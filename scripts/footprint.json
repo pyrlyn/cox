@@ -10,11 +10,11 @@
   },
   "Darwin-arm64-ci": {
     "startup_ms": 6.9,
-    "first_frame_ms": 35.7,
-    "rss_mib": 27.6,
-    "binary_bytes": 77764992,
+    "first_frame_ms": 34.5,
+    "rss_mib": 30.7,
+    "binary_bytes": 90767264,
     "turns": 30,
     "calls": 60,
-    "calib_ms": 3.3
+    "calib_ms": 1.9
   }
 }
