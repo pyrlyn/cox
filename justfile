@@ -16,6 +16,16 @@ check:
 test *args:
     @uv run --no-project python scripts/changed_tests.py "$@"
 
+
+# The tests that validate docs/ (config keys, subcommands, links, ide.md, generated config.md,
+# the keymap table). CI's `docs` job runs only this on a docs-only pull request, with
+# CARGO=cargo (Rust already comes from mise there).
+docs-check:
+    {{docs_cargo}} test --locked -p cox --test docs --test ide
+    {{docs_cargo}} test --locked -p cox-protocol --lib config
+    {{docs_cargo}} test --locked -p cox-tui --lib keymap_table_matches_docs
+
+docs_cargo := env("CARGO", "mise exec -- cargo")
 # The whole workspace, then the swarfr cleanup; CI runs the same suite.
 check-all: && swarfr
     mise exec -- cargo nextest run --workspace

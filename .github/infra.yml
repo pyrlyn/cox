@@ -3,6 +3,21 @@
 # turns on the scans and SonarCloud, which replaces the former sonarcloud.yml.
 version: 1
 
+# Docs-only pull requests (pyrlyn/infra docs/config.md, "Docs-only changes"): when every changed
+# file is documentation, infra's scans (CodeQL, Semgrep, SonarCloud) are skipped and the gate
+# counts them as passed. ci.yml's `config` job reads the same verdict: its Rust, plugin, deny,
+# audit, footprint and desktop jobs become no-ops (required checks still report) and the `docs`
+# job runs `just docs-check` (the tests that validate docs/) instead.
+# Documentation = any *.md except Markdown that is code or test input: crates/ (prompts, agents
+# and fixtures via include_str! or read by tests), plugins/ (shipped packages), fixtures/,
+# desktop/ (lint fixtures, design), evals/, examples/, scripts/, tests/, README.md and
+# CHANGELOG.md (release). Anything else (.github/, mise.toml, a non-.md file) runs the full CI.
+docs-only:
+  enabled: true
+  exclude:
+    - '^(crates|plugins|fixtures|desktop|evals|examples|scripts|tests)/'
+    - '^(README|CHANGELOG)\.md$'
+
 codeql:
   # Every language in the repository that supports `build-mode: none`.
   languages: [actions, javascript-typescript, python, rust]
