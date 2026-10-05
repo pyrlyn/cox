@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 64" role="img" aria-label="cox">
+  <rect width="64" height="64" rx="12" fill="#0F1A14"/>
+  <rect x="8" y="8" width="48" height="48" rx="3" fill="none" stroke="#A8E06C" stroke-width="1.75"/>
+  <line x1="8" y1="18" x2="56" y2="18" stroke="#6BBF4A" stroke-width="1.25"/>
+  <circle cx="14" cy="13" r="2" fill="#C8F08A"/>
+  <rect x="11" y="22" width="4" height="28" rx="1" fill="#A8E06C"/>
+  <line x1="21" y1="22" x2="21" y2="50" stroke="#344638" stroke-width="1.25"/>
+  <path d="M28 28 L38 34 L28 40" fill="none" stroke="#C8F08A" stroke-width="3" stroke-linecap="square" stroke-linejoin="miter"/>
+  <rect x="40" y="31" width="6" height="6" fill="#A8E06C"/>
+  <text x="80" y="40" font-family="IBM Plex Mono, JetBrains Mono, ui-monospace, monospace" font-size="28" font-weight="600" letter-spacing="1" fill="#0F1A14">cox</text>
+</svg>
