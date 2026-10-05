@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The App Intents entities (T51.17): a project and a session as Shortcuts and Siri pick them,
 // read from the workspace the sidebar reads (`App.projects()`, `App.sessions()`). Titles come
 // from Rust already sanitized. Separate from the intents so both intents share one query each.

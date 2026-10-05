@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The App Intents (T51.17): "Ask cox" starts a session in a project and sends the prompt as the
 // composer's Send (CoxModel's `AskCox`), so the engine decides and approvals reach the inbox as
 // for any turn; "Open session" opens one. Both bring cox forward and show the session in a

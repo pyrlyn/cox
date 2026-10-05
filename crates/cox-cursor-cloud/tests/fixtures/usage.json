@@ -1,0 +1,22 @@
+{
+  "totalUsage": {
+    "inputTokens": 1200,
+    "outputTokens": 340,
+    "cacheWriteTokens": 50,
+    "cacheReadTokens": 800,
+    "totalTokens": 2390
+  },
+  "runs": [
+    {
+      "id": "run-1",
+      "usageUuid": "u-1",
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 340,
+        "cacheWriteTokens": 50,
+        "cacheReadTokens": 800,
+        "totalTokens": 2390
+      }
+    }
+  ]
+}

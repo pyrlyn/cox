@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Fixtures shared by this crate's tests and `crates/cox`'s (the
 //! `test-util` feature): a scripted session, a user turn, a granted plugin
 //! installed the way `cox plugin install` leaves it, and a provider that

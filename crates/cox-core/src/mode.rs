@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Mode presets over permission mode and main tier (P42, A73): the
 //! top-session counterpart of `subagent::PRESETS`. Separate from `session`
 //! so the preset table and the one narrowing rule have a single home that

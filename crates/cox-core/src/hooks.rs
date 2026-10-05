@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Hook call sites (plan.md T7.4/§1.8): the one place the core asks the
 //! runner and applies D14 — a hook that fails to run is a warning, never a
 //! stopped turn. The runner itself is a `Hook` trait object the surface

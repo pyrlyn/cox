@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `TasksTab` (DS§6.4 row `TasksTab`, the mockup's Tasks `.ib`; DT§5.1 Tasks): the inspector's
 // fourth tab — the subagents and background calls this session started, each with its tier,
 // state and cost. Separate so the `Inspector` frame stays a slot and each tab is its own view,

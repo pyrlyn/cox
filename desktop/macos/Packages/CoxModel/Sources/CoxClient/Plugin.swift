@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A plugin's slot as the core reports it (`cox_app::PluginSlot`, PL§8, T52.17): which plugin,
 // which slot, and the widget tree cox-app already sanitized and bounded. Separate from the
 // timeline's block types because a slot sits beside the blocks, never among them.

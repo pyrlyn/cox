@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Git-aware completion (T15.4): `Tab` on a `git` line opens the picker over
 //! subcommands, branches or paths by position, and a choice replaces the
 //! word being typed. Any other line keeps Tab's old meaning.

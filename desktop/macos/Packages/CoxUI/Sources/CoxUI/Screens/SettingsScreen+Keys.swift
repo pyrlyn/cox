@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A provider's key row and its sheet (T37.45.2, DT§5.7, mockup 18's Add key / Change key): the row
 // says whether the Keychain holds a key — never the key — and its button opens a sheet with a
 // secure field. What is typed stays in the sheet until Save hands it to `.storeKey`, which the app

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The host drivers behind `ExternalAgent` (T35.13, EA§4–§5): one per
 //! granted `[[external_agents]]` entry, each spawning T35.2's sandboxed
 //! `Command` for a turn. Here, in session assembly (T37.1; `crates/cox`

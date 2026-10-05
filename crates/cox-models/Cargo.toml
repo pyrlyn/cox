@@ -13,3 +13,6 @@ thiserror = { workspace = true }
 # table already did before the move (figment's Toml provider over a
 # string) — no new dependency, and no I/O of its own.
 figment = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Settings window (DT§5.7, T37.30.1): `SettingsStore`'s pages, tables and fields copied into
 // CoxUI's `SettingsScreenState` case for case, and the screen's intents sent back to the store.
 // A slider's steps are coalesced into one write per rest; until Rust answers, the slider shows

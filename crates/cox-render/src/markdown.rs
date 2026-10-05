@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Markdown → `StyledDoc` (T5.3, T37.7): pulldown-cmark events become runs
 //! tagged with `StyleToken` roles, fenced code goes through syntect. The
 //! ratatui lines (`render`, `highlight`, aligned tables) are a thin layout

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! cox as an ACP **client** (T35.3, EA§4): drives an external agent such as
 //! Cursor's `agent acp` over the spawned process's stdio and answers the
 //! requests it sends back. Beside `server.rs`, not inside it, because the

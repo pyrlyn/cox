@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // "Copy as Markdown" in the transcript's context menu (T37.42.2, DT§5.2):
 // the selection's Markdown, as `MarkdownCopy` builds it, as both the Markdown
 // and the plain-text type, so a plain editor pastes Markdown too. Its own

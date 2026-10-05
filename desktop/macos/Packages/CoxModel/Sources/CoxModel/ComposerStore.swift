@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The composer of one open session as observable state (DT§5.3, DT§4.6): the draft, shell
 // mode, the files picked from `@` rows, the files attached, the rows the core offers for the
 // token at the caret, and the earlier prompt ↑ brought back; beside it, the session's mode and

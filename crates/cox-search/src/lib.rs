@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The pure `grep`/`glob` search engine: gitignore-aware directory walking
 //! (`ignore::WalkBuilder`), regex content search (`grep-regex` +
 //! `grep-searcher`) and fuzzy path ranking (`nucleo`) — split out of

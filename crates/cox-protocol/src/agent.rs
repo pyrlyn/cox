@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! A custom subagent definition (`.cox/agents/*.md`, `.claude/agents/*.md`;
 //! plan.md T7.3/T34.1): what `cox-ext`'s `agents::discover` reads off disk,
 //! and what `cox-core`'s `agent` tool matches a `preset` name against.

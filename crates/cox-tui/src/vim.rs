@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Vim keys (T5.7, T25.4) over the composer's textarea, on when `tui.vim`
 //! is set: motions `w b e 0 ^ $ gg G h j k l` with counts, operators
 //! `d c y` over motions and text objects (`iw aw i" a" i' a' i( a( i[ a[

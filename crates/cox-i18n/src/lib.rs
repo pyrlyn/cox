@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox-i18n`: the user-facing strings of cox in gettext catalogs (`.po`),
 //! embedded in the binary, and the one place a message id becomes text in the
 //! user's language. English (`en`) is the source and default locale; `ru` and
@@ -15,6 +19,10 @@
 //!
 //! [`export`] lowers the same catalogs to Apple `.strings`/`.stringsdict` and
 //! Windows `.resw` files for the native apps (`docs/i18n.md`).
+
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
 
 pub mod catalog;
 pub mod export;

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CheckpointRow` (DS§6.3 row `CheckpointRow`, the inspector's Checkpoints `.fr`): one point
 // the session can be rewound to — which turn, before what — and when it was taken. Separate so
 // the inspector and the rewind list draw a checkpoint the same way.

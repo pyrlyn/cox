@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `WindowKeys` (T37.27.5, T37.27.8): the one app-local key monitor a view installs for the
 // window it stands in — `DecisionBar`'s ⌘⏎ and ⌘⌫, and the composer's ⌘V of files and images.
 // In its own file because both organisms need the same monitor, and two copies drifted apart.

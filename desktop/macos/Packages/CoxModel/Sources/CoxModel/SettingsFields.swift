@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Settings screen's fields (DT§5.7): a sidebar group split into one box per config table,
 // each field with the title, detail line and control Rust gave it (T58.4.8–T58.4.9). Here, not
 // in CoxUI, because CoxUI depends on no cox package; the app copies them into CoxUI's

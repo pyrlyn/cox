@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Subagents through the loop (T3.9): the explore preset runs on the cheap
 //! tier with read-only tools, its cost lands in the ledger under its own
 //! session, and an answer over the cap comes back summarised.

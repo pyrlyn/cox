@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A reply's structure in the transcript text (T37.23.8, DT§5.2): headings, list
 // items, quote lines, tables and rules stay text in the one text (A87), set by
 // paragraph styles rather than drawn as flat paragraphs. `cox-render` sends a

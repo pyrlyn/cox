@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Background tasks (T9.2, T27.1): `agent` with `background: true` runs its
 //! child session concurrently, and any running `bash` or `agent` call can be
 //! detached into a task — at once for `bash(background: true)`, mid-run on

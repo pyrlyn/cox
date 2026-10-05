@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T33.28 Check: the Rust reference plugin (`plugins/examples/rust`, built by
 //! `cox-plugin-fixtures`) end to end. The real binary installs it into a
 //! scratch `COX_HOME`, `enable --yes` grants it, and two `run -p` turns with

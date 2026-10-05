@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox doctor`: diagnostics to understand why cox will or will not work on
 //! this machine. Checks: toolchain version, `COX_HOME` writable, db opens,
 //! API keys per configured provider, sandbox backend, `git` on PATH, terminal

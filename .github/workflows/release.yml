@@ -1,24 +1,33 @@
 name: release
 
-# The release build. It never tags: bump.yml (Actions -> Bump and release) is
-# the only way to a release. bump runs `scripts/release.sh --local`, opens a pull
-# request with the version commit, rebase-merges it once every required check
-# is green, tags the commit that landed on main, creates a *draft* release with
-# the CHANGELOG.md section for the version, and dispatches this workflow with
-# `--ref <tag> -f tag=<tag>`. A tag or release made with GITHUB_TOKEN starts no
-# workflow, so the dispatch is explicit.
+# The one release workflow, and its one trigger. It never tags a normal release: bump.yml
+# (Actions -> Bump and release, pyrlyn/infra bump.yml) is the only way to one. bump runs
+# `scripts/release.sh --local`, opens a pull request with the version commit, rebase-merges it
+# once every required check is green, tags the commit that landed on main, creates a *draft*
+# release with the CHANGELOG.md section for the version, and dispatches this workflow with
+# `--ref <tag> -f tag=<tag>`. A tag or release made with GITHUB_TOKEN starts no workflow, so
+# the dispatch is explicit.
 #
-# Here: verify (fmt, clippy, nextest — the same gate as CI) on the tagged
-# commit, build all four targets through `scripts/package.sh`, smoke-test the
-# native tarballs, upload everything to bump's draft and publish it, then the
-# cask. A failed build leaves the tag and a draft (not on /releases/latest, so
-# `install.sh` and `cox self update` never see it); re-run this workflow with
-# the same tag to finish it.
+# Here: verify (fmt, clippy, nextest — the same gate as CI) on the tagged commit, then the two
+# build workflows on it: build-cli.yml (all three targets through `scripts/package.sh`, smoke
+# tested) and desktop-build.yml (the macOS app's DMG), both signed through
+# .github/actions/macos-signing. Everything goes up to bump's draft, which is published last,
+# then the cask. A failed build leaves the tag and a draft (not on /releases/latest, so
+# `install.sh` and `cox self update` never see it); re-run this workflow with the same tag to
+# finish it.
+#
+# Test releases: a `vX.Y.Z-test.N` tag (X.Y.Z = Cargo.toml's version), made by hand on the
+# commit to try and dispatched the same way
+# (`gh workflow run release.yml --ref vX.Y.Z-test.N -f tag=vX.Y.Z-test.N`). Same gate, same
+# builds and signing, but no bump: no version or CHANGELOG commit on main. This workflow
+# creates the release itself as a *prerelease* that is never marked latest, so
+# /releases/latest (install.sh, `cox self update`) and the Homebrew cask (skipped) stay on the
+# last normal release.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag bump.yml created (vX.Y.Z); run with --ref <tag>'
+        description: "Release tag: bump.yml's vX.Y.Z, or a vX.Y.Z-test.N test tag; run with --ref <tag>"
         required: true
         type: string
 
@@ -49,6 +58,7 @@ jobs:
       tag: ${{ steps.decide.outputs.tag }}
       publish: ${{ steps.decide.outputs.publish }}
       ref: ${{ steps.decide.outputs.ref }}
+      test: ${{ steps.decide.outputs.test }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,15 +71,23 @@ jobs:
         run: |
           version="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')"
           [ -n "$version" ] || { echo "could not read the version out of Cargo.toml" >&2; exit 1; }
-          tag="v$version"
+          # A test tag is v<version>-test.<n>: same version, never a bump.
+          if [[ "$TAG" =~ ^v${version//./\\.}-test\.[0-9]+$ ]]; then
+            tag="$TAG"
+            test=true
+          else
+            tag="v$version"
+            test=false
+          fi
           if [ "$TAG" != "$tag" ]; then
-            echo "tag input $TAG is not v<Cargo.toml version> ($tag) at $GITHUB_SHA" >&2
+            echo "tag input $TAG is not v<Cargo.toml version> ($tag) or $tag-test.<n> at $GITHUB_SHA" >&2
             exit 1
           fi
           # bump.yml tags the commit that landed on main; this run must be on it.
-          # Annotated tags peel via ^{commit}; lightweight tags only have the
-          # plain refs/tags/<tag> line.
-          ref="$(git ls-remote origin "refs/tags/${tag}^{commit}" | awk '{print $1; exit}')"
+          # An annotated tag's commit is its peeled `refs/tags/<tag>^{}` line (ls-remote
+          # never prints `^{commit}`, so that lookup always fell through to the tag object);
+          # a lightweight tag only has the plain refs/tags/<tag> line.
+          ref="$(git ls-remote origin "refs/tags/${tag}^{}" | awk '{print $1; exit}')"
           if [ -z "$ref" ]; then
             ref="$(git ls-remote origin "refs/tags/${tag}" | awk '{print $1; exit}')"
           fi
@@ -83,6 +101,7 @@ jobs:
             echo "tag=$tag"
             echo "ref=$ref"
             echo "publish=true"
+            echo "test=$test"
           } >> "$GITHUB_OUTPUT"
           echo "$tag at $ref: releasing it"
 
@@ -91,11 +110,14 @@ jobs:
   verify:
     needs: version
     if: needs.version.outputs.publish == 'true'
-    runs-on: macos-latest
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.ref }}
+      - uses: pyrlyn/infra/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+        with:
+          version: '27'
       # The Rust mise.toml pins, checked like in ci.yml. `cox-plugin-fixtures`
       # builds the example plugin for wasm32 (PL§13, T33.28); the target comes
       # with the pin.
@@ -109,143 +131,36 @@ jobs:
       - name: Test
         run: cargo nextest run --workspace --locked
 
-  build:
+  # The CLI archives (build-cli.yml) and the macOS app's DMG (desktop-build.yml), both from
+  # the tagged commit, both signed through .github/actions/macos-signing with the same two
+  # secrets: one signing setup for everything the release ships.
+  cli:
     needs: [version, verify]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            sign: true
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            sign: true
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            sign: false
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
-            sign: false
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.version.outputs.ref }}
-      # The Rust mise.toml pins, checked like in ci.yml; scripts/package.sh
-      # adds the matrix target to it.
-      - uses: ./.github/actions/rust
-      - uses: Swatinem/rust-cache@v2
+    uses: ./.github/workflows/build-cli.yml
+    with:
+      ref: ${{ needs.version.outputs.ref }}
+      require-signing: true
+    secrets:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+      APPSTORE_CONNECT_KEY: ${{ secrets.APPSTORE_CONNECT_KEY }}
+      APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+      APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
 
-      # The certificate goes into a keychain of its own, created for this job
-      # and deleted at the end of it, so nothing is left on the runner and the
-      # login keychain is never touched. An unsigned release is refused the
-      # same way an untested one is: it would be discovered by whoever installs
-      # it, not here.
-      - name: Import signing certificate
-        if: matrix.sign
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-        run: |
-          if [ -z "$MACOS_CERTIFICATE" ] || [ -z "$MACOS_CERTIFICATE_PWD" ]; then
-            echo "MACOS_CERTIFICATE and MACOS_CERTIFICATE_PWD must both be set:" >&2
-            echo "a base64-encoded Developer ID Application .p12 and its password." >&2
-            exit 1
-          fi
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          keychain_pwd="$(openssl rand -hex 16)"
-          cert="$RUNNER_TEMP/certificate.p12"
-          echo "$MACOS_CERTIFICATE" | base64 --decode > "$cert"
-
-          security create-keychain -p "$keychain_pwd" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$keychain_pwd" "$keychain"
-          security import "$cert" -P "$MACOS_CERTIFICATE_PWD" \
-            -f pkcs12 -k "$keychain" -T /usr/bin/codesign
-          rm -f "$cert"
-          # Without this, codesign would prompt for the key and hang the job.
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$keychain_pwd" "$keychain" >/dev/null
-          security list-keychains -d user -s "$keychain" login.keychain-db
-
-          identity="$(security find-identity -v -p codesigning "$keychain" \
-            | sed -nE 's/^ *[0-9]+\) ([0-9A-F]{40}) "Developer ID Application:.*/\1/p')"
-          if [ "$(printf '%s\n' "$identity" | grep -c .)" -ne 1 ]; then
-            echo "expected exactly one Developer ID Application identity, found:" >&2
-            security find-identity -v -p codesigning "$keychain" >&2
-            exit 1
-          fi
-          echo "COX_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
-          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
-
-      - name: Package
-        run: scripts/package.sh ${{ matrix.target }} dist
-
-      - name: Remove signing keychain
-        if: always() && matrix.sign && env.SIGNING_KEYCHAIN != ''
-        run: security delete-keychain "$SIGNING_KEYCHAIN"
-
-      # Off until an App Store Connect key exists: setting the repository
-      # variable COX_NOTARIZE to `true` turns it on, and from then on a
-      # missing secret fails the release, as a missing certificate does.
-      - name: Notarise
-        if: matrix.sign && vars.COX_NOTARIZE == 'true'
-        env:
-          NOTARY_KEY: ${{ secrets.APPSTORE_CONNECT_KEY }}
-          NOTARY_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
-          NOTARY_ISSUER: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
-        run: |
-          if [ -z "$NOTARY_KEY" ] || [ -z "$NOTARY_KEY_ID" ] || [ -z "$NOTARY_ISSUER" ]; then
-            echo "COX_NOTARIZE is on, so APPSTORE_CONNECT_KEY (the .p8 as base64)," >&2
-            echo "APPSTORE_CONNECT_KEY_ID and APPSTORE_CONNECT_ISSUER_ID must all be set." >&2
-            exit 1
-          fi
-          work="$RUNNER_TEMP/notarise"
-          mkdir -p "$work"
-          key="$work/key.p8"
-          trap 'rm -f "$key"' EXIT
-          echo "$NOTARY_KEY" | base64 --decode > "$key"
-
-          tar -xJf dist/cox-${{ matrix.target }}.tar.xz -C "$work" cox
-          ditto -c -k --keepParent "$work/cox" "$work/cox.zip"
-          xcrun notarytool submit "$work/cox.zip" \
-            --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" \
-            --wait --output-format json > "$work/result.json" || true
-          cat "$work/result.json"
-          if [ "$(jq -r .status "$work/result.json")" != "Accepted" ]; then
-            id="$(jq -r .id "$work/result.json")"
-            xcrun notarytool log "$id" \
-              --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" >&2 || true
-            exit 1
-          fi
-
-      # The arm64 runner can build the x86_64 slice but cannot run it, so only
-      # the native one is smoke-tested here.
-      - name: Smoke test
-        if: matrix.target != 'x86_64-apple-darwin'
-        run: |
-          mkdir -p smoke
-          tar -xJf dist/cox-${{ matrix.target }}.tar.xz -C smoke
-          smoke/cox --version
-          if [ "${{ matrix.sign }}" = "true" ]; then
-            codesign --verify --strict smoke/cox
-            codesign --display --verbose=2 smoke/cox 2>&1 \
-              | grep -q 'Authority=Developer ID Application'
-          fi
-          if [ "${{ matrix.sign }}" = "true" ] && [ "${{ vars.COX_NOTARIZE }}" = "true" ]; then
-            spctl --assess --type install -vv smoke/cox 2>&1 \
-              | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
-          fi
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.target }}
-          path: dist/*.tar.xz
-          if-no-files-found: error
+  # The macOS app's DMG (T37.32.3), published with the CLI archives. It must be Developer
+  # ID-signed, as the CLI must.
+  desktop:
+    needs: [version, verify]
+    uses: ./.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ needs.version.outputs.ref }}
+      require-signing: true
+    secrets:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
 
   publish:
-    needs: [version, build]
+    needs: [version, cli, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -259,14 +174,14 @@ jobs:
       - name: Collect assets and checksums
         run: |
           mkdir -p dist
-          find staging -name '*.tar.xz' -exec mv {} dist/ \;
+          find staging \( -name '*.tar.xz' -o -name '*.dmg' \) -exec mv {} dist/ \;
           cd dist
           # One aggregate file. Sorted, so the file is reproducible.
-          shasum -a 256 $(ls *.tar.xz | sort) > SHA256SUMS
+          shasum -a 256 $(ls *.tar.xz *.dmg | sort) > SHA256SUMS
           cat SHA256SUMS
           # Per-archive sidecars: install.sh and `cox self update` fetch
           # `<archive>.sha256` next to each tarball.
-          for f in *.tar.xz; do
+          for f in *.tar.xz *.dmg; do
             shasum -a 256 "$f" > "$f.sha256"
           done
       # bump.yml made the tag and the draft release (notes from CHANGELOG.md).
@@ -276,13 +191,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
+          TEST: ${{ needs.version.outputs.test }}
         run: |
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
+          set -euo pipefail
+          if [ "$TEST" = true ]; then
+            # No bump for a test tag, so no draft yet: make one, a prerelease never marked latest.
+            if ! gh release view "$TAG" >/dev/null 2>&1; then
+              gh release create "$TAG" --verify-tag --draft --prerelease --latest=false \
+                --title "$TAG (test build)" \
+                --notes "Test build of $(git rev-parse --short HEAD), not a release: same gate, builds and signing as a release, published as a prerelease that is never /releases/latest. The macOS app is a Debug build, Developer ID-signed, not notarised."
+            fi
+          elif ! gh release view "$TAG" >/dev/null 2>&1; then
             echo "no release for $TAG: Bump and release creates it" >&2
             exit 1
           fi
           gh release upload "$TAG" dist/* --clobber
-          gh release edit "$TAG" --draft=false
+          if [ "$TEST" = true ]; then
+            gh release edit "$TAG" --draft=false --prerelease --latest=false
+            latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            if [ "$latest" = "$TAG" ]; then
+              echo "test release $TAG became /releases/latest" >&2
+              exit 1
+            fi
+          else
+            gh release edit "$TAG" --draft=false
+          fi
           gh release view "$TAG" --json tagName,isDraft,assets \
             --jq '"published \(.tagName) draft=\(.isDraft) assets=\(.assets | length)"'
 
@@ -291,7 +224,9 @@ jobs:
   # names a tarball that is not on the releases page yet.
   tap:
     needs: [version, publish]
-    runs-on: macos-latest
+    # Test releases never reach the cask.
+    if: needs.version.outputs.test != 'true'
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
       # From the published release, not this run's build artifacts: a tap
@@ -328,11 +263,10 @@ jobs:
             exit 1
           fi
           arm="$(shasum -a 256 dist/cox-aarch64-apple-darwin.tar.xz | cut -d' ' -f1)"
-          intel="$(shasum -a 256 dist/cox-x86_64-apple-darwin.tar.xz | cut -d' ' -f1)"
 
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
           mkdir -p tap/Casks
-          scripts/cask.sh "$release_version" "$arm" "$intel" > tap/Casks/cox.rb
+          scripts/cask.sh "$release_version" "$arm" > tap/Casks/cox.rb
       - name: Lint the cask
         run: brew style tap/Casks/cox.rb
       # Commit before smoking: `brew tap … $PWD/tap` uses the git HEAD of a
@@ -399,7 +333,7 @@ jobs:
   # per workflow, so this is the release failure notification. Pinned to pyrlyn/infra
   # ci/notify-release-failure; repin to its merge commit.
   notify-failure:
-    needs: [version, verify, build, publish, tap]
+    needs: [version, verify, cli, desktop, publish, tap]
     if: always() && contains(needs.*.result, 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 5

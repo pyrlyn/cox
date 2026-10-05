@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Figma side of the desktop tokens (A114, T37.44.1): turns `tokens/*.json` into Figma Plugin API
 // scripts that the Figma MCP tool `use_figma` runs against the `cox desktop` file. Separate from
 // `style-dictionary.config.mjs` because Figma is a mirror, not a build output: nothing in the

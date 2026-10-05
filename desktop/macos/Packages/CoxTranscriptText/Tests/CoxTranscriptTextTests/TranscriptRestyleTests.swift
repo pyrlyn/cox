@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A new text size restyles the text in place (T37.23.6): every character takes the look a
 // fresh load at that size gives it — fonts, a prompt's and a thought's decor, a reply's
 // structure — while the characters, the block ranges, the selection, an open thought and

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Checks that the pixel diff finds a known drift where it is and scales a 2x frame to a 1x snapshot.
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Generated Rust types for the Anthropic Messages API: the request body
 //! (`CreateMessageParams`) and the stream frame bodies (T30.12). `build.rs`
 //! runs typify over the schemas of the vendored OpenAPI spec

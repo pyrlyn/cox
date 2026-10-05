@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! One plugin as a hook source (PL§6, T33.11): `PluginHooks` implements
 //! `cox_protocol::Hook` by calling the guest's `cox_hook` export, so plugin
 //! hooks are one more source in `cox-ext`'s `HookChain` rather than a second

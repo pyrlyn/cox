@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Generic Server-Sent-Events framing, shared by every provider that
 //! streams over SSE (today: Anthropic; OpenAI Responses in T1.3 reuses it).
 //! Kept separate from `anthropic::stream` so the wire-framing bug class

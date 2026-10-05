@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The app's shortcuts (T51.17): "Ask cox in <project>" and "Open <session> in cox" for Siri,
 // Spotlight and the Shortcuts app, and the one place the intents get the launch's `AppModel`.
 

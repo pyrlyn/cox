@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox run -p`: the headless surface (plan §1.12, T6.1). One consumer of
 //! the same `Event` stream the TUI reads, printed in one of three shapes;
 //! the exit code tells a script what happened without parsing anything.

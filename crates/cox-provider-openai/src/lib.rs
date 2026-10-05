@@ -14,8 +14,6 @@
 //! `cox_provider::openai::chat::OpenAiChatProvider` and
 //! `cox_provider::openai::responses::OpenAiResponsesProvider` keep working.
 
-#![warn(missing_docs)]
-
 // Imported at the crate root so the moved wires' `crate::http`,
 // `crate::retry` and `crate::sse` paths resolve exactly as they did inside
 // `cox-provider`, which re-exports the same modules (T32.12).

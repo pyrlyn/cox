@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The stream-json driver's line mapper (EA§5, T35.4): turns each line
 //! Cursor CLI's `agent -p --output-format stream-json` prints into the
 //! `Event`s cox's own loop emits for the same thing, so every surface shows

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Plugin tools (PL§7, T33.12): each granted tool a plugin declares in
 //! `cox_init` becomes a `WasmTool` named `wasm__<id>__<tool>`, which runs
 //! the guest's `cox_tool_call` on the plugin's one `PluginHost`. Its own

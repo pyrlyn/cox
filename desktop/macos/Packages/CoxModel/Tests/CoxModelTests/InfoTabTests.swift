@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Info tab's state from cox-app's `Info` (T37.29.5): the core's facts fill the tab as they
 // arrive, read through SessionStore from the fixture session. What the facts say (`~`,
 // `detached`, the key counts) is `cox_app::info`'s test (T58.4.20).

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The fold behind `TimelinePatch::Status` (T37.24.7): the composer's mode,
 //! model and effort chips, and the queue count. Seeded from the config the
 //! session opened with — the core records its opening mode to the rollout

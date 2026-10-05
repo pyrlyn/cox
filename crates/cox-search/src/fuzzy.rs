@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! One query scored against many short texts with `nucleo`, returning which
 //! characters matched as well as the score: what a picker needs to draw the
 //! matched characters bold (the desktop command palette, T37.44.13). Separate

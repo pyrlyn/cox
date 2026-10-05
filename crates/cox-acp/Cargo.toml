@@ -34,3 +34,6 @@ cox-provider = { path = "../cox-provider", version = "0.1.2" }
 tempfile = { workspace = true }
 # The update fold's snapshot test (T52.3); already a workspace dev-dependency.
 insta = { workspace = true }
+
+[lints]
+workspace = true

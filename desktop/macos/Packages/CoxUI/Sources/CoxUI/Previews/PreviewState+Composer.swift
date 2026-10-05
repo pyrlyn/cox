@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the composer's molecules (T37.21.7): the chips of a message
 // about to be sent, as mockup screens 1 and 6 show them. Separate from `PreviewState.swift` so
 // molecules built in parallel add their fixtures without editing one file.

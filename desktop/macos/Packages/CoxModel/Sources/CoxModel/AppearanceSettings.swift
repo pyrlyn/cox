@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `[desktop.appearance]` (DS§3.5, T37.13) as the Appearance popover edits it: one edit per key,
 // written through `SettingsStore.set` like any other setting, and the section read back from
 // the settings view so the window redraws from what Rust stored (T37.26). Separate so the

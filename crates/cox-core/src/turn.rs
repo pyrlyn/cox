@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! One provider call and its tool batch. Kept separate from `Session` so
 //! the loop's `step` stays a state transition, not a grab-bag of I/O.
 

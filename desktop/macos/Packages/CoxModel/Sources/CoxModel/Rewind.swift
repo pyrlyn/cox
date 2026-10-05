@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The rewind timeline's intent (T37.28.1, DT§5.4): a checkpoint of `ChangesTabState`, whose id
 // is the turn, and the scope the person picked become `Intent.rewind`; a changed file's Revert
 // (T37.28.3) becomes `Intent.revertFile`, and a Review hunk's (T51.21) `Intent.revertHunk`. Here,
@@ -12,6 +16,12 @@ extension SessionStore {
   /// turn — none that `ChangesTabState` writes — sends nothing.
   public func rewind(checkpoint id: String, code: Bool, conversation: Bool) async throws {
     guard let turn = UInt32(id) else { return }
+    try await rewind(toTurn: turn, code: code, conversation: conversation)
+  }
+
+  /// Rewinds to before `turn`, the first turn the core undoes: the timeline's checkpoints and a
+  /// prompt's rewind menu (Figma frame 14) alike.
+  public func rewind(toTurn turn: UInt32, code: Bool, conversation: Bool) async throws {
     _ = try await send(.rewind(toTurn: turn, code: code, conversation: conversation))
   }
 

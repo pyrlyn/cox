@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for best of n (T52.12, mockup 27): the composer's control with Codex
 // added, and the compare view with two and three candidates, one of which failed to start, plus
 // both questions "Keep this one" asks. Separate so these do not grow the agents' file.

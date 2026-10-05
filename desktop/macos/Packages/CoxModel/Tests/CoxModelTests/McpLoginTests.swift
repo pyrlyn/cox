@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // MCP login through SettingsStore (T37.30.3) over the fixture client: a row shows the core's
 // line and button (T58.4.3; the words are `cox_app::mcp_login`'s tests), Log in hands the login
 // page to the host's `open`, and after the scripted callback the server shows logged in with Log

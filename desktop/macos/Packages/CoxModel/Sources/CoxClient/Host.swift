@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // What the Rust core asks macOS to do (DT§4.4's `Host`), in `CoxClient`
 // values: the seam between CoxPlatform, which implements it over the
 // Keychain and AppKit, and CoxCore, which adapts it to the generated

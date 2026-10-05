@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! MCP client (plan.md T7.6): one rmcp session per server, its tools
 //! exposed as `mcp__<server>__<tool>` `Tool` impls that the core gates like
 //! any other. A server that will not start is a notice and no tools (D14);

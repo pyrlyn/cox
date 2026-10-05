@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // AppKit text from the tokens (DS§3.1, DS§3.2): the fonts and colours a TextKit view outside
 // CoxUI draws with — the transcript's one `NSTextView` (T37.23) — resolved from the same tokens
 // and colour assets as `.textStyle` and `Color(.<role>)`. In Foundations because only Tokens and

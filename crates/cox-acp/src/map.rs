@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `Event` → ACP `SessionUpdate` mapping (T11.2 in plan numbering, T11.1
 //! task): agent message and thought chunks, tool call start/progress/done
 //! with locations, and the `todo` plan. Pure over one event plus the call

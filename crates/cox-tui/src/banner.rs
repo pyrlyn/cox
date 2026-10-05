@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The pinned security banner: the one piece of TUI chrome that is not a
 //! transcript cell. It lives apart from the (later) `State`/`view` so T4.3's
 //! "`danger-full-access` is loud" has a home and a snapshot before the app

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The app's remote workspaces (DT§4.4, T52.21): each host File › Connect to Host… or
 // `desktop.remote_hosts` named, whether its connection holds, and its sessions as a sidebar
 // group of their own. Beside `AppStore`, not in it: the registry holds open sessions whatever

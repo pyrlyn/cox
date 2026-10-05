@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SessionWindow`'s intent handlers: what the shell, the toolbar and the sidebar report, turned
 // into pane state, store calls and core intents. Separate from `SessionWindow.swift` only to keep
 // that file within SwiftLint's length limits; the members both files use are internal for it.

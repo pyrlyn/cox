@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! ACP conformance (T11.1 step 5): the reference SDK client talks to this
 //! server over an in-process channel pair - a scripted prompt completes, and
 //! a permission round-trip allows the turn. In-process `Channel` transport

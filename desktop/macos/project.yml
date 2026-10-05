@@ -4,8 +4,9 @@
 # and every other line of Swift lives in the local packages, so the project stays a few lines
 # of spec and never merge-conflicts.
 #
-# Debug is ad-hoc signed (`-`): no signing identity, no team, no Keychain. Developer ID,
-# Hardened Runtime for a shipped build, notarization and Sparkle are T37.32.2.
+# Debug is ad-hoc signed (`-`): no signing identity, no team, no Keychain. The downloadable
+# Debug DMG is re-signed with Developer ID by scripts/desktop/dmg.sh (T37.32.3); Hardened
+# Runtime for a shipped build, notarization and Sparkle are T37.32.2.
 name: Cox
 options:
   deploymentTarget:
@@ -48,9 +49,10 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Cox
-        # Derived from the repository (github.com/pyrlyn/cox); T37.32.2 confirms it before the
-        # first signed build, after which it is fixed.
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.listepo.cox
+        # From the repository (github.com/pyrlyn/cox), confirmed by the creator for the first
+        # signed build (T37.32.3). Fixed from here on: macOS keys notification, Keychain and
+        # folder permissions to it, so a change would reset them for everyone.
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.pyrlyn.cox
         INFOPLIST_FILE: App/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/Cox.entitlements
         CODE_SIGN_STYLE: Manual

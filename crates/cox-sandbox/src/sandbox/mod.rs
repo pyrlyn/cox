@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The sandbox front door (plan.md D7): turns a shell command, or any
 //! program argv (`argv`, the desktop terminal pane's login shell), plus the
 //! session's `SandboxPolicy` into what confines it on this host. Separate from `bash` so the tool only knows it runs *a* command,
@@ -78,6 +82,8 @@ pub fn backend(linux: LinuxBackend) -> Option<Backend> {
 /// the backend, or bare for `danger-full-access` and hosts without one.
 /// `shell` is an absolute path the caller already resolved from its own
 /// allowlist — the sandbox never looks a program up on `PATH`.
+// why: Command::pre_exec applies the sandbox guard in the forked child.
+#[allow(unsafe_code)]
 pub fn command(
     policy: &SandboxPolicy,
     roots: &[PathBuf],

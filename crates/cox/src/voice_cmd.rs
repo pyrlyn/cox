@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox voice model list|download <name>` (T54.5, A123): the whisper models
 //! push-to-talk can use. Names, pinned URLs, SHA-256 digests and sizes come
 //! from `cox-voice`'s vendored table; a model outside it is never fetched.

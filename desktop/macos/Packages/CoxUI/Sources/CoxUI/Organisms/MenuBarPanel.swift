@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `MenuBarPanel` (DS§6.4 row `MenuBarPanel`, mockup 26's popover; T51.13): what the menu-bar
 // extra shows. "Needs you" rows come first: an approval shows its command with Allow and Deny,
 // and a question opens the app. "Running" rows follow, then today's spend, New session and Open

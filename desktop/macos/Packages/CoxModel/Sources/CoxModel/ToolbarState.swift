@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The session toolbar's figures (DT§5.1 Toolbar, DS§6.4 `SessionToolbar`): the session's title and
 // where it lives, its cost and how full its context is, from the store's meter, the session's row
 // in `cox.db` and its Info; an external agent's session names its agent in the model chip and

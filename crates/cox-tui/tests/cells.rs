@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Cell snapshots (T5.3): every cell kind rendered from the golden event
 //! stream in `fixtures/events/transcript.jsonl`, so a change to how a cell
 //! prints shows up as a snapshot diff rather than in a user's terminal.

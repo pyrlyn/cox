@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `.insetWell()` (DS§6.1): the pressed-in look of the terminal tail and text fields, the
 // mockup's `.tail` and `.filter`. Separate because it is the one inner shadow in the app; like
 // elevation it fades with Depth, so Flat gives a plain filled field.

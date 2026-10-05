@@ -16,6 +16,16 @@ check:
 test *args:
     @uv run --no-project python scripts/changed_tests.py "$@"
 
+
+# The tests that validate docs/ (config keys, subcommands, links, ide.md, generated config.md,
+# the keymap table). CI's `docs` job runs only this on a docs-only pull request, with
+# CARGO=cargo (Rust already comes from mise there).
+docs-check:
+    {{docs_cargo}} test --locked -p cox --test docs --test ide
+    {{docs_cargo}} test --locked -p cox-protocol --lib config
+    {{docs_cargo}} test --locked -p cox-tui --lib keymap_table_matches_docs
+
+docs_cargo := env("CARGO", "mise exec -- cargo")
 # The whole workspace, then the swarfr cleanup; CI runs the same suite.
 check-all: && swarfr
     mise exec -- cargo nextest run --workspace
@@ -141,6 +151,12 @@ desktop-xcframework:
 # `desktop/macos/build/Cox.app/Contents/MacOS/Cox -CoxFixture desktop/macos/Fixtures/edit.json`.
 desktop-app: desktop-xcframework
     mise exec -- bash scripts/desktop/app.sh
+
+# The app as a DMG to hand out (T37.32.3): desktop/macos/build/Cox-<version>-<build>-debug-arm64.dmg,
+# ad-hoc signed unless COX_SIGN_IDENTITY names a Developer ID Application identity. CI builds the
+# same through the `desktop build` workflow.
+desktop-dmg: desktop-app
+    bash scripts/desktop/dmg.sh
 
 # The native apps' string resources from crates/cox-i18n/po (docs/i18n.md):
 # Apple .strings/.stringsdict and Windows .resw under target/i18n/ (gitignored).

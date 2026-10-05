@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The terminal pane's bridge over a fake `TerminalClient` (T51.5): keys typed into SwiftTerm's
 // view reach `write`, a new frame reaches `resize` in cells, and bytes the shell prints appear
 // in the view's buffer. No process is spawned; the fake is the whole shell.

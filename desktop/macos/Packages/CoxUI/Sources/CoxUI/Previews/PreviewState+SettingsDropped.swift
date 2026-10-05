@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixture for dropped project values (T37.30.4): a project file that raises the
 // session budget, the value listed as dropped with its reason above the budget table. Separate
 // from `PreviewState+SettingsScreen.swift` so each card adds its fixtures without editing another's.

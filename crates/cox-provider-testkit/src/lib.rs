@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Pure data types and helpers shared by the `Scripted` and `Replay`
 //! test-double providers (plan.md T32.11): scenario parsing, event
 //! building, cassette hashing and secret redaction. Depends only on
@@ -15,6 +19,10 @@
 //! for its `pub use` re-export while this crate depended back on
 //! `cox-provider` for those helpers — a cycle. `cox_provider::scripted`
 //! and `cox_provider::replay` re-export what moved here.
+
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
 
 pub mod replay;
 pub mod scripted;

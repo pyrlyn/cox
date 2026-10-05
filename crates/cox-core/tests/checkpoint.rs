@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T26.1: the loop archives a pre-image before a write and snapshots
 //! around a shell call, with a fake `Checkpointer` so no git runs here.
 

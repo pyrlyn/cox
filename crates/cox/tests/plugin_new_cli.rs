@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T33.29 Check: `cox plugin new demo --lang rust --with status,hook` in a
 //! scratch `COX_HOME` writes the PL§13 file tree, and the manifest it
 //! writes parses as `PluginManifest` and passes `validate()` the same way

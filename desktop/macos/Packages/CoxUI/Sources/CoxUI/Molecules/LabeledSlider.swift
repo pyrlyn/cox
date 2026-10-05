@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `LabeledSlider` (DS§6.3 row `LabeledSlider`, the mockup's `.appear .lbl`, `.slider` and
 // `.ends`): a setting on a scale — its name and current value above the slider, what each end
 // means below it. Separate so every Appearance scale (transparency, blur, reflection, Depth)

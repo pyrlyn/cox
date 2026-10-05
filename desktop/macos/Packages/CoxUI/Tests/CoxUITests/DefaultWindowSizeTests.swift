@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Size.defaultWindow`'s clamp (T37.44.14): a new session window opens at the mockups' 1440×900
 // on a screen with room for it, and never larger than a smaller screen's visible frame.
 

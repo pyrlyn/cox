@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Hostile strings (T5.6): fifty things a model, a tool or a file could print
 //! to escape its cell — every one renders inside a frame with the lines
 //! around it intact, and `sanitize` leaves no control character behind.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The Settings Permissions page's model (T37.45.3, A120): the allow, ask
 //! and deny rules in effect with the layer each list comes from, an edit
 //! of one rule written to the user file only, and the `AllowForSession`

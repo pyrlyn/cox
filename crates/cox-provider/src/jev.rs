@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The TypeSafe Jev decision-model backend (type-1 native, T21.1): the System
 //! One wire format (`POST /v1/systemone`) behind the same `Provider` trait
 //! every other backend speaks. Same split as every other backend: a *pure*

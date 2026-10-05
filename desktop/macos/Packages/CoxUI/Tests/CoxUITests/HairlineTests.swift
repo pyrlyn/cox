@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The `Hairline` atom's check (T37.20.4, DS§6.2): a snapshot per orientation × light/dark ×
 // Solid/Frosted, on a pane from `PreviewState` as its `#Preview` shows it. The `.hairline`
 // modifier keeps its own images under `FoundationsTests`.

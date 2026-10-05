@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The agent a new session is opened with (T52.7, DT§3.3.1): the New-session sheet's list and
 // the one chosen, carried into the `OpenSession` the window hands the core. Here, not in the
 // sheet, so the rule that an agent that cannot start is never chosen is tested without a view.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Settings search (T37.45.1, mockups 18–20): the field at the top of the sidebar, empty in
 // the page-list snapshots, and here with a query — only the pages and fields it keeps, the match
 // bold on `accent.soft` in each label and bold alone on the selected page's `accent` — in every

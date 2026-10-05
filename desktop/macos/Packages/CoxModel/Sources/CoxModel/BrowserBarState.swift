@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The browser pane's bar (T51.10, DT§3.3): the page's address and state as the fields CoxUI's
 // `BrowserPaneChrome.State` holds. The address loses its scheme and a bare root's slash, as
 // mockup 25 shows `localhost:5173/checkout`, and only `https` earns the lock. Here, not in

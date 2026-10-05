@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The rewind timeline's check (T37.28.1, DT§5.4, DS§6.4): the checkpoints with one lifted per
 // light/dark × Solid/Frosted cell, and empty; the scope each row action reports.
 

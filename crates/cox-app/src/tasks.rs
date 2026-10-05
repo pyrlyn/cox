@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! What a Tasks-tab click opens (T37.29.6, DT§5.1): a subagent's own
 //! session or a background shell's archived output, and which of the two a
 //! task is. The events name neither the child session nor, until the task

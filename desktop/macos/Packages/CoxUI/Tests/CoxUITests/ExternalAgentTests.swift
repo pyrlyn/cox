@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // T52.8's CoxUI check (DT§3.3.1, mockup 27): the New-session agent picker, picked and after a
 // failed read, the ACP banner, the Agents list on the Info tab and the toolbar of an external
 // agent's session, each in light/dark × Solid/Frosted.

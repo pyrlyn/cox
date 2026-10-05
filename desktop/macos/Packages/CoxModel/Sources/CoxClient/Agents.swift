@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Who can drive a new session (DT§3.3.1, T52.7): cox itself and every external ACP agent the
 // config or a granted plugin names, field for field as cox-ffi exports `cox_app::AgentChoice`.
 // Separate from the session seam because it is read from the config for a cwd, before any

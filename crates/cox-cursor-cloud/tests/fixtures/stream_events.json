@@ -1,0 +1,22 @@
+[
+  { "event": "status", "data": { "runId": "run-1", "status": "RUNNING" } },
+  { "event": "assistant", "data": { "text": "Looking at the test." } },
+  { "event": "thinking", "data": { "text": "It races." } },
+  {
+    "event": "tool_call",
+    "data": {
+      "callId": "c1",
+      "name": "read_file",
+      "status": "completed",
+      "args": { "path": "src/lib.rs" },
+      "result": { "lines": 3 },
+      "truncated": { "result": true }
+    }
+  },
+  { "event": "interaction_update", "data": { "kind": "step", "index": 2 } },
+  { "event": "heartbeat", "data": {} },
+  { "event": "result", "data": { "runId": "run-1", "status": "FINISHED", "text": "Fixed it.", "durationMs": 41000 } },
+  { "event": "error", "data": { "code": "rate_limited", "message": "slow down" } },
+  { "event": "done", "data": {} },
+  { "event": "future_event", "data": { "anything": [1, 2, 3] } }
+]

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the inspector's rows (T37.21.9) and tabs (T37.29): the Changes
 // tab's files, checkpoints and worktree as the mockup's inspector shows them. Separate from `PreviewState.swift` so
 // molecules built in parallel add their fixtures without editing one file.

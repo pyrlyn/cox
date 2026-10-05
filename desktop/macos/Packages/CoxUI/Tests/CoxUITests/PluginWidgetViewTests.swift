@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PluginWidgetView`'s check (T52.16, DS§6.3, PL§8): a snapshot per widget variant and a nested
 // tree in light/dark × Solid/Frosted, the nested tree again under Increase Contrast, and the
 // span's own mapping from a plugin's role to a token.

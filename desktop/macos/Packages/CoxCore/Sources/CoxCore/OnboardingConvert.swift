@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The first-run checklist over cox-ffi (DT§5.8, T37.31): `App.checklist` and its rows as
 // CoxClient's `CheckRow`. Separate from `LiveCoreClient.swift` like the other conversions, so
 // that file stays the list of calls into Rust.

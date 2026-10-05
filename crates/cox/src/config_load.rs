@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The binary's side of config loading (T32.16): `cox-config` owns the
 //! layering, guards, provenance and editing, and this module keeps only what
 //! needs `crates/cox`'s own types or crates `cox-config` must not depend on:

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for `PluginWidgetView` (T52.16, PL§8): one tree per widget variant, a
 // status-segment-sized line and a block nesting the others, as a plugin's panel would. Separate
 // so the plugin fixtures change without touching another surface's.

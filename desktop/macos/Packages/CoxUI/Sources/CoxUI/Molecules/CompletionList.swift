@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CompletionList` (DS§6.3 row `CompletionList`, the mockup's `.pop`; DT§5.3; mockup screens
 // 5–6): the rows the composer offers for the token being typed — files for `@`, commands for
 // `/` — ranked by the core, with one row picked. Separate so the composer only places it; the

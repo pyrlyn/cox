@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T7.2: skills from a vendored `anthropics/skills` sample plus cox's own —
 //! the index carries names and descriptions only; the body arrives on
 //! invoke, with `allowed-tools` alongside for the engine.

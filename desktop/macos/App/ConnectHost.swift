@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // File › Connect to Host…'s sheet (T52.21): the alias goes to CoxModel's `RemoteHosts`, which
 // connects, saves it to `desktop.remote_hosts` and keeps the host groups. Wiring only; separate
 // from `SessionWindow` so the window's body stays the layout.

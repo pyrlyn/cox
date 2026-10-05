@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The command palette's ranking (DT§5.5, T37.44.13, mockup 12): one query
 //! over the window's actions, the listed sessions, the session's `/`
 //! commands and the project's files, grouped by kind and best first within

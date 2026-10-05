@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `todo`: a structured task list the model reports progress through
 //! (plan.md §1.11, T3.6). No filesystem or network access — `ReadOnly` per
 //! the tool catalogue — so it does nothing `confine` needs to guard; its

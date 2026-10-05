@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The command palette's rows between CoxClient and cox-ffi (T37.44.13), apart from
 // `Convert.swift`'s timeline so each file stays one concern. Case for case; the ranking is
 // `cox_app::palette::rank`, which both the live and the remote session call through here.

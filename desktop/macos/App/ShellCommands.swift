@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The View menu's pane items (DS§4, DT§5.1, A89): Show/Hide Sidebar on ⌃⌘S and Show/Hide
 // Inspector on ⌃⌘I, the keys and titles of the system `SidebarCommands` and
 // `InspectorCommands`. Those act only on panes the system built, and `MainScreen` lays its panes

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The "Needs you" inbox and each session's activity (DT§4.3, §5.1): one
 //! fold over the event streams of every session this process drives, so
 //! the sidebar, the Dock badge and notifications agree. Derived from

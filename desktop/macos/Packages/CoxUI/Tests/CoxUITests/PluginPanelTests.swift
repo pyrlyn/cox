@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // T52.17's CoxUI check (DS§6.4, PL§8): the plugin panel above the composer and the toolbar's
 // plugin status segments, each in light/dark × Solid/Frosted.
 

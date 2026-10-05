@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CoxToggleStyle` and `CoxSlider`'s check (T37.19.4): a snapshot per on/off and per slider
 // value × light/dark × Solid/Frosted, disabled ones too (T37.19.5), and the slider placing its
 // knob by the value's share of the range, clamped to it.

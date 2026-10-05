@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `DiffStat` (DS§6.2 row `DiffStat(added, removed)`, the mockup's `.plus` and `.minus`): the
 // lines a change adds and removes, "+42 −7". Separate so a tool row, a turn summary and the
 // changes tab count lines the same way.

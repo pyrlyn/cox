@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ReviewPane` (DS§6.4 row `ReviewPane`; DT§5.4 Review, T37.28.2): the split that replaces the
 // transcript column — the changed files grouped by the turn that changed each last, Review's
 // rewind timeline under them, and the open file's diff as `DiffHunkView`s. Separate from

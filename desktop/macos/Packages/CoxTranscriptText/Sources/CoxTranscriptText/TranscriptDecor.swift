@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A prompt's bubble and a thought's fold in the transcript text (T37.23.4,
 // DT§5.2): both stay text, so a drag can start partway through a prompt and run
 // on into the reply, which a card attachment (selected whole) cannot give. A
@@ -15,6 +19,8 @@ extension NSAttributedString.Key {
   static let transcriptDecor = NSAttributedString.Key("cox.transcript.decor")
   /// A decorated paragraph's `Decor.Edge`, as its raw value.
   static let transcriptEdge = NSAttributedString.Key("cox.transcript.edge")
+  /// A prompt's turn, as an `Int`, drawn in the gutter beside its first line (T37.47).
+  static let transcriptTurn = NSAttributedString.Key("cox.transcript.turn")
 }
 
 /// How a prompt's or a thought's paragraphs are set and what is drawn behind
@@ -34,11 +40,12 @@ final class Decor: NSObject {
   let kind: Kind
   let bubble: TranscriptStyle.Bubble
   private let thought: TranscriptStyle.Thought
+  private let gutter: TranscriptStyle.Gutter?
   /// One paragraph style per `Edge` raw value.
   private var styles: [NSParagraphStyle] = []
 
   init(_ kind: Kind, _ style: TranscriptStyle) {
-    (self.kind, bubble, thought) = (kind, style.bubble, style.thought)
+    (self.kind, bubble, thought, gutter) = (kind, style.bubble, style.thought, style.gutter)
     super.init()
     styles = (0..<8).map { raw in
       let edge = Edge(rawValue: raw)
@@ -117,6 +124,34 @@ final class Decor: NSObject {
       let bottom = edge.contains(.last) ? last.maxY : height
       return CGRect(x: margin, y: 0, width: thought.ruleWidth, height: bottom)
     }
+  }
+
+  /// Where a prompt's first paragraph draws its turn number, in its fragment's coordinates: the
+  /// gutter's box left of the bubble, as tall as the first line. `nil` for any other paragraph or
+  /// without a gutter.
+  func gutterArea(_ fragment: NSTextLayoutFragment, _ edge: Edge) -> CGRect? {
+    guard kind == .bubble, edge.contains(.first), let gutter, let face = area(fragment, edge),
+      let line = fragment.textLineFragments.first?.typographicBounds
+    else { return nil }
+    return CGRect(
+      x: face.minX - gutter.offset, y: line.minY, width: gutter.width, height: line.height)
+  }
+
+  /// Draws `turn` right-aligned in `box`, centred on its line.
+  func drawTurn(_ turn: Int, in box: CGRect, context: CGContext) {
+    guard let gutter else { return }
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .right
+    let number = NSAttributedString(
+      string: String(turn),
+      attributes: [.font: gutter.font, .foregroundColor: gutter.color, .paragraphStyle: paragraph])
+    let height = number.size().height
+    let line = CGRect(x: box.minX, y: box.midY - height / 2, width: box.width, height: height)
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    // The text view is flipped, and so is the context TextKit hands a fragment.
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+    number.draw(with: line, options: [.usesLineFragmentOrigin])
   }
 
   /// Draws a paragraph's slice `rect` of the decoration; `whole` is the bubble it is a slice of.
@@ -219,11 +254,20 @@ final class DecorFragment: NSTextLayoutFragment {
     return (decor, Decor.Edge(rawValue: raw ?? 0))
   }
 
+  /// The prompt's turn, on its first paragraph only.
+  var turn: Int? {
+    guard let text = (textElement as? NSTextParagraph)?.attributedString, text.length > 0 else {
+      return nil
+    }
+    return text.attribute(.transcriptTurn, at: 0, effectiveRange: nil) as? Int
+  }
+
   override var renderingSurfaceBounds: CGRect {
     let bounds = super.renderingSurfaceBounds
     guard let (decor, edge) = decoration, let area = decor.area(self, edge) else { return bounds }
     let reach = decor.kind == .bubble ? decor.bubble.reach : 0
-    return bounds.union(area.insetBy(dx: -reach, dy: -reach))
+    let surface = bounds.union(area.insetBy(dx: -reach, dy: -reach))
+    return decor.gutterArea(self, edge).map { surface.union($0) } ?? surface
   }
 
   override func draw(at point: CGPoint, in context: CGContext) {
@@ -232,6 +276,9 @@ final class DecorFragment: NSTextLayoutFragment {
       decor.draw(
         area.offsetBy(dx: point.x, dy: point.y), whole: whole.offsetBy(dx: point.x, dy: point.y),
         edge, in: context)
+      if let turn, let box = decor.gutterArea(self, edge) {
+        decor.drawTurn(turn, in: box.offsetBy(dx: point.x, dy: point.y), context: context)
+      }
     }
     super.draw(at: point, in: context)
   }
@@ -304,6 +351,8 @@ extension TranscriptText {
         (attributes[.attachment], attributes[.kern]) = (tile, look.style.bubble.gap)
         out.append(NSAttributedString(string: "\u{FFFC}", attributes: attributes))
       }
+      out.addAttribute(
+        .transcriptTurn, value: Int(block.turn), range: NSRange(location: 0, length: out.length))
     case .thinking(let text, _):
       guard !text.isEmpty else { break }
       let header = CardAttachment(block, cards: cards, role: .header)

@@ -1,7 +1,11 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the inspector's Context tab (T37.29.3.1): a turn's split of a 200k
 // window as `cox_app::MeterText` formats it, the same split with the window unknown, and mockup
 // 10's cost by turn and project footnote as `cox_app::TurnCosts` formats them (T37.29.3.2,
-// T37.29.3.3), and the session's cache hit while a turn runs (A104, A105). Separate
+// T37.29.3.3), the budget caps against the spend (T37.29.3.4), and the session's cache hit while a turn runs (A104, A105). Separate
 // from `PreviewState+Inspector.swift` so the inspector's tabs, built in parallel, add their
 // fixtures without editing one file.
 
@@ -32,6 +36,24 @@ extension PreviewState {
     ]
     state.footnote =
       "Project cox today: $3.18 · this week: $21.40. Every number is a row in the cost ledger."
+    return state
+  }
+
+  /// The budget under the cost by turn: the session against its cap and the month against its own,
+  /// as `cox_app::TurnCosts` formats them (T37.29.3.4).
+  static var contextBudget: ContextTab.State {
+    var state = contextCosts
+    state.budget = [
+      .init(label: "Session", text: "$0.42 of $5.00", fraction: 0.084),
+      .init(label: "This month", text: "$21.40 of $100.00", fraction: 0.214),
+    ]
+    return state
+  }
+
+  /// A cap that is not a usable number: the month's row is the spend alone, with no gauge.
+  static var contextBudgetWithoutACap: ContextTab.State {
+    var state = contextBudget
+    state.budget[1] = .init(label: "This month", text: "$21.40")
     return state
   }
 

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for remote hosts (T52.21): a local project, then a connected host and a
 // disconnected one, each a sidebar group under its host badge; and the Connect to Host sheet after
 // a failed connect. Separate from `PreviewState+Window.swift` so this card adds its fixtures

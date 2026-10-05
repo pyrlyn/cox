@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox app-server --stdio` (DT§4.4, T52.19): serves the `wire` protocol
 //! to one client over a reader and a writer. Requests call this process's
 //! `App` and `Workspace`; each open session's patches stream as

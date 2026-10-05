@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `.elevation(_:)` (DS§3.4, DS§6.1): the only place a shadow is drawn, so the Depth setting
 // scales every lifted thing at once. Drop shadows sit behind the view; inset layers are the
 // top-edge highlight drawn inside the view's shape.

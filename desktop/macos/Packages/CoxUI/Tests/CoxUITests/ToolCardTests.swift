@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ToolCard`'s check (T37.23, DS§6.4): a snapshot per state × light/dark × Solid/Frosted — a
 // folded and an opened edit, a running command with its tail, an opened failure and a call with
 // nothing to open — each on a pane as its `#Preview` shows it.

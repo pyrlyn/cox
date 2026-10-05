@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The WASM plugin host (A52, `docs/design/plugins.md`): loads a plugin
 //! module with extism and runs each plugin on a worker thread of its own. A
 //! crate of its own because it is the only one that links extism and
@@ -31,8 +35,8 @@
 //!   `Advisor` trait, calling `cox_decide` (PL§4, T33.20).
 //! - [`tool`] — `WasmTool`: a plugin's granted tool as a deferred `Tool`
 //!   named `wasm__<id>__<tool>`, its spec frozen at `cox_init` (PL§7, T33.12).
-
-#![warn(missing_docs)]
+//! - [`net`] — `cox_http`: the allow-list, the body cap, and the PL§7d
+//!   refusal of a `net` entry that covers a provider host (T33.14.1).
 
 pub mod advisor;
 pub mod context;
@@ -46,6 +50,7 @@ pub mod host;
 pub mod hostfn;
 pub mod install;
 pub mod live;
+pub mod net;
 pub mod provider;
 pub mod tool;
 

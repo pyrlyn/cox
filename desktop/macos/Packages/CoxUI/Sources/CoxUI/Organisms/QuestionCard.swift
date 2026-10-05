@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `QuestionCard` (DS§6.4 row `QuestionCard`, the mockup's question `.appr`, DT§5.2 Question): the
 // agent asks the person something — the question, one button per offered answer and a field
 // for their own — and once answered, the one line "You answered: …". Separate from

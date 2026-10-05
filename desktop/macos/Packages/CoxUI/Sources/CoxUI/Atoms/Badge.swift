@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Badge` (DS§6.2 row `Badge`, the mockup's `.badge .b-*`): a short tag in a soft tint of its
 // meaning — where a setting comes from, an agent's model, a warning. Separate so every tag has
 // one shape and one colour per kind; `RiskChip` is a badge too.

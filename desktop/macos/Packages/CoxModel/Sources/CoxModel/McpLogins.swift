@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The MCP page's logins (T37.30.3, DT§5.7): per server, the line saying whether cox can reach
 // it and the button that changes that, both worded by `cox_app` (T58.4.1), with its status badge
 // and log (T37.45.4). Here, not in CoxUI, because the store owns what the screen shows (DS§1);

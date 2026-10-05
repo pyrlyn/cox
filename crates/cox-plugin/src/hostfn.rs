@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The `cox:host/v1` host functions (PL§4, T33.9): what a guest may ask the
 //! host for, each call checked against the plugin's grant and the export it
 //! is called from. Separate from `host` because that module owns threads and
@@ -15,7 +19,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use cox_plugin_api::{
-    AbiError, InitIn, ModelCall, ModelTier, NoticeLevel, PluginManifest, SessionInfo, ToolCallIn,
+    AbiError, HttpReq, InitIn, ModelCall, ModelTier, NoticeLevel, PluginManifest, SessionInfo,
+    ToolCallIn,
 };
 use cox_protocol::config::PluginsConfig;
 use cox_protocol::errors::CoreError;
@@ -30,6 +35,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::context::Context;
+use crate::net::Net;
 
 /// The import module every host function lives in.
 pub const NAMESPACE: &str = "cox:host/v1";
@@ -115,6 +121,8 @@ pub struct HostEnv {
     // T33.13: `cox_invoke_tool`'s route to the session's tool path, run on
     // `runtime` like `model_caller`.
     tool_invoker: Option<Arc<dyn ToolInvoker>>,
+    // T33.14.1: `cox_http`'s allow-list, from the same grant as `granted`.
+    net: Net,
 }
 
 /// The running `cox_tool_call`'s end of its `ToolCx` (T33.12): where
@@ -141,6 +149,7 @@ impl HostEnv {
             runtime: None,
             tool: Mutex::new(None),
             tool_invoker: None,
+            net: Net::new(&BTreeSet::new()),
         }
     }
 
@@ -148,6 +157,7 @@ impl HostEnv {
     /// that `grant::check` found `Granted`) and the kv store.
     pub fn with_grant(mut self, granted: Vec<String>, store: Arc<dyn PluginStore>) -> Self {
         self.granted = granted.into_iter().collect();
+        self.net = Net::new(&self.granted);
         self.store = Some(store);
         self
     }
@@ -308,6 +318,7 @@ impl HostEnv {
             }
             "cox_model_call" => self.model_call(arg),
             "cox_invoke_tool" => self.invoke_tool(arg),
+            "cox_http" => self.http(arg),
             "cox_output" => {
                 self.in_tool_call()?;
                 let line: String = parse(arg)?;
@@ -414,6 +425,21 @@ impl HostEnv {
             .block_on(caller.call(&self.id, tier, request))
             .map_err(model_call_error)?;
         serde_json::to_value(events).map_err(|e| failed(&e.to_string()))
+    }
+
+    /// `cox_http` (PL§4, T33.14.1): to a granted `net` host from any export
+    /// but render, blocking this plugin's worker on the session runtime as
+    /// `cox_model_call` does.
+    fn http(&self, arg: Value) -> Result<Value, AbiError> {
+        self.outside_render()?;
+        let request: HttpReq = parse(arg)?;
+        let url = self.net.target(&request.url)?;
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| failed("http is not available in this cox"))?;
+        let response = runtime.block_on(self.net.send(request, url))?;
+        serde_json::to_value(response).map_err(|e| failed(&e.to_string()))
     }
 
     /// `cox_invoke_tool` (PL§4, T33.13): a granted tool, run by the session
@@ -544,6 +570,10 @@ pub(crate) mod tests {
 
     use cox_plugin_api::{Capabilities, Limits};
     use cox_protocol::{GrantScope, PluginGrant};
+
+    use tokio::runtime::Runtime;
+    use wiremock::matchers::path;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
     use crate::host::{Lane, PluginHost};
@@ -756,8 +786,147 @@ pub(crate) mod tests {
     #[test]
     fn unimplemented_import_links_and_answers_failed() {
         let env = Arc::new(HostEnv::new("t"));
-        let reply = call(&env, "cox_http", "cox_command", json!({}));
+        let reply = call(&env, "cox_redraw", "cox_command", json!({}));
         assert_eq!(reply["Err"]["kind"], "failed", "{reply}");
+    }
+
+    /// An environment granted `net:<net>`, blocking on `rt` like a session's.
+    fn http_env(net: &str, rt: &Runtime) -> Arc<HostEnv> {
+        let mut env =
+            HostEnv::new("t").with_grant(vec![format!("net:{net}")], Arc::new(MemKv::default()));
+        env.runtime = Some(rt.handle().clone());
+        Arc::new(env)
+    }
+
+    fn mock(rt: &Runtime, route: &str, response: ResponseTemplate) -> MockServer {
+        rt.block_on(async {
+            let server = MockServer::start().await;
+            Mock::given(path(route))
+                .respond_with(response)
+                .mount(&server)
+                .await;
+            server
+        })
+    }
+
+    fn hits(rt: &Runtime, server: &MockServer) -> usize {
+        rt.block_on(server.received_requests())
+            .map_or(0, |requests| requests.len())
+    }
+
+    fn get(url: String) -> Value {
+        json!({ "method": "GET", "url": url })
+    }
+
+    #[test]
+    fn http_to_allowed_host_round_trips() {
+        let rt = Runtime::new().expect("runtime");
+        let response = ResponseTemplate::new(201)
+            .set_body_string("hi")
+            .insert_header("x-a", "1");
+        let server = mock(&rt, "/ok", response);
+        let request = json!({
+            "method": "POST",
+            "url": format!("{}/ok", server.uri()),
+            "headers": { "x-q": "v" },
+            "body": "sent",
+        });
+        let reply = call(
+            &http_env("127.0.0.1", &rt),
+            "cox_http",
+            "cox_command",
+            request,
+        );
+        assert_eq!(reply["Ok"]["status"], 201, "{reply}");
+        assert_eq!(reply["Ok"]["body"], "hi");
+        assert_eq!(reply["Ok"]["headers"]["x-a"], "1");
+        let got = rt.block_on(server.received_requests()).expect("recorded");
+        assert_eq!(got[0].body, b"sent");
+        assert_eq!(got[0].headers["x-q"], "v");
+    }
+
+    #[test]
+    fn http_outside_allow_list_is_refused() {
+        let rt = Runtime::new().expect("runtime");
+        let server = mock(&rt, "/x", ResponseTemplate::new(200));
+        let env = http_env("api.github.com", &rt);
+        let reply = call(
+            &env,
+            "cox_http",
+            "cox_command",
+            get(format!("{}/x", server.uri())),
+        );
+        assert_eq!(
+            reply,
+            json!({ "Err": { "kind": "not_granted", "capability": "net:127.0.0.1" } })
+        );
+        let none = Arc::new(HostEnv::new("t"));
+        let reply = call(
+            &none,
+            "cox_http",
+            "cox_command",
+            get(format!("{}/x", server.uri())),
+        );
+        assert_eq!(
+            reply,
+            json!({ "Err": { "kind": "not_granted", "capability": "net" } })
+        );
+        assert_eq!(hits(&rt, &server), 0, "a refused request was sent");
+    }
+
+    #[test]
+    fn http_in_render_is_not_in_this_context() {
+        let rt = Runtime::new().expect("runtime");
+        let server = mock(&rt, "/x", ResponseTemplate::new(200));
+        let env = http_env("127.0.0.1", &rt);
+        let reply = call(
+            &env,
+            "cox_http",
+            "cox_render",
+            get(format!("{}/x", server.uri())),
+        );
+        assert_eq!(reply, json!({ "Err": { "kind": "not_in_this_context" } }));
+        assert_eq!(hits(&rt, &server), 0);
+    }
+
+    #[test]
+    fn http_body_over_cap_is_too_large() {
+        let rt = Runtime::new().expect("runtime");
+        let big = vec![b'a'; crate::net::MAX_HTTP_RESPONSE_BYTES + 1];
+        let server = mock(&rt, "/big", ResponseTemplate::new(200).set_body_bytes(big));
+        let env = http_env("127.0.0.1", &rt);
+        let reply = call(
+            &env,
+            "cox_http",
+            "cox_command",
+            get(format!("{}/big", server.uri())),
+        );
+        assert_eq!(
+            reply,
+            json!({ "Err": { "kind": "too_large", "limit": crate::net::MAX_HTTP_RESPONSE_BYTES } })
+        );
+    }
+
+    #[test]
+    fn http_redirect_is_not_followed() {
+        let rt = Runtime::new().expect("runtime");
+        let server = rt.block_on(MockServer::start());
+        let to = format!("{}/elsewhere", server.uri());
+        rt.block_on(
+            Mock::given(path("/r"))
+                .respond_with(ResponseTemplate::new(302).insert_header("location", to.as_str()))
+                .mount(&server),
+        );
+        let env = http_env("127.0.0.1", &rt);
+        let reply = call(
+            &env,
+            "cox_http",
+            "cox_command",
+            get(format!("{}/r", server.uri())),
+        );
+        assert_eq!(reply["Ok"]["status"], 302, "{reply}");
+        assert_eq!(reply["Ok"]["headers"]["location"], to);
+        assert_eq!(hits(&rt, &server), 1, "the redirect was followed");
     }
 
     #[test]
@@ -789,6 +958,7 @@ pub(crate) mod tests {
             models: Vec::new(),
             mcp: Vec::new(),
             external_agents: Vec::new(),
+            cloud_agents: Vec::new(),
             agents: Vec::new(),
         };
         let mut plugins = PluginsConfig::default();

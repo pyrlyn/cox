@@ -1,8 +1,15 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! MCP login on the Settings screen end to end (T37.30.3): an `App` over a
 //! scratch `COX_HOME` whose config names an HTTP and a stdio server. Tokens
 //! live in `cox_mcp::auth::Memory` and the browser's callback is scripted,
 //! so nothing opens a browser, reads the keychain (A49) or dials out. nextest
 //! runs each test in its own process, so each sets its own `HOME`.
+
+// why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+#![allow(unsafe_code)]
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The inspector's Tasks tab (T37.29.4, DT§5.1): the session's subagents and background calls,
 // read off its `task` blocks — label, tier, state and cost. Here, not in CoxUI, because these
 // decide what the tab shows (DS§1); the app copies them into CoxUI's `TasksTab.Item` field for

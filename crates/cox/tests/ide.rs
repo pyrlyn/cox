@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T11.2: the Zed `agent_servers` snippet in `docs/ide.md` is valid JSON
 //! and points at `cox acp`. T37.2: `cox acp` opens its sessions through
 //! `cox-session`, so an IDE gets the same tools as `cox run -p`.

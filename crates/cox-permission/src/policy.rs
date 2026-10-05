@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The approval-policy × sandbox-mode table for `Exec` calls (plan.md §1.8
 //! step 8, T4.3). Its own module so the twelve cells are one function the
 //! matrix test reads directly, instead of a condition buried in `by_risk`

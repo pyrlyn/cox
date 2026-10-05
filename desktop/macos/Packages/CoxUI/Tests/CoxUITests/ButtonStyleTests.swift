@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CoxButtonStyle`'s check (T37.19.1): one snapshot per role × size × light/dark × Solid/Frosted,
 // each showing rest, hovered, pressed and disabled; the disabled face holds the readable floor.
 

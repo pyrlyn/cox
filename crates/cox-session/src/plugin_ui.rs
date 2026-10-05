@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The plugin UI service (T33.23–T33.26, PL§8; moved here by T52.13, DT§4.7
 //! G9): renders, commands, keys and item renders asked of the session's live
 //! plugin hosts, each under its deadline, answered as neutral values. Here,

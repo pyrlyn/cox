@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox self update [--version v]` (T12.2): downloads the release archive
 //! for this platform from GitHub, verifies its `.sha256` checksum, and
 //! replaces the running binary. Refuses to install without a matching
@@ -18,7 +22,6 @@ const REPO: &str = "pyrlyn/cox";
 fn target() -> anyhow::Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Ok("aarch64-apple-darwin"),
-        ("macos", "x86_64") => Ok("x86_64-apple-darwin"),
         ("linux", "x86_64") => Ok("x86_64-unknown-linux-gnu"),
         ("linux", "aarch64") => Ok("aarch64-unknown-linux-gnu"),
         (os, arch) => anyhow::bail!("no cox release for {os}/{arch}"),

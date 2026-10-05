@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! One plugin as a decision-point source (PL§4 "Decision points", T33.20):
 //! `PluginAdvisor` implements `cox_protocol::traits::Advisor` by calling the
 //! guest's `cox_decide` export. Shaped like `hooks.rs`, and here for the same

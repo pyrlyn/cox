@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Whole-block selection from the gutter (T37.42.2, DT§5.2): a click left of
 // the text selects the block beside it, and a ⇧-click selects every block
 // from that anchor to the clicked one. The gutter is the text container's

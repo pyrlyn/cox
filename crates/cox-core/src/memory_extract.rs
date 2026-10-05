@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! End-of-session memory extraction (T10.2): with `memory.extract`, a
 //! `Shutdown` runs one cheap `memory`-job call over the transcript, asks the
 //! `salience` decision point (T33.21.1, `monotone.rs`) to drop candidates

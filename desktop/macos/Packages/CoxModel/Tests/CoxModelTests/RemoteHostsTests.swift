@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A remote host in the sidebar (T52.21): a connected host lists its sessions as one group of its
 // own and routes their opening to itself; a host that cannot connect still shows, disconnected,
 // with its rows read-only.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The tool card's molecules' check (T37.21.1, T37.21.4, DS§6.3): a snapshot per variant ×
 // light/dark × Solid/Frosted, each molecule on a pane from `PreviewState` as its `#Preview`
 // shows it.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The composer's attachment row (DS§6.4 row `Composer`, the mockup's `.composer` `atts` row;
 // DT§5.3): each file or image the next message carries as a `Thumbnail`, with a way to take it
 // back out. Separate from `Composer.swift` so the organism's file stays one view, and the tile

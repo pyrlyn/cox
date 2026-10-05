@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Which program runs a `bash` command line (T57.2). Separate from the
 //! runner because the choice is host policy, not process plumbing, and a
 //! test drives it with an injected [`Lookup`] on any host.

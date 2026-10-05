@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! TEA state for the TUI (T5.1): `State`, `Msg`, `Cmd` and the pure
 //! `update`. No async, no I/O, no terminal: the runtime (`app`) feeds it key
 //! and core events and executes the `Cmd`s it returns, and a test feeds it

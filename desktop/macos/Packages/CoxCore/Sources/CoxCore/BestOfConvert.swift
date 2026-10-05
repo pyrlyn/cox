@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Best of n over cox-ffi (T52.11): `App.bestOf`, `compare` and `pick` as CoxClient's values.
 // Field for field; nothing is decided here. Separate from `LiveCoreClient.swift` like the other
 // conversions, so that file stays the list of calls into Rust for one session.

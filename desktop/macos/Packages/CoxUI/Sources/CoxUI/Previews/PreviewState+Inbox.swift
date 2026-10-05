@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the sidebar's "Needs you" section as inbox rows (T37.27.7): two
 // items of one session, a failure, and an expired approval shown read-only. Separate from
 // `PreviewState+Window.swift` so this card adds its fixture without editing the shell's.

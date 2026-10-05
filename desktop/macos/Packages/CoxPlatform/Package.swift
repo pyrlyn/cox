@@ -1,4 +1,8 @@
 // swift-tools-version: 6.2
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // CoxPlatform (DT§4.6): what the app asks macOS for — today the provider
 // keys in the Keychain over the Security framework, no wrapper package
 // (research.md 9.5.8) — and notifications with Allow, Deny and Answer

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Session assembly (T37.1, DT§4.2): turns an effective `Config` into a
 //! live [`Session`] — provider, built-in and MCP tools, skills, subagent
 //! definitions, hooks, plugins, the checkpointer and worktrees. Separate
@@ -5,6 +9,10 @@
 //! builds a session the same way without `clap`, `anyhow` or a terminal:
 //! the caller loads config from its own flags, and what went wrong on the
 //! way comes back as [`Warning`]s for it to show, never printed here.
+
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

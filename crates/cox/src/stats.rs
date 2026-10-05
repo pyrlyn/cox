@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox stats` (T1.7 per-session table, T8.3 `--cache`, T8.4 day/month
 //! groupings by tier and job, context-token-turns, top tools, `--json` and
 //! `--csv`). Pure summaries are built by `summarize_session` and rendered by
@@ -171,7 +175,7 @@ pub fn run(home: &Path, args: &StatsArgs) -> anyhow::Result<()> {
         let session: SessionId = session_id.parse()?;
         let rows = store.usage_for_session(&session)?;
         if rows.is_empty() {
-            println!("No usage records found for session {session_id}");
+            println!("No usage records found for this session");
             return Ok(());
         }
         if args.cache {

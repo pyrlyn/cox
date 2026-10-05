@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `read`: whole, ranged and outline reads of one confined file (plan.md
 //! T3.2, §1.11), and an image file returned as an image (T40.4). Every path argument goes through `cox_tools::path::confine`
 //! first (AGENTS.md trust boundary) — no other constructor for a `Path`

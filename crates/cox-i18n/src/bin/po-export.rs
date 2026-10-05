@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `po-export`: writes the native apps' string resources from the embedded
 //! gettext catalogs (`cox_i18n::export`). Output defaults to `target/i18n/`
 //! under the workspace root, which is gitignored; the macOS and Windows

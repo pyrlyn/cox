@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SettingsSidebar` (DS§6.4 row `SettingsSidebar`, the mockup's `.set-side`; DT§5.7): the
 // Settings window's search field, the page list — General through Advanced — and, at its foot,
 // the config files the values come from. Separate so the Settings screen composes its sidebar

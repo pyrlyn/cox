@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `UserBubble` (DS§6.3 row `UserBubble`, the mockup's `.user` and `.user .att`): what the user
 // sent in a turn — the prompt and, under it, the pictures and files attached to it. Separate so
 // every user turn in the transcript is one card, set apart from the assistant's prose.
@@ -48,9 +52,10 @@ struct UserBubble: View {
   }
 }
 
-/// What a hovered prompt offers (DT§5.2, T37.23.9): Edit and resend, and Copy, as icon buttons
-/// on a readable capsule lifted to e1 over the bubble's edge. Public so the transcript's text
-/// view, which draws the bubble itself, shows the same strip; the caller acts on the choice.
+/// What a hovered prompt offers (DT§5.2, T37.23.9; Figma frame 14-rewind-edit-resend): Edit and
+/// resend and Copy as small labelled push buttons (the mockup's `.pb`, 24 pt) side by side over
+/// the bubble's top trailing corner. Public so the transcript's text view, which draws the
+/// bubble itself, shows the same strip; the caller acts on the choice.
 public struct PromptActions: View {
   public enum Action: CaseIterable, Sendable {
     case edit, copy
@@ -62,10 +67,11 @@ public struct PromptActions: View {
       }
     }
 
-    var symbol: String {
+    /// The frame shows a pencil before Edit and resend and Copy as a bare word.
+    var symbol: String? {
       switch self {
       case .edit: "pencil"
-      case .copy: "doc.on.doc"
+      case .copy: nil
       }
     }
   }
@@ -79,23 +85,20 @@ public struct PromptActions: View {
   }
 
   public var body: some View {
-    let shape = RoundedRectangle(cornerRadius: Radius.capsule, style: .continuous)
-    HStack(spacing: Space.xxs) {
+    HStack(spacing: Space.s) {
       ForEach(actions, id: \.self) { action in
         Button {
           act(action)
         } label: {
-          Image(systemName: action.symbol).symbolStyle(.footnote)
+          HStack(spacing: Space.xs) {
+            if let symbol = action.symbol { Image(systemName: symbol).symbolStyle(.footnote) }
+            Text(action.title)
+          }
         }
-        .buttonStyle(CoxButtonStyle(.plain, size: .small))
-        .help(action.title)
+        .buttonStyle(CoxButtonStyle(.secondary, size: .small))
         .accessibilityLabel(action.title)
       }
     }
-    .padding(.horizontal, Space.xxs)
-    .glassPane(shape, surface: Color(.surfaceCapsule), role: .readable)
-    .hairline(in: shape)
-    .elevation(.e1, cornerRadius: Radius.capsule)
   }
 }
 

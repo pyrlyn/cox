@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The one argv wrap a host-spawned process runs under (T33.19, T33.42,
 //! T35.2): a plugin's `[[mcp]]` servers and external agents, every other
 //! stdio MCP server, and `doctor`'s probe of them. Separate so each of those

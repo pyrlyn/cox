@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The app target's entry (DT§4.6, DT§7, A106): `@main`, its scenes and the launch-wide state
 // they share. Thin by design — every view and store lives in the local packages; this target
 // picks the core at launch, hosts the windows and joins stores to screens. The session window

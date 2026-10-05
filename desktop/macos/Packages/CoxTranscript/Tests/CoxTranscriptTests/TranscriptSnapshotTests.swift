@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The transcript's look (T37.23, DS§6.4 row `TranscriptView`): one transcript with every block
 // kind — prose, code, a thought, tool calls running, done and failed, a group, a subagent task,
 // an approval and a question in the slot, a compaction, a checkpoint, a notice and an error —

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The interaction state a control face draws (DS§3.6, DS§6.1): rest, hovered, pressed or
 // disabled, with the tint and lift each one gets. Separate so every button-like style resolves
 // hover, press and `isEnabled` the same way, and a snapshot can draw any state by value.

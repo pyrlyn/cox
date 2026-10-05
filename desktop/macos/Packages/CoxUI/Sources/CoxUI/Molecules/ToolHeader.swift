@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ToolHeader` (DS§6.3 row `ToolHeader`, the mockup's `.tool .h`): one tool call at a glance —
 // what kind of work, what it did to what, how risky, whether it is still running and how long
 // it took, and whether its body is open. Separate so a collapsed tool row and an expanded

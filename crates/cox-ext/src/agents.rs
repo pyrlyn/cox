@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Subagent definitions from `.claude/agents/*.md` and `.cox/agents/*.md`
 //! (T7.3): `name`, `description`, `tools`, `model`. A definition narrows
 //! what the `agent` tool may hand a child.

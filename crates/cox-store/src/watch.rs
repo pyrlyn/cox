@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The cross-process change feed (T37.35, DT§11 item 6): the app
 //! and a TUI share one `cox.db`, and each must notice when the other commits
 //! a session or a ledger row, so the sidebar and the cost totals refresh.

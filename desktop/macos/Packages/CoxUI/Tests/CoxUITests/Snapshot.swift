@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The one snapshot harness every CoxUI suite shares (DS§9): a sample drawn over a colourful
 // backdrop in one light/dark × Solid/Frosted cell, through a window-hosted `NSHostingView`
 // (`ImageRenderer` drops glass content) into a bitmap of a fixed 2× scale, so the image does

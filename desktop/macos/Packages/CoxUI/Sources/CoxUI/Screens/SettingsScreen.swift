@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SettingsScreen` (DS§6.5; DT§5.7): the Settings window — the page list, and the selected
 // page's config tables as boxes of `SettingRow`s, each value with the layer it comes from, and
 // a key row in each provider's box (`SettingsScreen+Keys.swift`). Composition only (DS§5): what each field shows,

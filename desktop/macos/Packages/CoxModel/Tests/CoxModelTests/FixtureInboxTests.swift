@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The inbox through the fixture client (T37.27): a recorded approval reaches the host as its
 // `HostNote` with badge 1 when its batch is pulled, the turn waits on the person, and the
 // approve intent resumes it to the recorded end. Plus each `Need` as its note's kind, with the

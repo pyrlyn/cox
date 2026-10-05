@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Config loading and provenance (plan.md §1.6/D13/T0.3): layers
 //! `config/default.toml` < `~/.cox/config.toml` < `<git root>/.cox/config.toml`
 //! < `COX_<SECTION>_<KEY>` env vars < CLI flags via `figment`, enforces the
@@ -696,6 +700,8 @@ pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Sets env vars for the duration of `f`, restoring the previous value
 /// (or absence) afterwards, holding [`ENV_LOCK`] throughout so this
 /// doesn't race other env-mutating tests in the crate.
+// why: env::set_var/remove_var are unsafe in edition 2024; ENV_LOCK is held.
+#[allow(unsafe_code)]
 pub fn temp_env(vars: &[(&str, Option<&str>)], f: impl FnOnce()) {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let previous: Vec<(String, Option<String>)> = vars

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // AppStore's session registry (T51.11): windows on one session share its stores, one window
 // closing keeps them for the others, and the last one lets them go.
 

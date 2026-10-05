@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for mockup 27 (T52.8): cox and three external ACP agents, one of them
 // unable to start here, as the New-session sheet, the Info tab's Agents list and the transcript's
 // banner show them. Separate so the agents' fixtures do not grow the Info tab's file.

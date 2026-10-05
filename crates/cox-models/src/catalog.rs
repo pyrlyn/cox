@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The merged model catalog (plan.md T30.24; `docs/design/providers.md` §
 //! "Target shape" item 3): one [`ModelRow`] per model id, combining four
 //! layers in override order — built-in rows < plugin `[[models]]` rows

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the progress and token-meter atoms (T37.20.1–T37.20.2): the values
 // their `#Preview`s and snapshot tests share, and the frames the flexible ones are shown in.
 // Separate from `PreviewState.swift` so the atoms built in parallel add their fixtures without

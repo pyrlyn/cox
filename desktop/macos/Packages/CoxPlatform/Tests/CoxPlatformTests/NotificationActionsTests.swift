@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Notification actions without posting one (T37.27, T37.44.15): a note's content carries what
 // its action needs, each action becomes its intent or the session it brings forward, and
 // approving the recorded `approve-write` fixture's note from the notification resumes the

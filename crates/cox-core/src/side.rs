@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! One-shot side requests: a background job's own tiny prompt (`/init`'s
 //! README summary, the session title), sent outside the conversation so
 //! the cache-stable prefix and the history never see it, and recorded in

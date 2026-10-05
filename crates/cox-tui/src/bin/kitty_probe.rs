@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T23.1: a tiny binary that exists only for `tests/shell.rs`'s
 //! `pty_pops_keyboard_flags_on_exit`. `cox-tui` is a library with no binary
 //! of its own (`crates/cox` owns the real one) and has no `[[bin]]`-worthy

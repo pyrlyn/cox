@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the model popover (T37.22.6): the default config's tiers as the
 // core lists them, with claude-sonnet-5 running, and the main screen with it open under the capsule.
 // Separate from the other fixture files so this card adds its own.

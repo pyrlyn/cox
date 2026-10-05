@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Plugin discovery and the package digest (PL§1). Finds user plugins under
 //! `~/.cox/plugins/<id>/versions/<digest12>/` (following each `current`
 //! file) and project plugins under `<git root>/.cox/plugins/<id>/`, parses

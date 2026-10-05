@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The fold from an external agent's ACP `session/update` notifications to
 //! cox `Event`s (T52.3, DT§3.3.1). A top-level session driven by Claude
 //! Agent, Codex, Gemini CLI or Cursor streams through the same `Timeline`,

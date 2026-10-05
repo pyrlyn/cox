@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Lossless, line-safe tool-result truncation. Kept in core because tools
 //! return complete output and only the loop decides what a model may see.
 //! The archive row already exists when this runs (D6a), so the trailer is

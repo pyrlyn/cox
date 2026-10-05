@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ModelCapsule` (DS§6.3 row `ModelCapsule`, the mockup's first toolbar `.cap`): the session's
 // model and effort, opening the model menu. Separate from `CostCapsule`: it shows a choice the
 // person makes, not a figure that changes while they watch.

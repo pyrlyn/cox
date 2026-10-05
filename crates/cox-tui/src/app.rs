@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The runtime: crossterm input (polled on a thread) and core `Event`s on
 //! one `select!`, an
 //! inline viewport, `insert_before` for finished cells so the terminal's own

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CapsuleStyle` (DS§6.1): the toolbar capsules and filter chips, the mockup's `.cap` and
 // `.cap.hot`. Separate so every capsule has one glass face, lift and active halo, built on
 // `glassPane`, `hairline`, `elevation` and `textStyle`, with the states of `ControlState`.

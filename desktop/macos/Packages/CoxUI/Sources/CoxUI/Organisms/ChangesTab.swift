@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ChangesTab` (DS§6.4 row `ChangesTab`, the mockup's Changes `.ib`; DT§5.1 Changes): the
 // inspector's first tab — the files this session changed, the checkpoints it can rewind to and
 // the worktree it runs in. Separate so the `Inspector` frame stays a slot and each tab is its

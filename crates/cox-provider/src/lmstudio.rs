@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! LM Studio's native REST API (`/api/v1`, T30.16): the subset cox reads to
 //! learn what the server is actually running — the loaded context length,
 //! whether the model was trained for tool use, whether it is loaded at all —

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Ripgrep-equivalent content search (plan.md T3.3): walks a root with
 //! `ignore::WalkBuilder` (`.gitignore` honoured, hidden files included),
 //! searches each file with `grep-regex` + `grep-searcher`, and formats
@@ -16,7 +20,10 @@ use ignore::WalkBuilder;
 /// One formatted output line plus whether it counts toward a caller's
 /// match cap (context/`--` break lines don't).
 pub struct Line {
+    /// The line as `rg -n --no-heading` prints it, `path` prefix included.
     pub text: String,
+    /// Whether this is a match line (counted toward the cap) rather than a
+    /// context or `--` break line.
     pub is_match: bool,
 }
 
@@ -94,8 +101,10 @@ pub(crate) fn glob_allows(
 /// An invalid regex or glob pattern handed to [`search`].
 #[derive(Debug, thiserror::Error)]
 pub enum SearchError {
+    /// The regex pattern did not compile.
     #[error("invalid pattern: {0}")]
     Pattern(grep_regex::Error),
+    /// The glob filter did not parse.
     #[error("invalid glob: {0}")]
     Glob(globset::Error),
 }

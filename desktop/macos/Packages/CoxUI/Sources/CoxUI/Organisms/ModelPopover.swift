@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ModelPopover` (DS§6.4 row `SessionToolbar`, its model capsule's popover, the mockup's
 // `.popover`; DT§5.1; T37.22.6): each tier's models under the tier's name, the one the session
 // runs on marked, a click switching to another. Separate so the toolbar only opens it and the

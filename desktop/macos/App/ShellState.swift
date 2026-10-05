@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The window shell's values from the live stores (DT§5.1, T37.22.5): the toolbar and its model
 // popover from the open session's store, Info and model catalog (T37.22.6), the sidebar from
 // `SidebarStore` and the providers' health, copied into CoxUI's `SessionToolbar.State`,

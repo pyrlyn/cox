@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Generated cox-ffi values ⇄ `CoxClient` values, field for field. The two
 // sets have the same shape (both mirror cox-app's serde types); this file
 // keeps the generated ones inside CoxCore, so the stores and views never

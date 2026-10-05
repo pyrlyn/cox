@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The token meter and popover's values from the core's `UsageView` (T37.25, DS§7): the figures
 // `cox_app::MeterText` formatted, copied field by field. Here, beside `SessionComposer`, because
 // this package is where CoxUI's values and CoxClient's types meet; nothing here computes a

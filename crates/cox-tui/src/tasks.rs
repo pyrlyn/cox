@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Background task list (T9.2): `/tasks` renders the running tasks the
 //! core reports via `TaskCreated`/`TaskCompleted` (which `state` already
 //! tracks for the status count), then the last few that finished with

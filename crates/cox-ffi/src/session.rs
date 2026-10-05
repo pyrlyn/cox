@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! One open session behind the FFI (DT§4.4, §4.5): forwards to
 //! `cox_app::LiveSession`, which builds it, feeds the inbox and runs each
 //! intent; this side only moves the calls onto the runtime. Separate from

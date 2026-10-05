@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // What the inspector's Changes tab lists (T37.29.1, DT§5.1), field for field as cox-ffi exports
 // `cox_app::Changes`: the files the session changed, the turns code can be rewound to, and the
 // linked worktree it runs in. Separate from the timeline because it answers a call, not a patch.

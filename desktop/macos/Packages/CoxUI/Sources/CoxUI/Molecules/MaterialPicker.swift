@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `MaterialPicker` (DS§6.3 row `MaterialPicker`, the mockup's `.mat`): the Appearance popover's
 // choice of window glass — Frosted, Glossy or Solid — as three swatches, each a small pane drawn
 // in its own material over a wallpaper and lifted at the user's Depth. Separate so the popover

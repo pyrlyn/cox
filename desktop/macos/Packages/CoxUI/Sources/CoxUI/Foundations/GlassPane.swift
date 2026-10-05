@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `.glassPane(_:)` (DS§3.5, DS§6.1): the one place a pane chooses glass or a solid surface, so
 // the material setting, the readable floor and Reduce Transparency apply to every pane alike.
 

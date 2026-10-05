@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Generates the Anthropic wire types (T30.12) from the vendored OpenAPI 3.1
 //! spec, `schema/anthropic-openapi.json`, so that file stays the single source
 //! of truth: no extracted schema is committed and nothing can go stale.

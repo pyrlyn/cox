@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Mockup 18's provider keys and pop-ups (T37.45.2, A120): a key is added and changed in the
 // in-memory `SecretStore` alone — never sent to the settings file, never in the view or an error
 // — and a pop-up Rust chose (an enum past the segment limit, a tier's model from the catalog)

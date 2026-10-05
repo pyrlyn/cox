@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The first-run checklist (DT§5.8, T37.31) as cox-ffi exports `cox_app::onboarding`: per check,
 // how it went and the one line saying what is missing, and the `OnboardingClient` seam the app
 // reads it through. Separate from Settings because the checklist is its own first-run window;

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The checks `cox doctor` and the desktop app's first-run checklist
 //! (DT§5.8, T37.31) share: the code tier's provider key, the sandbox
 //! backend and `git` on PATH. Here rather than in `crates/cox` because

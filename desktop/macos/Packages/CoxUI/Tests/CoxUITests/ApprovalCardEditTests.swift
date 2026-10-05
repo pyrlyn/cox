@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ApprovalCard`'s Edit… (T37.27.6): the card hosted in a window far off screen and driven by
 // real clicks and typing — Edit…, a new input in the field, Run edited — sends the edited JSON,
 // and a draft that is not JSON sends nothing. Separate from the snapshot suite because it

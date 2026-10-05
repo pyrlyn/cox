@@ -1,8 +1,16 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox-app` (DT§4.3): the UI-agnostic application core the desktop app
 //! drives through `cox-ffi`: the pure fold over the core's `Event` stream,
 //! the drain task that feeds it (`controller`) and the sessions themselves
 //! (`app`, `live`), kept out of every surface crate so the TUI could share
 //! it later and no UI toolkit leaks in (`crates/cox/tests/deps.rs`).
+
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
 
 pub mod app;
 pub mod best_of;
@@ -37,6 +45,7 @@ pub mod tasks;
 pub mod terminal;
 pub mod timeline;
 pub mod usage;
+pub mod welcome;
 pub mod wire;
 pub mod workspace;
 
@@ -48,7 +57,7 @@ pub use browser::{Browser, BrowserError, PageText};
 pub use changes::{ChangedFile, Changes, Checkpoint, FileChange, TurnFiles};
 pub use complete::{Completer, Completion};
 pub use controller::Controller;
-pub use costs::{CostRow, DaySummary, TurnCosts};
+pub use costs::{BudgetRow, CostRow, DaySummary, TurnCosts};
 pub use external::AgentChoice;
 pub use inbox::{Activity, Inbox, InboxItem, InboxStatus, Need};
 pub use info::{ConfigSource, Fact, Info};
@@ -69,6 +78,7 @@ pub use tasks::{TaskKind, TaskTarget};
 pub use terminal::{TerminalError, TerminalHandle};
 pub use timeline::Timeline;
 pub use usage::{Meter, Tally, TurnUsage, UsageView};
+pub use welcome::{Suggestion, Welcome};
 pub use workspace::{Project, SearchHit, SessionEntry, Workspace, WorkspaceError};
 
 // What the exported types carry, named here so `cox-ffi` depends on no

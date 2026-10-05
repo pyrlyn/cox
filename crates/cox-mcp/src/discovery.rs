@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Where MCP servers are declared (plan.md T7.6 step 1): `[mcp.servers]`
 //! in config, the project's `.mcp.json`, and Claude Code's `~/.claude.json`
 //! (read-only, D4), plus granted plugins' `[[mcp]]` entries (PL§7c).

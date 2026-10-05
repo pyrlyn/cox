@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Fuzz target for permission rules (T12.4): compiling arbitrary rule
 //! strings and deciding synthetic calls must never panic. A malformed rule
 //! is a config error; an undecidable call asks or denies — both are values,

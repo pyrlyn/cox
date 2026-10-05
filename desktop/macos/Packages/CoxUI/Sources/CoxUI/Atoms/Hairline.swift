@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Hairline` (DS§6.2 row `InlineCode, Hairline`, the mockup's separators: `.divider:before`,
 // `.popover .sep`): a free-standing 0.5 pt rule between rows, menu sections or toolbar groups.
 // Separate from the `.hairline(_:)` modifier (Foundations/HairlineModifier.swift), which draws

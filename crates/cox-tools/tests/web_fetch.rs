@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T3.8 step 3: `web_fetch` against a local HTTP server — readable
 //! extraction, the byte cap, and the URL scheme guard — without touching
 //! the network.

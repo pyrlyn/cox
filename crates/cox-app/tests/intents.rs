@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Every intent (T37.10, DT§4.3) against a scratch `COX_HOME`: a real
 //! cox-core session over the Scripted provider writes to a real `cox.db`
 //! in a tempdir, the intents drive it through `dispatch`, and the

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Review's check (T37.28.2, DT§5.4, DS§6.4): the files by turn with the open file's diff per
 // light/dark × Solid/Frosted cell, the same file with nothing left after a code-only rewind, a
 // draft of line comments per cell (T37.28.4), and empty.

@@ -1,4 +1,8 @@
 #!/bin/sh
+# Copyright (c) 2026 Ivan Tugay
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 # install.sh — installs cox from GitHub releases (T12.2).
 # Usage: ./install.sh [vX.Y.Z]   (default: latest release)
 # Do not pipe this blindly: it downloads the release archive, verifies its
@@ -13,7 +17,6 @@ os="$(uname -s)"
 arch="$(uname -m)"
 case "${os}-${arch}" in
   Darwin-arm64) TARGET="aarch64-apple-darwin" ;;
-  Darwin-x86_64) TARGET="x86_64-apple-darwin" ;;
   Linux-x86_64) TARGET="x86_64-unknown-linux-gnu" ;;
   Linux-aarch64) TARGET="aarch64-unknown-linux-gnu" ;;
   *) echo "error: no cox release for ${os}/${arch}" >&2; exit 1 ;;

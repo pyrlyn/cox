@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Enforces the crate dependency-direction rules from plan.md §1.1 by
 //! parsing `cargo metadata` rather than hand-maintaining a second copy of
 //! the graph that could drift out of sync with the workspace `Cargo.toml`s.

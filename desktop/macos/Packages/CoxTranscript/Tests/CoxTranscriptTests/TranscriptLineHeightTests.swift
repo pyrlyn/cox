@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `[desktop.transcript]`'s `text_size` and `line_height` reach the transcript (T37.23.13's
 // Check): the rows the settings view holds, read through `SettingsStore.transcript`, set the
 // prose size and the space between its lines, restyled in place over the text already shown,

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox sessions` (T10.3): list past sessions, grep them through
 //! `rollout_fts`, and print one session's record (A13). Pure row shaping
 //! (`list_rows`, `age_of`, `detail_of`) stays testable without printing;

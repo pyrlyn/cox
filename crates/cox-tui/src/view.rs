@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `view`: `State` → screen. Pure over the state and a `Buffer`, so the
 //! live viewport and the test harness (`render`) draw through the same
 //! function and a snapshot is the real screen. Cells print through

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Approval modal (T5.4): what `ApprovalRequired` shows and the keys that
 //! decide it — `y` allow, `s` allow for the session, `n` deny, `e` edit a
 //! bash command inline and resubmit it as `Decision::Edit`. Separate from

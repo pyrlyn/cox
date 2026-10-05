@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The card a card block shows (T37.23, DT§5.2): a tool call, a tool group or a subagent task
 // as a CoxUI `ToolCard`, an approval or a question in the caller's slot (the `ApprovalCard`,
 // T37.27). Separate so the one place that reads a block's fields to fill a card is its own

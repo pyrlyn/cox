@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The inspector's Changes tab (T37.29.1, DT§5.1): cox-app's `Changes` as the rows CoxUI's
 // `ChangesTab.State` holds — the changed files, the checkpoints with their id and time, and the
 // worktree's facts as the core built them (T58.4.22), with the checkpoint time and the worktree's

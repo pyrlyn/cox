@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Landlock + seccomp for Linux hosts without bubblewrap (plan.md T4.2
 //! step 2). Separate from `bwrap` because this backend cannot wrap an argv:
 //! the restriction is applied inside the child between fork and exec, so
@@ -24,6 +28,8 @@ use seccompiler::{
 const WANTED: ABI = ABI::V3;
 
 /// Whether this kernel has Landlock at all.
+// why: raw landlock_create_ruleset syscall to probe the ABI version (FFI).
+#[allow(unsafe_code)]
 pub fn supported() -> bool {
     // SAFETY: the version probe passes no attribute (null, size 0) and
     // touches no memory; the kernel only reports its ABI number.

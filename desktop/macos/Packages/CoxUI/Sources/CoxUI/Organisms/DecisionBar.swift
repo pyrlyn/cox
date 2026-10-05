@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `DecisionBar` (DS§6.4 row `DecisionBar`, the mockup's `.pinned`, DT§5.2 Approval; T37.27.5):
 // the approval or question a turn waits on, pinned above the composer while its card stays in
 // the transcript, with ⌘⏎ Allow and ⌘⌫ Deny. Separate from `ApprovalCard` because the bar is one

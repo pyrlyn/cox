@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Inspector` (DS§6.4 row `Inspector`, the mockup's `.insp`; DT§5.1): the pane at the trailing
 // edge of the window — its title, the tab strip and the selected tab's content. Separate so the
 // window shell owns the pane and its tabs while each tab's content is its own view (T37.29).

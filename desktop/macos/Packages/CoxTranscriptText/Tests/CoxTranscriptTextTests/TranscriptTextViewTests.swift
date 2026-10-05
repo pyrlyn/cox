@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // TranscriptTextView against the recorded fixtures (T37.40's Check): every
 // block id maps to its range and every location back to its block.
 

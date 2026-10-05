@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Permission engine table (T2.2): one row per plan.md §1.8 claim, plus the
 //! property that adding a deny rule never weakens a decision.
 

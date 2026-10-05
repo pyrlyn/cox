@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Tasks tab's check (T37.29.4, DT§5.1, DS§6.4): the inspector on its Tasks tab per
 // light/dark × Solid/Frosted cell (a subagent and a shell row, T37.29.8), and empty; the open
 // intent a row click sends and its label per kind; its header; and a shell's output sheet

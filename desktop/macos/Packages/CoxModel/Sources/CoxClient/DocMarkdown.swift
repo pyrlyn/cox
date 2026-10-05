@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A reply's `StyledDoc` back as Markdown (T37.42, T58.4.27): a `docTail` carries doc blocks, not
 // source, so Copy as Markdown needs a writer for a reply without its source. The core owns that
 // writer (`cox_render::doc`, T58.4.26): a heading's level, a list item's marker and a quote's

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SessionFilter` (DS§6.3 row `SessionFilter`, the mockup's `.filter`): the search field over
 // the sidebar's sessions (and Settings' search), with the shortcut that focuses it. Separate so
 // every filter field is the same sunken well with the same hint.

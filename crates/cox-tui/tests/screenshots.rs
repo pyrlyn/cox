@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Whole-screen snapshots (A16): finished cells above the inline viewport,
 //! laid out the way `app::run` does with `insert_before`, so one snapshot
 //! is the terminal as a user sees it. Each test also writes the frame as

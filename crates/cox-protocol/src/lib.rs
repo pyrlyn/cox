@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `Submission`, `Event`, `Item`, config and tool-schema types: every type
 //! that crosses a crate boundary. Kept separate so every other crate can
 //! depend on the contract without depending on any implementation.
@@ -17,8 +21,6 @@
 //! - [`image`] — `sniff`, the size cap and base64 encoding for images: the one check an image passes before it becomes an `Attachment` or a tool-output payload (T40.1).
 //! - [`config`] — the `Config` struct tree mirroring `config/default.toml` (plan.md §1.6).
 //! - [`plugin`] — `cox-plugin-api` re-exported (A52): the `plugin.toml` manifest and, later, the ABI payloads. It lives in its own crate because the guest SDK builds it for wasm32.
-
-#![warn(missing_docs)]
 
 pub mod agent;
 pub mod commands;

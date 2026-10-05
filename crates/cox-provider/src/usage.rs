@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Usage and cost tracking (plan.md §1.7/D5/D6g). `Price`/`PriceError`/
 //! `PriceTable` moved into the pure `cox-models` crate by T30.24 (the model
 //! catalog owns them now, alongside context window, efforts and

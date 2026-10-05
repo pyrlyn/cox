@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Login-shell environment resolution (T37.11, DT§4.8). An app launched
 //! from Finder or the Dock inherits `launchd`'s minimal environment, so
 //! `bash` would not find `cargo` or `mise` and env-var API keys would be

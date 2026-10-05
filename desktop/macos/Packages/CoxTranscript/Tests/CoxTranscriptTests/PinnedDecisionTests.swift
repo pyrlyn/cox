@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // T37.27.5's Check: with the recorded `approve-write` fixture waiting on its write, the
 // `SessionComposer` pins the `DecisionBar` above the composer, in light and dark; ⌘⏎ through the
 // application sends `.approve` for that call and ⌘⌫ denies it, and the bar goes once the core

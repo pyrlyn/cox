@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Fetching what `cox` installs from outside the machine (T53.2, PL§1): the
 //! HTTP client, download and SHA-256 helpers `cox self update`, `cox plugin
 //! install <https-url>` and `cox voice model download` share, the `tar`

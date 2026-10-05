@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The agent's browser (T51.7, DT§3.3): `browser_open`, `browser_read` and
 //! `browser_screenshot`, three deferred tools over a [`Browser`] the host
 //! supplies (the macOS app's `WebPage`). Here rather than in `cox-tools`

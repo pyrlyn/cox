@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Permissions page's values (T37.45.3, A120): the allow/ask/deny rules in effect and the
 // grants of the sessions open here, field for field as cox-ffi exports `cox_app::permissions`.
 // Separate from `Settings.swift` because a rule is one entry of a list setting, and a grant is

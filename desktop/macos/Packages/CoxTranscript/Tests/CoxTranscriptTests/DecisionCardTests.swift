@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The waiting cards in the transcript (T37.27, DT§5.2): an approval or question block fills
 // its CoxUI card with the words DT§5.2 gives, a decided one shrinks to its line, a choice
 // becomes the intent the core expects, and the transcript draws the real cards in its slot.

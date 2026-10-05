@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The prompt's bubble and its hover actions (T37.23.9's Check): the bubble on `UserBubble`'s
 // readable face with the glass sweep and e2, a gap above its tile row, at rest and hovered, in
 // light and dark, Frosted; the hover shows the actions over the prompt only; Copy puts the

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A new text size (T37.23.6's Check): the app hands the view a new `textScale` and the whole
 // transcript restyles in place — the fonts grow, a drag's selection and the block ranges stay,
 // a card keeps its view, a reader at the bottom stays there — shown at two sizes, through the

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The sidebar's "Needs you" rows (T37.27.7, DS§6.4 `Sidebar`): one row per inbox item, two of
 // one session among them, per light/dark × Solid/Frosted cell; an item's row opens and
 // highlights its session.

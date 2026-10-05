@@ -1,9 +1,16 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The exported surface end to end (T37.14): a real session in a scratch
 //! `COX_HOME`, driven through `App` and `SessionHandle` as Swift drives
 //! them, with the in-memory host from the fixture recorder. The session
 //! logic itself is `cox-app`'s and tested there (T37.39); these prove the
 //! forwarding, the runtime, the host bridge and the error mapping. nextest
 //! runs each test in its own process, so each sets its own environment.
+
+// why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+#![allow(unsafe_code)]
 
 #[path = "../examples/record.rs"]
 #[allow(dead_code)]

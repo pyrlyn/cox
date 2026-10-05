@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // T52.21's CoxUI check (DS§6.4, DT§4.4): the Connect to Host sheet, empty and after a failed
 // connect, and a remote host's sidebar group, connected and disconnected, each in
 // light/dark × Solid/Frosted.

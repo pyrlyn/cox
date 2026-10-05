@@ -23,13 +23,33 @@ env:
 # version: the `rust` job through the shared pyrlyn/infra workflow, the others
 # through .github/actions/rust. Both fail when rustc is not that pin.
 jobs:
-  # The shared pyrlyn/infra workflow, pinned by commit (descendant of the
-  # ci-rust pin in #57; this commit also ships release-plz.yml and pipeline.yml):
+  # infra's config action on .github/infra.yml: `docs-only` is "true" when every changed file
+  # is documentation (fails open: "false" when unsure, e.g. a .github/ change). The jobs below
+  # then do no work but still report under their names, so the required checks pass, and
+  # `docs` runs the tests that read docs/. A failed `config` runs everything.
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs-only: ${{ steps.config.outputs.docs-only }}
+    steps:
+      - id: config
+        uses: pyrlyn/infra/.github/actions/config@f231304c2539f5cd84aadf48c449540b33c6020d # main
+
+  # The shared pyrlyn/infra workflow, pinned by commit (descendant of e6e376e, which
+  # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27):
   # fmt once, then per target clippy (--all-targets --all-features), check, and
-  # nextest where the runner executes the target (Linux x86_64 and aarch64,
-  # macOS aarch64) or a build where it does not (macOS x86_64).
+  # nextest on every target (Linux x86_64 and aarch64, macOS aarch64; macOS is
+  # Apple Silicon only).
   rust:
-    uses: pyrlyn/infra/.github/workflows/ci-rust.yml@189816ac5a375e18e0235044970efcbc40e3cabd
+    needs: config
+    if: ${{ !cancelled() }}
+    uses: pyrlyn/infra/.github/workflows/ci-rust.yml@f231304c2539f5cd84aadf48c449540b33c6020d # main
+    # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
+    # `actions: write` on the calling job.
+    permissions:
+      contents: read
+      actions: write
     with:
       # The shared matrix minus Windows: the workspace does not build there
       # yet (P57); the `windows` job below checks the crates that do.
@@ -37,11 +57,10 @@ jobs:
         [
         {"os": "ubuntu-latest", "target": "x86_64-unknown-linux-gnu"},
         {"os": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-gnu"},
-        {"os": "macos-latest", "target": "aarch64-apple-darwin"},
-        {"os": "macos-latest", "target": "x86_64-apple-darwin"}
+        {"os": "xcode-27", "target": "aarch64-apple-darwin"}
         ]
-      # The manifest is virtual with `default-members`; cover every member.
-      clippy-args: --workspace
+      # The manifest is virtual with `default-members`; ci-rust's default `package-args`
+      # (--workspace) already covers every member, so no `clippy-args` here.
       tools: nextest
       # Linux job A (plan.md T4.2): the sandbox must pick bubblewrap; job B
       # (sandbox-landlock) covers the Landlock fallback. cox-voice's build
@@ -54,10 +73,14 @@ jobs:
       # CI runs only on pull requests, so the default-branch-only cache would
       # never be written.
       cache-all-refs: true
+      # Docs-only: every job is a no-op that still reports (`rust / <target>` stay required).
+      skip: ${{ needs.config.outputs.docs-only == 'true' }}
 
   # Linux job B (plan.md T4.2): no bwrap on PATH, so the sandbox must fall
   # back to Landlock + seccomp and still hold the same guarantees.
   sandbox-landlock:
+    needs: config
+    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
     runs-on: ubuntu-24.04
     env:
       COX_EXPECT_SANDBOX: landlock
@@ -106,6 +129,8 @@ jobs:
   # target (a separate workspace, so the root `rust` job above never builds
   # it) plus the wasm32-unknown-unknown build every plugin ships as.
   plugins:
+    needs: config
+    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -127,6 +152,8 @@ jobs:
   # failure rather than a silently skipped test. Dart (T33.38) today;
   # go/kotlin join this job once T33.34/T33.36 land.
   plugin-examples:
+    needs: config
+    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -159,12 +186,16 @@ jobs:
         run: cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_dart)'
 
   deny:
+    needs: config
+    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   audit:
+    needs: config
+    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -187,16 +218,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, ubuntu-24.04]
+        os: [xcode-27, ubuntu-24.04]
+    # A matrix job skipped at job level reports one check under its raw name, so the required
+    # `footprint (<os>)` checks would wait: on a docs-only change every step is a no-op instead.
+    needs: config
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
+    env:
+      RUN: ${{ needs.config.outputs.docs-only != 'true' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - if: env.RUN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
+      - if: env.RUN == 'true'
+        uses: ./.github/actions/rust
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - if: env.RUN == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: footprint regression check
+        if: env.RUN == 'true'
         run: bash scripts/footprint.sh --check
 
   # Which suites this change needs, from the shared pyrlyn/infra classification
@@ -211,7 +252,7 @@ jobs:
   # skipping them. A skipped macOS job reports `skipped` under its own name,
   # which a required check treats as passed.
   changes:
-    uses: pyrlyn/infra/.github/workflows/changes.yml@f49cd4a1e9b5c0e4b70f7253f4a1de16971402ca # main
+    uses: pyrlyn/infra/.github/workflows/changes.yml@f231304c2539f5cd84aadf48c449540b33c6020d # main
     permissions:
       contents: read
     with:
@@ -226,13 +267,17 @@ jobs:
   # packages are linted by the SwiftLintPlugins build-tool plugin during
   # desktop-macos' `swift test`. SwiftLint is the mise.toml pin.
   desktop-macos-lint:
-    needs: changes
+    needs: [config, changes]
     if: >-
-      !cancelled()
+      !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: pyrlyn/infra/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+        with:
+          version: '27'
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
@@ -271,36 +316,23 @@ jobs:
 
   # The macOS app (T37.15, DT§7): CoxFFI.xcframework for Apple Silicon only
   # (A67), then `swift test` for every package under desktop/macos/Packages,
-  # then the app target, unsigned (T37.32.1). macos-26 is the arm64 image
-  # whose Xcode 26 carries the macOS 26 SDK the app targets. Always the full
-  # build: every package and the app, never only the changed ones.
+  # then the app target, unsigned (T37.32.1). xcode-27 is GitHub's arm64 image
+  # with Xcode 27 (macos-26 / macos-latest carry Xcode 26.x); setup-xcode selects
+  # the pinned stable Xcode 27 and fails when the image has none. Always the full
+  # build: every package and the app, never only the changed ones. The toolchain
+  # and XCFramework steps are .github/actions/desktop-macos, shared with the
+  # desktop build workflow (T37.32.3).
   desktop-macos:
-    needs: changes
+    needs: [config, changes]
     if: >-
-      !cancelled()
+      !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success'
       || needs.changes.outputs.swift == 'true' || needs.changes.outputs.rust == 'true')
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-
-      - name: CoxFFI.xcframework
-        run: bash scripts/desktop/xcframework.sh
-
-      - name: arm64 only
-        run: |
-          set -euo pipefail
-          libs=$(find desktop/macos/build/CoxFFI.xcframework -name '*.a')
-          [ -n "$libs" ] || { echo "no library in CoxFFI.xcframework" >&2; exit 1; }
-          for lib in $libs; do
-            archs=$(lipo -archs "$lib")
-            echo "$lib: $archs"
-            [ "$archs" = arm64 ] || { echo "expected arm64 only" >&2; exit 1; }
-          done
+      - uses: ./.github/actions/desktop-macos
 
       # Serial: the UI tests share one NSApplication (key window, appearance, main run loop),
       # and the benchmark times the main thread, so tests running alongside break both. Every
@@ -359,6 +391,8 @@ jobs:
   # Colors.xcassets and tokens.css from desktop/design/tokens/*.json and fail
   # on any change, like the config-schema drift test. Node only, so Linux.
   desktop-tokens:
+    needs: config
+    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -383,10 +417,39 @@ jobs:
             exit 1
           fi
 
+  # Docs-only pull requests: the tests that validate docs/ (`just docs-check`: docs/config.md
+  # covers every key, the docs name every subcommand and their links resolve, docs/ide.md,
+  # generated docs/config.md, the getting-started keymap table). Skipped otherwise: the `rust`
+  # job runs the same tests.
+  docs:
+    needs: config
+    if: ${{ !cancelled() && needs.config.outputs.docs-only == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CARGO: cargo # Rust comes from the rust action; no `mise exec` in the recipe
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: ./.github/actions/rust
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: false
+
+      - uses: taiki-e/install-action@b6a061addd82b81aaeca51bdf2c53cd707996e5a # just
+
+      # cox-voice's build packages, as in the `rust` job.
+      - name: build packages
+        run: bash .github/actions/voice/install.sh
+
+      - name: docs check
+        run: just docs-check
+
   revert-on-failure:
     name: revert-on-failure
     needs:
-      [rust, sandbox-landlock, plugins, plugin-examples, deny, audit, footprint]
+      [rust, sandbox-landlock, plugins, plugin-examples, deny, audit, footprint, docs]
     if: >-
       always()
       && github.event_name == 'push'

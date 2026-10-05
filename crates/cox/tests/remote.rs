@@ -1,8 +1,14 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T52.20: a remote workspace end to end. `RemoteWorkspace` starts a fake
 //! `ssh` that records what it was given and then runs the command after the
 //! host — the built `cox app-server --stdio` — so the session, the wire and
 //! the patch stream are the shipped ones, only the network is missing.
 
+// why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+#![allow(unsafe_code)]
 #![cfg(feature = "app-server")]
 
 use std::os::unix::fs::PermissionsExt as _;

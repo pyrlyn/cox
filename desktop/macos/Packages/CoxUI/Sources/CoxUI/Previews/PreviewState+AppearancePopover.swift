@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the Appearance popover (T37.26): its values as mockup screens
 // 28–29 show them, and the main screen with it open, redrawn from every change it reports as
 // the app does. Separate from the other fixture files so this card adds its own.

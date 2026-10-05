@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The composer editor's own text and selection (T37.24.9, DS§6.4 row `Composer`), and the
 // selection as UTF-16 offsets: the store finds the `@` or `/` token at the caret from plain
 // offsets and puts the caret after a picked row with them. Separate from `Composer.swift` so the

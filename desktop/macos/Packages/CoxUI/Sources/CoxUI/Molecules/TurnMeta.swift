@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `TurnMeta` (DS§6.3 row `NoticeRow, TurnDivider, TurnMeta`, the mockup's `.meta`): the quiet
 // line under a finished turn — model, tokens, cache share, cost, how long it took and why it
 // stopped. Separate so every turn reports its figures in the same order and the same place.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CodeBlockView` (DS§6.3 row `CodeBlockView`, the mockup's `.codeblock`): a fenced code block in
 // a message — its language, a copy button and the highlighted code. Separate so every block of
 // code the model writes reads the same, and the code arrives already highlighted (`CodeRun`).

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Language-server support for the `diagnostics` tool (P41). Lives in
 //! `cox-tools` because talking to a server means a process and its pipes,
 //! which the core never touches (D2); split into modules so the wire, the

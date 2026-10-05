@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Spinner` (DS§6.2 row `Spinner`, the mockup's `.spin`): work in progress with no known end —
 // a running tool, a background task, a subagent. Separate so every busy row turns the same
 // ring at the same speed, and all of them hold still under Reduce Motion (`coxSpin`).

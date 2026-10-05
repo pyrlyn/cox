@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Compaction integration tests (T8.1 §1.10).
 //!
 //! Names use `compact_` so `cargo test -p cox-core compact_` matches them;

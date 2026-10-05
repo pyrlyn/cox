@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! v0.1 DoD §4.5: `cox mcp` serves the real `read`/`grep`/`glob` to an MCP
 //! client. `cox-mcp`'s own server test uses stand-in tools; this one spawns
 //! the built binary and talks newline-delimited JSON-RPC over its stdio,

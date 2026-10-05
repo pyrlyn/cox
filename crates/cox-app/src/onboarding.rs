@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The first-run checklist (DT§5.8, T37.31): whether cox can work here —
 //! the code tier's provider key, `git`, the sandbox and the login shell's
 //! environment — each with the one line that says what is missing. The

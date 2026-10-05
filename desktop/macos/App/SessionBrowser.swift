@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The session window's browser pane (T51.10, mockup 25, DT§3.3): CoxUI's `BrowserPaneChrome`
 // around WebKit's `WebView` of the one page the agent's browser tools drive (CoxPlatform's
 // `BrowserController`), so the person sees what the agent reads. Wiring only: a typed address

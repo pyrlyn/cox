@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `AppearancePopover` (DS§3.5, DS§6.4 row `AppearancePopover`, the mockup's `.appear`; mockup
 // screens 28–29): the window's glass settings — material, transparency, blur or reflection,
 // Depth and wallpaper tint — under the toolbar's paintbrush. Separate so the window shell

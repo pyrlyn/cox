@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Permissions page's rules and session grants (T37.45.3, A120, mockup 19; DS§6.5 row
 // `SettingsScreen`): each allow/ask/deny rule with the layer its list comes from, a row to add
 // one, and the "allow for session" grants of the open sessions with a Revoke button.

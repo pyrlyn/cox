@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Pre-images for `/rewind` (T26.1): what a file held before a tool call
 //! changed it, including changes a shell command made that no tool named.
 //! Lives here rather than in `cox-core` because it reads files and runs

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! bubblewrap argv (plan.md T4.2 step 1): user and pid namespaces, `/`
 //! bound read-only, the writable set bound read-write on top, the read-only
 //! subpaths re-bound read-only over that, a private `/tmp`, and no network

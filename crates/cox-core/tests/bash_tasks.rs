@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `bash` background tasks (T27.1) through the loop with the real
 //! `BashTool`: `background: true` and `Submission::Background` both turn
 //! the call into a registered task whose completion carries the exit code

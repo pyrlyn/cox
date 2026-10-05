@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T3.4 step 6: the two properties `edit`'s match ladder has to hold, driven
 //! through the real `Tool` surface (confine, archive, atomic write) rather
 //! than the private `apply_replace`, so a regression in the write path fails

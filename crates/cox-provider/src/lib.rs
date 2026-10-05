@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The `Provider` trait implementations: the Anthropic Messages API, the
 //! OpenAI Responses/Chat APIs (also Ollama, vLLM, LM Studio, OpenRouter),
 //! the TypeSafe Jev System One API, and the `Replay`/`Scripted` fakes used
@@ -28,8 +32,6 @@
 //! [`anthropic`] is a re-export of `cox-provider-anthropic` (T32.13:
 //! dependencies (a), the typify build step, and size (c)), kept at this path
 //! so `cox_provider::anthropic::*` keeps working.
-
-#![warn(missing_docs)]
 
 pub use cox_provider_anthropic as anthropic;
 pub use cox_provider_http::http;

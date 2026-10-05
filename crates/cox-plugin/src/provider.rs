@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Merges a granted plugin's declarative `[[provider]]` rows
 //! (`docs/design/plugins.md` §7a, `api = "chat" | "responses"`) into
 //! `providers.custom`, so `crates/cox` drives them with its own

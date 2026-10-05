@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Thumbnail`'s check (T37.20.3, DS§6.2): a snapshot of the image and the file variant ×
 // light/dark × Solid/Frosted, on a pane from `PreviewState` as its `#Preview` shows it.
 

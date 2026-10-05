@@ -1,4 +1,8 @@
 #!/bin/zsh
+# Copyright (c) 2026 Ivan Tugay
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 # Renders each mockup screen to a 2x PNG with headless Chrome; Chrome is killed once the file appears.
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 DIR=${0:A:h}

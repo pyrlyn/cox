@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The token meter and its popover as text (T37.25, DS§7–8, mockup 30):
 //! every figure the desktop views show, formatted here so the UI does no
 //! arithmetic on them. Separate from `usage.rs`, which folds events into

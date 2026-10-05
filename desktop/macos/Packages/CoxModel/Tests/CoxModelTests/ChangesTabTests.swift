@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Changes tab's state from cox-app's `Changes` (T37.29.1): the files, the checkpoints and
 // the worktree's facts fill the tab, read through SessionStore from the fixture session. What
 // the facts say (`detached`, `Base` only with both) is `cox_app::changes`'s test (T58.4.20).

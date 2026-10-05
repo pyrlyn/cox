@@ -58,6 +58,11 @@ pub struct PluginManifest {
     /// `docs/design/external-agents.md`).
     #[serde(default)]
     pub external_agents: Vec<ExternalAgentDecl>,
+    /// `[[cloud_agents]]` entries: a background task run as a hosted cloud
+    /// agent (P56, `docs/design/v0.3-cursor-cloud.md`). The host drives it;
+    /// no wasm export backs it.
+    #[serde(default)]
+    pub cloud_agents: Vec<CloudAgentDecl>,
     /// `[[agents]]` subagent definition files the package ships (T45.3);
     /// each is one approval line, and a local definition of the same name
     /// wins over it.
@@ -285,6 +290,58 @@ pub struct ExternalAgentDecl {
     pub key_env: String,
 }
 
+/// A `[[cloud_agents]]` entry (P56): a background task run as a hosted
+/// cloud agent. There is deliberately no URL field: the host for a backend
+/// is fixed in cox, so a plugin cannot point the user's key at another
+/// server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CloudAgentDecl {
+    /// The `agent(preset: "<name>")` dispatch name.
+    pub name: String,
+    /// Which hosted service runs it.
+    pub backend: CloudBackend,
+    /// Env var the host resolves the key from; a name, never a value.
+    #[serde(default = "default_cloud_key_env")]
+    pub key_env: String,
+    /// The backend's model id; the backend's own default when absent.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// One-line description shown at approval.
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+fn default_cloud_key_env() -> String {
+    String::from("CURSOR_API_KEY")
+}
+
+/// The hosted services a `[[cloud_agents]]` entry can name. Closed: each
+/// variant fixes a host (`CloudBackend::host`), so adding one is a reviewed
+/// code change rather than a manifest string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum CloudBackend {
+    /// Cursor Cloud Agents (`api.cursor.com`).
+    Cursor,
+}
+
+impl CloudBackend {
+    /// The name the manifest and the approval line use.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cursor => "cursor",
+        }
+    }
+
+    /// The one host this backend's requests go to.
+    pub fn host(self) -> &'static str {
+        match self {
+            Self::Cursor => "api.cursor.com",
+        }
+    }
+}
+
 /// An `[[agents]]` entry (T45.3): a subagent definition (`.md` with
 /// frontmatter, the same format as `.cox/agents/*.md`) inside the package.
 /// Data, not code: the host reads it only for a granted plugin.
@@ -364,7 +421,8 @@ impl PluginManifest {
             let data_only = self.capabilities == Capabilities::default()
                 && self.provider.is_empty()
                 && self.models.is_empty()
-                && self.external_agents.is_empty();
+                && self.external_agents.is_empty()
+                && self.cloud_agents.is_empty();
             if !data_only {
                 return Err(ManifestError::MissingWasm);
             }
@@ -413,6 +471,14 @@ impl PluginManifest {
             // (EA§1): the id-joined form must still be a valid tool name.
             let prefixed = format!("{}-{}", self.id, agent.name);
             if !is_tool_name(&prefixed) {
+                return Err(ManifestError::ToolName(agent.name.clone()));
+            }
+            if !is_env_var_name(&agent.key_env) {
+                return Err(ManifestError::KeyEnv(agent.key_env.clone()));
+            }
+        }
+        for agent in &self.cloud_agents {
+            if !is_tool_name(&format!("{}-{}", self.id, agent.name)) {
                 return Err(ManifestError::ToolName(agent.name.clone()));
             }
             if !is_env_var_name(&agent.key_env) {
@@ -727,7 +793,7 @@ command = "build/count"
     }
 
     /// Every non-`[[mcp]]` list that also gates the wasm-less exemption:
-    /// `provider`, `models` and `external_agents` each need `wasm` too.
+    /// `provider`, `models`, `external_agents` and `cloud_agents` each need `wasm` too.
     #[test]
     fn manifest_rejects_a_wasm_less_package_with_provider_models_or_agents() {
         let base = r#"
@@ -740,13 +806,62 @@ name = "count"
             "{base}\n[[provider]]\nname = \"p\"\napi = \"chat\"\nbase_url = \"https://x\"\n"
         );
         let models = format!("{base}\n[[models]]\nid = \"m\"\n");
+        let cloud = format!("{base}\n[[cloud_agents]]\nname = \"c\"\nbackend = \"cursor\"\n");
         let agents = format!(
             "{base}\n[[external_agents]]\nname = \"a\"\ncommand = \"agent\"\nmode = \"acp\"\nkey_env = \"A_KEY\"\n"
         );
-        for toml in [provider, models, agents] {
+        for toml in [provider, models, agents, cloud] {
             let m = parse(&toml).expect("structurally valid manifest");
             assert_eq!(m.validate(), Err(ManifestError::MissingWasm));
         }
+    }
+
+    #[test]
+    fn manifest_cloud_agent_defaults_the_key_env_and_round_trips() {
+        let toml = format!(
+            "{EXAMPLE}\n[[cloud_agents]]\nname = \"bg\"\nbackend = \"cursor\"\nmodel = \"composer-2\"\n"
+        );
+        let m = parse(&toml).expect("parses");
+        assert_eq!(m.validate(), Ok(()));
+        assert_eq!(
+            m.cloud_agents,
+            vec![CloudAgentDecl {
+                name: "bg".into(),
+                backend: CloudBackend::Cursor,
+                key_env: "CURSOR_API_KEY".into(),
+                model: Some("composer-2".into()),
+                description: None,
+            }]
+        );
+        assert_eq!(CloudBackend::Cursor.host(), "api.cursor.com");
+    }
+
+    #[test]
+    fn manifest_cloud_agent_backend_is_a_closed_set() {
+        let toml = format!("{EXAMPLE}\n[[cloud_agents]]\nname = \"bg\"\nbackend = \"devin\"\n");
+        assert!(parse(&toml).is_err());
+    }
+
+    #[test]
+    fn manifest_cloud_agent_has_no_url_field() {
+        for field in ["url", "base_url", "host"] {
+            let toml = format!(
+                "{EXAMPLE}\n[[cloud_agents]]\nname = \"bg\"\nbackend = \"cursor\"\n{field} = \"https://evil.example\"\n"
+            );
+            assert!(parse(&toml).is_err(), "{field} must be refused");
+        }
+    }
+
+    #[test]
+    fn manifest_cloud_agent_rejects_a_key_value_in_key_env() {
+        let toml = format!(
+            "{EXAMPLE}\n[[cloud_agents]]\nname = \"bg\"\nbackend = \"cursor\"\nkey_env = \"sk-live-123\"\n"
+        );
+        let m = parse(&toml).expect("a bad key_env is still a string, so this parses");
+        assert_eq!(
+            m.validate(),
+            Err(ManifestError::KeyEnv("sk-live-123".into()))
+        );
     }
 
     /// T45.3: an `[[agents]]` entry, appended to the PL§2 fixture.

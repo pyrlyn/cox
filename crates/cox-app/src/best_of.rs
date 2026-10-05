@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Best of n (T52.9, DT§3.3.1, mockup 27): one prompt sent to n candidates
 //! — cox on a model, or an external ACP agent — each in a worktree of its
 //! own and a session of its own, grouped under one [`BestOfId`] the sidebar

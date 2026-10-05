@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the inspector's Info tab (T37.29.5): a session in a linked worktree
 // with a user and a project config. Separate from `PreviewState+Inspector.swift` so the
 // inspector's tabs, built in parallel, add their fixtures without editing one file.

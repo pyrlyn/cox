@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The session status the composer's chips show (T37.24.7), generated cox-ffi value → `CoxClient`
 // value, with the mode and effort enums it carries. Beside `Convert.swift`, which holds every
 // other conversion, only to keep that file within the length limit.

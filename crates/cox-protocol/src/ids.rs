@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! ULID-backed newtype identifiers. Every id that crosses a crate boundary
 //! (session, turn, item, tool call, archive row, background task) is one of
 //! these instead of a bare `String`, so a mixed-up id is a compile error.

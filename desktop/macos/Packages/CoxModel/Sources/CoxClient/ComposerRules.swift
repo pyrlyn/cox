@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The composer's rules as cox-ffi returns them (T58.4.16, T58.4.17): the token at the caret
 // that asks for rows, a picked row spliced into the draft, the picked `@` files still in it, and
 // what a draft becomes when sent. `cox_app::complete` and `cox_app::intent` decide; the stores

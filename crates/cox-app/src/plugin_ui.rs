@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The desktop app's side of plugin UI (T52.14, PL§8): the closed `Widget`
 //! tree a plugin renders, turned into a [`WidgetView`] whose every string went
 //! through `cox_sanitize` and whose size PL§8 caps, and the per-session slot

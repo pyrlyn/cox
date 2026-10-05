@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SessionToolbar` (DS§6.4 row `SessionToolbar`, the mockup's `.toolbar`; DT§5.1): the open
 // session's bar above the transcript — where it lives, its title renamed by a double-click
 // (A113), its model, mode and cost, Stop while a turn runs, the Appearance and inspector buttons

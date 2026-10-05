@@ -33,7 +33,6 @@ doc = false
 # dist-workspace.toml; a new target needs its row here too.
 [package.metadata.dist.binaries]
 aarch64-apple-darwin = ["cox"]
-x86_64-apple-darwin = ["cox"]
 x86_64-unknown-linux-gnu = ["cox"]
 aarch64-unknown-linux-gnu = ["cox"]
 
@@ -149,3 +148,6 @@ cox-plugin-fixtures = { path = "../cox-plugin-fixtures" }
 [[example]]
 name = "plugin_bench"
 required-features = ["plugins"]
+
+[lints]
+workspace = true

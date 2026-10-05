@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Cassette bookkeeping for the `Replay` provider (T32.11): the sha256
 //! hash key derived from a `Request` with volatile fields masked, secret
 //! redaction so a cassette can be committed, and the file-write/near-miss

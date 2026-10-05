@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The seam between the stores and the Rust core (DT§4.1, §4.6): the
 // `CoreClient` protocol CoxModel depends on instead of the FFI, and the
 // fixture client that replays a recorded patch stream (DT§8) so every view,

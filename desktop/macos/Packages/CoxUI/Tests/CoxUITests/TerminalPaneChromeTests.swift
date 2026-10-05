@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `TerminalPaneChrome`'s check (T51.6, DS§6.4): a snapshot of mockup 24's one tab and of two
 // tabs × light/dark × Solid/Frosted, each on a pane as its `#Preview` shows it, and the toggle's
 // key.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Thumbnail` (DS§6.2 row `Thumbnail(attachment)`, the mockup's `.thumb`): one attachment of a
 // user turn, as a small tile. Separate so the composer and the user bubble show an attachment
 // the same way. Takes the attachment's name and, for an image, its picture as plain values:

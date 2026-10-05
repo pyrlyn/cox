@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T4.2: `bash` under bubblewrap or Landlock — the same guarantees as the
 //! macOS file, through the real tool. CI runs this twice, with and without
 //! `bwrap` on PATH, and `COX_EXPECT_SANDBOX` pins which backend each job

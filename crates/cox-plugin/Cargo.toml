@@ -23,6 +23,9 @@ extism = { workspace = true }
 # config (figment's `Toml` provider, already workspace-pinned); this is the
 # one module that owns plugin-manifest loading (PL§2, AGENTS "Config files").
 figment = { workspace = true }
+# T33.14.1: `cox_http` sends the guest's request host-side (PL§4); the
+# workspace's one HTTP client, rustls only, so no new TLS stack.
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # T33.4: the PL§1 package digest (SHA-256 over the tree); already a
@@ -51,3 +54,9 @@ tokio = { workspace = true }
 # T33.12: a test builds the `ToolCx` a `WasmTool` runs under, whose
 # `cancel` is tokio-util's token; already a workspace dependency.
 tokio-util = { workspace = true }
+# T33.14.1: `cox_http` tests run against a local mock server, never the
+# network; already the workspace's HTTP mock.
+wiremock = { workspace = true }
+
+[lints]
+workspace = true

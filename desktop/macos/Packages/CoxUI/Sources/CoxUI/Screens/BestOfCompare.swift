@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `BestOfCompare` (DT§3.3.1, T52.12): one best-of-n group side by side — a column per candidate
 // with its state, the files its worktree changed, its cost and how long it ran, "Open in Review"
 // and "Keep this one". Keeping one first lists the worktrees it prunes; a worktree with changes

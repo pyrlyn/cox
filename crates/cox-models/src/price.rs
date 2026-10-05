@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The price table (plan.md §1.7/D5/D6g; moved here from
 //! `cox-provider/src/usage.rs` by T30.24 so the model catalog and its
 //! prices live in one pure crate). Loads a dated per-model rate table and

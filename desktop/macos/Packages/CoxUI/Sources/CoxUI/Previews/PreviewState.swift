@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` (DS§5, DS§9): the fixtures and the frame every `#Preview` and snapshot test
 // share, so a preview and its snapshot show the same values on the same backdrop and pane.
 // The last layer: it may use every component, and nothing but a preview or a test uses it.

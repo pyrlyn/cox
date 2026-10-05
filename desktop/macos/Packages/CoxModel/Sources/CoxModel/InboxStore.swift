@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The sidebar's "Needs you" section (T37.27.7, DT§4.3 Inbox, DS§6.4 `Sidebar`): the app inbox as
 // one row per item, an expired one read-only, in the core's words (T58.4.1). Here, not in CoxUI,
 // because the store owns what the section shows (DS§1); the app copies each row into CoxUI's

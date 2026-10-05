@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! MCP for a session (T7.6, T22.5, T33.42): which servers are in effect
 //! for a directory, the auth a surface brings, and connecting them — every
 //! stdio server under the sandbox wrap first. Separate from `open` because

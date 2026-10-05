@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for `ApprovalCard` and `QuestionCard` (T37.27): the mockup's push that
 // waits on the person, a subagent's risky call, a split line with its grant and Edit… (T37.27.6),
 // the two decided lines, and the mockup's retry

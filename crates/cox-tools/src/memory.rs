@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `memory_save` / `memory_search` (T10.1): durable project facts. Saving
 //! writes `<name>.md` plus the `MEMORY.md` index line and upserts the
 //! store's FTS rows (for T10.2's dedup reader); searching reads the FTS

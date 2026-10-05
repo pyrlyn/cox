@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `TranscriptView` (DS§6.4 row `TranscriptView`, DT§5.2): a session's timeline as one
 // selectable document — `CoxTranscriptText`'s TextKit 2 view with the blocks as text and the
 // card blocks as CoxUI cards — kept in step with the session by the same patches its
@@ -213,7 +217,11 @@ extension TranscriptStyle {
       lineHeights: .init(
         body: lineHeight, code: FontToken.monoCode.lineHeight,
         heading: FontToken.transcriptH3.lineHeight, thought: FontToken.caption.lineHeight),
-      readingWidth: Size.readingWidth)
+      readingWidth: Size.readingWidth,
+      // CoxUI's `TurnGutter` (Figma frames 01, 14): the turn number left of a prompt (T37.47).
+      gutter: .init(
+        font: FontToken.detail.nsFont(scale: textScale), color: secondary,
+        width: Size.turnGutter, offset: Size.turnGutterOffset))
   }
 }
 

@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "id": "bc-1",
+    "name": "fix flaky test",
+    "status": "ACTIVE",
+    "env": { "type": "cloud" },
+    "repos": [{ "url": "https://github.com/pyrlyn/cox", "startingRef": "main" }],
+    "workOnCurrentBranch": false,
+    "autoCreatePR": false,
+    "url": "https://cursor.com/agents/bc-1",
+    "createdAt": "2026-10-03T10:00:00Z",
+    "updatedAt": "2026-10-03T10:00:00Z",
+    "latestRunId": "run-1"
+  },
+  "run": {
+    "id": "run-1",
+    "agentId": "bc-1",
+    "status": "CREATING",
+    "createdAt": "2026-10-03T10:00:00Z",
+    "updatedAt": "2026-10-03T10:00:00Z"
+  }
+}

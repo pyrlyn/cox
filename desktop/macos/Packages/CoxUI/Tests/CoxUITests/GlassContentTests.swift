@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // What sits on glass keeps its token colour (T37.22.10): a `text.primary` swatch in a pane's top
 // leading corner, where the specular sweep is brightest, reads the same on Frosted and Glossy
 // as on Solid, which draws no sweep. Separate from the snapshots because a snapshot passes with

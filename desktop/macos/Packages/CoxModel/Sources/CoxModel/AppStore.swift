@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The app's registry of open sessions (DT§4.5, DT§4.6, T51.11): every window that shows one
 // session — the main window, a popped-out window or a native tab — shares its one
 // `SessionStore`, its `ComposerStore` and its one patch pull. The registry keeps them while any

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Candidate A measurements: Textual 0.5.0 on the same fixture. `@testable` reaches
 // Textual's internal selection model so the test reads what a drag selected and what
 // its Copy command would write, without touching the user's general pasteboard.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Actionable notifications (DT§5.6, T37.27, T37.44.15): an approval posts with Allow once, Deny
 // and Open, a question with a typed answer, and an action on either comes back as the session and
 // the `Intent` to send it, or as the session to bring forward. Separate from `MacHost` so the

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Headings and quotes at CoxUI's tokens, in light and dark, Solid, through the SwiftUI view the
 // app hosts: every heading level at its token's size (T37.23.15, A94) and a quote nested three
 // deep with a bar per depth in `quote.bar` (T37.23.17, A97). Apart from

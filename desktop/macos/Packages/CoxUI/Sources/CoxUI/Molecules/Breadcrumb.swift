@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Breadcrumb` (DS§6.3 row `Breadcrumb`, the mockup's `.crumb`): where the open session lives —
 // its title, then its project and branch — at the leading end of the toolbar. Separate so the
 // toolbar and any detached session window name a session the same way.

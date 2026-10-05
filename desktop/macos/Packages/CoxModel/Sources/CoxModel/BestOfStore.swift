@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // One best-of-n group's compare view (DT§3.3.1, T52.11): its columns, read again whenever the
 // app says a session started, stopped or began to wait, and the pick with its second
 // confirmation for worktrees that hold changes. Here, not in the view, so the rule that changes

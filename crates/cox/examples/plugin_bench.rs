@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Plugin timings for PL§11 (T33.28), measured on the Rust reference plugin
 //! that `cox-plugin-fixtures` builds, through the same host paths a session
 //! uses: `LivePlugins::load` + `start` (compile, instantiate, `cox_init`),

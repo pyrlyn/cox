@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T12.3: `docs/config.md` documents every key in `config/default.toml`.
 //! T52.22: every `cox` subcommand is named in the docs, and the docs' relative
 //! links and the repository paths `docs/app-server.md` cites resolve.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Review's diff of one changed file (DT§5.4, T37.28.2, A101): the net
 //! difference between the copy the session's first checkpoint of it holds
 //! and the file on disk now, not the model's calls one by one, so after a

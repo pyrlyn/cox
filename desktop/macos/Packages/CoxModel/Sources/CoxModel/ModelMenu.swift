@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The toolbar's model popover (DT§5.1 "model chip", T37.22.6): the core's sections (T58.4.7), each
 // row by the core's short name (A111, A129), the one the session runs on marked.
 // A pick is `/model <tier> <id>`, the TUI's switch. Here, not in CoxUI, because the store owns

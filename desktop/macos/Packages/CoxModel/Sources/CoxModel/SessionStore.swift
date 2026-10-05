@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // One open session as observable state (DT§4.6): the timeline keyed by
 // block id in insertion order (`OrderedDictionary`, research.md 9.5.6), the
 // token meter, the composer draft, the terminal tabs and the plugin slots. It

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Plugin renderers for finished cells (T33.26, PL§8): a `tool:<name>` or
 //! `item:assistant_message` target is asked once, when its cell completes,
 //! and the answer is cached in the cell. Its own module so `state` only

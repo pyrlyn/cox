@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Following the tail (T37.23.7's Check): a reply streamed as `docTail` patches through the
 // store keeps a real scroll view at the bottom while the reader is there, leaves it put once
 // they scroll up, and follows again when they return to the bottom.

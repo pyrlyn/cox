@@ -17,3 +17,6 @@ tempfile = { workspace = true }
 landlock = { workspace = true }
 seccompiler = { workspace = true }
 nix = { workspace = true }
+
+[lints]
+workspace = true

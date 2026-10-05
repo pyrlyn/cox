@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // ⌘K's command palette in a session window (DT§5.5, mockup 12, T37.44.13): the window's actions
 // and the listed sessions go to the session, which ranks them with its `/` commands and `@` files
 // through `cox_app::palette::rank`; a picked row runs its action, shows its session or lands in

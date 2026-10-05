@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Ivan Tugay
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 # Builds desktop/macos/build/CoxFFI.xcframework (T37.15, DT§7): cox-ffi as a
 # static library for aarch64-apple-darwin only (A67: no Intel slice, no
 # universal binary) plus the UniFFI Swift bindings the CoxCore package wraps.

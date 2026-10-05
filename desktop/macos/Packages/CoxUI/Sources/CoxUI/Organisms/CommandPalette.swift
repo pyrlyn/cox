@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CommandPalette` (DS§6.4 row `CommandPalette`, mockup 12; DT§5.5, T37.44.13): ⌘K's one list
 // over the window's actions, the sessions, slash commands and the project's files, under a query
 // field. Separate so the window only places it over its scrim: which rows show, their order and

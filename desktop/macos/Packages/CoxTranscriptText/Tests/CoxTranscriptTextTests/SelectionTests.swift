@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Copy as Markdown and the one-block clamp (T37.42's Check): real `NSEvent`
 // drags through an offscreen window, as spike T37.37 drove them, and copy
 // into a private named pasteboard — never the general one.

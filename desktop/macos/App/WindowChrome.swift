@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The session and Settings windows' chrome (DS§3.5, DS§4): no title bar, a see-through window,
 // and the behind-window blur under the screen's window pane that draws `[desktop.appearance]`'s
 // blur and wallpaper tint. AppKit, so it lives in the app: CoxUI draws the panes, and only the window

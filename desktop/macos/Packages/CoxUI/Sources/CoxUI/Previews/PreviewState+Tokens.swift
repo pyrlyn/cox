@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the token meter and popover (T37.25): mockup screen 30's figures,
 // as `cox_app::MeterText` formats them, streaming and after the turn. Separate from
 // `PreviewState+Meter.swift`, which holds the atoms' raw series, so this card adds its values

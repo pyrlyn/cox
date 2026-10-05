@@ -4,6 +4,10 @@
 //! build its `build.rs` runs; no `.wasm` is committed, so nothing drifts
 //! from `plugins/examples/rust` (A48).
 
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
+
 /// The Rust reference example as an installable package directory: its
 /// `plugin.toml` and `example.wasm`, nothing else, so `cox plugin install`
 /// digests exactly what a user's build would ship.

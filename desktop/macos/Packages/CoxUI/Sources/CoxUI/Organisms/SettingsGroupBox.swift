@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SettingsGroupBox` (DS§6.4 row `SettingsGroupBox`, the mockup's Settings `.gtitle` over a
 // `.group`): the settings of one config table as a card — a header naming the table, then the
 // rows with a hairline between each two. Separate so every Settings page draws its boxes the

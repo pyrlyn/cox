@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CountBadge` (DS§6.2 row `CountBadge`, the mockup's `.sect .cnt`): how many things wait for
 // you, beside a section header. Separate from `Badge` because it is a solid, lifted pill that
 // asks to be looked at, not a quiet tag.

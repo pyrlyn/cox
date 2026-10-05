@@ -129,6 +129,25 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    /// `00000000000007_cloud_runs` (T56.5, P56): one row per hosted
+    /// cloud-agent run, keyed by backend and the backend's run id.
+    cloud_runs (backend, run_id) {
+        backend -> Text,
+        run_id -> Text,
+        session_id -> Text,
+        task_id -> Text,
+        agent_id -> Text,
+        repository -> Text,
+        model -> Nullable<Text>,
+        status -> Text,
+        terminal -> Bool,
+        usage_recorded -> Bool,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
 // `usage` joins `sessions` on `session_id` (no foreign key in the DDL, so no
 // `joinable!`): the project spend in `queries.rs` groups by the session's cwd.
 diesel::allow_tables_to_appear_in_same_query!(sessions, usage);

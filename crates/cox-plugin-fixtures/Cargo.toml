@@ -10,3 +10,6 @@ publish = false
 # No dependencies: `build.rs` runs the guest workspace's own cargo for
 # `wasm32-unknown-unknown` (plugins/, PL§9), so no guest crate ever builds
 # for the host here.
+
+[lints]
+workspace = true

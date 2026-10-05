@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `DiffLineView` (DS§6.3 row `DiffLineView`, the mockup's `.diff .ln`): one line of a diff — its
 // line number in a gutter, its sign and its highlighted code on the added, removed or context
 // background. Separate so a tool card, the review pane and the changes tab draw a line the same

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Re-read dedup (D6b, plan.md §1.3 step vi): an identical read-only call
 //! within `context.dedup_window_turns` rounds, with no write to its subject
 //! since, shows a pointer to the earlier archive row instead of the payload.

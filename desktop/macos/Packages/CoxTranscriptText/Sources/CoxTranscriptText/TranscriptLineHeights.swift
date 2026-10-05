@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The transcript's line heights (A93, DS§3.2): each face's `lineHeight` token as the space
 // under its lines, set by the paragraph styles every block's text carries
 // (`TranscriptText.respace`, `Paragraphs`, `Decor`). Its own file so those three build their

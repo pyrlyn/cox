@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The inspector's Changes tab (DT§5.1, T37.29.1): the files this session
 //! changed with their kind, `+n −m` and the call that changed them last; the
 //! turns code can be rewound to; the linked worktree it runs in. Built on

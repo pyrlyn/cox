@@ -1,0 +1,23 @@
+# The shared example every guest language implements (PL§13), in Kotlin
+# over cox's own PDK (plugins/sdk-kotlin): a status segment with the turn
+# count, a hook that counts failed tool calls, the `/example-kotlin:reset`
+# command and a `turn_started` subscription. `gradle pluginPackage` stages
+# this file beside the module in build/plugin.
+api = 1
+id = "example-kotlin"
+version = "0.1.0"
+name = "Turn counter (Kotlin)"
+description = "Turns and failed tool calls in the status line; /example-kotlin:reset clears both"
+wasm = "example_kotlin.wasm"
+
+[capabilities]
+events = ["turn_started"]
+# A failed call fires `PostToolUseFailure`, a successful one `PostToolUse`;
+# both are listed so the counter reads `tool_response.is_error` whichever
+# the host sends.
+hooks = ["PostToolUse", "PostToolUseFailure"]
+kv = true
+
+[capabilities.ui]
+status = true
+commands = true

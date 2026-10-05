@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Rebuild history from a store rollout for `cox run --resume` (T2.4).
 //! `--continue` (latest session for this cwd) waits on a store listing API.
 

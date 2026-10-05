@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `Queryable`/`Insertable` row types for `schema.rs`'s non-virtual tables
 //! (plan.md §1.7/D9). Every field is a plain SQL-shaped type (`String`,
 //! `i64`, ...); the `Store` impl in `lib.rs` converts to/from the
@@ -5,7 +9,9 @@
 
 use diesel::prelude::*;
 
-use crate::schema::{archive, checkpoints, memory, plugin_grants, plugin_kv, sessions, usage};
+use crate::schema::{
+    archive, checkpoints, cloud_runs, memory, plugin_grants, plugin_kv, sessions, usage,
+};
 
 #[derive(Insertable)]
 #[diesel(table_name = sessions)]
@@ -135,5 +141,24 @@ pub(crate) struct PluginKvDbRow {
     pub plugin_id: String,
     pub key: String,
     pub value: Vec<u8>,
+    pub updated_at: String,
+}
+
+/// Both directions of the `cloud_runs` table (T56.5, P56).
+#[derive(Insertable, Queryable, Selectable)]
+#[diesel(table_name = cloud_runs)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub(crate) struct CloudRunDbRow {
+    pub backend: String,
+    pub run_id: String,
+    pub session_id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub repository: String,
+    pub model: Option<String>,
+    pub status: String,
+    pub terminal: bool,
+    pub usage_recorded: bool,
+    pub created_at: String,
     pub updated_at: String,
 }

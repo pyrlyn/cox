@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A reply's structure (T37.23.8's and T37.23.12's Check): one reply with every doc
 // block kind as `cox-render` sends it — headings, prose, a bulleted and a numbered
 // list with a nested item, a nested quote, a rule, a table and code — in light and

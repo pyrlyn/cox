@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Ivan Tugay
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 # Builds desktop/macos/build/Cox.app (T37.32.1, DT§7, A106): XcodeGen writes the thin
 # Cox.xcodeproj from desktop/macos/project.yml, then xcodebuild builds its one app target, Debug
 # and ad-hoc signed (`-`): no signing identity, no team, no Keychain. Needs

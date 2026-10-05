@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T35.7: a test-only stand-in for Cursor's `agent` CLI, so
 //! `tests/external_agents_cursor.rs` drives the real plugin, sandbox and
 //! driver path with no network and no Cursor account. It replays a fixture

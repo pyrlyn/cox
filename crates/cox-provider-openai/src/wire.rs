@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Re-exports of the `async-openai` crate's Responses-API types
 //! (`response-types` feature only — no HTTP client, no second
 //! `reqwest`/`tokio`/`futures` in the dependency graph; verified with

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SessionComposer` (DT§5.3, DS§6.4 row `Composer`): CoxUI's `Composer` over a session's
 // `ComposerStore` — the store's draft, rows and think toggle, and the session's token meter, mode
 // and model, copied into the organism's value, and each of its intents handed to the store. Here,

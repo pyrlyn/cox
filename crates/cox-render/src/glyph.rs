@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The glyph table (T14.1): every symbol the TUI prints that is not plain
 //! ASCII, in one place. The terminal owns the font, so what cox owns is a
 //! set that degrades to ASCII when the environment cannot show it, and that

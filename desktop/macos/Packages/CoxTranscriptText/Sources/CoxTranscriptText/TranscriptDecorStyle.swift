@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // What a prompt's bubble and a thought's fold are drawn with (T37.23.4, T37.23.9): the values
 // the app fills from CoxUI's tokens. Apart from `TranscriptDecor.swift`, which sets and draws
 // them, so the drawing file holds only the drawing.
@@ -64,6 +68,20 @@ extension TranscriptStyle {
     public init(color: NSColor, offset: CGSize, blur: CGFloat, spread: CGFloat, inset: Bool) {
       (self.color, self.offset, self.blur) = (color, offset, blur)
       (self.spread, self.inset) = (spread, inset)
+    }
+  }
+
+  /// A prompt's turn number in the margin left of its bubble (T37.47; Figma frames 01 and 14,
+  /// CoxUI's `TurnGutter`): right-aligned in a box `width` wide whose leading edge is `offset`
+  /// left of the bubble's, centred on the prompt's first line.
+  public struct Gutter: Equatable {
+    public var font: NSFont
+    public var color: NSColor
+    public var width: CGFloat
+    public var offset: CGFloat
+
+    public init(font: NSFont, color: NSColor, width: CGFloat, offset: CGFloat) {
+      (self.font, self.color, self.width, self.offset) = (font, color, width, offset)
     }
   }
 

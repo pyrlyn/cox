@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Cache diagnostics (T8.3 §1.9/D6): is the prefix actually hitting the
 //! cache, and if not, which block broke it? Pure functions over a request
 //! copy plus a tiny per-session tracker; the session emits the `Notice`,

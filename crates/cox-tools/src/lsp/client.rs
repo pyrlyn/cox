@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! LSP stdio transport: `Content-Length` framing and a JSON-RPC 2.0 client
 //! over any `AsyncRead`/`AsyncWrite`. Hand-rolled on `serde_json` because no
 //! maintained, async, client-side LSP crate exists (plan.md P41). Separate

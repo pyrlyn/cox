@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ThinkingDisclosure` (DS§6.3 row `ThinkingDisclosure`, the mockup's `.think` and
 // `.think-body`): the model's reasoning in a turn, folded to one line saying how long it
 // thought. Separate so the reasoning stays out of the way of the answer and opens the same way

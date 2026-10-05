@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T35.9 Check: `docs/plugins/cursor.md`'s commands run against the real
 //! `cox` binary. The doc's literal `cox plugin install plugins/cursor
 //! --yes`, from a cwd shaped like the doc's own example, then `cox

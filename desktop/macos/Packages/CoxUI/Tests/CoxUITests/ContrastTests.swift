@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // DS§8's text contrast on glass (T37.21.11, A112): each text pair T37.21.11 and T37.22.11 fixed,
 // measured on the glass laid over the window fill — the worst case cox can predict, since the
 // wallpaper behind the window is unknown — in every material and both appearances. Separate from

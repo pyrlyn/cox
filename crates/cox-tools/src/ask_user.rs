@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `ask_user`: the model asks the person a question and the turn blocks
 //! until they answer (plan.md T3.8, §1.11). Separate from the other tools
 //! because it is the only one whose "I/O" is a surface: an interactive

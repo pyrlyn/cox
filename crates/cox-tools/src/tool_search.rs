@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `tool_search`: BM25 over the deferred tools' names and descriptions
 //! (plan.md T3.8, D6d). The core keeps every non-core schema out of the
 //! prompt until the model asks for it here; the names this returns in

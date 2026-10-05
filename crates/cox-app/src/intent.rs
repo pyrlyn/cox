@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The one enum the app sends (DT§4.3) and what each intent means to the
 //! core: a `Submission`, a turn to spawn or hold, or a lineage call. Pure,
 //! so a test checks an intent without a session, and separate from the

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Settings through the real Rust core (T37.30): a scratch home, an edit that
 // lands in its `config.toml` and comes back with the `user` layer, an MCP
 // server's login (T37.30.3) and a project value the guard list drops

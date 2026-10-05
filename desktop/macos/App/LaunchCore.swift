@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Which core the app talks to (DT§4.1, §8): the live Rust core, or a recorded patch stream from
 // `desktop/macos/Fixtures` replayed by `FixtureCoreClient`, so the whole app runs without Rust
 // state or a key. Settings and the first-run checklist always read the live core, since a

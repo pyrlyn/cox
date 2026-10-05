@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Timeline patches into the text (T37.43, DT§4.5): each patch edits only its
 // own block's range, so a streamed reply or thought appends to the storage
 // instead of rebuilding it. The pieces come from `TranscriptText`, the

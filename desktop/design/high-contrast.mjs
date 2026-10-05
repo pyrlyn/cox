@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The High Contrast palettes (A89, T37.17.1): derives `tokens/color.light-hc.json` and
 // `tokens/color.dark-hc.json` from the light and dark palettes by one rule, then reads the written
 // files back and checks every pair. Separate from the Style Dictionary build because it writes that
@@ -34,7 +38,7 @@ const WORDS = [
 ];
 const CODE = ['syntax.keyword', 'syntax.string', 'syntax.number', 'syntax.function', 'syntax.comment', 'syntax.type'];
 const onCode = (...fills) => ['surface.code', ...fills.map((f) => `${f}@surface.code`)];
-const TILES = ['neutral', 'edit', 'shell', 'search', 'write'];
+const TILES = ['neutral', 'edit', 'shell', 'search', 'write', 'app'];
 const PAGES = ['general', 'models', 'permissions', 'sandbox', 'budget', 'mcp', 'plugins', 'appearance', 'advanced'];
 
 // Which colour sits on which. `fill@surface` is a translucent fill over that surface. `move: 'bg'`

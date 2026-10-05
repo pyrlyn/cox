@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `/rewind` in the TUI (T26.2): the timeline lists turns newest first with
 //! their checkpointed file counts, a choice plus a what-to-restore row
 //! becomes `Submission::Rewind`, `Esc Esc` on an empty composer opens the

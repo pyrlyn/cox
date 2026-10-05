@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `IconTile` (DS§6.2 row `IconTile`, the mockup's `.tool .ic.c-*`): a tool's SF Symbol on a
 // lifted, gradient tile coloured by the kind of work. Separate so a tool reads the same in the
 // transcript, the inspector and the approval card.

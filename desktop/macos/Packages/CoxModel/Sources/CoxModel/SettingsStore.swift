@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Settings window's state (DT§5.7): the view Rust built from the schema
 // and the config layers, grouped for the sidebar, plus provider keys through
 // a `SecretStore`. Every decision — the page, the label, the control, whether

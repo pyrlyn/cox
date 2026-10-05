@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The session side of decision points (PL§4 "Decision points", T33.20):
 //! asks the advisor `[plugins.decide]` names, applies the point's monotone
 //! rule from `router`, and records every answer as `Event::Advised`.

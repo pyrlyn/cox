@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `.claude/settings.json` import (plan.md T7.5, D4/D13): permission rules
 //! and hooks from a Claude Code setup, read-only, as one config layer the
 //! binary merges above `.cox` project config. Only the keys cox understands

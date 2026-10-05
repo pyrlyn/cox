@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Best of n (DT§3.3.1, T52.9–T52.11): one prompt sent to several candidates, each in a worktree
 // of its own, then compared and one kept. Field for field as cox-ffi exports `cox_app::best_of`.
 // Separate from the session seam because a group spans several sessions and owns none of them.

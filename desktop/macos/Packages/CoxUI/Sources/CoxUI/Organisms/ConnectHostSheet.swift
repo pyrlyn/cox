@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ConnectHostSheet` (DS§6.4, DT§4.4, T52.21): File › Connect to Host…, one `ssh` host alias
 // and Connect. The host runs `cox app-server --stdio` over the person's own ssh; the sheet says
 // that no key and no ssh agent leave this Mac. Separate so the app only presents it: the core

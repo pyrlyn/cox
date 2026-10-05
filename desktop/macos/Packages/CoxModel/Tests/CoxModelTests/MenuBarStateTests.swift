@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The menu-bar extra's rows (T51.14): answerable approvals and questions under their session's
 // title, news and expired items left out, and the running rows as the sidebar has them.
 

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The Settings screen's model (DT§5.7, T37.30): every leaf of the
 //! effective config with the layer it came from, what `Config`'s JSON Schema
 //! says about it, and whether an edit to the user file would take effect.

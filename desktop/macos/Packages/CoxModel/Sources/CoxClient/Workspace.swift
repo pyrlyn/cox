@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The sessions across projects the sidebar lists (DT§5.1, DT§4.3), field for field as cox-ffi
 // exports `cox_app::Workspace`, its sidebar sections and the inbox's per-session activity.
 // Separate from the session seam because it answers for every session in `cox.db`, not one

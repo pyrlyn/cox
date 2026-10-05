@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! One loaded plugin: a worker thread that owns the extism `Plugin` and serves
 //! two queues, control before events (PL§4 "Threading"), plus a watchdog
 //! thread that cancels a call at its deadline through a `CancelHandle`

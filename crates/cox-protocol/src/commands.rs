@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The built-in slash-command table (T37.10, DT§4.3): name, usage and one
 //! line of help per command. Shared data rather than TUI code so every
 //! surface — the TUI's `/` palette, `/help` and parser, the desktop's

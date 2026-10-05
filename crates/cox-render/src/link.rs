@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! OSC 8 hyperlinks (T23.3). A renderer marks a span as a link with
 //! [`mark`]; after the frame is drawn, [`apply`] finds the marked cells,
 //! clears the mark and — when the terminal speaks OSC 8 — wraps each run in

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! MCP elicitation (T47.1, plan.md A78): the pure mapping between an rmcp
 //! `ElicitationSchema` and the one-question-at-a-time prompts a surface's
 //! question modal shows — the schema as ordered fields, each typed answer

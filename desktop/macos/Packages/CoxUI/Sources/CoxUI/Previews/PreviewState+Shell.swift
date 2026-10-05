@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the window shell's molecules (T37.21): the sidebar's sessions and
 // filter and the toolbar's breadcrumb and capsules, as mockup screen 28 shows them. Separate from
 // `PreviewState.swift` so molecules built in parallel add their fixtures without editing one file.

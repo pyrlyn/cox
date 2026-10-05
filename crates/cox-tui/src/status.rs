@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Status line and todo panel (T5.5, segments T28.1): the one row under the
 //! composer in the §1.13 form `sonnet-5 · ctx ▰▰▰▱▱ 41% · $0.83/5 ·
 //! workspace-write · 2 tasks · [plan]`, and the panel the `todo` tool's list

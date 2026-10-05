@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The context window's split (A98) as the views that draw it take it: cox-app's `MeterText`
 // context figures, each part's kind checked against the four the bar colours. One mapping for
 // the token popover (T37.25.2) and the inspector's Context tab (T37.29.3.1), so the two views

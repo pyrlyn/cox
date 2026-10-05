@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A turn's prompt and thoughts inside the transcript text (T37.23.4's Check): the prompt on
 // `UserBubble`'s face with its attachment's tile, a folded and an open thought as
 // `ThinkingDisclosure` reads, in light and dark, Solid; and a drag from the prompt into the reply

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The one image check (P40, T40.1): sniffs PNG, JPEG, GIF and WebP by magic
 //! bytes, caps the size, and encodes the result as an [`Attachment`] or a
 //! tool-output payload. Surfaces, `read` and the core all call it, so there

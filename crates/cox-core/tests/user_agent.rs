@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Composer `@name task` lines (T45.5) through the loop:
 //! `Submission::UserAgent` runs the `agent` tool on the model's own path
 //! (engine, hooks, slots), its answer joins history at the tail, and it is

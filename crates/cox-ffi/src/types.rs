@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The records and enums Swift sees (DT§4.4): cox-app's and cox-protocol's
 //! own types, declared to UniFFI with `#[uniffi::remote]` rather than
 //! mirrored, so there is no conversion code and a field added upstream
@@ -27,7 +31,7 @@ use cox_app::patch::{Block, BlockId, BlockKind, Status, TimelinePatch, ToolState
 use cox_app::review::LineComment;
 use cox_app::workspace::{SidebarKind, SidebarRow, SidebarSection, SidebarStatus, SubtitlePart};
 use cox_app::{
-    Activity, BrowserError, ChangedFile, Changes, Checkpoint, Completion, ConfigSource,
+    Activity, BrowserError, BudgetRow, ChangedFile, Changes, Checkpoint, Completion, ConfigSource,
     ContextPart, CostRow, DaySummary, Dropped, FileChange, Icon, InboxItem, InboxStatus, Info,
     Intent, Layer, Linked, LoginAction, McpLogin, McpServer, McpStatus, MeterRow, MeterText,
     ModelChoice, Need, PageText, PaletteHit, PaletteItem, PaletteKind, Project, SearchHit,
@@ -39,6 +43,7 @@ use cox_app::{KeyError, PermissionRule, RuleKind, SessionGrant, SettingsGroup};
 use cox_app::{KeyValueRow, PluginKey, PluginSlot, SpanView, WidgetView};
 use cox_app::{MenuModel, ModelSection};
 use cox_app::{SettingControl, SettingInput, SettingOption};
+use cox_app::{Suggestion, Welcome};
 use cox_protocol::ids::{ArchiveId, CallId, SessionId, TaskId, TurnId};
 use cox_protocol::plugin::Slot;
 use cox_protocol::plugin::ui::StyleToken;
@@ -125,6 +130,19 @@ pub struct ModelChoice {
     pub short_name: Option<String>,
     pub efforts: Vec<Effort>,
     pub context_window: Option<u32>,
+}
+
+#[uniffi::remote(Record)]
+pub struct Welcome {
+    pub summary: String,
+    pub suggestions: Vec<Suggestion>,
+}
+
+#[uniffi::remote(Record)]
+pub struct Suggestion {
+    pub title: String,
+    pub detail: String,
+    pub prompt: String,
 }
 
 #[uniffi::remote(Record)]
@@ -847,6 +865,14 @@ pub struct TurnCosts {
     pub rows: Vec<CostRow>,
     pub total: CostRow,
     pub project: String,
+    pub budget: Vec<BudgetRow>,
+}
+
+#[uniffi::remote(Record)]
+pub struct BudgetRow {
+    pub label: String,
+    pub text: String,
+    pub fraction: Option<f64>,
 }
 
 #[uniffi::remote(Record)]

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Push-to-talk (T54.6, A123): the `voice` key starts and stops a
 //! recording, `Esc` cancels it, and the transcript lands in the composer.
 //! `Voice` and `on_key`/`on_msg` are the pure half `state::update` calls;

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // SessionStore's plugin slots (T52.17's Check): a slot patch replaces only its own slot, and a
 // reset of the timeline leaves the slots alone, as `cox_app::coalesce` keeps them beside it; the
 // column's area reaches the session, which renders a shown panel again for it.

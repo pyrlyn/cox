@@ -89,7 +89,7 @@ Programs the project uses and the direct packages from its manifests.
 | proptest | local | https://crates.io/crates/proptest | Rust dependency |
 | pulldown-cmark | local | https://crates.io/crates/pulldown-cmark | T5.3: plan.md says pulldown-cmark 0.10; 0.13 is the current line with the same Tag/TagEnd API. syntect without onig (pure-Rust fancy-regex engine). Lives in `cox-render` (T32.2). |
 | ratatui | local | https://crates.io/crates/ratatui | cox-tui |
-| reqwest | local | https://crates.io/crates/reqwest | cox-provider |
+| reqwest | local | https://crates.io/crates/reqwest | cox-provider; cox-plugin: the host side of `cox_http` (T33.14.1) |
 | url | local | https://crates.io/crates/url | cox-tools: LSP `file://` URI ↔ path (T41.3); `cox-app`'s browser tools parse a URL and pass only http/https (T51.7). 2.5.8, the latest release, 2026-01-05 |
 | rmcp | local | https://crates.io/crates/rmcp | cox-mcp |
 | rubato | local | https://github.com/HEnquist/rubato | cox-voice: the microphone's rate (often 44.1 or 48 kHz) to whisper's 16 kHz (T54.3, A123) |

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The on-disk layout of a user plugin (PL§1, §1b) and the only code that
 //! changes it: staging a package into `versions/<digest12>/`, moving the
 //! `current`/`previous` pointers, and deleting the whole `<id>` directory.

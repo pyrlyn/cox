@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Pure translation of a provider-neutral [`Request`] into an OpenAI
 //! Responses body ([`build_body`]), and the SSE state machine that turns a
 //! `POST /v1/responses` stream back into [`ProviderEvent`]s

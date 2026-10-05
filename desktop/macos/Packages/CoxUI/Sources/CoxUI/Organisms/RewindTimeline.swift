@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `RewindTimeline` (DS§6.4 row `RewindTimeline`; DT§3 Rewind timeline, DT§5.4): the session's
 // checkpoints oldest first, each rewinding code, the conversation or both to before its turn.
 // Separate from `ChangesTab`, whose checkpoint rows only name a rewind, because this is where the

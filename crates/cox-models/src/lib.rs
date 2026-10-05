@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The model catalog (plan.md T30.24; `docs/design/providers.md` §
 //! "Target shape" item 3): one pure crate mapping a model id to its
 //! context window, max output, efforts, capabilities and price, merged
@@ -10,8 +14,6 @@
 //! `crates/cox/tests/deps.rs` enforces it) and does no I/O beyond parsing
 //! an embedded or caller-supplied string — a file on disk is the caller's
 //! job (`cox-provider::usage::load_price_table`).
-
-#![warn(missing_docs)]
 
 mod catalog;
 mod effort;

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A plugin slot's generated cox-ffi values ⇄ `CoxClient` values (PL§8, T52.17), field for
 // field like `Convert.swift`: the slot, its kind and the sanitized widget tree. Separate so the
 // timeline's conversions stay one file; the terminal cell widths and stack sizes are dropped,

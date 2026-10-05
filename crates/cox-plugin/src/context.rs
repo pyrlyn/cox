@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The context snapshot `cox_context` answers (PL§5, T33.9): session id,
 //! cwd, tier and model, usage totals, the last 50 transcript items with
 //! their assembled text, the todo list and the compactions — folded by the

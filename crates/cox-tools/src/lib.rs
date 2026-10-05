@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Built-in tools: read, edit, write, bash, grep, glob, outline, web, todo,
 //! ask_user, agent, send_message. Separate from `cox-core` because every tool touches the
 //! filesystem or a process and must go through a trait, never called
@@ -11,6 +15,10 @@
 //! impls (`path::confine`, archiving) stay here. `web_fetch`'s HTTP
 //! GET and HTML→text engine live in `cox-web` (T32.7); `web_fetch.rs` keeps
 //! only the `Tool` glue (`ToolCx`, input parsing, output framing).
+
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
 
 pub mod ask_user;
 pub mod bash;

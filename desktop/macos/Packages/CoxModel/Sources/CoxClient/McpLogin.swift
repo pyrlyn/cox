@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // MCP logins on the Settings screen (T37.30.3, DT§5.7): each server in effect for a directory
 // with whether cox holds a token for it, field for field as cox-ffi exports `cox_app::McpServer`.
 // Separate from `Settings.swift` because a login is no config value: it lives in the token store

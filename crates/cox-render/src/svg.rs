@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! A frame as an SVG picture: one `<rect>` per background run and one
 //! `<text>` per styled run, columns pinned by `textLength` so the picture
 //! lines up like the terminal did. Kept apart from `view` because it renders

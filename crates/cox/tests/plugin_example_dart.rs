@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T33.38 Check: the Dart MCP-server example (`plugins/examples/dart`) end
 //! to end. `#[ignore]`d because it needs the Dart SDK — `just
 //! plugin-examples dart` builds `build/example_dart` first (this test only

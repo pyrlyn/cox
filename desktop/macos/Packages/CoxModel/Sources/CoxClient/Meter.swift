@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The token meter's figures as `cox_app::MeterText` formats them (T37.25, A98): the popover's rows,
 // the context split and the cache hit, field for field. Separate from `Timeline.swift`, which
 // carries them inside `UsageView`, so the meter's text can grow without that file doing so.

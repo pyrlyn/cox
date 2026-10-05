@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The session's event tap (PL§5, T33.10): `Session::emit` offers every
 //! scrubbed rollout event here; each plugin gets the kinds it subscribed to
 //! and was granted, through a ring of 256 that drops the oldest when full,

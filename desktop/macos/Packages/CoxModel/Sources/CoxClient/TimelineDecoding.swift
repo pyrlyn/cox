@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // How the timeline values read the serde JSON a recorded fixture holds
 // (DT§8): internally tagged enums (`#[serde(tag = "type")]`), an
 // externally tagged `TextKind`, spans with their defaults omitted. Separate

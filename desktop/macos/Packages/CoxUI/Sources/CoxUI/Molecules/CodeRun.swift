@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CodeRun` (DS§6.3 rows `DiffLineView` and `CodeBlockView`, the mockup's `.kw`, `.str`, `.num`,
 // `.fn`, `.com`, `.ty`): a stretch of code text in one syntax role, as the core highlighted it.
 // Separate so a diff line and a code block colour the same roles the same way; the app maps

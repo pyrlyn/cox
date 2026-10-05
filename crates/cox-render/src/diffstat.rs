@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The `+n −m` line counts of a unified diff. Outside `diff` because that
 //! module draws with ratatui, and the desktop app (`cox-app`, built without
 //! the `ratatui` feature) writes the same counts into its tool summaries.

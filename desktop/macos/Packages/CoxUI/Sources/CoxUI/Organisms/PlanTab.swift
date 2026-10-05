@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PlanTab` (DS§6.4 row `PlanTab`, the mockup's Plan `.ib` and `.todo`; DT§5.1 Plan): the
 // inspector's second tab — the live todo list the agent keeps with its `todo` tool, each step with
 // its state. Separate so the `Inspector` frame stays a slot and each tab is its own view, fed plain

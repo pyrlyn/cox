@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The provider a session talks to (T9.1, T30.15, T30.16, T30.23): the
 //! `tiers.code` section picks the wire client, the model catalog its
 //! context window, and every real client is wrapped in `Priced` so each

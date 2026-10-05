@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Tools that execute through the ACP client instead of the local machine
 //! (T11.1 step 4): `read`/`edit`/`write` through `fs/*` so the editor's
 //! buffers stay authoritative, `bash` through `terminal/*`. Same names,

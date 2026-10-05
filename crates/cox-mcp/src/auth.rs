@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! OAuth for HTTP MCP servers (plan.md T22.5): where the tokens live, how a
 //! login runs, and what `doctor` reports. Separate from `client.rs` because
 //! the client only needs a credential store and a way to ask for a login;

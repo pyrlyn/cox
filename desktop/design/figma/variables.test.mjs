@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Tests for the Figma token scripts (T37.44.1): every token reaches Figma in every mode, each script
 // fits `use_figma`'s limit, and running the scripts twice changes nothing — checked against an
 // in-memory stand-in for the Plugin API calls the scripts make.

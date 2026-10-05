@@ -66,3 +66,6 @@ tempfile = { workspace = true }
 cox-config = { path = "../cox-config", version = "0.1.2", features = ["test-util"] }
 # T33.17: a plugin's merged `[[provider]]` section against a mock server.
 wiremock = { workspace = true }
+
+[lints]
+workspace = true

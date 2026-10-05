@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T41.8: a test-only language server, so `tests/lsp.rs` drives the real
 //! `diagnostics` tool, its sandbox wrap and its shutdown with no real server
 //! installed. It speaks just enough LSP over stdio: `initialize` answers

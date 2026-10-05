@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // What the inspector's Info tab lists (T37.29.5, DT§5.1), field for field as cox-ffi exports
 // `cox_app::Info`: the session's id, cwd, linked worktree, the config layers it runs with and its
 // rollout file. Separate from the timeline because it answers a call, not a patch.

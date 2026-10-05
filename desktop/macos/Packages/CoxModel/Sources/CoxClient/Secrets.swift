@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Provider keys (DT§5.7, R§9.5.8): the `SecretStore` seam the Settings
 // store writes keys through and the app's `AppHost.secret` reads them from.
 // The Keychain implementation lives in CoxPlatform, which may link the

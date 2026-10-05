@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Presence records (plan.md A14): one small JSON file per live session
 //! under `COX_HOME/presence/`, so concurrent sessions on one workspace can
 //! tell each other what they are doing and which files are mid-edit. The

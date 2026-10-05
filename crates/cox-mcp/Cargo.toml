@@ -29,3 +29,6 @@ reqwest = { version = "0.13", default-features = false, features = ["default-tls
 tempfile = { workspace = true }
 # T22.5: the OAuth contract test plays authorization server and MCP server.
 wiremock = { workspace = true }
+
+[lints]
+workspace = true

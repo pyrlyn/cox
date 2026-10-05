@@ -178,7 +178,8 @@ Validation (T33.1 and T33.4):
 - a `ui.render` target outside the plugin's own tools needs an explicit `tool:<name>`, which approval shows as "changes how <name> looks";
 - an `[[agents]]` `file` is a relative `.md` path with no `..`, `\` or `:` component, and names are unique (T45.3);
 - `wasm` may be omitted only by a data-only package: `[[mcp]]` and/or `[[agents]]`, nothing else;
-- unknown keys are an error. The manifest is ours, so `deny_unknown_fields` applies, as in `Config` (`crates/cox-protocol/src/config.rs:35`).
+- unknown keys are an error. The manifest is ours, so `deny_unknown_fields` applies, as in `Config` (`crates/cox-protocol/src/config.rs:35`);
+- `surfaces` and the surface tables `[capabilities.terminal]` and `[capabilities.desktop]` follow §15.5; `ui.keys` is an alias of `terminal.keys`.
 
 The capability list is the unit of approval. Each entry becomes one line in the dialog, for example "Can call the model on the cheap tier (costs appear in `cox stats` as `plugin:git-glance`)".
 
@@ -248,7 +249,7 @@ Configuration comes in `InitIn.config`. That is the plugin's `[plugins.<id>]` ta
 
 **Why some calls are banned in some contexts.** The core awaits `cox_hook`, `cox_decide` and `cox_provider_stream`. A tool invocation from inside them would need the loop that is waiting on them, which is a deadlock. So those contexts get `Err(NotInThisContext)`. `cox_render` has a strict time cap, so it may only read. The same reasoning gates `cox_http` to a provider host: reaching it from inside `cox_decide` directly would either deadlock (the plugin's own worker is blocked waiting on `cox_decide`, P8) or bypass the budget gate and the ledger, so the host allows it only inside `cox_provider_stream`. A decision plugin reaches its own provider instead by returning `DecideOut::Call(ModelCall)`, which the host runs before calling `cox_decide_resume` (2026-09-26, T33.40.1, R§4.3.6 J§4).
 
-**Versioning.** `api` is the ABI major. A minor addition (a new optional export, host function or field) keeps `api = 1`, because unknown JSON fields are ignored in both directions. A breaking change raises the major. The host supports the current major and the previous one for one minor release of cox, and `cox plugin list` flags plugins on the old major.
+**Versioning.** `api` is the ABI major. A minor addition (a new optional export, host function or field) keeps `api = 1`, because unknown JSON fields are ignored in both directions. A breaking change raises the major. The host supports the current major and the previous one for one minor release of cox, and `cox plugin list` flags plugins on the old major. The surface parts and their namespaces (`cox:tui/v1`, `cox:desktop/v1`) follow the same rule (§15.7).
 
 **Threading.** One OS thread per plugin owns its `Plugin` (`call` is `&mut self`, P8) and serves two bounded queues:
 
@@ -382,6 +383,8 @@ The result is cached in `State` through `Msg::Plugin(PluginUiMsg)`, and `Cmd::Pl
 
 Headless and ACP do not call UI exports.
 
+The desktop app draws the same slots, renderers and commands. Keys are terminal-only, and the app adds its own contributions (§15).
+
 ## 9. Where the code lives
 
 | Crate | Rule (`crates.md`) | Depends on | Holds |
@@ -502,3 +505,119 @@ The creator resolved every open question this design and the Jev use case (A25/A
 13. **The ABI fix from the Jev research.** Writing the Jev plugin against `api = 1` as first drafted exposed a deadlock/ledger-bypass gap (T33.40.1, §4 above): `cox_decide` now returns either an `Advice` or a `ModelCall`, the host runs the call through the plugin's own provider with the budget gate and ledger, then calls `cox_decide_resume`; `cox_http` to a provider host is allowed only inside `cox_provider_stream`; `Question` is batched. The example provider throughout this document is named `typesafe`, not `jev` — the plugin id stays `jev`, the provider section it declares is `typesafe` (§2).
 14. **No prebuilt Jev plugin archive ships with the release.** Users build it from `plugins/jev` (`just plugin jev`) and install it with `cox plugin install <dir>` (§1).
 15. **Plugin agent definitions are grant-gated, local definitions win** (T45.3, 2026-09-29). An `[[agents]]` file is loaded only for a `Granted` plugin, and each file is its own approval line, so an update that adds or renames one asks again. A `.cox/agents/*.md` or `~/.cox/agents/*.md` definition of the same name wins over the plugin's, with a notice (T45.4). The definition's `permissionMode` can only narrow the parent's mode (T45.2).
+
+## 15. Surfaces: shared, terminal-only and desktop-only (T33.45, A134)
+
+Plugins were designed for the terminal (§8), but they already run in every session cox opens, and the desktop app draws the shared slots through `cox-app` (`crates/cox-app/src/plugin_ui.rs`, T52.14–T52.17, T52.23). Until this section, nothing said which surface a feature belongs to: a plugin could not declare where it runs, `[capabilities.ui]` mixed a terminal-only part (`keys`) with shared ones, and there was no desktop-only API. This section splits the API into three parts, says how a plugin declares them and what happens when it asks for a part the current surface does not have. Build cards: §6 A134 in `plan.md`.
+
+### 15.1 Surfaces
+
+The session already names who drives it (`SessionSpec.surface`, `crates/cox-session/src/lib.rs`, set in `crates/cox/src/session.rs`, `crates/cox/src/acp_cmd.rs` and `crates/cox-app/src/live.rs`). `cox-session` maps it to the plugin `Surface` in one function; the plugin host never parses the string.
+
+| `SessionSpec.surface` | `Surface` | Draws plugin UI |
+| --- | --- | --- |
+| `tui` | `terminal` | yes, §8 |
+| `plain` (`cox --plain`) | `terminal` | no: it appends lines and has no slots, as today |
+| `app`, local or through `cox app-server --stdio` on an ssh host (`crates/cox-app/src/server.rs` opens its sessions through the same `App::open`) | `desktop` | yes, `cox-app` `plugin_ui` |
+| `headless` (`cox run -p`) | `headless` | no |
+| `acp` | `acp` | no |
+
+The surface is fixed when the session opens. A remote session is a desktop session: the UI is the app, wherever the plugin runs.
+
+### 15.2 Shared API (both surfaces)
+
+Everything `api = 1` had before this section, minus `keys`:
+
+- **Exports:** `cox_init`, `cox_on_event`, `cox_hook`, `cox_decide`/`cox_decide_resume`, `cox_tool_subject`/`cox_tool_risk`/`cox_tool_call`, `cox_provider_stream`, `cox_command`, `cox_render`, `cox_render_item`, `cox_shutdown` (§4).
+- **Manifest:** `[capabilities]` `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui.status`, `ui.panel`, `ui.overlay`, `ui.commands`, `ui.render`; `[[provider]]`, `[[models]]`, `[[mcp]]`, `[[external_agents]]`, `[[agents]]` (§2).
+- **Host functions** in `cox:host/v1`: `cox_log`, `cox_notify`, `cox_kv_*`, `cox_context`, `cox_invoke_tool`, `cox_model_call`, `cox_http`, `cox_output`/`cox_cancelled`, `cox_redraw` (§4).
+- **Widgets and slots:** the closed `Widget` tree with `StyleToken` roles (§8); the `status.left`/`status.right`, `panel` and `overlay` slots; `tool:`/`item:` renderers; `/<id>:<name>` commands. Sizes are in cells: the TUI's grid, the app's `font.monoCode` cells (`PluginWidgetView`, DS§6.3).
+- **Layout rules both hosts already apply alike** are shared, not terminal-only: a status segment is at most 24 cells and plugin segments drop first when the row is narrow (`SEGMENT_COLS` in `crates/cox-tui/src/status.rs` and in `crates/cox-app/src/plugin_ui.rs`; the app's `SessionToolbar` drops them first through `ViewThatFits`, DS§6.4); the panel is at most 8 rows (`PANEL_ROWS` in both); the overlay is `Modal::Plugin` in the TUI and a sheet that Esc closes in the app (DS§6.4 `PluginPanel`). They are host layout, not API: a plugin only receives `RenderIn { width, height }`.
+
+Two shared additions:
+
+- **`InitIn.surface: Option<Surface>`** — `terminal`, `desktop`, `headless` or `acp`, so a plugin adapts at run time. Absent from a cox older than this section; the SDK reads absence as `terminal`, the only surface plugins were written for.
+- **`Span.link: Option<String>`** — a link on a run of text: an `https://` URL or a workspace-relative path; anything else is dropped to plain text when the tree is converted. The terminal draws it with `cox-render`'s OSC 8 marking (`crates/cox-render/src/link.rs`) when `term::Caps.osc8` is on, and as underlined text otherwise; the app draws a link that opens on a click — `Host::open_url` for a local session, `Host::confirm_open_url` for a remote one (`crates/cox-app/src/app.rs`). Nothing opens without the person's click. An older host ignores the field (no ABI type denies unknown fields) and draws the text.
+
+### 15.3 Terminal-only API
+
+- **Leader keys:** `KeyDecl`, `InitOut.keys` and the `cox_key` export, reachable only as `<leader> <key>` under the keymap action `plugin.leader` (§8 "Keys", `crates/cox-tui/src/keymap.rs`). The manifest spelling moves from `ui.keys` to `[capabilities.terminal] keys` (§15.5). Why terminal-only: the leader is a binding in `keybindings.toml`; the app's keys belong to the menu bar and ⌘K (DT§5.5), which have no leader. `cox-app` exposes `plugin_keys`/`plugin_key` (`crates/cox-app/src/live.rs`) and `cox-ffi` forwards them, but no Swift view calls them; the app-core card removes them. A plugin that wants the same action on the desktop declares it as a command and a palette action (§15.4).
+- **Namespace `cox:tui/v1`** is reserved for terminal-only host functions and has none in the first build. The candidate, `cox_tui_caps()` returning the probed `term::Caps` subset a plugin could use (`osc8`, `truecolor`, `images`), waits for a plugin that needs it: the host already downgrades colours, glyphs and links on its own.
+- **Not API:** what depends on D10's inline viewport (no sidebar, §8) and the narrow-terminal drop order stay host behaviour.
+
+### 15.4 Desktop-only API
+
+Each contribution is drawn natively by the app from declarative data; a plugin never supplies UI code (§10). Each maps to a control the design system already has.
+
+| Contribution | Manifest `[capabilities.desktop]` | ABI | Native control | On the terminal |
+| --- | --- | --- | --- | --- |
+| Inspector tab | `inspector = true` | `InitOut.desktop.inspector: Option<TabDecl { title, symbol }>`; filled by `cox_render` with the new slot `desktop.inspector` and the inspector's width in cells; one tab per plugin; §8's redraw model applies (it renders while selected) | DS§6.4 `Inspector`: a tab in the strip after Info (`InspectorTab` gains a plugin case), its tree in a `PluginWidgetView` inside an `InspectorSection` | not offered (§15.6) |
+| Toolbar items | `toolbar = true` | `InitOut.desktop.toolbar: Vec<ActionDecl { command, title, symbol }>`, at most 2 per plugin | DS§6.1 `CapsuleStyle(.plain, isIcon: true)` in DS§6.4 `SessionToolbar`, after the plugin segments, the title as tooltip; dropped with the segments when the bar is narrow | not offered |
+| Palette actions | `palette = true` | `InitOut.desktop.palette: Vec<ActionDecl>` | DS§6.4 `CommandPalette`, Actions group: a `PaletteKind::Action` row (`crates/cox-app/src/palette.rs`) with id `plugin:<id>:<command>` and the symbol in its well | the same command is already in the TUI palette as `/<id>:<name>` |
+| Actionable notifications | `notify = true` | host function `cox_desktop_notify(DesktopNotice { level, title, body, actions })` in `cox:desktop/v1`; at most 2 actions `{ label, command }`; allowed in every export but render; level capped at `warn`; at most one per 10 s per plugin | DT§5.6: posted through `cox_app::app::Host` like an inbox item, its actions mapped back by CoxPlatform's `NotificationActions` (T37.27); posted only when the app is not frontmost or the session is not visible, otherwise shown as a notice | `Err(NotOnThisSurface)`; `cox_notify` is the shared notice |
+| Images in widgets | none (shows only bytes the digest covers) | `Widget::Image { path, alt }`: a package-relative PNG path (no `..`, `\` or `:` component, as an `[[agents]]` file), at most 256 KiB, counted by §8's node cap; never a URL, so the app never fetches for a plugin | DS§6.3 `PluginWidgetView` draws the image, `alt` as its accessibility label | the `alt` text as one dim line |
+
+Rules for all of them:
+
+- `ActionDecl.command` names one of the plugin's `InitOut.commands`, so a click goes through `cox_command` and its closed `CommandOut` (§4) — no new export, no new way to submit. An action naming an undeclared command is dropped with a notice. Commands still need `ui.commands`.
+- `symbol` is an SF Symbol name matching `[a-z0-9.]{1,64}`. A name the system does not know draws `puzzlepiece.extension`. That `NSImage(systemSymbolName:accessibilityDescription:)` returns nil for an unknown name is **unverified**: Apple's page (https://developer.apple.com/documentation/appkit/nsimage/init(systemsymbolname:accessibilitydescription:)) did not render its text to a fetch on 2026-10-03; the Swift card proves it with a test.
+- `CommandOut` gains `OpenInspector`, the desktop counterpart of `OpenOverlay`.
+- Every string passes `cox_sanitize::sanitize` in `cox-app` before Swift sees it, as `WidgetView` does today.
+- **Not offered (open: the creator has not confirmed this, A134):** a sidebar section — the sidebar lists the window's sessions across projects (DS§6.4 `Sidebar`), while a plugin instance lives in one session (T33.44), so it would need a window-scoped plugin lifetime the host does not have; menu-bar items — the palette covers them and the menu bar is app-wide; plugin-supplied SwiftUI, HTML or web views — never; HTML from MCP servers is `v0.3-mcp-apps.md`'s separate path.
+
+### 15.5 Declaring surfaces
+
+```toml
+api = 1
+id = "glance"
+surfaces = ["terminal", "desktop"]   # where it loads; absent = every surface
+
+[capabilities]                       # shared
+ui = { status = true, commands = true }
+
+[capabilities.terminal]              # terminal-only
+keys = true
+
+[capabilities.desktop]               # desktop-only
+inspector = true
+toolbar = true
+palette = true
+notify = true
+```
+
+- `surfaces` takes `terminal`, `desktop`, `headless` and `acp`; absent means all four, so every existing manifest loads where it loads today. An empty list is an error. A UI-only plugin lists the two UI surfaces and skips `cox_init` in headless and ACP runs.
+- A surface table whose surface `surfaces` excludes is an error: it asks for something that can never run.
+- `ui.keys` stays accepted under `api = 1` as an alias of `terminal.keys` (the loader ORs them). `cox plugin new` and the docs write the new spelling; the alias goes at the next ABI major.
+- **Grant lines** (T33.6) gain `terminal.keys`, `desktop.inspector`, `desktop.toolbar`, `desktop.palette` and `desktop.notify`. A stored `ui.keys` line reads as `terminal.keys`, so nobody is asked again. `surfaces` adds no line: it only narrows.
+- **One grant covers both surfaces.** A grant stays per digest. The TUI modal and the CLI prompt (§3) list every line, the surface parts marked "terminal only" or "desktop only"; the app has no grant dialog and loads only `Granted` plugins, like headless (§3), so a grant given in the terminal or the CLI covers the app too, and nobody is asked twice.
+- `cox plugin list` (text and `--json`) and `cox doctor` show each plugin's surfaces.
+
+### 15.6 Calls to an unavailable surface
+
+Every case fails open (D14) and none traps:
+
+1. **Load.** A plugin whose `surfaces` excludes the session's surface is not loaded. One `Notice(Info)` names where it runs: the author chose it, so it is not a warning.
+2. **Grant.** `InitIn.granted` leaves out the other surface's table. Headless and ACP leave out both surface tables and the shared `ui`, since they call no UI export (§8).
+3. **`InitOut`.** Entries for a part this surface lacks — `keys` on the desktop, `desktop.*` on the terminal — are dropped like ungranted ones, with one `Notice(Info)` per plugin per session listing them. A plugin that checks `InitIn.surface` returns only its surface's parts and gets no notice.
+4. **Host functions.** Every namespace is linked on every surface, because extism resolves a module's imports when it instantiates it and `hostfn.rs` registers one fixed import list. On a surface without that part a surface function returns `Err(AbiError::NotOnThisSurface { surface })`, checked before the grant: saying "not granted" for something that can never work here would mislead.
+5. **Values.** `Widget::Image` on the terminal draws its `alt`; `CommandOut::OpenInspector` on the terminal is dropped with a notice; a `Span.link` the surface cannot open draws as text.
+
+### 15.7 Versioning
+
+- **The ABI parts stay `api = 1`** under §4's minor rule. New fields are ignored both ways (`abi.rs` denies no unknown field). A new enum value reaches only a peer that asked for it: `Slot::DesktopInspector` only after the guest declared the tab, `NotOnThisSurface` only from surface functions an older guest never imports, `Widget::Image` only from a guest that saw `surface = desktop`, since an older host rejects the whole tree and counts a miss.
+- **The manifest is the exception.** It denies unknown keys (`manifest.rs`), so a cox older than this section refuses a package that uses `surfaces` or a surface table, with "unknown field", and skips it with the usual notice. Accepted: that strictness is a trust property (a misspelt capability must never grant less or more), and the fix is updating cox. An old manifest loads unchanged in a new cox.
+- **Namespaces:** `cox:host/v1` (shared), `cox:tui/v1` (reserved) and `cox:desktop/v1` (`cox_desktop_notify`), so a surface part grows without touching `cox:host/v1`. A module that imports `cox:desktop/v1` does not instantiate in an older cox and is skipped with a notice.
+- **A breaking change to any part raises the one ABI major** (`api`); the parts do not version apart in the manifest.
+
+### 15.8 Where the code lives
+
+| Crate | Gains |
+| --- | --- |
+| `cox-plugin-api` | `Surface`; `surfaces`, `TerminalCaps`, `DesktopCaps` in the manifest; `TabDecl`, `ActionDecl`, `InitOut.desktop`, `InitIn.surface`, `DesktopNotice`, `Slot::DesktopInspector`, `CommandOut::OpenInspector`, `AbiError::NotOnThisSurface`; `Span.link`, `Widget::Image` |
+| `cox-plugin` | the grant lines and the `ui.keys` alias (`grant.rs`); the session's `Surface` on `HostEnv`, `cox:desktop/v1` and the `NotOnThisSurface` check (`hostfn.rs`); the `InitOut` filter (`live.rs`) |
+| `cox-session` | the `SessionSpec.surface` → `Surface` map and the load filter |
+| `cox-tui` | links and image `alt` in the widget conversion; `OpenInspector` dropped |
+| `cox-app`, `cox-ffi` | the inspector slot, toolbar and palette actions, notifications through `Host`, links and images in `WidgetView`; `plugin_keys`/`plugin_key` removed; the app-server wire carries the new payloads |
+| `desktop/macos` | the views in §15.4's table, with DS§6 rows |
+
+`cox-app` stays free of terminal toolkits and `cox-tui` keeps depending on the ABI types only through `cox-protocol` (§8, `deps.rs`).

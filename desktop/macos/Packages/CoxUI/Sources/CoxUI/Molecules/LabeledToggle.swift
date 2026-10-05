@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `LabeledToggle` (DS§6.3 row `LabeledToggle`, the mockup's `.appear .row2` and the Settings
 // `.gr` switch rows): an on/off setting named on the left, with an optional line saying what it
 // does, and the switch at the far edge. Separate so the Appearance popover and Settings lay out

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! D11 and A90 as a test: `cox-ffi` holds no logic. Every function and
 //! method body in `lib.rs`, `session.rs`, `host.rs` and `remote.rs` —
 //! exported through `#[uniffi::export]` or not — is one forward expression;

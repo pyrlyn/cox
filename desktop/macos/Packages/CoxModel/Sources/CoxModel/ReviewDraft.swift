@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Review's line comments (T37.28.4, DT§5.4): the draft a line-number click adds to and "Send to
 // agent" posts as one turn, queued behind a running turn like a composer prompt unless
 // `[desktop.review] send = "now"` (A108). Here, not in CoxUI, because the anchor is read from the

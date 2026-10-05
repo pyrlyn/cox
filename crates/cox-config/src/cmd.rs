@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox config show|get|set|path` (plan.md §1.6/§1.12): renders the layered
 //! config `config_load::load` produces, and edits the user config file with
 //! `toml_edit` so hand-written comments survive a `set`.
@@ -186,6 +190,8 @@ fn set_value_in(path: &Path, key: &str, value: TomlValue) -> Result<(), ConfigEr
 }
 
 #[cfg(test)]
+// why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+#[allow(unsafe_code)]
 mod tests {
     use cox_protocol::CoreError;
     use tempfile::tempdir;

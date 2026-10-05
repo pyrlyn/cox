@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T34.9 e2e: two subagents messaging through the parent, driven headless
 //! (`cox run -p --output-format stream-json`) against a real `COX_HOME`
 //! scratch tree and the `Scripted` provider — no network, no API key

@@ -7,3 +7,10 @@
 # research.md §4.3.5 P44) — builds plugins/templates/dart and
 # plugins/examples/dart. Latest stable, the version R§4.3.5 P44 re-checked.
 dart = "3.13.4"
+# T33.36: the Kotlin/Wasm (`wasmWasi`) PDK in sdk-kotlin/, the example in
+# examples/kotlin and templates/kotlin. Gradle runs the build on java; the
+# Kotlin Gradle plugin pins its own compiler to the same `kotlin` version.
+# Latest stable of each on 2026-09-26 (`mise latest`).
+java = "27.0.0"
+gradle = "9.8.0"
+kotlin = "2.4.20"

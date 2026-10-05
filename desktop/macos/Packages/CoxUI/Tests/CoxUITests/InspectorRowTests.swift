@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The inspector rows' check (T37.21.9, DS§6.3): a snapshot per variant × light/dark ×
 // Solid/Frosted of `ChangedFileRow` and `CheckpointRow`, on a pane from `PreviewState` as their
 // `#Preview`s show them, and the path split a changed file owns.

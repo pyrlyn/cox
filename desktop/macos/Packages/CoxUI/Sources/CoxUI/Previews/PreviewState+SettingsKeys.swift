@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for mockup 18's provider keys and pop-ups (T37.45.2): one provider
 // whose key the Keychain holds and one with none, and the code tier's model and effort as
 // pop-ups beside a thinking switch that stays segmented. Separate so this card's fixtures stay

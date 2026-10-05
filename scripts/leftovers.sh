@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Ivan Tugay
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 # scripts/leftovers.sh: the T22.7 leftover audit as a runnable check.
 #
 # Every "Not done:" line in done.md must sit in at least one of three sets:

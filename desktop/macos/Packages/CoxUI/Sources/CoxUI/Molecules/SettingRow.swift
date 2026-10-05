@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SettingRow` (DS§6.3 row `SettingRow`, the mockup's Settings `.group .gr`): one setting in a
 // Settings group — its name, its control and the config layer its value comes from. Separate
 // so every setting says where its value is set, and one the user's config cannot change is

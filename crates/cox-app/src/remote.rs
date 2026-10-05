@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! A workspace on another machine (DT§4.4, T52.20): `ssh <host> cox
 //! app-server --stdio` spoken over `wire`, with the same calls a local
 //! `App` and `LiveSession` answer, so the desktop app drives a remote
@@ -684,6 +688,8 @@ mod tests {
     }
 
     #[test]
+    // why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+    #[allow(unsafe_code)]
     fn remote_spawn_forwards_no_agent_and_no_env() {
         // SAFETY: nextest runs each test in its own process.
         unsafe { std::env::set_var("ANTHROPIC_API_KEY", "sk-must-not-leave") };

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Candidate B: our own TextKit 2 view. One NSTextView holds the whole transcript,
 // so AppKit's own drag selection runs across blocks; tool cards are view-backed
 // attachments (one attachment character each). Copy writes Markdown in block

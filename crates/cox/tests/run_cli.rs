@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T6.1: `cox run -p` against the real binary with the scripted provider —
 //! what the `tests/cmd` fixtures (T48) cannot check: stdin answers mid-run,
 //! prefix rules, and that a denied write left no file on disk.

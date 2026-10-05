@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `web_fetch`: `Tool` glue over the `cox-web` fetch engine (plan.md T3.8,
 //! §1.11). Owns `ToolCx`, input-JSON parsing and tool-output framing; the
 //! HTTP GET and the HTML→text reduction moved to `cox-web` (T32.7) because

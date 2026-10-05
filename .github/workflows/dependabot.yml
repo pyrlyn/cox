@@ -43,6 +43,9 @@ jobs:
     # workflow-level `permissions` still caps its build and test jobs.
     permissions:
       contents: write
+      # ci.yml's `rust` job (pyrlyn/infra ci-rust.yml) cancels the run on a failed job, so it
+      # asks for `actions: write`; without it here every run is a startup_failure.
+      actions: write
 
   automerge:
     name: Merge patch update

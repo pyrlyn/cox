@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Permission rule grammar (Claude Code's, verbatim — D4): one rule string
 //! becomes a tool matcher plus a subject matcher. Separate from the engine
 //! so the grammar is table-testable without a decision order around it.

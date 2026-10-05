@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Shared HTTP plumbing for the network backends: credential lookup, auth
 //! headers, and non-2xx → [`ProviderError`] mapping (plan.md §1.14).
 //!
@@ -155,6 +159,8 @@ pub fn map_http_error(
 }
 
 #[cfg(test)]
+// why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
 

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CoxSegmented` (DS§6.1, the mockup's `.seg`): the segmented control, a glass capsule whose
 // selection is a pill lifted to e1 that slides between segments, or cross-fades under Reduce
 // Motion. A view rather than a `PickerStyle`: SwiftUI has no public hook to restyle the

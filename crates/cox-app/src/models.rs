@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! What the toolbar's model popover offers (DT§5.1 "model chip", T37.22.6):
 //! each tier's provider's models by the id `/model` takes, grouped into the
 //! popover's sections (T58.4.7), and which providers can answer at all

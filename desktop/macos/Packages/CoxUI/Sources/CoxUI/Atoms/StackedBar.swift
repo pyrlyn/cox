@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `StackedBar(segments)` (DS§6.2 row `StackedBar(segments)`, the mockup's `.tokpop .bar`): how
 // the context window is split between its parts (DS§7), in the token popover and the context
 // inspector. Separate so each part has one colour wherever the split is drawn, taken from the

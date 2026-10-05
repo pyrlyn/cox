@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T3.7 step 5: `bash` through the real `Tool` surface — streaming, the env
 //! allowlist, classification, and that a timeout or cancel kills the whole
 //! process group, not just the shell.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! YAML frontmatter (`---` … `---`) shared by skills, commands and agent
 //! definitions. One place to split and parse so every extension file fails
 //! the same way: a malformed header is an error the caller turns into a

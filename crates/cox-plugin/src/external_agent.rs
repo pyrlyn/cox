@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! A granted `[[external_agents]]` entry resolved to the process the host
 //! spawns (EA§2, T35.2). Its own module for two reasons. The program
 //! resolution — a PATH program as approved, or a regular file inside the

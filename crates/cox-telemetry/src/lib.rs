@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Process-wide structured logging and optional OTLP export (T32.9; `docs/
 //! design/crates.md` C9). Separate from `crates/cox` because it is the only
 //! user of five otel crates (dependency (a)); it takes plain values rather
@@ -5,6 +9,10 @@
 //! belongs at the binary boundary: core emits `tracing` spans but never
 //! opens files or sockets, while this crate owns exporter lifecycle and
 //! shutdown flushing.
+
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
 
 use std::path::Path;
 

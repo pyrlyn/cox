@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `MainScreen` (DS§4, DS§6.5; DT§5.1): the window shell — the sidebar, the toolbar, the
 // transcript column and the inspector as floating panes on the window's glass. Composition
 // only (DS§5): the panes style themselves, and the transcript and inspector tabs are slots

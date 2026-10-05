@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Unconditional redaction of what leaves a session (T28.4): one pattern
 //! table and one `scrub` helper behind every output boundary — rollout
 //! lines, logs, headless output, exports, a plugin's context snapshot. Moved

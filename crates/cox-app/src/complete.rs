@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Composer completion (DT§5.3): `/` offers the shared built-in table plus
 //! the project's command files, `@` offers the files the `glob` tool would
 //! find. The sources are the TUI's — `cox_protocol::commands::COMMANDS`,

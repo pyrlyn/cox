@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The appearance every Foundation reads (DS§3.4–3.6): material, window opacity, Depth, text
 // size and the dark highlight (A109), plus the one place the system's Reduce Transparency,
 // Increase Contrast and Reduce Motion override them (DS§1.6, DS§8). Separate so no modifier

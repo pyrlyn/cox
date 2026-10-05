@@ -6,7 +6,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T33.14 | todo | P2 | 4 | 0% | |
+| T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.18 | todo | P2 | 5 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
@@ -26,12 +26,21 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.43 | todo | P1 | 2 | 0% | |
-| T33.45 | todo | P2 | 4 | 0% | |
+| T33.45 | todo | P2 | 4 | 10% | |
+| T33.45.1 | todo | P2 | 3 | 0% | |
+| T33.45.2 | todo | P2 | 3 | 0% | |
+| T33.45.3 | todo | P2 | 4 | 0% | |
+| T33.45.4 | todo | P2 | 3 | 0% | |
+| T33.45.5 | todo | P2 | 4 | 0% | |
+| T33.45.6 | todo | P2 | 3 | 0% | |
+| T33.45.7 | todo | P2 | 4 | 0% | |
+| T33.45.8 | todo | P2 | 3 | 0% | |
+| T33.45.9 | todo | P2 | 3 | 0% | |
+| T33.45.10 | todo | P2 | 2 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
-| T37.29.3 | todo | P2 | 4 | 80% | |
-| T37.29.3.4 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
+| T37.32.3 | in progress | P1 | 2 | 90% | Claude Code / opus-5.5 |
 | T37.33 | todo | P1 | 3 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
@@ -40,11 +49,8 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.1 | todo | P3 | 2 | 0% | |
 | T56.2 | todo | P3 | 3 | 0% | |
-| T56.3 | todo | P3 | 3 | 0% | |
 | T56.4 | todo | P3 | 3 | 0% | |
-| T56.5 | todo | P3 | 2 | 0% | |
 | T56.6 | todo | P3 | 4 | 0% | |
 | T56.7 | todo | P3 | 4 | 0% | |
 | T56.8 | todo | P3 | 3 | 0% | |
@@ -64,7 +70,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T58.1 | todo | P1 | 4 | 0% | |
 | T58.2 | todo | P2 | 2 | 0% | |
 | T58.3 | todo | P1 | 3 | 0% | |
-| T58.4 | todo | P1 | 3 | 10% | |
 | T58.5 | todo | P2 | 3 | 0% | |
 | T58.6 | todo | P2 | 3 | 0% | |
 | T58.7 | todo | P2 | 4 | 0% | |
@@ -156,7 +161,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15 |
 | `cox-config` | the one config owner (T32.16; split out of `cox`): figment layering (default/user/project/env/flag), validation, `cox config set` editing and the `docs/config.jsonschema` drift test. Errors are a `thiserror` enum | figment, toml_edit 0.25, thiserror |
 | `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents; login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell) |
-| `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52) |
+| `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
 | `cox-ffi` | the macOS app's UniFFI surface (T37.14): one tokio runtime, `App` and `SessionHandle` objects, the foreign `AppHost` trait, `#[uniffi::remote]` mirrors of cox-app types, a fixture recorder. `staticlib` + `lib`; the only crate that depends on uniffi | uniffi 0.32.2 (proc-macros, no UDL; default features off); dev: syn 3.0.5 (`full`, `parsing`; T37.39.1: `tests/forward_only.rs` parses the FFI sources); async-trait (MIT OR Apache-2.0): the async `AppHost` methods UniFFI exports (P51, P52) |
 | `desktop/` | the macOS app (P37, not a Cargo crate): Swift packages under `desktop/macos/Packages/`, the design tokens and their generator under `desktop/design/` | node 24.21.0 (mise) with npm `style-dictionary` 5.5.5 (T37.17: DTCG tokens → Swift, asset colours, CSS); SwiftLint 0.65.1 (mise, aqua; T37.18: DS§9 no-literal rules) and SwiftLintPlugins at the same version in each package; `swift-format` from the Xcode toolchain; swift-collections 1.7.1 (T37.16: `OrderedDictionary` timeline store); swift-snapshot-testing 1.19.6 (T37.19: `CoxUI` snapshot tests) |
 | `desktop/windows/` | the Windows app (P58, A127; planned, not a Cargo crate): a WinUI 3 + C# solution over `cox-ffi`'s C# bindings, logic in `cox-app` | planned by A127: .NET SDK 10.0 LTS (10.0.12), Windows App SDK 2.5.1, uniffi-bindgen-cs on uniffi 0.32 (blocked, T58.1); candidates CommunityToolkit.Mvvm 8.4.2, xunit.v3 4.0.1, FlaUI.UIA3 5.0.0, Verify.XunitV3 33.1.5 (`research.md` §10) |
@@ -186,10 +191,10 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-tui` | TEA app, composer (tui-textarea-2 0.13, the ratatui-0.30 fork of tui-textarea 0.7), transcript cells, streaming markdown (pulldown-cmark 0.13 → spans; the plan said 0.10, same Tag/TagEnd API), syntect 5 highlighting, diff view, approval modal, status line, `/` commands, `@` file picker, `text::sanitize`, OSC 11 background detection for `tui.theme = "auto"` (T22.6), theme files and `/theme` (T24.2) | ratatui 0.30.2 (`scrolling-regions`, T23.2), crossterm 0.29, nucleo 0.5, pulldown-cmark 0.13, syntect 5.3 (fancy-regex, no onig), two-face 0.3 (`syntect-fancy`; ~250 syntaxes, +0.33 MiB — T24.3), unicode-width 0.2, arboard 3, terminal-colorsaurus 1.0, toml_edit 0.25, similar 3.2 (word diffs, the approval modal's proposed edit — T24.5), base64 0.23 (the OSC 52 payload, A81) |
 | `cox-acp` | Agent Client Protocol 2.0 server: session/prompt, permission requests, client fs/terminal | agent-client-protocol 2.0 |
 | `cox-plugin-api` | plugin manifest (`plugin.toml`), ABI v1 payloads, TUI widget tree, capability names; schemas `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` with drift tests. Pure; builds for `wasm32-unknown-unknown` so the guest SDK can use it; `cox-protocol` re-exports it as `plugin` (A52, P33) | serde, serde_json, schemars 1, thiserror |
-| `cox-plugin` | the WASM host: discovery, package digest, grant check, one worker per plugin, host functions (`cox:host/v1`), and the protocol-trait adapters `PluginHooks`, `WasmTool`, `PluginProvider`, `EventTap`, `Advisor` (A52, P33) | extism 1.30.0 (`default-features = false`: no ureq, no URL or file loading; `wasmtime-exceptions` on, A61), wasmtime 43 (declared only for the `anyhow` feature extism needs without its defaults), sha2 (package digest), figment (`plugin.toml`); linked into `crates/cox` behind the default-on `plugins` feature (A55) |
+| `cox-plugin` | the WASM host: discovery, package digest, grant check, one worker per plugin, host functions (`cox:host/v1`), and the protocol-trait adapters `PluginHooks`, `WasmTool`, `PluginProvider`, `EventTap`, `Advisor` (A52, P33) | extism 1.30.0 (`default-features = false`: no ureq, no URL or file loading; `wasmtime-exceptions` on, A61), wasmtime 43 (declared only for the `anyhow` feature extism needs without its defaults), sha2 (package digest), figment (`plugin.toml`), reqwest 0.12 (`cox_http`, T33.14.1); linked into `crates/cox` behind the default-on `plugins` feature (A55) |
 | `cox-plugin-sdk` (`plugins/sdk`, the separate guest workspace, never a `crates/*` member) | the Rust guest SDK (T33.27): typed wrappers for every PL§4 export and `cox:host/v1` host function, the `register!` macro, and the wire (`{"Ok"\|"Err"}` host replies) that other-language guests copy; builds for `wasm32-unknown-unknown` | extism-pdk 1.4.1 (`default-features = false`: no extism `http`, no msgpack), cox-plugin-api (path) |
 | `cox-voice` | push-to-talk dictation (P54, A123): `Transcriber` (whisper.cpp through `whisper-rs`, model loaded once), `Recorder` (default input device, mono, resampled to 16 kHz, capped length), and the `Dictation` impl the TUI receives. Its own crate under D1: a heavy C++ build and platform audio. Behind `crates/cox`'s `voice` feature, off by default; audio never leaves the process | whisper-rs 0.16.0 (Unlicense; whisper.cpp MIT; cmake), cpal 0.18.2 (Apache-2.0), rubato 5.0.0 (MIT OR Apache-2.0) |
-| `cox-cursor-cloud` | the Cursor Cloud Agents API client (P56, A123; planned, blocked on the creator's terms go-ahead): hand-written wire types (A40 step 3, never generated from or copied out of Cursor's unlicensed OpenAPI file), create/run/stream/cancel/usage. The one place a socket to `api.cursor.com` opens; not a `Provider`; the host driver that maps runs to task events lives in `cox-session` | cox-provider-http (reqwest, eventsource-stream), serde; no new dependency |
+| `cox-cursor-cloud` | the Cursor Cloud Agents API client (P56, A123; P56 under way, terms go-ahead given 2026-10-03): hand-written wire types (A40 step 3, never generated from or copied out of Cursor's unlicensed OpenAPI file), create/run/stream/cancel/usage. The one place a socket to `api.cursor.com` opens; not a `Provider`; the host driver that maps runs to task events lives in `cox-session` | cox-provider-http (reqwest, eventsource-stream), serde; no new dependency |
 
 Planned by A127 (not used yet; `toolchain.md` gets each row when its card lands): `cox-ffi` adds `cdylib` to its crate types for the Windows app (T58.1); process-wrap 10.0.1 (Apache-2.0 OR MIT; job objects on Windows, process groups on Unix) in `cox-ext`, `cox-session`, `cox-tools`, `cox-app` and `crates/cox`, pending the creator's approval (A127 open question 5; T57.5); portable-pty 0.9 (already a workspace dependency) in `cox-tools` for the Windows `bash` (T57.8); the `desktop/windows/` row above.
 
@@ -741,11 +746,9 @@ Rationale in §6 A13. Not redone here: unified-diff rendering (`cox-render/src/d
 
 Rationale in §6 A14. Not redone here: the `/` palette with nucleo ranking (T5.2 — `/sessions`, `/agents`, `/model` already complete), hooks (T7.4), `cox sessions` (T10.3/A13), subagent tasks (T9.2).
 
-
 ### P17 — Surface leftovers (goal: §1.12 resume/continue/first prompt, OpenAI retry, doctor prices, website matches the shipped binary)
 
 Rationale in §6 A20. T17.1–T17.7 are in `done.md`.
-
 
 ### P18 — TUI resume and the remaining website pages (goal: `cox --resume` opens the TUI; the site covers tools, compat, IDE and the walkthrough)
 
@@ -812,17 +815,16 @@ Every card in this phase:
 
 Host unit tests use inline WAT (R§4.3.5 P15); no `.wasm` is ever committed. **Blockers** (everything after them depends on them): T33.1, T33.2, T33.3, T33.5, T33.6.
 
-#### T33.14 `cox_http` and filesystem preopens
+#### T33.14.2 Filesystem preopens
 
-Depends: T33.9, T33.43 (preopens stay off until wasmtime ≥ 48, A55) · Size: ~180 · Files: `crates/cox-plugin/src/net.rs`, `src/fs.rs`
-Goal:
-- `cox_http` over reqwest: the host must match the allow-list, the body is capped, and a `net` entry equal to a configured provider host is refused at validation (PL§7d).
-- WASI preopens come only from `fs` and pass `confine`; reads mount `ro:`; `.git` and `.cox` are never writable. WASI is on only when `wasi = true` or `fs` is set.
-Check: wiremock `http_outside_allow_list_is_refused`, `net_entry_matching_provider_host_is_rejected`, `fs_write_to_dot_git_is_refused`, `wasi_ctx_has_no_env`.
+Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43; the `cox_http` half is T33.14.1.
+Depends: T33.9, T33.43 (preopens stay off until wasmtime ≥ 48, A55) · Size: ~120 · Files: `crates/cox-plugin/src/fs.rs`
+Goal: WASI preopens come only from `fs` and pass `confine`; reads mount `ro:`; `.git` and `.cox` are never writable. WASI is on only when `wasi = true` or `fs` is set.
+Check: `fs_write_to_dot_git_is_refused`, `wasi_ctx_has_no_env`.
 
 #### T33.18 Providers, ABI form (`PluginProvider`)
 
-Depends: T33.14, T33.17 · Size: ~190 · Files: `crates/cox-plugin/src/provider.rs`, `src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox/src/session.rs`
+Depends: T33.14.1, T33.17 · Size: ~190 · Files: `crates/cox-plugin/src/provider.rs`, `src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox/src/session.rs`
 Goal: with `api = "plugin"`, `stream()` calls `cox_provider_stream` and forwards `ProviderEvent`s. The guest's `cox_http` is limited to `base_url`'s host, and the host injects the `auth` header from `resolve_key`, so the key never enters wasm memory. Missing usage is estimated; usage below half of cox's estimate is replaced by the estimate with one warning.
 Plan (amended 2026-09-26 for the Jev use case, R§4.3.6 J§4.3): `Router::pick` and `backend_for_with` register ABI provider sections by name, so a tier — including a legacy `typesafe` tier — resolves to them, not only to `providers.custom`. The ledger gets a `ProviderId::Plugin` bucket whose provider string is the section name, the same shape `Local` uses for compatible providers; `provider_name` returns it. `COX_PROVIDER=scripted`/`replay`, which short-circuits provider construction for the main turn, still builds plugin providers, so a scripted-main e2e can reach a real (wiremocked) plugin provider.
 Check: `provider_key_never_reaches_guest` (the WAT guest echoes its request headers, and the test asserts the key is absent); `underreported_usage_is_replaced_by_estimate`; `every_request_has_a_usage_row` with a plugin provider; `plugin_provider_section_resolves_by_name`; `scripted_provider_mode_still_builds_plugin_providers`.
@@ -846,7 +848,7 @@ Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). The
 
 #### T33.40.1 ABI: two-phase decide, own-provider call-out, batched questions — blocker
 
-Depends: T33.2, T33.14, T33.15, T33.18, T33.20 · Size: ~180 · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin/src/advisor.rs`, `crates/cox-plugin/src/net.rs`
+Depends: T33.2, T33.14.1, T33.15, T33.18, T33.20 · Size: ~180 · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin/src/advisor.rs`, `crates/cox-plugin/src/net.rs`
 Goal: close the gap that PL§12 falsifier 3 predicts (J§4.1–4.3). Today a decision plugin can reach its own provider only through a deadlock (`cox_model_call` into its own `cox_provider_stream`) or a ledger bypass (`cox_http` from `cox_decide`). This card adds a path with neither.
 Plan:
 1. ABI changes:
@@ -1064,7 +1066,7 @@ Check: the offline pytest (body construction, redaction, no key means a clear ex
 #### T33.43 Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 
 Depends: an extism release after v1.30.0 that pins wasmtime ≥ 48 (extism `main` already pins 48; checked 2026-09-26) · Size: ~30 · Files: `Cargo.toml`, `Cargo.lock`, `deny.toml`
-Goal: move the workspace `extism` and the direct `wasmtime` (declared only for its `anyhow` feature) to that release, then remove the `RUSTSEC-2026-0222`, `RUSTSEC-2026-0269` and `RUSTSEC-2026-0316` entries (the last needs wasmtime >= 48.0.3) from `deny.toml` `ignore` (A55, research.md P39). Also check whether the direct `wasmtime` declaration is still needed. The bump was approved in advance by the creator (A55), but only onto a published crates.io release, never a git dependency. It unblocks the WASI preopens in T33.14. If no such release exists by 2026-12-31, bring it back to the creator.
+Goal: move the workspace `extism` and the direct `wasmtime` (declared only for its `anyhow` feature) to that release, then remove the `RUSTSEC-2026-0222`, `RUSTSEC-2026-0269`, `RUSTSEC-2026-0316` and `RUSTSEC-2026-0327` entries (0316 needs wasmtime >= 48.0.3, 0327 needs >= 48.0.4) from `deny.toml` `ignore` (A55, research.md P39). Also check whether the direct `wasmtime` declaration is still needed. The bump was approved in advance by the creator (A55), but only onto a published crates.io release, never a git dependency. It unblocks the WASI preopens in T33.14.2. If no such release exists by 2026-12-31, bring it back to the creator.
 Check: `cargo deny check advisories` passes with no wasmtime ignores; the `cox-plugin` tests and `slim_build_has_no_wasm_runtime` pass; `scripts/footprint.sh` stays within the 20 MiB budget (PL§12).
 
 #### T33.45 Design the plugin API: shared, terminal-only and desktop-only
@@ -1094,10 +1096,72 @@ Steps:
 
 Check: the API structure section is in `docs/design/plugins.md` with its §6 amendment; manifest and ABI drift tests (`docs/plugin.schema.json`, `docs/plugin-abi.schema.json`) pass with the new fields; a `cox-plugin` test loads the example in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice (or `NotOnThisSurface`) on the other; `docs/plugins.md`, `docs/ru/` and `docs/uk/` cover all three parts; `just test` green.
 
+Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and amendment A134, approved by the creator; the build is T33.45.1–T33.45.10 below. This card closes when they are done.
+
+#### T33.45.1 Manifest and grant: surfaces and surface tables
+
+Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/plugin.schema.json` · Design: `docs/design/plugins.md` §15, A134
+
+Check: `surfaces_default_to_every_surface`, `surface_table_outside_its_surfaces_is_rejected`, `ui_keys_is_an_alias_of_terminal_keys`, `stored_ui_keys_grant_covers_terminal_keys` and the manifest schema drift test pass.
+
+#### T33.45.2 ABI: surface payloads
+
+Depends: — · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin-api/src/ui.rs`, `docs/plugin-abi.schema.json` · Design: `docs/design/plugins.md` §15, A134
+
+Check: round trips for `Surface`, `InitOut.desktop`, `DesktopNotice`, `Widget::Image`, `Span.link`; `unknown_fields_are_ignored_both_ways` covers the new fields; the ABI schema drift test passes.
+
+#### T33.45.3 Host: load filter, granted filter, `cox:desktop/v1`
+
+Depends: T33.45.1, T33.45.2 · Files: `crates/cox-plugin/src/hostfn.rs`, `crates/cox-plugin/src/live.rs`, `crates/cox-session/src/plugins.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: `plugin_outside_its_surfaces_is_skipped_with_a_notice`, `other_surface_init_entries_are_dropped_with_a_notice`, `desktop_notify_on_terminal_is_not_on_this_surface` (inline WAT, no build).
+
+#### T33.45.4 TUI: links, image `alt`, surfaces in listings
+
+Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: insta snapshots of a linked span with and without OSC 8 and of an image's `alt`; `cox plugin list --json` shows `surfaces`.
+
+#### T33.45.5 App core: inspector tab, toolbar and palette actions
+
+Depends: T33.45.3 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/palette.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: `cox-app` tests: the tab renders only while selected, an action runs its command, an action naming an undeclared command is dropped, `plugin_keys` is gone. Coordinate with T58.4 on `live.rs`.
+
+#### T33.45.6 App core: notifications, links and images
+
+Depends: T33.45.5 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/app.rs`, `crates/cox-app/src/wire.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: a plugin notice with actions reaches `Host::notify`'s test double and its action runs the command; a remote link goes through `confirm_open_url`; the app-server wire round-trips the new payloads.
+
+#### T33.45.7 FFI and Swift: the desktop contributions
+
+Depends: T33.45.6 · Files: `crates/cox-ffi/src/{session,types}.rs`, `desktop/macos/Packages/CoxUI/…` (Inspector, SessionToolbar, CommandPalette, PluginWidgetView), `desktop/design/DESIGN.md` §6 rows · Design: `docs/design/plugins.md` §15, A134
+
+Check: `forward_only` passes; a snapshot per new view in light and dark; an unknown SF Symbol draws `puzzlepiece.extension` (settles §15.4's **unverified** note).
+
+#### T33.45.8 SDK and the surfaces example
+
+Depends: T33.45.3 · Files: `plugins/sdk/src/lib.rs`, `plugins/examples/surfaces/` (new), `crates/cox-plugin-fixtures/build.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: a `cox-plugin` test loads the example (a command and a status segment, a leader key, an inspector tab and a notification) in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice or `NotOnThisSurface` on the other.
+
+#### T33.45.9 Docs: the three-part plugin API reference
+
+Depends: T33.45.1, T33.45.2 · Files: `docs/plugins.md` (or `docs/plugins/api.md`), its generator and drift test · Design: `docs/design/plugins.md` §15, A134
+
+Check: every field of `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` appears under its part (shared, terminal-only, desktop-only), checked by test.
+
+#### T33.45.10 Docs: Russian and Ukrainian translations
+
+Depends: T33.45.9 · Files: `docs/ru/plugins.md`, `docs/uk/plugins.md` (new directories) · Design: `docs/design/plugins.md` §15, A134
+
+Check: both cover all three parts and every heading of the English page; `just test` green.
+
 **Order.** T33.1 → T33.2 → T33.3 → T33.4 → T33.5 → T33.6 is the critical path. After it these can run in parallel:
 
 - T33.7–T33.8;
-- T33.9 → (T33.10, T33.11, T33.12, T33.14, T33.15);
+- T33.9 → (T33.10, T33.11, T33.12, T33.14.1, T33.15); T33.43 → T33.14.2;
 - T33.16 → T33.17 → T33.18;
 - T33.19 (after T32.3) → T33.42;
 - T33.20 → T33.21.
@@ -1397,18 +1461,6 @@ Every card in this phase:
 
 Swift dependencies are in `research.md` §9.5 and A67; a new one needs the same check (most used, maintained, licence compatible with both GPLv3 and the royalty-free option, A68) or our own package with its own card.
 
-#### T37.29.3 Inspector Context & Cost tab
-
-Depends: T37.25.1 · Size: split into T37.29.3.1–T37.29.3.4 · Files: see the sub-cards
-Goal: the context window as a StackedBar by part, cache-hit %, Compact now, per-turn cost as a KeyValueGrid, session and project totals and the budget cap; the missing cox-app calls (context breakdown, per-turn history, project totals, budget) come with it.
-Check: a snapshot per cell; cox-app tests for each new call.
-
-#### T37.29.3.4 Context tab: budget cap and how close it is
-
-Depends: T37.29.3.2 · Size: ~120 · Files: `crates/cox-app/…`, `desktop/macos/Packages/CoxUI/…/Organisms/ContextTab.swift`
-Goal: the configured cap and the spend as `$0.42 of $5.00` with a gauge. On hold by the creator (2026-09-28). Needs the creator's choice before it is claimed: where the cap comes from (a config key or the existing budget setting), whether it is per session or per day, and what the tab shows with no cap.
-Check: a cox-app test for the figure; snapshots with and without a cap.
-
 #### T37.32 Signing, notarization, Sparkle, bundled CLI, Homebrew cask
 
 Split into T37.32.1 and T37.32.2 (A106). Depends: T37.15 · Size: ~150 · Files: `.github/workflows/release.yml`, `desktop/macos/Cox.xcodeproj/…`, `scripts/desktop/…`
@@ -1421,7 +1473,21 @@ Depends: T37.32.1 · Size: ~150 · Files: `.github/workflows/release.yml`, `scri
 Goal: the rest of T37.32 (A106): a Developer ID-signed, notarized app with Sparkle 2 updates and the `cox` CLI inside the bundle (DT§7), and a Homebrew cask. New dependency Sparkle (§1.1 row). Waits for the creator's Developer ID certificate, App Store Connect API key, Sparkle EdDSA key, appcast host and tap repository as GitHub Actions secrets.
 Check: `spctl --assess` accepts the release build; the appcast validates.
 
-Confirm the bundle id `io.github.listepo.cox` (T37.32.1 derived it from the repo) before the first signed build.
+The bundle id is `io.github.pyrlyn.cox`, confirmed by the creator (A135, T37.32.3). The Developer ID import (`.github/actions/macos-signing`) and the app's re-signing and DMG (`scripts/desktop/dmg.sh`) exist since T37.32.3; this card adds Hardened Runtime, notarization, Sparkle, the bundled CLI and the cask.
+
+#### T37.32.3 Debug macOS app DMG on CI, every feature, Developer ID-signed
+
+Depends: T37.32.1 · Size: ~200 · Files: `.github/workflows/desktop-build.yml`, `.github/actions/desktop-macos/action.yml`, `.github/actions/macos-signing/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `scripts/desktop/dmg.sh`, `desktop/macos/project.yml`, `justfile`
+Goal: the first build of the macOS app someone can download from CI and run (A135): Debug, not a release build, with every macOS feature the app has; started by hand (Actions -> desktop build) and by every release, which attaches the DMG.
+Plan:
+1. Survey (Explore agent, 2026-10-03): no feature needs an Info.plist usage key or an entitlement (no microphone, Apple Events, URL scheme or sandbox; notifications, Keychain, App Intents, Spotlight, hotkeys, menu-bar extra, WebKit and the PTY need none); the Rust core links with its plugin host on; there is no desktop voice UI and the Swift side never looks for a bundled CLI, so neither is added (the CLI in the bundle stays T37.32.2). The gap was signing: ci.yml builds with `CODE_SIGNING_ALLOWED=NO` and nothing packages the app.
+2. `.github/actions/macos-signing`: release.yml's Developer ID import moved into a composite action (one copy), with `required: false` falling back to ad-hoc for a manual run without the secrets.
+3. `.github/actions/desktop-macos`: Xcode 27, the Metal toolchain, the Rust pin, CoxFFI.xcframework and the arm64 check, shared by ci.yml's `desktop-macos` job and the new workflow.
+4. `scripts/desktop/dmg.sh` (`just desktop-dmg`): re-signs `Cox.app` inside-out with `COX_SIGN_IDENTITY` or ad-hoc, keeping the build's identifier, entitlements and flags; checks it (`codesign --verify --deep --strict`, Developer ID authority when signed); writes `Cox-<version>-<build>-debug-arm64.dmg` with an /Applications link, signed and verified.
+5. `.github/workflows/desktop-build.yml` (`workflow_dispatch` and `workflow_call`): build number = run number; artifact `desktop-macos-dmg`. release.yml's `desktop` job calls it with the tag's commit and `require-signing`, and `publish` uploads the DMG and its checksum with the CLI archives.
+6. Bundle id `io.github.pyrlyn.cox` in project.yml.
+Check: actionlint 1.7.12 on the three workflows and shellcheck 0.11.0 on `dmg.sh` add no finding; `dmg.sh` run ad-hoc on a locally built Debug `Cox.app` signs the nested debug dylibs, keeps `get-task-allow`, and writes a DMG `hdiutil verify` accepts; the PR's `desktop-macos` job passes through the shared action; after the merge, Actions -> desktop build produces a Developer ID-signed DMG whose app opens on another Mac after Open Anyway.
+Out of scope: Hardened Runtime, notarization, Sparkle, the bundled CLI, the app cask (T37.32.2).
 
 #### T37.33 Performance budget suite
 
@@ -1462,7 +1528,7 @@ Every card in this phase:
 
 #### T53.5 Freeze ABI `api = 1`
 
-Depends: T33.14, T33.18, T33.34, T33.40.1, and the creator's confirmation that the ABI is stable · Size: ~100 · Files: `docs/plugin-abi.v1.schema.json` (frozen copy), the compatibility test in `crates/cox-plugin-api`, `docs/design/plugins.md` §4
+Depends: T33.14.1, T33.14.2, T33.18, T33.34, T33.40.1, and the creator's confirmation that the ABI is stable · Size: ~100 · Files: `docs/plugin-abi.v1.schema.json` (frozen copy), the compatibility test in `crates/cox-plugin-api`, `docs/design/plugins.md` §4
 Goal: PL§12 falsifier 3 has been checked by the Jev plugin (T33.40.1) and the open ABI cards have landed, so `api = 1` is frozen: a committed copy of the v1 ABI schema and a test that the current `docs/plugin-abi.schema.json` only adds optional fields, exports and host functions to it (PL§4's minor-change rule); PL§4 records the freeze.
 Check: `mise exec -- cargo nextest run -p cox-plugin-api abi_v1_changes_are_additive_only abi_schema_drift`.
 
@@ -1512,7 +1578,7 @@ Rationale in §6 A123 (4). Design: `docs/design/v0.3-mcp-apps.md` option (a); (b
 
 Rationale in §6 A123 (5). Design: `docs/design/v0.3-cursor-cloud.md`; the local-CLI sibling is P35 (EA).
 
-**Blocked on the creator.** Every card depends on the creator's written go-ahead on the terms reading in A123 (5): the Acceptable Use Policy prohibits accessing the Service by automated or non-human means, by bot, script or otherwise (https://cursor.com/acceptable-use-policy, last updated 2026-08-11, checked 2026-09-29, paraphrased), which read literally covers any program that calls the API. The go-ahead is recorded as its own amendment (or as Cursor's written answer). No agent claims a P56 card before it.
+**Terms go-ahead given (creator, 2026-10-03, A123 (5)); local work only.** The go-ahead starts P56 without a real Cursor key or any network call in tests; T56.10 stays untouched until the creator supplies a key. It answers the terms reading in A123 (5): the Acceptable Use Policy prohibits accessing the Service by automated or non-human means, by bot, script or otherwise (https://cursor.com/acceptable-use-policy, last updated 2026-08-11, checked 2026-09-29, paraphrased), which read literally covers any program that calls the API. The go-ahead is recorded in A123.
 
 Every card in this phase:
 - stays within 200 LOC and 3 source files (manifests, generated schemas, snapshots, fixtures and the docs rows a card must add do not count);
@@ -1522,14 +1588,6 @@ Every card in this phase:
 - runs every string from Cursor (stream text, tool names, artifact names, errors) through `cox_sanitize::sanitize`;
 - makes no network call in tests (wiremock and hand-written fixtures only, D12).
 
-#### T56.1 `cox-cursor-cloud` crate: hand-written wire types
-
-Depends: the creator's terms go-ahead (A123 (5)) · Size: ~170 · Files: `crates/cox-cursor-cloud/src/lib.rs` (new), `crates/cox-cursor-cloud/src/wire.rs` (new); manifests `crates/cox-cursor-cloud/Cargo.toml`, the workspace `Cargo.toml`; fixtures `crates/cox-cursor-cloud/tests/fixtures/*.json`
-Goal: serde types for the endpoints cox uses, written from https://cursor.com/docs/cloud-agent/api/endpoints: create agent (`prompt`, `model`, `repos` with `url` and `startingRef`, `autoCreatePR` defaulting to false), a follow-up run, run status (unknown values kept as `Other(String)`), the stream events (`status`, `assistant`, `thinking`, `tool_call`, `interaction_update`, `heartbeat`, `result`, `error`, `done`, and `Unknown` for anything else), cancel and run usage (`inputTokens`, `outputTokens`, `cacheWriteTokens`, `cacheReadTokens`, `totalTokens`). The crate is its own under D1: the one place a socket to `api.cursor.com` is opened (T56.2), not a `Provider`, and not session assembly; it depends on `cox-protocol` and `cox-provider-http` only. Rows in AGENTS.md Layout and `docs/design/crates.md`; no new dependency.
-Check: `mise exec -- cargo nextest run -p cox-cursor-cloud create_agent_request_has_no_identity_fields stream_event_parses_every_documented_type unknown_stream_event_is_kept_as_unknown run_usage_parses_the_token_counts auto_create_pr_defaults_off`.
-Done when: the tests pass over hand-written fixtures.
-Out of scope: endpoints cox does not use (`/v1/me`, `/v1/repositories`, `/v1/sub-tokens`, archive, artifacts download).
-
 #### T56.2 Cloud Agents client: create, follow up, stream, cancel, usage
 
 Depends: T56.1 · Size: ~190 · Files: `crates/cox-cursor-cloud/src/client.rs` (new), `crates/cox-cursor-cloud/src/lib.rs`
@@ -1538,14 +1596,6 @@ Check: `mise exec -- cargo nextest run -p cox-cursor-cloud client_sends_the_key_
 Done when: the tests pass.
 Out of scope: webhooks (not in the v1 API); artifacts.
 
-#### T56.3 `[[cloud_agents]]` manifest capability and its grant line
-
-Depends: the creator's terms go-ahead (A123 (5)) · Size: ~150 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`; generated `docs/plugin.schema.json`
-Goal: `[[cloud_agents]]` entries with `name`, `backend` (a closed set: `"cursor"`), `key_env` (default `CURSOR_API_KEY`), optional `model` and `description`. There is no URL field: the host for a backend is fixed, so a plugin cannot point the key elsewhere. The grant line names the host `api.cursor.com`, the key env, that the prompt and the repository's GitHub URL are sent, and that Cursor clones the repository and pushes a branch on its servers, billed to the user's Cursor plan; a changed entry asks for the grant again, as every capability does (T33.6).
-Check: `mise exec -- cargo nextest run -p cox-plugin-api manifest_cloud_agent_backend_is_a_closed_set manifest_cloud_agent_has_no_url_field` and `-p cox-plugin grant_lists_cloud_agent_host_key_and_off_machine_code`, plus `plugin_schema_matches_committed_file`.
-Done when: the tests pass and the schema is regenerated.
-Out of scope: any backend other than Cursor.
-
 #### T56.4 `Engine` asks before code leaves the machine: `CloudAgent(<repo>)`
 
 Depends: the creator's terms go-ahead (A123 (5)) · Size: ~140 · Files: `crates/cox-permission/src/rules.rs`, `crates/cox-permission/src/policy.rs`, `crates/cox-permission/src/lib.rs`
@@ -1553,14 +1603,6 @@ Goal: a new permission subject `CloudAgent(<github owner>/<repo>)` in the rule g
 Check: `mise exec -- cargo nextest run -p cox-permission cloud_agent_asks_in_auto_and_bypass cloud_agent_is_denied_in_plan_mode cloud_agent_user_allow_rule_matches_one_repo cloud_agent_project_allow_is_reverted cloud_agent_approval_text_names_repo_ref_and_off_machine`.
 Done when: the tests pass; the rule grammar docs list the subject.
 Out of scope: any other remote-execution subject.
-
-#### T56.5 `cloud_runs` table: a run outlives the session that started it
-
-Depends: the creator's terms go-ahead (A123 (5)) · Size: ~120 · Files: `crates/cox-store/migrations/00000000000006_cloud_runs/up.sql` and `down.sql` (new), `crates/cox-store/src/models.rs`, `crates/cox-store/src/queries.rs`; generated `crates/cox-store/src/schema.rs`
-Goal: one row per run: session id, task id, backend, agent id, run id, repository, model, status, `usage_recorded`, created and updated times. Diesel models and typed queries (D9): insert, set status, list a session's non-terminal runs, and mark usage recorded exactly once (`UPDATE … WHERE usage_recorded = false` through the DSL, returning whether this call won).
-Check: `mise exec -- cargo nextest run -p cox-store cloud_run_round_trips cloud_runs_lists_only_non_terminal_runs mark_usage_recorded_wins_once`.
-Done when: the migration applies on a fresh and an existing database; the tests pass.
-Out of scope: storing stream text (the transcript goes through the archive as any task result does).
 
 #### T56.6 Host driver: a background task becomes a Cursor Cloud run
 
@@ -1717,75 +1759,6 @@ Check: every R10, DT§ and A-number reference resolves to an existing row or sec
 Depends: T58.1 · Size: ~150 · Files: `desktop/windows/Cox.sln` (new), `desktop/windows/Directory.Packages.props` (new), `desktop/windows/global.json` (new); project files per the list below
 Goal: mirror `desktop/macos/Packages` (DT§6): `App` (WinUI 3 entry, window, resources), `Cox.Core` (generated bindings, T58.1), `Cox.Model` (stores, the counterpart of CoxModel), `Cox.UI` (controls catalogue and views), `Cox.Transcript` (the transcript list), `Cox.Platform` (host bridge, notifications, packaging hooks) and `Cox.Tests`. `global.json` pins the .NET SDK (10.0 LTS, R10.2.6); central package versions in `Directory.Packages.props`; `Cox.Model` references no WinUI assembly so its tests run headless. A `desktop-windows` CI job builds the solution and runs `dotnet test`.
 Check: `dotnet build desktop/windows/Cox.sln -c Debug` and `dotnet test desktop/windows/Cox.Tests` in the Windows job; a test asserts `Cox.Model` has no reference to `Microsoft.WindowsAppSDK`.
-
-#### T58.4 Move the decisions still in CoxModel into `cox-app`
-
-Depends: — · Size: an audit (~40 lines in `docs/design/desktop-windows.md` or this card) plus one sub-card per move · Files: see the sub-cards
-Goal: CoxModel is ~5 000 lines of Swift (stores, settings fields, remote hosts, completion, markdown helpers). Anything there that decides rather than renders (validation, ordering, text built from state, settings field rules) would have to be written a second time in C#. List each such piece with its file, and card its move into `cox-app` (with an FFI forwarder, A90) as T58.4.n; the Swift store then calls the forwarder. Pure view state stays in each client.
-Check: the audit list is in the card; each T58.4.n has a `cox-app` test and the macOS package tests still pass (`swift test` in each package under `desktop/macos/Packages`).
-
-Audit: (2026-09-29; `desktop/macos/Packages/CoxModel`, 5 081 lines of source in 56 files; Swift paths below are under `desktop/macos/Packages/CoxModel/Sources/`, and in the sub-cards under `desktop/macos/Packages/` unless they start with `desktop/`). 28 pieces decide and move (T58.4.1–T58.4.28), 17 stay in each client, 10 more belong to M2/M3 and are not carded (A127 (2)). A move is a Rust card (the rule in `cox-app` with its test, plus the `cox-ffi` record fields in `types.rs` or a one-expression forwarder, A90) and a Swift card (the `CoxClient` value, the `CoxCore` conversion, the store); a Swift side that needs a fourth file is split into plumbing and switch. Each store keeps its public shape, so the app and CoxUI do not change, and the Swift tests of a moved rule move to its Rust test.
-
-Moves:
-1. `CoxClient/Inbox.swift` `HostNote.init(_:badge:)`: a notification's line (`tool subject`, the tool alone without a subject, the question, the error, the task label). → T58.4.1, T58.4.2
-2. `CoxModel/InboxStore.swift` `InboxRow.init`: status and wait words (`approval waiting` … `task failed`, `expired`), `agent · wait`, an expired item read-only. → T58.4.1, T58.4.2
-3. `CoxModel/McpLogins.swift` `SettingsStore.logins`: each login state's line and its Log in / Log out. → T58.4.1, T58.4.3
-4. `CoxModel/SidebarStore.swift` `sections`: "Needs you", "Running" (a running session lifted out of its project), then projects; a project with no match hidden and a folded one opened only while filtering; the section count. → T58.4.4, T58.4.5
-5. `SidebarStore.row(_:in:ages:)`: activity → status dot and words (`running`, `waiting for you`, `failed`, `done` after a turn), the project or the age, the agent first, a cost only above zero. → T58.4.4, T58.4.5
-6. `SidebarStore.matches`: what the filter matches (title and subtitle). → T58.4.4, T58.4.5
-7. `SidebarStore.swift` `SessionEntry.name`: `Untitled session` until the core titles it. → T58.4.4, T58.4.5
-8. `CoxModel/ModelName.swift` `ModelName.short`: the `Claude ` vendor prefix and ` (latest)` dropped, else the id (A111, A116). → T58.4.6, T58.4.14
-9. `CoxModel/ToolbarState.swift` `ToolbarState.init`: the context percent cut out of the core's `context_share` at ` of `, the ring's fill as the parts' shares summed and capped, the session cost. → T58.4.6, T58.4.15
-10. `CoxModel/ModelMenu.swift` `ModelMenu.init`: one section per tier in first-listed order, a model listed once across tiers, section titles, the efforts line. → T58.4.7, T58.4.12, T58.4.13
-11. `CoxModel/SettingsStore.swift` `SettingsGroup.init(key:)` and `allCases` order: a key's top-level table → its page. → T58.4.8, T58.4.10, T58.4.11
-12. `SettingsStore.title(of:)`: `base_url` → `Base url`, the label the search also matches (the search itself, over the core's title and the key, stays in each client). → T58.4.8, T58.4.10, T58.4.11
-13. `SettingsStore.providers`, `storeKey`: the provider sections from the keys; an empty key or an unknown provider refused. → T58.4.8, T58.4.10, T58.4.11
-14. `CoxModel/SettingsFields.swift` `tables(in:)`, `detail(of:)`: one box per config table, the rule lists left out, a `providers.<name>` box's provider, `Set in <project file>` or the schema's help. → T58.4.8, T58.4.10, T58.4.11
-15. `CoxModel/DroppedValues.swift` `dropped(in:)`: a dropped value's page and its `999 → 5`. → T58.4.8, T58.4.10, T58.4.11
-16. `SettingsFields.control(of:)`: slider only for a number bounded on both ends, more than 3 options a pop-up except `permissions.mode`, lists and open shapes as JSON, the fallbacks for a value of another type. → T58.4.9, T58.4.10, T58.4.11
-17. `SettingsFields.modelMenu`: `tiers.<tier>.model` as that tier's catalog models, an unlisted value kept first. → T58.4.9, T58.4.10, T58.4.11
-18. `SettingsFields.edit`: typed input by the key's kind (a slider's number rounded for an integer, text parsed as a number, else sent as text). → T58.4.9, T58.4.10, T58.4.11
-19. `CoxModel/ComposerStore.swift` `typedToken`, `caret`: which token at the caret asks for rows (`@` anywhere, `/` only as the first word, none inside a word, with a selection or in shell mode). → T58.4.16, T58.4.18, T58.4.19
-20. `ComposerStore.pick`, `append`, the mention pruning in `edit`: the insert spliced in for the token plus one space, the caret after it, the picked `@` files. → T58.4.16, T58.4.18, T58.4.19
-21. `ComposerStore.edit` (`!` enters shell mode), `canSend`, `draftIntent`, `submit`, `submitNow`: shell line, `/` command line or turn, queued while a turn runs, what the draft keeps after a send. → T58.4.17, T58.4.18, T58.4.19
-22. `CoxModel/ReviewDraft.swift` `SessionStore.sendReview`: queued behind a running turn unless `[desktop.review] send = "now"`. → T58.4.17, T58.4.19
-23. `CoxModel/InfoTabState.swift` `InfoTabState.init`: the rows and their order, `~` for the home directory, `detached`, a layer's key count with its file as a detail row. → T58.4.20, T58.4.21
-24. `CoxModel/ChangesTabState.swift` worktree facts: `detached`, `Base` only with both base and commit. → T58.4.20, T58.4.22
-25. `CoxModel/ReviewState.swift` `ReviewState.init`: files grouped by the turn that changed them last, oldest turn first. → T58.4.20, T58.4.22, T58.4.25
-26. `CoxModel/TaskRows.swift` `SessionStore.tasks`: a finished task with no exit code is a success (CoxTranscript's `TranscriptCard.swift` reads it the same way). → T58.4.23, T58.4.24, T58.4.25
-27. `CoxClient/DocMarkdown.swift` `StyledDoc.markdown`, `DocBlock.markdown`, `DocBlock.fence`, `Span.markdown`: a reply's doc as Markdown (headings, list markers and depth, quotes, tables, a fence longer than any backtick run, bold/italic/strike marks). → T58.4.26, T58.4.27, T58.4.28
-28. `CoxModel/SessionStore.swift` `BlockKind.replaceDoc`: a streamed reply's text re-rendered as Markdown on each `docTail`. → T58.4.27
-
-Stays in each client (view state, platform, localization, test doubles):
-- `SessionStore.apply`, `BlockKind.append`, `lastLines` (the tool tail's 5-line cut): the patch-consumer contract that mirrors `cox_app::coalesce::apply` and `patch::tail`; every client applies patches into its own list, and T58.5 replays the same fixtures to the same snapshot, which catches a drift.
-- `ComposerStore.recall`, `moveSelection`, `selectedRange`, `dismissCompletion`, `toggleThink`, `leaveShell`: key navigation and toggles over what the core returns (`history`, `complete`).
-- `ComposerStore.attach`, `read`: the file read and its media type named by the OS (`UTType`; Windows has its own); the core decides what reaches the model (T37.6).
-- `ComposerStore.model`'s `name · effort` join: two core values side by side in the chip.
-- `SidebarStore.folded`, `filter` text, `watch`, `refresh`, `ages`, `paletteItems`: view state, refresh cadence, relative dates localized per client; the core ranks the palette.
-- `SidebarStore.swift` `ProviderHealth`: a count with its unit, and the check's status mapped to a dot colour.
-- `CoxModel/ContextSplit.swift`: a part's kind → its colour role, an unknown kind left out.
-- `CoxModel/ContextTabState.swift` `ContextTabState`, `CostHistoryState`: a choice between two strings the core formatted, the total row last.
-- `ChangesTabState` checkpoint time and worktree size, `ChangesTabState.date`: localized time and bytes.
-- `ToolbarState`'s project from the cwd's folder before `cox.db` lists the session, and `usd` (`$%.2f`) for task rows: display fallback and number formatting.
-- `ReviewDraft.pick`, `save`: which line number `LineComment` documents (`new`, else `old` for a removed line), the typed text trimmed.
-- `CoxModel/Rewind.swift`: one intent per click with the core's own numbers (turn, hunk index, digest); the core rewinds and refuses.
-- `SectionRows` readers (`DesktopAppearance`, `DesktopTranscript`, `reviewSend`, `cacheHitScope`, `darkHighlight`, `darkHighlightScope`, `showsMenuBar`): typed reads of values Rust stored; their fallbacks apply only before the first load.
-- `CoxModel/AppearanceSettings.swift` `AppearanceEdit.key`, `value`: which config key a popover control writes, the config's public names.
-- `SettingValue.json`, `SettingsStore.readKeys`, `storedKeys`, failures: JSON encoding for the FFI, the platform keychain through `SecretStore`, error text.
-- Fixture clients in `CoxClient` (`FixtureSession.complete`, `reviewMessage`, `Palette.swift` `SessionClient.palette`, `FixtureSettingsClient`'s rule order, `FixtureBestOf.pick`, `FixtureInbox`): test doubles, "enough to drive a view"; the C# fixture client (T58.5) has its own.
-- `CoxClient/TimelineDecoding.swift`: serde JSON of the fixtures.
-
-M2/M3, not carded (A127 (2) keeps P58 to M1; each moves when a Windows M2/M3 is planned):
-- `CoxModel/TerminalTabs.swift` `TerminalTab.title`, `closeTerminal`'s next selection (T51.6).
-- `CoxModel/BrowserBarState.swift`: the shown address and the lock (T51.10).
-- `CoxModel/MenuBarState.swift`: which inbox items the extra lists (T51.14).
-- `CoxModel/AskCox.swift`: open, then send (T51.17).
-- `CoxModel/AppStore.swift`: one store per session across windows (T51.11; a window registry is per client anyway).
-- `SidebarStore.listed` for Spotlight (T51.16); `Rewind.revert(hunk:in:)` (T51.21).
-- `CoxModel/RemoteHosts.swift`: alias trim, `desktop.remote_hosts` grows on connect, `host:` section ids, rows read-only while disconnected (T52.21).
-- `CoxModel/BestOfStore.swift` `prunes`, `pending`; `CoxClient/BestOf.swift` `Candidate.label` and `CandidateView`'s sums, which repeat `cox_app::Candidate::label` (T52.11).
-- `CoxModel/AgentPicker.swift` fallback to cox, `[AgentChoice].label(of:)`, `ToolbarState`'s `· ACP` chip and `—` cost (T52.7, mockup 27).
-- `SessionStore.pluginViews` and the slot keeping (T52.17).
 
 #### T58.5 C# client contract, fixture client and the session store
 
@@ -2418,17 +2391,20 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A120 T37.45.1–T37.45.5 — by the creator (2026-09-28, "do what is best"): controls the mockups show and the design doc already names but the app lacks — settings filter, provider keys and model pop-ups, permission rules editor and session grants, MCP status and log, the onboarding drop zone — become cards; the settings sidebar stays the floating glass one of DESIGN.md §6.5, not the mockups' flush 220 pt one; the M2/M3 mockups (24–27) stay out of scope. Why: the design pass (T37.44.5) found them missing, and they are features, not layout.
 - A121 §3 (new P51: T51.1–T51.21, P52: T52.1–T52.22, P53: T53.1–T53.9), `roadmap.md`, by the creator (2026-09-28): every `roadmap.md` item moves into the plan as described cards — desktop M2 and the dark glass theme as P51, desktop M3 as P52 (the ACP host no longer waits for a blocked card, A67 §11 Q8), plugin install from git or a URL and the publishing of `cox-plugin-api`, `cox-plugin-sdk` and the Go module as P53. The approved looks are mockups 24-terminal-pane-m2, 25-browser-preview-m2, 26-menu-bar-extra-m2 and 27-external-agents-acp-m3 in `desktop/design/mockups/mockups.html`, which T37.44.11 and A120 left out of P37. One agent implements the cards serially without building or running tests (the creator's instruction); a later verification pass runs each card's Check, builds and tests, and only then does the card merge and move to `done.md`. Decisions taken with them: business logic stays in Rust (`cox-app`), `cox-ffi` stays a one-expression forwarder (D11, A90), Swift never spawns a process; the terminal pane runs the user's login shell in the session cwd under the session's own `cox_sandbox::sandbox::Policy`; browser page text reaching the model is untrusted and passes `cox_sanitize::sanitize` and the archive; remote SSH sessions never send API keys or forward the ssh agent; install from a URL needs a pinned sha256 and from git a named ref, and both end in the existing local-directory install and per-digest grant; publishing stops at a dry run — `cargo publish` and tag pushes are the creator's. New dependencies: SwiftTerm (research.md §9.5.2) and KeyboardShortcuts (§9.5.7) in Swift, `portable-pty` promoted from a dev-dependency to a `cox-app` dependency; each gets its §1.1 and `toolchain.md` rows in the implementing commit. Plugin install from git or a URL reverses PL§12's "out of scope" line for those two sources only (T53.1). Why: the creator approved these items in `roadmap.md` and asked to have all of them planned; `roadmap.md` is left with no items.
 - A122 T22.10 — by the creator (2026-09-28): a project config may only tighten `permissions.allow`/`ask`/`deny`: it can add `deny` and `ask` rules, never remove one, and its `allow` is reverted with a notice; the same holds for the permissions imported from a repository's `.claude/settings.json` (T22.11, creator 2026-09-28). Why: T37.45.3 found that a project config replaced the lists wholesale, so a cloned repository could drop the default `~/.ssh` deny or allow `Bash` without a prompt.
-- A123 §0 (the v0.2+ "voice" entry), §1.1 (new `cox-voice` and `cox-cursor-cloud` rows), §3 (new P54: T54.1–T54.7, P55: T55.1, P56: T56.1–T56.10) — the P49 gate verdicts, by the creator (2026-09-29). (1) **T49.1 remote control: defer.** Why: `docs/design/v0.3-remote-control.md` — no `agent-client-protocol` release ships the HTTP/WebSocket transport, and hand-rolling one the spec may change is falsifier 1. Effect: no card; reopens when such a release ships, with candidate A (loopback only, opt-in, per-run token, the user's own tunnel); never a hosted relay. (2) **T49.2 Windows sandbox: defer.** Why: `docs/design/v0.3-windows-sandbox.md` — there is no Windows release target, so a backend would ship to nobody (falsifier 2). Effect: no card; a Windows release target comes first as its own decision; there is never a token-only backend that relaxes D7's forced prompts; D7 is unchanged. (3) **T49.3 voice: build** option 2 of `docs/design/v0.3-voice.md` — local `whisper-rs` in its own crate `cox-voice`, push-to-talk with auto-submit in the TUI. Why: the creator wants the push-to-talk gap closed; local transcription needs no paid endpoint, no key (D3), no audio leaving the machine and no ledger unit (it is not a request and costs nothing). Effect: P54. New dependencies (crates.io API, checked 2026-09-29): `whisper-rs` 0.16.0 (Unlicense, released 2026-03-12; https://codeberg.org/tazz4843/whisper-rs last commit 2026-03-14, not archived; already pinned by `apps/runa` and in the workspace `rust.md`) with `whisper-rs-sys` 0.15.0 (Unlicense) building whisper.cpp (MIT) through cmake; `cpal` 0.18.2 (Apache-2.0, released 2026-08-16; https://github.com/RustAudio/cpal last commit 2026-09-20; new to `rust.md`); `rubato` 5.0.0 (MIT OR Apache-2.0, released 2026-08-10; in `rust.md`); program `cmake` through mise. `cox-voice` stays behind the `voice` cargo feature of `crates/cox`, off by default; whether release builds turn it on is left to the creator. Models (ggml, MIT, https://huggingface.co/ggerganov/whisper.cpp, 78–488 MB for `tiny.en`–`small.en`, checked 2026-09-29) are pinned by a `scripts/vendor` script (A48) and fetched only by `cox voice model download` after the user confirms, SHA-256 verified; never silently. A project config cannot set `voice.*`. The §0 "voice" entry stays and points at P54. (4) **T49.4 MCP Apps: build (a) only**, as the single card T55.1: cox ignores a tool's `ui://` resource and keeps its text and structured result, test-backed. Why: `docs/design/v0.3-mcp-apps.md` — (a) is today's behaviour and adds no listener, dependency or rmcp bump; no existing MCP phase fits (P47 is elicitation), so it is its own phase. Effect: P55; (b) (browser page over a loopback listener) is deferred and returns as its own gate if its falsifier 1 fires; (c) waits for ACP to carry App resources. (5) **T49.5 Cursor Cloud Agents: build** as `docs/design/v0.3-cursor-cloud.md` describes — a host-driven plugin capability `[[cloud_agents]]`, the off-machine step an `Engine` approval (`CloudAgent(<repo>)`), and $0 `billed_externally` usage rows carrying Cursor-reported tokens. Terms, from the primary sources (checked 2026-09-29; paraphrased with section numbers): the Terms of Service (https://cursor.com/terms-of-service, last updated 2026-09-03) define the Service to include Anysphere's APIs and Documentation, grant a limited right to access and use it (§1.1), forbid reproducing, modifying, translating or making derivative works of it (§1.5(ii)), and grant no implied licences (§5.1); they say nothing about third-party API clients. The Acceptable Use Policy (https://cursor.com/acceptable-use-policy, last updated 2026-08-11), which applies however the Service is accessed, lists among prohibited uses "Accessing the Service through automated or non-human means" (by bot, script or otherwise), and copying or distributing the Service. The API page (https://cursor.com/docs/cloud-agent/api/endpoints) documents API keys for users and service accounts, marks v1 as a public beta that may change before general availability, accepts GitHub repositories only, and returns per-run `inputTokens`/`outputTokens`/`cacheWriteTokens`/`cacheReadTokens`/`totalTokens` with no cost and no model. The OpenAPI file (https://cursor.com/docs-static/cloud-agents-openapi.yaml: HTTP 200, 59,113 bytes, SHA-256 `fef3a8b7272a8b1d0eb8abbc12a4f8a9745f3d56531f86566e60d926cc0dd35f`, OpenAPI 3.0.3, `info.version` 1.0.0) carries no `license`, no `termsOfService` and no copyright statement. Reading: (i) **vendoring the spec is not allowed** — no licence, §5.1 grants none by implication, and §1.5(ii) and the AUP forbid reproducing or distributing the Documentation; so A40 step (2) and the gate doc's `scripts/vendor` step are dropped, the wire types are hand-written from the public docs (A40 step 3), and nothing is generated from or copied out of the OpenAPI file. (ii) **Whether a third-party client may call the API is unresolved**: the API exists for programs, but the AUP line, read literally, forbids any program's access, and no document names third-party clients. This is new since the gate doc (T49.5 cited only the silent ToS). Effect: P56 (T56.1–T56.10), every card blocked on the creator's written go-ahead on (ii), recorded as its own amendment (or Cursor's written answer, e.g. to the spec's contact address); no request carries the user's name, email or git identity (bodies carry the prompt, the credential-stripped GitHub URL, the ref and the model; `/v1/me` is never called); `cox-cursor-cloud` adds no dependency (it builds on `cox-provider-http`). Deferred items (1), (2) and (4b) stay recorded in their gate docs and here; A80 sends nothing back to `roadmap.md` or `ideas.md`, so neither changes.
+- A123 §0 (the v0.2+ "voice" entry), §1.1 (new `cox-voice` and `cox-cursor-cloud` rows), §3 (new P54: T54.1–T54.7, P55: T55.1, P56: T56.1–T56.10) — the P49 gate verdicts, by the creator (2026-09-29). (1) **T49.1 remote control: defer.** Why: `docs/design/v0.3-remote-control.md` — no `agent-client-protocol` release ships the HTTP/WebSocket transport, and hand-rolling one the spec may change is falsifier 1. Effect: no card; reopens when such a release ships, with candidate A (loopback only, opt-in, per-run token, the user's own tunnel); never a hosted relay. (2) **T49.2 Windows sandbox: defer.** Why: `docs/design/v0.3-windows-sandbox.md` — there is no Windows release target, so a backend would ship to nobody (falsifier 2). Effect: no card; a Windows release target comes first as its own decision; there is never a token-only backend that relaxes D7's forced prompts; D7 is unchanged. (3) **T49.3 voice: build** option 2 of `docs/design/v0.3-voice.md` — local `whisper-rs` in its own crate `cox-voice`, push-to-talk with auto-submit in the TUI. Why: the creator wants the push-to-talk gap closed; local transcription needs no paid endpoint, no key (D3), no audio leaving the machine and no ledger unit (it is not a request and costs nothing). Effect: P54. New dependencies (crates.io API, checked 2026-09-29): `whisper-rs` 0.16.0 (Unlicense, released 2026-03-12; https://codeberg.org/tazz4843/whisper-rs last commit 2026-03-14, not archived; already pinned by `apps/runa` and in the workspace `rust.md`) with `whisper-rs-sys` 0.15.0 (Unlicense) building whisper.cpp (MIT) through cmake; `cpal` 0.18.2 (Apache-2.0, released 2026-08-16; https://github.com/RustAudio/cpal last commit 2026-09-20; new to `rust.md`); `rubato` 5.0.0 (MIT OR Apache-2.0, released 2026-08-10; in `rust.md`); program `cmake` through mise. `cox-voice` stays behind the `voice` cargo feature of `crates/cox`, off by default; whether release builds turn it on is left to the creator. Models (ggml, MIT, https://huggingface.co/ggerganov/whisper.cpp, 78–488 MB for `tiny.en`–`small.en`, checked 2026-09-29) are pinned by a `scripts/vendor` script (A48) and fetched only by `cox voice model download` after the user confirms, SHA-256 verified; never silently. A project config cannot set `voice.*`. The §0 "voice" entry stays and points at P54. (4) **T49.4 MCP Apps: build (a) only**, as the single card T55.1: cox ignores a tool's `ui://` resource and keeps its text and structured result, test-backed. Why: `docs/design/v0.3-mcp-apps.md` — (a) is today's behaviour and adds no listener, dependency or rmcp bump; no existing MCP phase fits (P47 is elicitation), so it is its own phase. Effect: P55; (b) (browser page over a loopback listener) is deferred and returns as its own gate if its falsifier 1 fires; (c) waits for ACP to carry App resources. (5) **T49.5 Cursor Cloud Agents: build** as `docs/design/v0.3-cursor-cloud.md` describes — a host-driven plugin capability `[[cloud_agents]]`, the off-machine step an `Engine` approval (`CloudAgent(<repo>)`), and $0 `billed_externally` usage rows carrying Cursor-reported tokens. Terms, from the primary sources (checked 2026-09-29; paraphrased with section numbers): the Terms of Service (https://cursor.com/terms-of-service, last updated 2026-09-03) define the Service to include Anysphere's APIs and Documentation, grant a limited right to access and use it (§1.1), forbid reproducing, modifying, translating or making derivative works of it (§1.5(ii)), and grant no implied licences (§5.1); they say nothing about third-party API clients. The Acceptable Use Policy (https://cursor.com/acceptable-use-policy, last updated 2026-08-11), which applies however the Service is accessed, lists among prohibited uses "Accessing the Service through automated or non-human means" (by bot, script or otherwise), and copying or distributing the Service. The API page (https://cursor.com/docs/cloud-agent/api/endpoints) documents API keys for users and service accounts, marks v1 as a public beta that may change before general availability, accepts GitHub repositories only, and returns per-run `inputTokens`/`outputTokens`/`cacheWriteTokens`/`cacheReadTokens`/`totalTokens` with no cost and no model. The OpenAPI file (https://cursor.com/docs-static/cloud-agents-openapi.yaml: HTTP 200, 59,113 bytes, SHA-256 `fef3a8b7272a8b1d0eb8abbc12a4f8a9745f3d56531f86566e60d926cc0dd35f`, OpenAPI 3.0.3, `info.version` 1.0.0) carries no `license`, no `termsOfService` and no copyright statement. Reading: (i) **vendoring the spec is not allowed** — no licence, §5.1 grants none by implication, and §1.5(ii) and the AUP forbid reproducing or distributing the Documentation; so A40 step (2) and the gate doc's `scripts/vendor` step are dropped, the wire types are hand-written from the public docs (A40 step 3), and nothing is generated from or copied out of the OpenAPI file. (ii) **Whether a third-party client may call the API is unresolved**: the API exists for programs, but the AUP line, read literally, forbids any program's access, and no document names third-party clients. This is new since the gate doc (T49.5 cited only the silent ToS). Effect: P56 (T56.1–T56.10), every card blocked on the creator's written go-ahead on (ii), recorded as its own amendment (or Cursor's written answer, e.g. to the spec's contact address); no request carries the user's name, email or git identity (bodies carry the prompt, the credential-stripped GitHub URL, the ref and the model; `/v1/me` is never called); `cox-cursor-cloud` adds no dependency (it builds on `cox-provider-http`). Deferred items (1), (2) and (4b) stay recorded in their gate docs and here; A80 sends nothing back to `roadmap.md` or `ideas.md`, so neither changes. Update (creator, 2026-10-03): the terms go-ahead on (ii) is given, so P56 starts; local work only, with no real Cursor key and no network call in tests, and T56.10 stays untouched until the creator supplies a key.
 - A124 T52.1, P52 — by the creator (2026-09-29), approving DT§3.3.1 as written plus two decisions. (1) An external ACP agent always gets network inside its sandbox, whatever `[sandbox] network` says; file limits stay, and an `[external_agents.<name>]` entry may add writable directories for the agent's own state, which a project config may not set. Why: none of the agents can reach its API otherwise. (2) Claude runs as `claude-agent-acp --hide-claude-auth` with `ANTHROPIC_API_KEY` only and is labelled "Claude Agent", never "Claude Code" and never a claude.ai login. Why: Anthropic's terms and branding rules for third-party clients (`research.md` §9.6). Effect: T52.2's schema gains the writable-directory list and its project-config guard; mockup 27 and the P52 goal say "Claude Agent". No §0 decision changes.
 - A125 T37.44.3 — by the creator (2026-09-29), replacing A118: the Figma file uses stand-in fonts (Inter for SF Pro, Roboto Mono for SF Mono); SF Pro and SF Mono stay in the HTML mockups, CoxUI and DESIGN.md. Why: with both fonts installed locally and Figma and `figma_agent` restarted, five `use_figma` probes found SF Mono absent and SF Pro listed but flagged `hasMissingFont` (115 of 135 text layers on screen 28 drew nothing); shared fonts need an Organization or Enterprise plan (https://help.figma.com/hc/en-us/articles/360039956774, checked 2026-09-29), and the account has Starter and Pro teams only. Effect: T37.44.3 is rewritten; metric comparisons (T37.44.2, T37.44.11) use the HTML renders, not Figma.
 - A126 T37.44.11 follow-ups — by the creator (2026-09-29): (1) the review screen stays as DT§5.4 has it (inspector kept); mockup 08 changes, not the app (T37.44.12). (2) The command palette of mockup 12 and ⌘K, ⌘N, ⌘⇧R are built (T37.44.13). (3) New session windows open at 1440×900, clamped to the screen (T37.44.14). (4) The approval notification has Allow once, Deny and Open as in mockup 23; DT§5.6 changes (T37.44.15). (5) An external ACP agent's question waits 15 minutes (`ASK_WAIT`, T52.5) and is then cancelled. Also carded from the verification passes: the shared walker skips `.git/` (T37.44.16) and durations format per locale (T37.44.17). Why: the running app was compared with the mockups end to end (T37.44.11), and these were the differences only the creator could decide or that were bugs outside that card.
 - A128 A127 open questions 2, 4, 5, 6 — by the creator (2026-09-29). (1) **Shell on Windows**: Git Bash when present, else PowerShell, for `bash`, `!` and hooks (T57.2). (2) **process-wrap 10.0.1** is approved as the one kill path for process trees (T57.5). (3) **D7 on Windows** forces only the less strict policy: `on-failure` becomes `on-request`; `untrusted` and `never` (stricter; `never` turns every `Ask` into `Deny`) stay as configured (T57.3). (4) **Windows 10 and later, x64 and ARM64** for the desktop and the release (Mica on Windows 11, the solid fallback on 10; T57.12, T58.10). Why: the P57/P58 cards waited on these answers. Effect: T57.2, T57.3, T57.5 and T57.12 lose their creator dependency; A127 questions 1, 3 and 7 stay open.
 - A130 P57, P58 — by the creator (2026-09-29): Windows builds and tests run on a Windows host by an agent started on that machine, not on the macOS host; the CI `windows` job stays off (`if: false`) until that agent has built and tested the work, and is enabled after. The macOS host takes no P57/P58 card except the T58.4.n moves (they change only `cox-app` and the Swift client and are checked on macOS); every other P57/P58 card, including writing its code, is the Windows-host agent's (creator, 2026-09-29). `just windows-check` (cargo-xwin) stays for that agent's convenience. Why: cross-checks cannot run the code, and CI should not be the first place Windows code runs. Effect: T57.1 and T57.7 go back to `todo` at 90% with a Remaining line.
 - A131 §3 P33 (new T33.45), by the creator (2026-10-01): the plugin API is designed in three parts — shared (terminal and desktop), terminal-only and desktop-only — with a per-plugin surface declaration, a defined behaviour for a call to an unavailable surface and versioning under PL§4, then documented (English, `docs/ru`, `docs/uk`) and shown by a Rust example using all three. Why: plugins were designed for the terminal; the desktop app draws the shared widget slots but the API names no surface. No §0 decision changes.
+- A132 §3 P37 (new T37.46–T37.49), by the creator (2026-10-02): the desktop app is synced with the latest Figma file (`KA9a0R7n6P0QbwDn92e167`, frames 01, 02, 14, 22). UI the app lacked is built in CoxUI (`AppIcon`, `WelcomeHero`, `TurnGutter`, `RewindMenu`) and existing UI is updated (`PromptActions` gets labelled buttons); data no core call returns yet is mocked behind a protocol with a `// MOCK:` implementation (`WelcomeService`, `RewindPreviewService`), and each mocked or unwired feature gets one card that replaces the mock, done one at a time. Why: the creator's Figma sync rule. No §0 decision changes.
 - A129 T58.4.4, T58.4.6, T58.4.14, T58.1, T58.8, T58.28, T37.44, T52.17, T51.22 follow-ups — by the creator (2026-09-29). (1) **Sidebar filter (T58.4.4/T58.4.5)**: the filter moves to Rust; matching the localized `age` part is dropped; diacritic folding is kept only if a crate already in the workspace provides it (no new dependency), otherwise the filter stays case-insensitive only. (2) **Short model names (T58.4.6/T58.4.14)**: the core adds a separate `short_name` field; `Status.model_name` and `ModelChoice.display_name` keep their existing meaning, so the TUI and ACP do not change. (3) **Patch application and the tool tail cut** stay mirrored in each client, checked by fixture replay, not lifted into the protocol. (4) **Windows M2/M3** pieces (terminal, browser, tray, ACP, best-of-N, plugin panels) stay uncarded until a Windows M2/M3 is planned; the `ideas.md` line already covers them. (5) **Packaging (T58.28)**: packaged with external location (a sparse package) for actionable-notification identity, installed by cox's own installer, not full MSIX virtualization — answers A127 open question 3. (6) **Accent colour (T58.8)**: the cox token accent, as on macOS; a "follow the system accent" setting may come later — answers A127 open question 7. (7) **Bindings way out (T58.1)**: do not move `cox-ffi` back to uniffi 0.31; keep waiting for upstream (PR #176 adds uniffi 0.32); if the gate is not met by its review date, carry a fork under `forks/` with #176 applied — answers A127 open question 1. (8) New card **T37.44.18** "Terminal well token is opaque dark": `surface.terminal` becomes an opaque dark value matching mockup 24 (`#15161a`) in both appearances, with a High Contrast value as the token pipeline requires. (9) New card **T37.44.19** "Mockup 24 keeps the composer": the composer stays above the terminal pane; mockup 24 changes to match. (10) New card **T52.23** "Desktop draws plugin `tool:`/`item:` renderers", split for size into **T52.23.1** (Rust: `cox-app` render path, a `Block` field, `cox-ffi` types) and **T52.23.2** (Swift: CoxModel and the CoxUI tool card); T52.17's renderer-widgets-inside-tool-cards part moves here, so T52.17 closes on its panel, status-segment, overlay and command parts. (11) New card **T51.23** "Panes draw from `glass.fill` and `glass.border`": CoxUI's pane fill and rim move off `surface.*`/`separator` onto the T51.1 glass tokens, and the specular sweep's white literal (`Specular.swift`, `TranscriptView.swift`) gets a token in the same change; light and dark snapshots are re-recorded on purpose. Why: the creator's decisions on the CoxModel audit's open items and the design follow-ups the verification passes and A127/A128 left open. Effect: T58.4.4, T58.4.6, T58.4.14, T58.1, T58.8 and T58.28 are rewritten; T52.17's card gains one sentence; T37.44.18, T37.44.19, T52.23.1, T52.23.2 and T51.23 are new cards; no other card or status changes.
 - A127 §1.1 (planned `cox-ffi` `cdylib`, planned `desktop/windows/` row, the "Planned by A127" note), §3 (new P57: T57.1–T57.13, P58: T58.1–T58.30) — a Windows build of the core and a Windows desktop client, by the creator (2026-09-29). (1) **UI stack: WinUI 3 + C# over the in-process Rust core through `cox-ffi` (UniFFI).** C# bindings are generated by uniffi-bindgen-cs (NordSecurity). All logic stays in Rust (`cox-app`), as in the Swift client (DT goal 1: no logic re-implemented in the UI). (2) **Scope: M1 parity only**, the DT§3.1 feature set. M2 and M3 (terminal pane, browser pane, pop-out windows, tray and hotkey, ACP host, best-of-N, plugin panels) are not in these phases and not in `roadmap.md`; `ideas.md` holds them as one line. (3) **Sandbox: as D7 says.** On Windows there is no sandbox, a loud warning, and `on-request` forced; the Windows sandbox stays deferred (A123 (2), `docs/design/v0.3-windows-sandbox.md`); the UI shows the warning (T58.25). This supersedes DT§1 "Non-goals (v1): Windows/Linux GUI" for Windows (Linux GUI stays a non-goal); `docs/design/desktop.md` §1 carries a pointer. It is also the "Windows release target first, as its own decision" that A123 (2) asked for: T57.12 adds the target, the release stays the creator's step. Facts behind the cards, checked 2026-09-29 (`research.md` §10, ledger #41–#44): uniffi-bindgen-cs's latest release `v0.11.0+v0.31.0` is on uniffi 0.31, cox-ffi pins 0.32.2, the 0.32 upgrade is open PR #176 and async callback interfaces are broken (issue #165), so T58.1 is a gate like T33.43; the current Windows App SDK is 2.5.1 (the 1.8 line's servicing ended 2026-09-24); .NET 10 is the LTS; D7's forced `on-request` is only a doc comment today (T57.3); keyring 4.2.0 and portable-pty 0.9.0 already have Windows backends; `nix` and process groups are the blockers. D1 names one macOS app linking `cox-ffi` as a static library; a C# app loads it as a DLL, so T58.1 adds `cdylib` and T58.2 proposes D1's new wording. Open questions for the creator: (1) **Bindings way out** if T58.1's gate is not met by 2026-12-31: wait, move `cox-ffi` to uniffi 0.31 (a version change), or carry a fork under `forks/`. (2) **Shell on Windows** for `bash`, `!` and hooks (T57.2): Git Bash else PowerShell (Claude Code), `pwsh` → Windows PowerShell → `cmd` (Codex), or Git Bash required. (3) **Packaging** (T58.28): MSIX with virtualization off, packaged with external location, or unpackaged self-contained. (4) **Minimum Windows version and architectures**: Windows 10 or 11 only (Mica needs Windows 11, with a solid fallback), x64 only or also ARM64 (cargo-dist's Windows signing covers x64 only). (5) **process-wrap 10.0.1** as the one kill path for process trees (T57.5; not in `rust.md`; alternatives win32job or raw `windows-sys`). (6) **Which policies the D7 rule forces**: only `on-failure` becomes `on-request`, or also `untrusted` and `never` (T57.3 keeps the stricter two until answered). (7) **Accent colour**: the cox token accent, or the user's Windows accent (T58.8). Why: the creator wants the desktop client on Windows with the same core and no second implementation of its logic. Effect: P57 and P58; no existing card changes; P58's feature cards wait on T58.1 and on the creator's approval of T58.9's mockups.
 - A131 §3 P7 (new T7.8; numbered A67 on its branch, renumbered on merge because main's A67 is P37), by the creator. Why: T7.1 landed the instruction-chain loader but left wiring it into `context::assemble` for later (its done.md "Not done" line), and no later card picked it up, so `system[2]` is still a one-line stub and no surface sends `AGENTS.md`/`CLAUDE.md` to the model (§4 item 3). Effect: one card; the surface loads the chain and hands the text to `cox-core` (D2); the stub stays only for a workspace with no instruction file, so its prefix bytes do not change. The card touches more than three source files because the ACP factory builds its session without `open`, and the e2e needs the scripted provider to match on system blocks. No decision changes.
 - A132 §3 (new P59: T59.1–T59.10) — Empryo-derived improvements, from a study of proxysoul/Empryo at `669ff91` (2026-10-02). Idea-only, clean-room: Empryo is BSL 1.1 (commercial, embedded and hosted use not granted; Change Date 2030-03-15), no code copied, and cards cite its files for the idea only. Why: deterministic compaction state, output folding, post-edit diagnostics and a graph-ranked map are the parts that port to Rust and have a falsifiable bench or test. Effect: ten new cards in a new phase; no existing card, default or status changes; the study ideas that do not fit cox or already exist in it are listed with a one-line reason in P59.
+- A134 §3 P33 (T33.45 step 1; build cards T33.45.1–T33.45.10 build cards T33.45.1–T33.45.10), proposed by Claude Code / opus-5.5 under T33.45 and approved by the creator (2026-10-03); the cards are in §3 P33 and the task table, and T33.45 stays open until they land. Design: `docs/design/plugins.md` §15. Decisions: (1) **Surfaces.** `SessionSpec.surface` maps to a plugin `Surface`: `tui` and `plain` → `terminal`, `app` (local or over `cox app-server`) → `desktop`, `headless`, `acp`. (2) **Shared API** = `api = 1` minus keys, plus `InitIn.surface` and `Span.link` (OSC 8 in the terminal, a click-to-open link in the app). The 24-cell segment budget, the drop-first order and the 8-row panel are shared host layout, not terminal-only: `cox-app` already applies them (`SEGMENT_COLS`, `PANEL_ROWS`). (3) **Terminal-only API** = leader keys (`[capabilities.terminal] keys`; `ui.keys` stays an alias under `api = 1`); `cox:tui/v1` is reserved with no function yet. (4) **Desktop-only API** = an inspector tab, toolbar items, palette actions (both run a declared command through `cox_command`), actionable notifications (`cox_desktop_notify` in `cox:desktop/v1`) and package images in widgets; no sidebar section (a plugin lives in one session, the sidebar spans the window), no menu-bar items, never plugin UI code. (5) **Declaring**: `surfaces = [...]`, default every surface; `[capabilities.terminal]`, `[capabilities.desktop]`; new grant lines `terminal.keys`, `desktop.inspector|toolbar|palette|notify`; a stored `ui.keys` reads as `terminal.keys`; one grant covers both surfaces. (6) **Unavailable surface**: not loaded with a `Notice(Info)`; the other surface's grant left out of `granted`; its `InitOut` entries dropped with one `Notice(Info)`; a surface host function answers `AbiError::NotOnThisSurface`, checked before the grant; values degrade (image → `alt`, link → text). (7) **Versioning**: the ABI parts stay `api = 1`; the manifest denies unknown keys, so a cox older than this refuses a manifest using the new keys and skips the plugin (fail open). Why: the creator's A131. No §0 decision changes. The creator confirmed (2026-10-03): `plain` is `terminal`; a plugin skipped for its surface gets a `Notice(Info)`; an older cox skips a manifest with the new keys rather than relaxing the unknown-key rule. The creator did **not** confirm leaving out a sidebar section in (4): that stays an open question for the creator, and no card below depends on it. Cards (≤ 200 LOC and ≤ 3 files each; together they cover T33.45's original Check): T33.45.1–T33.45.10 in §3 P33.
+- A135 §3 P37 (new T37.32.3), T37.32.2, `desktop/macos/project.yml` — by the creator (2026-10-03): the first macOS app build on CI is a Debug build with every macOS feature, not a release build; it runs by hand and with every release; the bundle id is `io.github.pyrlyn.cox` (the repository moved to pyrlyn). Why: a build to download and try before T37.32.2's notarized release. Effect: T37.32.3; T37.32.2 keeps Hardened Runtime, notarization, Sparkle, the bundled CLI and the cask, and reuses the signing action and `dmg.sh`. No decision in §0 changes; no new dependency.
 
 ## 7. Risk register
 
@@ -2443,7 +2419,6 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 | R7 | Bash classifier misses a destructive command | a destructive command runs without asking | classifier is an allowlist for `ReadOnly` (unknown → `Exec` → ask); sandbox is the second guard; fuzz the parser | T3.7, T12.4 |
 | R8 | Task size limits force half-finished features | many §6 amendments | split by design at planning time; a phase gate reviews before the next phase starts | §2 |
 | R9 | Third-party prices and thresholds in research were unverifiable | ledger cost wrong | `prices.toml` verified from official pages before the ledger goes live; doctor warns when stale | T1.7 |
-
 
 ---
 

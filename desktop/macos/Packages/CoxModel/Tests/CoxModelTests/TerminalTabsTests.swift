@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A session's terminal tabs (T51.6): `+` opens another shell of the same session, closing the
 // session closes every handle, a busy tab is what the window asks about, and the tab's title.
 

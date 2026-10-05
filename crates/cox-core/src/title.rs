@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Session titles (A113, DT G6): after a top-level session's first turn,
 //! when `[session] auto_title` is on, one `title` job names the session
 //! from the first prompt and `Event::TitleSet` carries the name to every

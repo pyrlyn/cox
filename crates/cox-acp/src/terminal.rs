@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The ACP client's terminals (T35.11, EA§4): the commands an external agent
 //! asks cox to run with `terminal/create`, and their output, exit and kill.
 //! Separate from `client.rs`, which judges each command and routes the

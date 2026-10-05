@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // T37.24's Check: a `SessionComposer` in a window, driven by real key events — type `@`, pick a
 // file from the rows with ↓ and ⏎, type the rest, send with ⏎ — and the intent reaches the
 // fixture client, which answers the completion without Rust. T37.24.6's: ↑ in the empty composer

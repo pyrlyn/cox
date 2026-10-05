@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Review's state (T37.28.2): the core's turns (the grouping itself is `cox_app::changes`'s
 // test, T58.4.20) and the open file's diff read through SessionStore from the fixture session.
 

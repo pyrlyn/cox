@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // T37.22.5: Review's pane from CoxModel's `ReviewState` and the store's draft — a turn's files
 // under `Turn n`, the open diff's hunks, and each comment anchored at `path:line`, the open one
 // included.

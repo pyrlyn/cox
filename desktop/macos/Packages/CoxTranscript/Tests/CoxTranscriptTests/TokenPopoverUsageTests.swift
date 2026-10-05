@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // T37.25.2 (A98): the core's context share and split become the token popover's heading and its
 // bar segments and legend, and a part of a kind this build has no colour role for is skipped.
 

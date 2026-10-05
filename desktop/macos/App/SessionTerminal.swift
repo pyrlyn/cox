@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The session window's terminal pane (T51.6, mockup 24, DT§3.2): CoxUI's `TerminalPaneChrome`
 // around CoxPlatform's SwiftTerm `TerminalPane`, fed by the session store's terminal tabs, and
 // the window's close guard that asks before a foreground job in one of them is killed. Wiring

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `BrowserPaneChrome` (DS§6.4 row `BrowserPaneChrome`, mockup 25's web column; T51.10): the
 // browser pane beside the transcript. A bar holds back, the address field with its lock and
 // reload, over the page in a rounded well. Separate because the page itself is WebKit's

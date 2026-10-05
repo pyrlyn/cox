@@ -1,4 +1,8 @@
 // swift-tools-version: 6.2
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // CoxModel (DT§4.6): the app's state without the Rust core. `CoxClient` is
 // the contract — the timeline value types, the `CoreClient` protocol and the
 // fixture client — and `CoxModel` the `@Observable` stores over it. The

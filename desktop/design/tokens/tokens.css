@@ -15,6 +15,7 @@
   --space-popover: 14px;
   --space-toolbarTrailing: 14px;
   --space-composerBottom: 18px;
+  --space-welcome: 14px;
   --radius-xs: 4px;
   --radius-s: 6px;
   --radius-m: 8px;
@@ -58,6 +59,11 @@
   --size-paletteWidth: 640px;
   --size-paletteIcon: 26px;
   --size-reviewFileListWidth: 260px;
+  --size-appIconHero: 56px;
+  --size-welcomeTop: 170px;
+  --size-turnGutter: 32px;
+  --size-turnGutterOffset: 44px;
+  --size-rewindMenuWidth: 330px;
   --c-surface-window: rgba(255, 255, 255, 1);
   --c-surface-sidebar: rgba(242, 242, 246, 0.86);
   --c-surface-code: rgba(246, 246, 248, 1);
@@ -150,6 +156,9 @@
   --c-tile-settings-advanced-top: rgba(172, 127, 94, 1);
   --c-tile-settings-advanced-bottom: rgba(172, 127, 94, 1);
   --c-tile-settings-advanced-glyph: rgba(255, 255, 255, 1);
+  --c-tile-app-top: rgba(27, 36, 64, 1);
+  --c-tile-app-bottom: rgba(45, 61, 110, 1);
+  --c-tile-app-glyph: rgba(255, 210, 122, 1);
   --c-role-project: rgba(142, 68, 216, 1);
   --c-role-projectSoft: rgba(142, 68, 216, 0.13);
   --c-risk-low: rgba(110, 110, 115, 1);
@@ -253,6 +262,9 @@
   --c-tile-settings-advanced-top: rgba(183, 138, 102, 1);
   --c-tile-settings-advanced-bottom: rgba(183, 138, 102, 1);
   --c-tile-settings-advanced-glyph: rgba(255, 255, 255, 1);
+  --c-tile-app-top: rgba(27, 36, 64, 1);
+  --c-tile-app-bottom: rgba(45, 61, 110, 1);
+  --c-tile-app-glyph: rgba(255, 210, 122, 1);
   --c-role-project: rgba(188, 144, 232, 1);
   --c-role-projectSoft: rgba(188, 144, 232, 0.13);
   --c-risk-low: rgba(161, 161, 168, 1);
@@ -356,6 +368,9 @@
   --c-tile-settings-advanced-top: rgba(149, 109, 81, 1);
   --c-tile-settings-advanced-bottom: rgba(149, 109, 81, 1);
   --c-tile-settings-advanced-glyph: rgba(255, 255, 255, 1);
+  --c-tile-app-top: rgba(27, 36, 64, 1);
+  --c-tile-app-bottom: rgba(45, 61, 110, 1);
+  --c-tile-app-glyph: rgba(255, 210, 122, 1);
   --c-role-project: rgba(102, 49, 156, 1);
   --c-role-projectSoft: rgba(142, 68, 216, 0.13);
   --c-risk-low: rgba(78, 78, 82, 1);
@@ -459,6 +474,9 @@
   --c-tile-settings-advanced-top: rgba(219, 166, 121, 1);
   --c-tile-settings-advanced-bottom: rgba(219, 166, 121, 1);
   --c-tile-settings-advanced-glyph: rgba(94, 94, 94, 1);
+  --c-tile-app-top: rgba(27, 36, 64, 1);
+  --c-tile-app-bottom: rgba(45, 61, 110, 1);
+  --c-tile-app-glyph: rgba(255, 210, 122, 1);
   --c-role-project: rgba(209, 179, 239, 1);
   --c-role-projectSoft: rgba(188, 144, 232, 0.13);
   --c-risk-low: rgba(196, 196, 200, 1);

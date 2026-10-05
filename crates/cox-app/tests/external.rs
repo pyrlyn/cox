@@ -1,9 +1,16 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! A top-level session driven by an external ACP agent (T52.4-T52.6,
 //! DT§3.3.1), end to end: `App::open_agent` starts `tests/fixtures/fake_acp.sh` from a
 //! scratch user config's `[external_agents.fake]`, under the real sandbox
 //! wrap, and `LiveSession` drives it as the macOS app does. The key comes
 //! from the in-memory host, never the Keychain (A49); nextest runs each
 //! test in its own process, so each sets its own environment.
+
+// why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+#![allow(unsafe_code)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

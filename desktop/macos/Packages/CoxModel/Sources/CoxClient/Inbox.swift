@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The "Needs you" inbox as Swift values (DT§4.3 Inbox): `InboxItem` and `Need`, cox-ffi's
 // records cut to what the app shows, and the one place an item becomes the `HostNote` a
 // notification and the Dock badge show. The words come from `cox_app` (T58.4.1); this only

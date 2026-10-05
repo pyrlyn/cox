@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // One window's sessions (DT§5.1): opens a session on the launch's core and shows it in CoxUI's
 // `MainScreen`, the transcript and composer in its column, over the behind-window blur; the
 // first-run checklist comes first on a first launch (DT§5.8), after the login shell's
@@ -191,6 +195,15 @@ struct SessionWindow: View {
           }
           TranscriptView(store: showing.store, send: send)
             .composer(showing.composer)
+            .overlay {
+              // Figma frame 22: an empty session shows the welcome hero until its first block.
+              if showing.store.blocks.isEmpty, let info = showing.info {
+                SessionWelcome(
+                  project: screen.toolbar.project, cwd: info.cwd, composer: showing.composer,
+                  // cox-app reads the folder (T37.49); without a core the hero asks alone.
+                  service: (try? model.launch.live.get()) ?? FixtureWelcome())
+              }
+            }
           let panels = PluginWidgets.panels(showing.store)
           if !panels.isEmpty { PluginPanel(panels).fixedSize(horizontal: false, vertical: true) }
           BestOfBar(launcher: bestOf, open: showing, model: model) { sessions in

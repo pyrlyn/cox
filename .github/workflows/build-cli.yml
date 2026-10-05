@@ -1,0 +1,143 @@
+name: build cli
+
+# The CLI half of a release; the macOS app's DMG is desktop-build.yml. Neither has a trigger of
+# its own: release.yml (the one release workflow, dispatched by bump.yml) calls both on the
+# tagged commit and publishes what they upload into one GitHub release.
+#
+# Per target: the mise.toml Rust, `scripts/package.sh <target> dist`, a smoke test of the
+# native tarball, uploaded as the `cli-<target>` artifact. The macOS binary is Developer
+# ID-signed with the identity .github/actions/macos-signing imports (the same action and the
+# same two secrets desktop-build.yml signs the app with); notarisation stays behind the
+# repository variable COX_NOTARIZE, off until an App Store Connect key exists.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to build (the release tag's commit).
+        type: string
+        required: true
+      require-signing:
+        description: Fail instead of leaving the macOS binary unsigned when the certificate secrets are missing.
+        type: boolean
+        required: false
+        default: true
+    # Passed by name by the caller, never `secrets: inherit`.
+    secrets:
+      MACOS_CERTIFICATE:
+        required: false
+      MACOS_CERTIFICATE_PWD:
+        required: false
+      APPSTORE_CONNECT_KEY:
+        required: false
+      APPSTORE_CONNECT_KEY_ID:
+        required: false
+      APPSTORE_CONNECT_ISSUER_ID:
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: cli (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: xcode-27
+            sign: true
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            sign: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            sign: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      # A no-op on the Linux targets.
+      - uses: pyrlyn/infra/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+        with:
+          version: '27'
+      # The Rust mise.toml pins, checked like in ci.yml; scripts/package.sh
+      # adds the matrix target to it.
+      - uses: ./.github/actions/rust
+      - uses: Swatinem/rust-cache@v2
+
+      # An unsigned release is refused the same way an untested one is: it
+      # would be discovered by whoever installs it, not here.
+      - name: Import signing certificate
+        if: matrix.sign
+        uses: ./.github/actions/macos-signing
+        with:
+          certificate: ${{ secrets.MACOS_CERTIFICATE }}
+          password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          required: ${{ inputs.require-signing && 'true' || 'false' }}
+
+      - name: Package
+        run: scripts/package.sh ${{ matrix.target }} dist
+
+      - name: Remove signing keychain
+        if: always() && matrix.sign && env.SIGNING_KEYCHAIN != ''
+        run: security delete-keychain "$SIGNING_KEYCHAIN"
+
+      # Off until an App Store Connect key exists: setting the repository
+      # variable COX_NOTARIZE to `true` turns it on, and from then on a
+      # missing secret fails the release, as a missing certificate does.
+      - name: Notarise
+        if: matrix.sign && vars.COX_NOTARIZE == 'true'
+        env:
+          NOTARY_KEY: ${{ secrets.APPSTORE_CONNECT_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+        run: |
+          if [ -z "$NOTARY_KEY" ] || [ -z "$NOTARY_KEY_ID" ] || [ -z "$NOTARY_ISSUER" ]; then
+            echo "COX_NOTARIZE is on, so APPSTORE_CONNECT_KEY (the .p8 as base64)," >&2
+            echo "APPSTORE_CONNECT_KEY_ID and APPSTORE_CONNECT_ISSUER_ID must all be set." >&2
+            exit 1
+          fi
+          work="$RUNNER_TEMP/notarise"
+          mkdir -p "$work"
+          key="$work/key.p8"
+          trap 'rm -f "$key"' EXIT
+          echo "$NOTARY_KEY" | base64 --decode > "$key"
+
+          tar -xJf dist/cox-${{ matrix.target }}.tar.xz -C "$work" cox
+          ditto -c -k --keepParent "$work/cox" "$work/cox.zip"
+          xcrun notarytool submit "$work/cox.zip" \
+            --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" \
+            --wait --output-format json > "$work/result.json" || true
+          cat "$work/result.json"
+          if [ "$(jq -r .status "$work/result.json")" != "Accepted" ]; then
+            id="$(jq -r .id "$work/result.json")"
+            xcrun notarytool log "$id" \
+              --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" >&2 || true
+            exit 1
+          fi
+
+      - name: Smoke test
+        run: |
+          mkdir -p smoke
+          tar -xJf dist/cox-${{ matrix.target }}.tar.xz -C smoke
+          smoke/cox --version
+          if [ "${{ matrix.sign }}" = "true" ] && [ -n "${COX_SIGN_IDENTITY:-}" ]; then
+            codesign --verify --strict smoke/cox
+            codesign --display --verbose=2 smoke/cox 2>&1 \
+              | grep -q 'Authority=Developer ID Application'
+          fi
+          if [ "${{ matrix.sign }}" = "true" ] && [ "${{ vars.COX_NOTARIZE }}" = "true" ]; then
+            spctl --assess --type install -vv smoke/cox 2>&1 \
+              | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cli-${{ matrix.target }}
+          path: dist/*.tar.xz
+          if-no-files-found: error

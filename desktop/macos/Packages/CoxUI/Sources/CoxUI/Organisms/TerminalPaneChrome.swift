@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `TerminalPaneChrome` (DS§6.4 row `TerminalPaneChrome`, mockup 24's `.panehead` over `.term`;
 // T51.6): the terminal pane under the transcript column — a header of the session's shell tabs,
 // `+` for another and the ⌃` hint, over the terminal well. Separate because the terminal itself

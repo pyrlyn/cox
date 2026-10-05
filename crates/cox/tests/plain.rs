@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T29.1: the real `cox --plain` under a PTY — a scripted turn with an
 //! approval, a markdown table and Ctrl+C twice — prints flat labelled
 //! lines and never moves the cursor. Only the provider is a double.

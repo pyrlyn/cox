@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The session repo map (plan.md P43, `docs/design/v0.2-repomap.md`): every
 //! workspace file the caller admits, recently changed first, each followed by
 //! its `outline`, cut at a byte budget. Separate because it is the only

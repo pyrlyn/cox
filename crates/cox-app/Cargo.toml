@@ -58,6 +58,9 @@ url = { workspace = true }
 # T52.18: the app-server wire's schema (`docs/app-server.schema.json`),
 # as cox-protocol and cox-config generate theirs; already in the tree.
 schemars = { workspace = true }
+# T37.49: the welcome hero reads `Cargo.toml`'s `[workspace] members`;
+# already in the tree through cox-config.
+toml_edit = { workspace = true }
 
 [dev-dependencies]
 # The scenario tests run a real session over the Scripted provider and
@@ -68,3 +71,6 @@ insta = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 # T37.10: intents run against a scratch COX_HOME.
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

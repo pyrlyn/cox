@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `TokenMeter` and `TokenPopover`'s check (T37.25, DS§6.3–§6.4, mockup screen 30): snapshots of
 // the meter idle, streaming and open, the popover streaming, after the turn and fed with the
 // core's context split (T37.25.2), and the composer with the popover open, × light/dark ×

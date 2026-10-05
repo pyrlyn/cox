@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox mcp`: picks which built-in tools to serve and plugs the permission
 //! engine in as the gate (T6.2). The wire side lives in `cox_mcp::server`;
 //! this is the only place the flags, the engine and the store meet.

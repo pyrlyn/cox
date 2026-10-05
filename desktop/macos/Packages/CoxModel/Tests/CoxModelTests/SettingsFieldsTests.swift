@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Settings screen's fields over the fixture client (T37.30.1): a group's page by the table
 // Rust named, the project's value read-only with the detail Rust wrote, each field's control as
 // Rust chose it, and a user value edited on the screen round-tripping through the client. The

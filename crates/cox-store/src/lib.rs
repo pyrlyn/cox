@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! One SQLite file (`~/.cox/cox.db`): sessions, rollouts (JSONL), the
 //! tool-output archive, memory, the cost ledger, and plugin grants/kv
 //! (PL§3, A52). Separate so `cox-core` never opens a file directly; it only
@@ -5,6 +9,11 @@
 //! (plan.md §1.7/D9). The only crate that contains SQL — a workspace test
 //! asserts no other crate depends on `diesel`.
 
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
+
+pub mod cloud_runs;
 pub mod fts;
 pub mod lock;
 mod models;
@@ -1133,7 +1142,7 @@ mod tests {
             err,
             StoreError::SchemaNewer {
                 db: "99991231000000".into(),
-                binary: "00000000000006".into(),
+                binary: "00000000000007".into(),
             }
         );
     }

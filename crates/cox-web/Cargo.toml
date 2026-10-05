@@ -10,3 +10,6 @@ cox-protocol = { path = "../cox-protocol", version = "0.1.2" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 reqwest = { workspace = true }
+
+[lints]
+workspace = true

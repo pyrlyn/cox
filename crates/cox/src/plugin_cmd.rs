@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox plugin` (plan.md T33.4, T33.7, T33.31, T33.32, T33.41): `list`, `install`,
 //! `enable`, `disable`, `update`, `remove`, `link`. `install` and `update`
 //! also take an https archive or a git repository (T53.2–T53.4), fetched

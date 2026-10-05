@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // ⇧-click block selection in the gutter and the "Copy as Markdown" menu item
 // (T37.42.2's Check): real `NSEvent` clicks through the offscreen window
 // `SelectionTests` uses, and copy into a private named pasteboard — never

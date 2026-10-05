@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T48.1: every `tests/cmd/*.toml` case runs the real `cox` binary with a
 //! scratch `COX_HOME` and the scripted provider, and compares its whole
 //! output with a reviewed fixture. `run_cli.rs` keeps the cases a fixture

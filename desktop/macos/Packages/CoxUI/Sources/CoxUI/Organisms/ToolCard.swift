@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ToolCard` (DS§6.4 row `ToolCard`, the mockup's `.tool` and `.tool.exp`): one tool call in the
 // transcript — its header and, while it runs or once opened, one detail under it: the diff it
 // made or the last lines it printed. Separate so the transcript's card attachments (T37.23) and

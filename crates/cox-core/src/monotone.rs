@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The decision points after `route` (PL§4 "Decision points", T33.21,
 //! T33.21.1): `risk`, `approve_hint`, `compact`, `rank` and `salience`. Each
 //! asks the advisor `[plugins.decide]` names and applies the point's

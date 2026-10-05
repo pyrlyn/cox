@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `AppHost` (DT§4.4's `Host`): the one trait Swift implements, for what
 //! Rust must ask the OS to do — post a notification, open a URL, read a
 //! Keychain item. Named apart from Foundation's `Host`, which every Swift

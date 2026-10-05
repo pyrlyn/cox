@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `RiskChip` (DS§6.2 row `RiskChip`, the mockup's `.risk`): what a tool call may do — "network
 // · writes remote" — tinted by how risky the classifier found it. Separate so a risk reads the
 // same on a tool row and an approval card; it draws as a `Badge`, the mockup's `.risk` and

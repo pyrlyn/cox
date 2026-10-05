@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T7.4 in the loop: hook verdicts reach the turn through the core's call
 //! sites, and a broken hook is a warning, never a stopped turn
 //! (`broken_hook_is_skipped_not_fatal`, plan.md §1.10 #10).

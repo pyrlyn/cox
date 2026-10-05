@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A remote host's workspace (DT§4.4, T52.21): cox on another machine, reached over the person's
 // own `ssh` as `cox app-server --stdio`, listed in the sidebar as its own group and opened like
 // a local session. The protocol CoxModel depends on instead of cox-ffi's `RemoteHandle`; the

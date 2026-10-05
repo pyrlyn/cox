@@ -1,14 +1,20 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The Context & Cost tab's cost history (T37.29.3.2, DT§5.1, mockup 10's
 //! "Cost by turn"): the session's ledger `usage` rows grouped by turn, each
 //! turn's subagents right under it, and the session total, every figure
 //! formatted. Built from the rows the store returns, never from the meter's
 //! running sums, because a cost that is not a ledger row does not exist.
 //! Also the tab's footnote, the project's spend today and this week
-//! (T37.29.3.3), and the menu bar's "Today" footer over the whole ledger
+//! (T37.29.3.3), the budget caps and how close the spend is (T37.29.3.4),
+//! and the menu bar's "Today" footer over the whole ledger
 //! (T51.12). Separate from `meter_text.rs`, which formats the live meter.
 
 use chrono::{DateTime, Datelike, Days, NaiveDate, SecondsFormat, TimeZone, Utc};
 use cox_protocol::StoreError;
+use cox_protocol::config::BudgetConfig;
 use cox_protocol::types::{Job, Usage};
 use cox_store::queries::LedgerRow;
 use cox_store::{Store, to_tag};
@@ -30,6 +36,21 @@ pub struct TurnCosts {
     pub total: CostRow,
     /// The footnote: `Project cox today: $3.18 · this week: $21.40. …`.
     pub project: String,
+    /// `[budget]`'s two caps against what was spent, session first; see
+    /// [`budget_rows`].
+    pub budget: Vec<BudgetRow>,
+}
+
+/// One cap against its spend: `Session`, `$0.42 of $5.00`, a gauge at 8%.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct BudgetRow {
+    pub label: String,
+    /// `$0.42 of $5.00`, or `$0.42` alone when the cap is not a usable
+    /// number.
+    pub text: String,
+    /// The spend over the cap, clamped to 0..=1 so the gauge never draws
+    /// past its end; none without a usable cap.
+    pub fraction: Option<f64>,
 }
 
 /// One line of the grid: `1 · code` (a subagent's `explore`), then a value
@@ -56,10 +77,17 @@ struct Turn {
 
 /// `own` is the session's ledger in written order; `children` each child
 /// session's, of which only subagents count (a fork or handoff is a session
-/// of its own, not this one's cost).
-pub fn build(own: &[LedgerRow], children: &[Vec<LedgerRow>]) -> TurnCosts {
+/// of its own, not this one's cost). `month_usd` is the whole ledger's spend
+/// since the month began, which `[budget].monthly_usd` caps.
+pub fn build(
+    own: &[LedgerRow],
+    children: &[Vec<LedgerRow>],
+    budget: &BudgetConfig,
+    month_usd: f64,
+) -> TurnCosts {
     let mut turns: Vec<Turn> = Vec::new();
     let mut total = None;
+    let mut spent = 0.0;
     for row in own {
         let u = &row.usage;
         // `turn` restarts at 1 with every turn; a side call (compaction,
@@ -81,6 +109,7 @@ pub fn build(own: &[LedgerRow], children: &[Vec<LedgerRow>]) -> TurnCosts {
             turn.sum = Some(add_to(turn.sum, &u.usage));
         }
         total = Some(add_to(total, &u.usage));
+        spent += u.usage.cost_usd;
     }
     let mut orphans = Vec::new();
     for rows in children {
@@ -91,6 +120,7 @@ pub fn build(own: &[LedgerRow], children: &[Vec<LedgerRow>]) -> TurnCosts {
         for r in rows {
             sum = Some(add_to(sum, &r.usage.usage));
             total = Some(add_to(total, &r.usage.usage));
+            spent += r.usage.usage.cost_usd;
         }
         // The job alone: with its tier the label wraps in the inspector's
         // width, and a subagent's tier is its preset's.
@@ -116,28 +146,78 @@ pub fn build(own: &[LedgerRow], children: &[Vec<LedgerRow>]) -> TurnCosts {
         rows,
         total: row("Session".into(), total, false),
         project: String::new(),
+        budget: budget_rows(budget, spent, month_usd),
     }
 }
 
+/// The session's and the month's spend against `[budget]`. `BudgetConfig`
+/// has no "no cap" value, and the core stops at a cap of 0 or less, so a cap
+/// that is not a positive number leaves its row with the spend alone rather
+/// than a fraction of nothing.
+pub fn budget_rows(budget: &BudgetConfig, session_usd: f64, month_usd: f64) -> Vec<BudgetRow> {
+    let row = |label: &str, spent: f64, cap: f64| {
+        let usable = cap.is_finite() && cap > 0.0;
+        BudgetRow {
+            label: label.into(),
+            text: if usable {
+                format!("${spent:.2} of ${cap:.2}")
+            } else {
+                format!("${spent:.2}")
+            },
+            fraction: usable.then(|| (spent / cap).clamp(0.0, 1.0)),
+        }
+    };
+    vec![
+        row("Session", session_usd, budget.session_usd),
+        row("This month", month_usd, budget.monthly_usd),
+    ]
+}
+
+/// `date`'s start in `tz`, written as `usage.created_at` is (UTC,
+/// milliseconds) so the store compares it as text. A zone that skips midnight
+/// for daylight saving starts the day an hour or two later.
+fn local_start<Tz: TimeZone>(tz: &Tz, date: NaiveDate) -> Option<String> {
+    (0..3).find_map(|h| {
+        tz.from_local_datetime(&date.and_hms_opt(h, 0, 0)?)
+            .earliest()
+            .map(|d| {
+                d.with_timezone(&Utc)
+                    .to_rfc3339_opts(SecondsFormat::Millis, true)
+            })
+    })
+}
+
 /// The starts of `now`'s day and of its week (Monday, ISO 8601) in its own
-/// time zone, written as `usage.created_at` is (UTC, milliseconds) so the
-/// store compares them as text.
+/// time zone, as [`local_start`] writes them.
 pub fn periods<Tz: TimeZone>(now: &DateTime<Tz>) -> (String, String) {
     let tz = now.timezone();
-    // A zone that skips midnight for daylight saving starts the day an
-    // hour or two later.
     let start = |date: NaiveDate| {
-        (0..3)
-            .find_map(|h| {
-                tz.from_local_datetime(&date.and_hms_opt(h, 0, 0)?)
-                    .earliest()
-            })
-            .map_or_else(|| now.with_timezone(&Utc), |d| d.with_timezone(&Utc))
-            .to_rfc3339_opts(SecondsFormat::Millis, true)
+        local_start(&tz, date).unwrap_or_else(|| {
+            now.with_timezone(&Utc)
+                .to_rfc3339_opts(SecondsFormat::Millis, true)
+        })
     };
     let today = now.date_naive();
     let back = Days::new(u64::from(today.weekday().num_days_from_monday()));
     (start(today), start(today - back))
+}
+
+/// The start of `now`'s calendar month in its own time zone.
+pub fn month_start<Tz: TimeZone>(now: &DateTime<Tz>) -> String {
+    let first = now
+        .date_naive()
+        .with_day(1)
+        .unwrap_or_else(|| now.date_naive());
+    local_start(&now.timezone(), first).unwrap_or_else(|| {
+        now.with_timezone(&Utc)
+            .to_rfc3339_opts(SecondsFormat::Millis, true)
+    })
+}
+
+/// What the whole ledger spent since `now`'s month began: the figure
+/// `[budget].monthly_usd` caps, across every project.
+pub fn month_spend<Tz: TimeZone>(store: &Store, now: &DateTime<Tz>) -> Result<f64, StoreError> {
+    Ok(store.activity_since(&month_start(now))?.0)
 }
 
 /// The tab's footnote over the project's spend (mockup 10).
@@ -262,7 +342,7 @@ mod tests {
             at(3, 0, Job::Compact, Tier::Cheap, 500, 0.01),
             at(4, 1, Job::Main, Tier::Code, 500, 0.10),
         ];
-        let costs = build(&own, &[]);
+        let costs = build(&own, &[], &BudgetConfig::default(), 0.0);
         assert_eq!(labels(&costs), [("1 · code", false), ("2 · code", false)]);
         assert_eq!(costs.rows[0].values, ["4.5k", "300", "3.0k/0", "0.21"]);
         assert_eq!(costs.rows[1].values[3], "0.10");
@@ -282,13 +362,15 @@ mod tests {
             at(3, 2, Job::Explore, Tier::Cheap, 100, 0.01),
         ];
         let fork = vec![at(7, 1, Job::Main, Tier::Code, 900, 9.0)];
-        let costs = build(&own, &[explore, fork]);
+        let costs = build(&own, &[explore, fork], &BudgetConfig::default(), 0.0);
         assert_eq!(
             labels(&costs),
             [("1 · code", false), ("explore", true), ("2 · code", false)]
         );
         assert_eq!(costs.rows[1].values, ["2.2k", "200", "2.0k/0", "0.02"]);
         assert_eq!(costs.total.values[3], "0.32");
+        // The subagent's rows are the session's spend, the fork's are not.
+        assert_eq!(costs.budget[0].text, "$0.32 of $5.00");
     }
 
     #[test]
@@ -297,7 +379,7 @@ mod tests {
             at(1, 0, Job::Summarize, Tier::Cheap, 10, 0.0),
             at(2, 1, Job::Main, Tier::Code, 10, 0.0),
         ];
-        let costs = build(&own, &[]);
+        let costs = build(&own, &[], &BudgetConfig::default(), 0.0);
         assert_eq!(
             labels(&costs),
             [("Before turn 1", false), ("1 · code", false)]
@@ -391,9 +473,65 @@ mod tests {
 
     #[test]
     fn an_empty_ledger_has_no_rows_and_a_zero_total() {
-        let costs = build(&[], &[]);
+        let costs = build(&[], &[], &BudgetConfig::default(), 0.0);
         assert!(costs.rows.is_empty());
         assert_eq!(costs.columns, ["In", "Out", "Cache r/w", "$"]);
         assert_eq!(costs.total.values, ["0", "0", "0/0", "0.00"]);
+    }
+
+    #[test]
+    fn budget_rows_show_the_fraction_of_each_cap() {
+        let rows = budget_rows(&BudgetConfig::default(), 0.5, 25.0);
+        let seen: Vec<_> = rows
+            .iter()
+            .map(|r| (r.label.as_str(), r.text.as_str(), r.fraction))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("Session", "$0.50 of $5.00", Some(0.1)),
+                ("This month", "$25.00 of $100.00", Some(0.25)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_spend_over_its_cap_fills_the_gauge_and_no_more() {
+        let rows = budget_rows(&BudgetConfig::default(), 7.5, 0.0);
+        assert_eq!(rows[0].text, "$7.50 of $5.00");
+        assert_eq!(rows[0].fraction, Some(1.0));
+    }
+
+    #[test]
+    fn a_cap_that_is_not_positive_leaves_the_spend_alone() {
+        let budget = BudgetConfig {
+            session_usd: 0.0,
+            monthly_usd: f64::NAN,
+            ..BudgetConfig::default()
+        };
+        let rows = budget_rows(&budget, 0.42, 3.0);
+        assert_eq!((rows[0].text.as_str(), rows[0].fraction), ("$0.42", None));
+        assert_eq!((rows[1].text.as_str(), rows[1].fraction), ("$3.00", None));
+    }
+
+    #[test]
+    fn the_month_starts_at_local_midnight_of_the_first() {
+        let zone = chrono::FixedOffset::east_opt(3 * 3600).expect("offset");
+        // The 1st at 01:30 at UTC+3 is still the last day of August in UTC.
+        let now = zone
+            .with_ymd_and_hms(2026, 9, 1, 1, 30, 0)
+            .single()
+            .expect("time");
+        assert_eq!(month_start(&now), "2026-08-31T21:00:00.000Z");
+    }
+
+    #[test]
+    fn month_spend_counts_only_this_month() {
+        let (_home, store) = ledger(1, &[0.5, 0.25]);
+        let now = chrono::Local::now();
+        assert_eq!(month_spend(&store, &now).expect("month"), 0.75);
+        // Seen from a later month, the same rows are old.
+        let later = now.checked_add_days(Days::new(40)).expect("later");
+        assert_eq!(month_spend(&store, &later).expect("later"), 0.0);
     }
 }

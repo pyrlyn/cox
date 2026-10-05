@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The clap command tree (plan.md §1.12). Kept separate from `main.rs` so
 //! `config_load`'s `every_flag_has_a_config_key` test and the flag→config-key
 //! table (`config_load::flag_key_map`) can inspect `Cli::command()` without

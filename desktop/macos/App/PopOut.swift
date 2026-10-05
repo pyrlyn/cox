@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A session popped out of a window (T51.11, DT§4.5): the `WindowGroup(for:)` value that opens
 // one session in its own window, and the probe that makes that window a native tab of the window
 // it came from. Separate from the session window because this is AppKit's tabbing, not the

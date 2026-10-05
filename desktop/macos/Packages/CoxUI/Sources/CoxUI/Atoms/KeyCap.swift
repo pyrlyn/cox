@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `KeyCap` (DS§6.2 row `KeyCap`, the mockup's `.kbd`): a keyboard shortcut hint beside a
 // control or in a tooltip. Separate so every shortcut is drawn as the same small lifted key.
 

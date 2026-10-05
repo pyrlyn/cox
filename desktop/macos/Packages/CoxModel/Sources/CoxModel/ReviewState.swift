@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Review (T37.28.2, DT§5.4): cox-app's `Changes` as the files grouped by the turn that changed
 // each last, the checkpoints Review's timeline rewinds to, and the open file's net diff from
 // `SessionClient.review` (A101). Here, not in CoxUI, because these decide what the pane shows

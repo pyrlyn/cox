@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ProjectDropZone` (DS§6.3, mockup screen 21's dashed onboarding box; DT§5.8, T37.45.5): the
 // first-run window's Open a project step, which also takes a project folder dropped on it.
 // Separate so the rule for what a drop may open — one local directory, nothing else — lives in

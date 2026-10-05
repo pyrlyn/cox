@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Append-only JSONL rollout: one line per `Event`,
 //! `{"seq":N,"ts":"…","event":{…}}` (plan.md §1.7). `seq` is monotonic per
 //! session; writes fsync every `ROLLOUT_FSYNC_EVERY` lines and on

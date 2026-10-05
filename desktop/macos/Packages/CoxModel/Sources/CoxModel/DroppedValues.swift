@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Project values the guard list threw out (T37.30.4, DT§5.7), on the page Rust put their key on:
 // the key, why the project may not set it, and Rust's `999 → 5`. Here, not in CoxUI, because
 // CoxUI depends on no cox package; the app copies them into CoxUI's `SettingsScreen.DroppedValue`

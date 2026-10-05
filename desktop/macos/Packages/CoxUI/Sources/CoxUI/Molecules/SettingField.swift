@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SettingField` (DS§6.3 row `SettingField`, the mockup's Settings `.sel` well and its Add key /
 // Change key): a setting's text, or a provider's key, typed in a sunken well and sent on
 // Return. Separate so a text value and a secret take one field, and so what is typed stays in

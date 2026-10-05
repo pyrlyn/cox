@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Job → tier → model routing (D5, T9.1). One pure function owns every
 //! routing choice: which tier a job runs on, which model string it sends,
 //! and whether the `think` tier's confirmation gate blocks the turn. The

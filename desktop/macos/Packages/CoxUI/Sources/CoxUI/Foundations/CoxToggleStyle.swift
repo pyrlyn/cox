@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CoxToggleStyle` (DS§6.1, the mockup's `.tog`): the switch, a sunken track that fills with
 // `accent` when on and the 3D knob that moves across it — sliding, or cross-fading under Reduce
 // Motion. Separate so every on/off setting looks and moves alike. Disabled, it keeps its knob's

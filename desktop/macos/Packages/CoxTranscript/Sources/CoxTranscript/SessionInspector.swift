@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The inspector's tabs for one session (DT§5.1, T37.29, T37.22.5): Changes, Plan, Context, Tasks
 // and Info read from `SessionStore`, copied into CoxUI's tab states field for field. Here, where
 // CoxUI and CoxModel meet, so the app only places the view: CoxModel decided every text; the

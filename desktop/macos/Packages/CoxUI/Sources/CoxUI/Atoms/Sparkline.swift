@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Sparkline(samples)` (DS§6.2 row `Sparkline(samples)`, the mockup's `svg` in `.meter`): the
 // shape of a recent series — tok/s in the token meter and its popover. Separate so the meter
 // and the popover draw one series the same way at any size; the caller sets the frame.

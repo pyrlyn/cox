@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The wire contract: `Submission` in, `Event` out (plan.md §1.2), plus
 //! every type reachable from them and from `Request`/`ToolSpec`. This file
 //! has no logic — only shapes and their serde/schemars derives — because

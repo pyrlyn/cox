@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The timeline as Swift values (DT§4.3): `Block`, `TimelinePatch` and the
 // records they carry, field for field as cox-ffi exports them. Separate from
 // the generated bindings so the stores, views and tests hold them without

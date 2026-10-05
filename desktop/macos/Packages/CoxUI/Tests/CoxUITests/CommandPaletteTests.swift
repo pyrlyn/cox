@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CommandPalette`'s check (T37.44.13, DS§6.4, mockup 12): snapshots of the palette with mockup
 // 12's `rev`, as ⌘K opens it, and with nothing matched × light/dark × Solid/Frosted, on a pane as
 // its `#Preview` shows it.

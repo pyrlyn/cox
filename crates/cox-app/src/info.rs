@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The inspector's Info tab (DT§5.1, T37.29.5): what a session is and where
 //! it lives — its id, cwd, linked worktree, the config layers it runs with
 //! and its rollout file. Built on request from what already answers each

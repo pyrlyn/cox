@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Semantic colour tokens (T24.1): every colour the TUI draws is named here
 //! instead of picked ad hoc at the render site. `dark()`/`light()` give
 //! ANSI-16 defaults so the app works over plain SSH with no truecolor

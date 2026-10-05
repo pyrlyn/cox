@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `Transcriber`: one loaded whisper.cpp model turning a 16 kHz mono buffer
 //! into text. Separate from capture so it tests without a microphone, and so
 //! the model (tens to hundreds of MB) is loaded once and reused per press.

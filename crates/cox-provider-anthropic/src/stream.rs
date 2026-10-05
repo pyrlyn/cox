@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Turns Anthropic Messages SSE frames into [`ProviderEvent`]s.
 //!
 //! Pure and synchronous — no I/O, no `async`. The network side ([`super`])

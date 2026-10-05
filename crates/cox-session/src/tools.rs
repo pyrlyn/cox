@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The built-in tool set a session starts from, and the swaps that adapt
 //! it to a surface: ACP client-backed file and shell tools (T11.1), an
 //! `ask_user` that surfaces questions (T22.1), and a `tool_search` index

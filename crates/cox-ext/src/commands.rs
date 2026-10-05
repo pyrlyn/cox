@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Slash commands from `.claude/commands/*.md` and `.cox/commands/*.md`
 //! (T7.3): discovery, frontmatter, and body expansion. Shell and file
 //! inclusion go through [`Includes`] so the binary can route `!` commands

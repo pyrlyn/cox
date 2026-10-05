@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `StyledDoc` (T37.7, DT§4.2): what markdown and syntax highlighting
 //! produce before any UI draws them — blocks of runs tagged with the plugin
 //! `StyleToken` roles, never a terminal style. Separate from `markdown` so a

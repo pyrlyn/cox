@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The named-placeholder convention of the catalogs. gettext has no named
 //! arguments, so cox writes them the way Python's `str.format` does, which
 //! GNU gettext knows as `python-brace-format` (and `msgfmt --check`

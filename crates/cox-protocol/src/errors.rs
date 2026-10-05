@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Error taxonomy (plan.md §1.14), one enum per crate that can fail.
 //! Every variant is `thiserror` (for `Display`/`std::error::Error`) and
 //! `Clone + Serialize + Deserialize`, because `CoreError` rides inside

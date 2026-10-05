@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ChecklistRow` (DS§6.3 row `ChecklistRow`, the mockup's onboarding `.group .gr`): one step of
 // the first-run checklist (DT§5.8) — a doctor check or a step still to take — with the one line
 // that says what was found or what is missing, and the button that fixes it. Separate so every

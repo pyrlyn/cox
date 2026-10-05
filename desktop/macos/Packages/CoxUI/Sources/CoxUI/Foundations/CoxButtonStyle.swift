@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `CoxButtonStyle` (DS§6.1): every push button, the mockup's `.pb`, `.pb.pri` and `.pb.dan`,
 // and the composer's round Send, `.send`. Separate so a button's face, label colour, lift and
 // states come from one place, built on `elevation`, `specular`, `hairline` and `textStyle`.

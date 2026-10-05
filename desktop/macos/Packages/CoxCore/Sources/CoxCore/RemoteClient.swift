@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A remote host over cox-ffi (DT§4.4, T52.20, T52.21): `App.connectRemote` as a
 // `RemoteWorkspace`, and a remote session as a `SessionClient`, so the stores and the windows
 // show it as they show a local one. Separate from `LiveCoreClient.swift` because the wire answers

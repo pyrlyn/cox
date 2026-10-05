@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The session controller's drain (DT§4.1, §4.5): a tokio task reads the
 //! core's bounded event channel continuously, folds each event into the
 //! timeline and queues the patches in the coalescing buffer; the UI pulls

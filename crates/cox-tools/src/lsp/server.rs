@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! One language server's lifecycle (T41.4): start it from a ready argv (the
 //! caller has already wrapped it in the sandbox), `initialize` it with the
 //! workspace root, keep its view of each file in sync, collect a file's

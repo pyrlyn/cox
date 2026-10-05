@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Vim keys (T5.7, T25.4): keypress tables over the composer with `tui.vim`
 //! on, and the `Esc`/status-line behaviour through `update`.
 

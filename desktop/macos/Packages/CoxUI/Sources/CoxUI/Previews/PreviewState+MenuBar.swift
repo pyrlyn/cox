@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for `MenuBarPanel` (T51.13): mockup 26's panel with nothing waiting,
 // and with an approval, a question and a running session. Separate so the organism's fixtures do
 // not edit the shared file.

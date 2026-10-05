@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The page the agent drives (T51.9, DT§3.3): a `WebPage` (macOS 26 WebKit,
 // R9.3.11) behind the host's browser methods — load, read the page, capture it
 // as PNG. The browser pane (T51.10) shows the same `page`, so the person sees

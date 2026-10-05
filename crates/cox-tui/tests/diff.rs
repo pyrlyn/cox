@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Diff view (T15.3): `Ctrl+G` asks the runtime for the working tree's diff
 //! and the answer opens a modal over the transcript, rendered through the
 //! same per-file blocks an edit result uses. T24.5 adds the word diff and

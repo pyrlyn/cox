@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Incremental text from patches (T37.43's Check): patches give the same text
 // a whole load gives, a streamed `AppendText` or `DocTail` edits only its own
 // block's range, and 10 000 blocks built patch by patch fit the DT§1 launch

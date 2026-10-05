@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the General page's shortcuts (T51.15): both shortcuts unbound,
 // with a stand-in for the app's recorder, which CoxUI does not link. Separate from
 // `PreviewState+SettingsScreen.swift` so each card adds its fixtures without editing another's.

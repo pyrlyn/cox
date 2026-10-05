@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Best of n end to end (T52.9, T52.10, DT§3.3.1): `App::best_of`,
 //! `compare` and `pick` over a fake git side that makes plain directories,
 //! counts their files' lines as the diffstat, treats a `DIRTY` file as
@@ -5,6 +9,9 @@
 //! with every cox candidate on the Scripted provider in a scratch
 //! `COX_HOME`. Never the real `~/.cox`, never a keychain (A49); nextest runs
 //! each test in its own process, so each sets its own environment.
+
+// why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+#![allow(unsafe_code)]
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

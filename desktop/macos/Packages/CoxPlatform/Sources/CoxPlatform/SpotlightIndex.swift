@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Session titles in Spotlight (T51.16): each listed session's title, its project and its last
 // write, and nothing else; never transcript text. Titles arrive already sanitized by Rust. A
 // session that leaves the workspace's list (archived, deleted or aged out of it) leaves the

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `OnboardingScreen` (DS§6.5; DT§5.8): the first-run window — open a project, then the checklist
 // from `cox doctor`'s checks (provider key, git, sandbox, login-shell environment), each saying
 // what is missing and offering its fix. Composition only (DS§5): the rows, their status and what

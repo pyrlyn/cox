@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The session toolbar's figures (T37.22.5): the title and project from the session's entry, the
 // branch from its Info, the cost and the context share the meter formatted with the ring's fill
 // from the split; before the first usage patch, a zero cost and an unknown share; an external

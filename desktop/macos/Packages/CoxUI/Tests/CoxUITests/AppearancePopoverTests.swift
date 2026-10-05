@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Appearance popover's check (T37.26, DS§3.5, DS§6.4): the popover per picked material in
 // every light/dark × Solid/Frosted cell; the main screen with it open per material, the window
 // drawn from the popover's values; Reduce Transparency, where the window is Solid and the glass

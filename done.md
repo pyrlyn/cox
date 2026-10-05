@@ -1,4 +1,128 @@
 
+#### T33.14.1 `cox_http`
+
+Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43; the filesystem half is T33.14.2.
+Model: Claude Code / opus-5.5 · Status: done 2026-10-03 · Depends: T33.9 · Size: ~180 · Priority: P2 · Complexity: 3 · Files: `crates/cox-plugin/src/net.rs`, `src/hostfn.rs`, `crates/cox-session/src/plugins.rs`
+Goal: `cox_http` over reqwest: the host must match the allow-list, the body is capped, and a `net` entry equal to a configured provider host is refused at validation (PL§7d).
+Plan:
+1. `crates/cox-plugin/src/net.rs` (new): `Net` built from the granted `net:<host>` lines, matched with the one matcher `Capabilities::net_allows`; `Net::target(url)` is the network rule (http/https only, the host on the allow-list; `hostfn` refuses `cox_render` first and `Net::send` refuses a `Host` header override), shaped so T33.40.1 step 3 adds the provider-host branch (allowed only inside `cox_provider_stream`) next to it; `Net::send` runs on reqwest with redirects off (a redirect could leave the allow-list), a timeout, and a streamed body cap `MAX_HTTP_RESPONSE_BYTES` (over it is `TooLarge`, never a silent cut); `refuse_provider_hosts(manifest, &ProvidersConfig)` refuses a `net` entry that covers the host of any configured provider section or of the plugin's own `[[provider]]` rows.
+2. `hostfn.rs`: dispatch `cox_http` to `Net`, blocking the plugin's worker on the session runtime like `cox_model_call`; no runtime answers `Failed`.
+3. `crates/cox-session/src/plugins.rs`: a `Granted` plugin whose `net` covers a provider host is not loaded, with a notice (fail open).
+4. `cox-plugin` gets `reqwest` (already a workspace dependency) and `wiremock` (dev).
+Check: wiremock `http_outside_allow_list_is_refused`, `net_entry_matching_provider_host_is_rejected`, plus `http_to_allowed_host_round_trips`, `http_body_over_cap_is_too_large`, `http_redirect_is_not_followed`, `http_in_render_is_not_in_this_context`.
+What landed: `crates/cox-plugin/src/net.rs` (`Net::target`, `Net::send`, `refuse_provider_hosts`, `MAX_HTTP_RESPONSE_BYTES` = 1 MiB, 30 s timeout, redirects off), `cox_http` in `hostfn.rs`, and the PL§7d refusal at load in `crates/cox-session/src/plugins.rs`. `unimplemented_import_links_and_answers_failed` now uses `cox_redraw`, the import still unimplemented.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-plugin -p cox-session -E 'test(http) | test(provider_host) | test(net_entry) | test(target_matches)'
+PASS cox-plugin net::tests::net_entry_matching_provider_host_is_rejected
+PASS cox-plugin net::tests::target_matches_the_url_host_not_its_userinfo
+PASS cox-session plugins::tests::plugin_http_server_needs_its_host_in_net
+PASS cox-plugin host::tests::http_request_is_compiled_out
+PASS cox-plugin hostfn::tests::http_in_render_is_not_in_this_context
+PASS cox-session plugins::tests::granted_plugin_with_provider_host_in_net_is_not_loaded
+PASS cox-plugin hostfn::tests::http_outside_allow_list_is_refused
+PASS cox-plugin hostfn::tests::http_body_over_cap_is_too_large
+PASS cox-plugin hostfn::tests::http_redirect_is_not_followed
+PASS cox-plugin hostfn::tests::http_to_allowed_host_round_trips
+10 tests run: 10 passed, 135 skipped
+$ mise exec -- cargo nextest run -p cox-plugin -p cox-session
+145 tests run: 145 passed, 0 skipped
+$ mise exec -- cargo nextest run -p cox --test deps
+10 tests run: 10 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-plugin -p cox-session --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
+#### T58.4 Move the decisions still in CoxModel into `cox-app`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-03 · Depends: — · Size: an audit (~40 lines in `docs/design/desktop-windows.md` or this card) plus one sub-card per move · Files: see the sub-cards
+Goal: CoxModel is ~5 000 lines of Swift (stores, settings fields, remote hosts, completion, markdown helpers). Anything there that decides rather than renders (validation, ordering, text built from state, settings field rules) would have to be written a second time in C#. List each such piece with its file, and card its move into `cox-app` (with an FFI forwarder, A90) as T58.4.n; the Swift store then calls the forwarder. Pure view state stays in each client.
+Check: the audit list is in the card; each T58.4.n has a `cox-app` test and the macOS package tests still pass (`swift test` in each package under `desktop/macos/Packages`).
+
+
+Audit: (2026-09-29; `desktop/macos/Packages/CoxModel`, 5 081 lines of source in 56 files; Swift paths below are under `desktop/macos/Packages/CoxModel/Sources/`, and in the sub-cards under `desktop/macos/Packages/` unless they start with `desktop/`). 28 pieces decide and move (T58.4.1–T58.4.28), 17 stay in each client, 10 more belong to M2/M3 and are not carded (A127 (2)). A move is a Rust card (the rule in `cox-app` with its test, plus the `cox-ffi` record fields in `types.rs` or a one-expression forwarder, A90) and a Swift card (the `CoxClient` value, the `CoxCore` conversion, the store); a Swift side that needs a fourth file is split into plumbing and switch. Each store keeps its public shape, so the app and CoxUI do not change, and the Swift tests of a moved rule move to its Rust test.
+
+Moves:
+1. `CoxClient/Inbox.swift` `HostNote.init(_:badge:)`: a notification's line (`tool subject`, the tool alone without a subject, the question, the error, the task label). → T58.4.1, T58.4.2
+2. `CoxModel/InboxStore.swift` `InboxRow.init`: status and wait words (`approval waiting` … `task failed`, `expired`), `agent · wait`, an expired item read-only. → T58.4.1, T58.4.2
+3. `CoxModel/McpLogins.swift` `SettingsStore.logins`: each login state's line and its Log in / Log out. → T58.4.1, T58.4.3
+4. `CoxModel/SidebarStore.swift` `sections`: "Needs you", "Running" (a running session lifted out of its project), then projects; a project with no match hidden and a folded one opened only while filtering; the section count. → T58.4.4, T58.4.5
+5. `SidebarStore.row(_:in:ages:)`: activity → status dot and words (`running`, `waiting for you`, `failed`, `done` after a turn), the project or the age, the agent first, a cost only above zero. → T58.4.4, T58.4.5
+6. `SidebarStore.matches`: what the filter matches (title and subtitle). → T58.4.4, T58.4.5
+7. `SidebarStore.swift` `SessionEntry.name`: `Untitled session` until the core titles it. → T58.4.4, T58.4.5
+8. `CoxModel/ModelName.swift` `ModelName.short`: the `Claude ` vendor prefix and ` (latest)` dropped, else the id (A111, A116). → T58.4.6, T58.4.14
+9. `CoxModel/ToolbarState.swift` `ToolbarState.init`: the context percent cut out of the core's `context_share` at ` of `, the ring's fill as the parts' shares summed and capped, the session cost. → T58.4.6, T58.4.15
+10. `CoxModel/ModelMenu.swift` `ModelMenu.init`: one section per tier in first-listed order, a model listed once across tiers, section titles, the efforts line. → T58.4.7, T58.4.12, T58.4.13
+11. `CoxModel/SettingsStore.swift` `SettingsGroup.init(key:)` and `allCases` order: a key's top-level table → its page. → T58.4.8, T58.4.10, T58.4.11
+12. `SettingsStore.title(of:)`: `base_url` → `Base url`, the label the search also matches (the search itself, over the core's title and the key, stays in each client). → T58.4.8, T58.4.10, T58.4.11
+13. `SettingsStore.providers`, `storeKey`: the provider sections from the keys; an empty key or an unknown provider refused. → T58.4.8, T58.4.10, T58.4.11
+14. `CoxModel/SettingsFields.swift` `tables(in:)`, `detail(of:)`: one box per config table, the rule lists left out, a `providers.<name>` box's provider, `Set in <project file>` or the schema's help. → T58.4.8, T58.4.10, T58.4.11
+15. `CoxModel/DroppedValues.swift` `dropped(in:)`: a dropped value's page and its `999 → 5`. → T58.4.8, T58.4.10, T58.4.11
+16. `SettingsFields.control(of:)`: slider only for a number bounded on both ends, more than 3 options a pop-up except `permissions.mode`, lists and open shapes as JSON, the fallbacks for a value of another type. → T58.4.9, T58.4.10, T58.4.11
+17. `SettingsFields.modelMenu`: `tiers.<tier>.model` as that tier's catalog models, an unlisted value kept first. → T58.4.9, T58.4.10, T58.4.11
+18. `SettingsFields.edit`: typed input by the key's kind (a slider's number rounded for an integer, text parsed as a number, else sent as text). → T58.4.9, T58.4.10, T58.4.11
+19. `CoxModel/ComposerStore.swift` `typedToken`, `caret`: which token at the caret asks for rows (`@` anywhere, `/` only as the first word, none inside a word, with a selection or in shell mode). → T58.4.16, T58.4.18, T58.4.19
+20. `ComposerStore.pick`, `append`, the mention pruning in `edit`: the insert spliced in for the token plus one space, the caret after it, the picked `@` files. → T58.4.16, T58.4.18, T58.4.19
+21. `ComposerStore.edit` (`!` enters shell mode), `canSend`, `draftIntent`, `submit`, `submitNow`: shell line, `/` command line or turn, queued while a turn runs, what the draft keeps after a send. → T58.4.17, T58.4.18, T58.4.19
+22. `CoxModel/ReviewDraft.swift` `SessionStore.sendReview`: queued behind a running turn unless `[desktop.review] send = "now"`. → T58.4.17, T58.4.19
+23. `CoxModel/InfoTabState.swift` `InfoTabState.init`: the rows and their order, `~` for the home directory, `detached`, a layer's key count with its file as a detail row. → T58.4.20, T58.4.21
+24. `CoxModel/ChangesTabState.swift` worktree facts: `detached`, `Base` only with both base and commit. → T58.4.20, T58.4.22
+25. `CoxModel/ReviewState.swift` `ReviewState.init`: files grouped by the turn that changed them last, oldest turn first. → T58.4.20, T58.4.22, T58.4.25
+26. `CoxModel/TaskRows.swift` `SessionStore.tasks`: a finished task with no exit code is a success (CoxTranscript's `TranscriptCard.swift` reads it the same way). → T58.4.23, T58.4.24, T58.4.25
+27. `CoxClient/DocMarkdown.swift` `StyledDoc.markdown`, `DocBlock.markdown`, `DocBlock.fence`, `Span.markdown`: a reply's doc as Markdown (headings, list markers and depth, quotes, tables, a fence longer than any backtick run, bold/italic/strike marks). → T58.4.26, T58.4.27, T58.4.28
+28. `CoxModel/SessionStore.swift` `BlockKind.replaceDoc`: a streamed reply's text re-rendered as Markdown on each `docTail`. → T58.4.27
+
+Stays in each client (view state, platform, localization, test doubles):
+- `SessionStore.apply`, `BlockKind.append`, `lastLines` (the tool tail's 5-line cut): the patch-consumer contract that mirrors `cox_app::coalesce::apply` and `patch::tail`; every client applies patches into its own list, and T58.5 replays the same fixtures to the same snapshot, which catches a drift.
+- `ComposerStore.recall`, `moveSelection`, `selectedRange`, `dismissCompletion`, `toggleThink`, `leaveShell`: key navigation and toggles over what the core returns (`history`, `complete`).
+- `ComposerStore.attach`, `read`: the file read and its media type named by the OS (`UTType`; Windows has its own); the core decides what reaches the model (T37.6).
+- `ComposerStore.model`'s `name · effort` join: two core values side by side in the chip.
+- `SidebarStore.folded`, `filter` text, `watch`, `refresh`, `ages`, `paletteItems`: view state, refresh cadence, relative dates localized per client; the core ranks the palette.
+- `SidebarStore.swift` `ProviderHealth`: a count with its unit, and the check's status mapped to a dot colour.
+- `CoxModel/ContextSplit.swift`: a part's kind → its colour role, an unknown kind left out.
+- `CoxModel/ContextTabState.swift` `ContextTabState`, `CostHistoryState`: a choice between two strings the core formatted, the total row last.
+- `ChangesTabState` checkpoint time and worktree size, `ChangesTabState.date`: localized time and bytes.
+- `ToolbarState`'s project from the cwd's folder before `cox.db` lists the session, and `usd` (`$%.2f`) for task rows: display fallback and number formatting.
+- `ReviewDraft.pick`, `save`: which line number `LineComment` documents (`new`, else `old` for a removed line), the typed text trimmed.
+- `CoxModel/Rewind.swift`: one intent per click with the core's own numbers (turn, hunk index, digest); the core rewinds and refuses.
+- `SectionRows` readers (`DesktopAppearance`, `DesktopTranscript`, `reviewSend`, `cacheHitScope`, `darkHighlight`, `darkHighlightScope`, `showsMenuBar`): typed reads of values Rust stored; their fallbacks apply only before the first load.
+- `CoxModel/AppearanceSettings.swift` `AppearanceEdit.key`, `value`: which config key a popover control writes, the config's public names.
+- `SettingValue.json`, `SettingsStore.readKeys`, `storedKeys`, failures: JSON encoding for the FFI, the platform keychain through `SecretStore`, error text.
+- Fixture clients in `CoxClient` (`FixtureSession.complete`, `reviewMessage`, `Palette.swift` `SessionClient.palette`, `FixtureSettingsClient`'s rule order, `FixtureBestOf.pick`, `FixtureInbox`): test doubles, "enough to drive a view"; the C# fixture client (T58.5) has its own.
+- `CoxClient/TimelineDecoding.swift`: serde JSON of the fixtures.
+
+M2/M3, not carded (A127 (2) keeps P58 to M1; each moves when a Windows M2/M3 is planned):
+- `CoxModel/TerminalTabs.swift` `TerminalTab.title`, `closeTerminal`'s next selection (T51.6).
+- `CoxModel/BrowserBarState.swift`: the shown address and the lock (T51.10).
+- `CoxModel/MenuBarState.swift`: which inbox items the extra lists (T51.14).
+- `CoxModel/AskCox.swift`: open, then send (T51.17).
+- `CoxModel/AppStore.swift`: one store per session across windows (T51.11; a window registry is per client anyway).
+- `SidebarStore.listed` for Spotlight (T51.16); `Rewind.revert(hunk:in:)` (T51.21).
+- `CoxModel/RemoteHosts.swift`: alias trim, `desktop.remote_hosts` grows on connect, `host:` section ids, rows read-only while disconnected (T52.21).
+- `CoxModel/BestOfStore.swift` `prunes`, `pending`; `CoxClient/BestOf.swift` `Candidate.label` and `CandidateView`'s sums, which repeat `cox_app::Candidate::label` (T52.11).
+- `CoxModel/AgentPicker.swift` fallback to cox, `[AgentChoice].label(of:)`, `ToolbarState`'s `· ACP` chip and `—` cost (T52.7, mockup 27).
+- `SessionStore.pluginViews` and the slot keeping (T52.17).
+
+What landed: the audit is in the card; all 28 moves T58.4.1–T58.4.28 are in the tree (each closed above with its own Check), so this closing change only runs the card's Check. A client that renders now reads each decision from `cox-app` through a `cox-ffi` forwarder; what stays in each client is the list above.
+Check output:
+```text
+$ mise exec -- cargo nextest run -p cox-app -p cox-ffi
+227 tests run: 227 passed, 0 skipped (including cox-ffi forward_only every_ffi_body_is_one_forward_expression)
+$ swift test   # desktop/macos/Packages/CoxCore, after scripts/desktop/xcframework.sh
+24 tests passed
+$ swift test   # CoxModel
+126 tests in 6 suites passed
+$ swift test   # CoxTranscriptText
+37 tests in 7 suites passed
+$ swift test   # CoxPlatform
+31 tests in 1 suite passed
+$ swift test   # CoxTranscript, CoxUI (pixel snapshot and window-interaction suites; no source changed in this closing change)
+CoxTranscript: 55 tests, 25 issues; CoxUI: 239 tests, 931 issues
+```
+The CoxTranscript and CoxUI issues are in the pixel-snapshot suites and one composer-interaction test; this closing change touches no Swift or Rust, and the cause (macOS 27 rendering or the run environment) is not diagnosed.
+
 #### T58.4.25 Tasks tab, Review and the task card read the core's state and turns
 
 Model: already in the tree · Status: done 2026-09-29 · Depends: T58.4.22, T58.4.24 · Size: ~60 · Priority: P1 · Complexity: 1
@@ -5751,6 +5875,29 @@ Check:
 - After merging into `p37-desktop`: the same runs as T37.29.3.2.
 Not done: the app target passes `SettingsStore.cacheHitScope` into the tab (T37.22.3).
 
+#### T37.29.3.4 Context tab: budget cap and how close it is
+
+Depends: T37.29.3.2 · Size: ~120 · Files: `crates/cox-app/src/costs.rs`, `crates/cox-app/src/live.rs`, `crates/cox-ffi/src/types.rs`, `desktop/macos/Packages/…` (CoxClient `TurnCosts`, CoxCore `CostsConvert`, CoxModel `CostHistoryState`, CoxUI `ContextTab`)
+Goal: the configured caps and the spend as `$0.42 of $5.00` with a gauge. Decided by the creator 2026-10-03: show both caps, the existing `[budget].session_usd` (default 5.0) and `[budget].monthly_usd` (default 100.0); no new config key. Session spend is this session's ledger total (subagents included) against `session_usd`; month-to-date spend is the whole ledger since the local month's start against `monthly_usd`. A cap that is not a positive finite number leaves its row with the spend alone (`$0.42`) and no gauge, because `BudgetConfig` has no "no cap" value (the core stops at a cap of 0, `budget::decide`) and a fraction of 0 is undefined.
+Check: a cox-app test for the figures; snapshots with and without a cap.
+Status: done 2026-10-03
+Result:
+- cox-app `costs.rs`: `BudgetRow { label, text, fraction }` and `budget_rows`, filled into `TurnCosts.budget` by `build`; `month_start` and `month_spend` beside `periods` (a shared `local_start`). `LiveSession::turn_costs` passes the session's effective `[budget]` (`App::config`) and the month's spend. cox-ffi, CoxClient, CoxCore `CostsConvert` and CoxModel `CostHistoryState` carry `budget` field for field; CoxUI `ContextTab.State.budget` draws a "Budget" section, a label and `$0.42 of $5.00` per cap with a capsule gauge, shown before the session spent anything.
+Deviations: no new cox-store query. `Store::activity_since` already sums the whole ledger since a cutoff, so the month's figure reuses it (it also counts sessions, one cheap extra query). The month's cap is checked against every project's spend, as `[budget].monthly_usd` reads.
+Check:
+- cox-store, cox-app and cox-ffi 263 passed, 2 skipped (`budget_rows_show_the_fraction_of_each_cap`, `a_spend_over_its_cap_fills_the_gauge_and_no_more`, `a_cap_that_is_not_positive_leaves_the_spend_alone`, `month_spend_counts_only_this_month`, `the_month_starts_at_local_midnight_of_the_first`, the subagent figure in `a_subagent_sits_under_the_turn_it_started_in_and_a_fork_is_left_out`, and the figure in `turn_costs_group_the_ledger_by_turn_with_the_subagent_under_its_turn`; `forward_only` passes); clippy `-D warnings` and fmt clean.
+- CoxModel 126 passed (`theCostHistoryIsTheTurnsThenTheSessionTotal` checks `budget`).
+- CoxUI: 5 new snapshots (`contextTabWithBudgetCaps` x4, `contextTabWithOneCapMissing`), recorded on this machine.
+Not done: CoxCore `ConvertTests` (`turnCostsConvertFieldForField` carries `budget`) was not run, it needs the XCFramework. The existing ContextTab snapshots do not match their references on this machine (pixel drift on views this change does not touch), so they were neither re-recorded nor verified here. App wiring (T37.32.1, T37.22.3).
+
+#### T37.29.3 Inspector Context & Cost tab
+
+Depends: T37.25.1 · Size: split into T37.29.3.1–T37.29.3.5 · Files: see the sub-cards
+Goal: the context window as a StackedBar by part, cache-hit %, Compact now, per-turn cost as a KeyValueGrid, session and project totals and the budget cap; the missing cox-app calls (context breakdown, per-turn history, project totals, budget) come with it.
+Check: a snapshot per cell; cox-app tests for each new call.
+Status: done 2026-10-03
+Result: T37.29.3.1 to T37.29.3.5 are done (see each card).
+
 #### T37.28.6 Review comments queue while a turn runs
 
 Depends: T37.28.4 · Size: ~80 · Files: `desktop/macos/Packages/CoxModel/…/ReviewDraft.swift`, `crates/cox-config/…`
@@ -9343,3 +9490,92 @@ Done when: the Check passes.
 - Result: `crates/cox-provider-testkit/src/replay.rs`: the `sk-` arm of `redact_secrets` counts ASCII alphanumerics plus `-` and `_`, the body alphabet T50.7 gave `scrub`; the 8-byte floor and the `Bearer ` arm are unchanged. Before the fix a `sk-ant-…` key matched nothing (`ant` is below the floor), so the whole key reached the cassette.
 - Tests: `cassette_redaction_removes_an_anthropic_key_whole` fails on the old code (the line came back unchanged); `redact_strips_sk_and_bearer` and `redact_preserves_non_ascii` still pass; `cox-provider`'s `no_secrets_in_fixtures` still finds no secret in the committed fixtures under the wider alphabet.
 - Check output summary: `cargo nextest run -p cox-provider-testkit` 9 passed; `cargo nextest run -p cox-provider` 28 passed; `cargo clippy -p cox-provider-testkit --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+#### T56.1 `cox-cursor-cloud` crate: hand-written wire types
+
+Status: done 2026-10-03 · Depends: — (terms go-ahead given by the creator 2026-10-03, A123 (5)) · Size: ~170 · Files: `crates/cox-cursor-cloud/src/lib.rs` (new), `crates/cox-cursor-cloud/src/wire.rs` (new); manifests `crates/cox-cursor-cloud/Cargo.toml`, the workspace `Cargo.toml`; fixtures `crates/cox-cursor-cloud/tests/fixtures/*.json`
+Goal: serde types for the endpoints cox uses, written from https://cursor.com/docs/cloud-agent/api/endpoints: create agent (`prompt`, `model`, `repos` with `url` and `startingRef`, `autoCreatePR` defaulting to false), a follow-up run, run status (unknown values kept as `Other(String)`), the stream events (`status`, `assistant`, `thinking`, `tool_call`, `interaction_update`, `heartbeat`, `result`, `error`, `done`, and `Unknown` for anything else), cancel and run usage (`inputTokens`, `outputTokens`, `cacheWriteTokens`, `cacheReadTokens`, `totalTokens`). The crate is its own under D1: the one place a socket to `api.cursor.com` is opened (T56.2), not a `Provider`, and not session assembly; it depends on `cox-protocol` and `cox-provider-http` only. Rows in AGENTS.md Layout and `docs/design/crates.md`; no new dependency.
+Plan: add `crates/cox-cursor-cloud` (a workspace member by the `crates/*` glob) with `serde` and `serde_json` only (the `cox-protocol` and `cox-provider-http` edges arrive with T56.2, which first uses them); `wire.rs` holds the request types (`CreateAgentRequest`, `Repo`, `CreateRunRequest`), `RunStatus` with `Other(String)`, `StreamEvent` with `Unknown`, `RunUsage` and the cancel response, each tested against fixtures under `tests/fixtures/`; add the Layout row in `AGENTS.md` (rewrite the existing plan.md §1.1 row) and the `docs/design/crates.md` row; run `cargo nextest run -p cox-cursor-cloud`, `-p cox --test deps`, clippy and fmt.
+Check: `mise exec -- cargo nextest run -p cox-cursor-cloud create_agent_request_has_no_identity_fields stream_event_parses_every_documented_type unknown_stream_event_is_kept_as_unknown run_usage_parses_the_token_counts auto_create_pr_defaults_off`.
+Done when: the tests pass over hand-written fixtures.
+Out of scope: endpoints cox does not use (`/v1/me`, `/v1/repositories`, `/v1/sub-tokens`, archive, artifacts download).
+
+- Result: new crate `crates/cox-cursor-cloud` (`serde` and `serde_json` only; the `cox-protocol` and `cox-provider-http` edges arrive with T56.2, the first card to use them). `src/wire.rs` holds the hand-written types from https://cursor.com/docs/cloud-agent/api/endpoints (checked 2026-10-03): `CreateAgentRequest` (prompt envelope, optional model, `repos` with `startingRef`, `autoCreatePR` always sent and false), `CreateRunRequest`, `Run`/`RunStatus` (open enum, unknown kept as `Other`, unknown never terminal), `CreateAgentResponse`/`CreateRunResponse`/`CancelResponse`, `UsageResponse`/`RunUsage`, and `StreamEvent::parse(event, data)` covering `status`, `assistant`, `thinking`, `tool_call`, `interaction_update`, `heartbeat`, `result`, `error`, `done` and `Unknown`. Fixtures in `crates/cox-cursor-cloud/tests/fixtures/`. Rows added to `AGENTS.md` Layout, `docs/design/crates.md` and plan.md §1.1.
+- Deviation noted: the card says `prompt` is text; Cursor's docs make it an object `{ "text": ... }` and `model` an object `{ "id": ... }`, so the types follow the docs. No `name` field is modelled, so no request can carry one.
+- Check output summary: `cargo nextest run -p cox-cursor-cloud` 11 passed (the five named tests plus six more); `cargo nextest run -p cox --test deps` 10 passed; `cargo clippy -p cox-cursor-cloud --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+#### T56.3 `[[cloud_agents]]` manifest capability and its grant line
+
+Status: done 2026-10-03 · Depends: — (terms go-ahead given by the creator 2026-10-03, A123 (5)) · Size: ~150 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`; generated `docs/plugin.schema.json`
+Goal: `[[cloud_agents]]` entries with `name`, `backend` (a closed set: `"cursor"`), `key_env` (default `CURSOR_API_KEY`), optional `model` and `description`. There is no URL field: the host for a backend is fixed, so a plugin cannot point the key elsewhere. The grant line names the host `api.cursor.com`, the key env, that the prompt and the repository's GitHub URL are sent, and that Cursor clones the repository and pushes a branch on its servers, billed to the user's Cursor plan; a changed entry asks for the grant again, as every capability does (T33.6).
+Plan: add `CloudAgent` (`name`, `backend: CloudBackend` closed to `cursor`, `key_env` defaulting to `CURSOR_API_KEY`, optional `model` and `description`, `deny_unknown_fields` so a `url` key is rejected) and `PluginManifest.cloud_agents` in `manifest.rs` with validation; add the grant line for each entry in `grant.rs`; regenerate `docs/plugin.schema.json` the way the drift test documents; run the named tests plus `-p cox-plugin-api -p cox-plugin`, clippy and fmt.
+Check: `mise exec -- cargo nextest run -p cox-plugin-api manifest_cloud_agent_backend_is_a_closed_set manifest_cloud_agent_has_no_url_field` and `-p cox-plugin grant_lists_cloud_agent_host_key_and_off_machine_code`, plus `plugin_schema_matches_committed_file`.
+Done when: the tests pass and the schema is regenerated.
+Out of scope: any backend other than Cursor.
+
+- Result: `crates/cox-plugin-api/src/manifest.rs` gains `CloudAgentDecl` (`name`, `backend`, `key_env` defaulting to `CURSOR_API_KEY`, optional `model` and `description`; `deny_unknown_fields`, so `url`, `base_url` or `host` is refused), the closed `CloudBackend` enum (`cursor`, with `host()` fixing `api.cursor.com` and `name()`), `PluginManifest.cloud_agents` and its validation (the name fits as a prefixed tool name; `key_env` is an env var name, not a value). A `[[cloud_agents]]` entry needs `wasm`, like `[[external_agents]]`. `crates/cox-plugin/src/grant.rs` adds one approval line per entry naming the backend, `host=api.cursor.com`, the key env, the model, that the prompt and the repository's GitHub URL are sent, and that the service clones the repository and pushes a branch on its servers, billed to the user's plan; any change to an entry asks again through the existing `check`. `docs/plugin.schema.json` regenerated.
+- Tests: `manifest_cloud_agent_backend_is_a_closed_set`, `manifest_cloud_agent_has_no_url_field`, `manifest_cloud_agent_defaults_the_key_env_and_round_trips`, `manifest_cloud_agent_rejects_a_key_value_in_key_env`, `manifest_rejects_a_wasm_less_package_with_provider_models_or_agents` (extended), `grant_lists_cloud_agent_host_key_and_off_machine_code`, `plugin_schema_matches_committed_file`.
+- Check output summary: `cargo nextest run -p cox-plugin-api -p cox-plugin` 111 passed; `cargo clippy -p cox-plugin-api -p cox-plugin --all-targets -- -D warnings` clean; `cargo fmt` applied to both crates.
+
+#### T56.5 `cloud_runs` table: a run outlives the session that started it
+
+Status: done 2026-10-03 · Depends: — (terms go-ahead given by the creator 2026-10-03, A123 (5)) · Size: ~120 · Files: `crates/cox-store/migrations/00000000000006_cloud_runs/up.sql` and `down.sql` (new), `crates/cox-store/src/models.rs`, `crates/cox-store/src/queries.rs`; generated `crates/cox-store/src/schema.rs`
+Goal: one row per run: session id, task id, backend, agent id, run id, repository, model, status, `usage_recorded`, created and updated times. Diesel models and typed queries (D9): insert, set status, list a session's non-terminal runs, and mark usage recorded exactly once (`UPDATE … WHERE usage_recorded = false` through the DSL, returning whether this call won).
+Plan: add migration `00000000000007_cloud_runs` (recheck the next free number against main before pushing, T37.29.3.4 may also add one), extend `schema.rs` in the existing style, add `CloudRunRow` and `NewCloudRun` to `models.rs` and typed queries (insert, set status, list a session's non-terminal runs, mark usage recorded once) to `queries.rs` on the Diesel DSL; run the three named tests plus `-p cox-store`, clippy and fmt.
+Check: `mise exec -- cargo nextest run -p cox-store cloud_run_round_trips cloud_runs_lists_only_non_terminal_runs mark_usage_recorded_wins_once`.
+Done when: the migration applies on a fresh and an existing database; the tests pass.
+Out of scope: storing stream text (the transcript goes through the archive as any task result does).
+
+- Result: migration `00000000000007_cloud_runs` (`up.sql`, `down.sql`; the down was run against the up in sqlite3) creates `cloud_runs`, keyed by `(backend, run_id)`, with session id, task id, agent id, repository, model (NULL when the backend picked its default), `status`, `terminal`, `usage_recorded`, created and updated times, and an index on `session_id`. `schema.rs` and `models.rs` (`CloudRunDbRow`) gained the table; the schema snapshot was updated. Typed Diesel queries (no raw SQL) are in the new `crates/cox-store/src/cloud_runs.rs`: `cloud_run_insert`, `cloud_run_set_status`, `cloud_run`, `cloud_runs_non_terminal` and `cloud_run_mark_usage_recorded` (one conditional `UPDATE … WHERE usage_recorded = false`, true for exactly one caller). `older_binary_refuses_newer_schema` now expects the binary version `00000000000007`.
+- Deviations from the card: the queries live in `cloud_runs.rs`, not `queries.rs` (that file holds ledger aggregations and was being edited by another task); a `terminal` column carries the host's verdict on the backend's `status` word, so `cox-store` embeds no backend's status list.
+- Tests: `cloud_run_round_trips`, `cloud_runs_lists_only_non_terminal_runs`, `mark_usage_recorded_wins_once`, plus the existing `schema_snapshot_matches` and `migrations_are_idempotent` (an existing database).
+- Check output summary: `cargo nextest run -p cox-store` 34 passed; `cargo clippy -p cox-store --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+### T37.46. Rewind menu: the restored-file count from the session's changes
+
+Model: Cursor / grok bot · Status: done 2026-10-02 · Depends: — · Size: ~60 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/RewindMenuState.swift`, its test, `desktop/design/DESIGN.md`
+
+Goal: Figma frame 14's "2 files restored" is the real count, replacing `MockRewindPreviewService` (`// MOCK:`). A code rewind to before turn N restores every file the session changed in turn N or later.
+Research: `cox_app::changes::Changes.turns` (`crates/cox-app/src/changes.rs`) already lists the session's changed files grouped by the turn that changed each last, oldest turn first, and crosses to Swift unchanged as `CoxClient.Changes.turns` (`SessionClient.changes()`). A file changed in turns 1 and 3 sits under turn 3 only, so the files under turns ≥ N are exactly the files changed at or after N, each once: the count needs no new core call, no FFI change and no new dependency. A shell command's writes are not in `turns` (T26 scope), so the count is a lower bound, as the Changes tab already is.
+Plan: `ChangesRewindPreview: RewindPreviewService` over a `SessionClient` sums `turns.filter { $0.turn >= N }` file counts; the mock is deleted; the DS§6 row stops saying "mocked".
+Check: a CoxModel test over a `FixtureSession` whose changes list files under turns 1–3 gives 3, 2 and 0 for N = 1, 3 and 4.
+
+- Result: `CoxModel/RewindMenuState.swift`: `MockRewindPreviewService` is gone; `ChangesRewindPreview` reads `SessionClient.changes()` and sums the files under `Changes.turns` entries of turn ≥ N; `SessionStore.rewindMenu(turn:preview:)` uses it when no preview is given. The DS§6 `RewindMenu` row names it.
+- Tests: `theRewindMenuCountsTheFilesChangedAtOrAfterItsTurn` (files under turns 1 and 3: 3, 2, 2, 0 for N = 1…4; the mock gave 2 for every turn) and `aFailedPreviewLeavesTheCountUnknown`.
+- Check output summary: `swift test --no-parallel --build-system swiftbuild` in CoxModel: 130 tests passed; `xcrun swift-format lint --strict` clean.
+
+### T37.47. Turn numbers in the transcript gutter
+
+Model: Cursor / grok bot · Status: done 2026-10-02 · Depends: — · Size: ~120 · Files: `desktop/macos/Packages/CoxTranscriptText/Sources/CoxTranscriptText/TranscriptDecor.swift`, `…/TranscriptDecorStyle.swift`, a CoxTranscript snapshot test
+Goal: every prompt's turn number sits in the gutter left of its bubble, as Figma frames 01 and 14 draw it (CoxUI's `TurnGutter`: `size.turnGutter` wide, right-aligned, `size.turnGutterOffset` from the bubble, `font.detail` in `text.secondary`).
+Research: the transcript is one TextKit 2 view (`CoxTranscriptText`), not SwiftUI rows, so `TurnGutter` cannot be placed per prompt by SwiftUI layout; the bubble is drawn by `DecorFragment` (`TranscriptDecor.swift`) from the `.user` block, and `Block.turn` already carries the turn (`CoxClient.Block`). The view's gutter is the text container's leading inset (36 pt in `BlockSelectionTests`), wide enough for `size.turnGutter`. Drawing the number in the fragment keeps it in step with layout and scrolling for free; a hosted SwiftUI view per prompt would need its own frame tracking, as `PromptHover` does for one view at a time.
+Plan: `TranscriptDecorStyle` gains the gutter font, colour and offset from the tokens (mapped in CoxTranscript's `TranscriptStyle.cox`); the bubble's first-edge draw also draws the turn number right-aligned in the gutter; gutter clicks keep selecting blocks (T37.42.2).
+Check: a CoxTranscript snapshot of two prompts shows `1` and `2` in the gutter; the block-selection tests stay green.
+
+- Result: `CoxTranscriptText`: `TranscriptStyle.Gutter` (font, colour, box width, offset) and `TranscriptStyle.gutter`, `nil` by default so `.system` draws no number; a prompt's text carries `.transcriptTurn`; `DecorFragment` draws the number right-aligned in `Decor.gutterArea` (the box `offset` left of the bubble, on the first line) and widens its rendering surface to it. CoxTranscript's `TranscriptStyle.cox` maps `font.detail`, `text.secondary`, `size.turnGutter` and `size.turnGutterOffset`. The number shows where the column's margin is at least `size.turnGutterOffset` (a window wider than the reading width); in a narrower one it falls outside the view, as before.
+- Tests: `TranscriptGutterTests` (CoxTranscriptText): a prompt of turn 7 carries the turn and inks the gutter box in the gutter's colour and nothing left of it; the system style inks none. A pixel test instead of the planned CoxTranscript snapshot: every snapshot there is at most 784 wide, so its margin is under the offset and the existing references are unchanged; and references recorded on this Mac (macOS 27) do not match CI.
+- Check output summary: `swift test --no-parallel --build-system swiftbuild` in CoxTranscriptText: 39 tests, all passed (the 10 000-block launch budget once over 400 ms under load, passed on rerun), block-selection tests included; CoxTranscript builds, its snapshot suites fail on this Mac as before the change (macOS 27 vs CI's macOS 26); `xcrun swift-format lint --strict` clean.
+
+### T37.48. Rewind menu from the turn gutter
+
+Model: Cursor / grok bot · Status: done 2026-10-02 · Depends: T37.46, T37.47 · Size: ~150 · Files: `desktop/macos/Packages/CoxTranscriptText/Sources/CoxTranscriptText/PromptHover.swift`, `desktop/macos/Packages/CoxTranscript/Sources/CoxTranscript/PromptActing.swift`, a CoxTranscript test
+Goal: as in Figma frame 14, a hovered prompt's turn number turns into the marked `TurnGutter` (accent, rewind glyph); clicking it opens CoxUI's `RewindMenu` under it with the count from T37.46, and a scope or "Fork a new session here" reaches the core through `SessionStore.rewind(toTurn:code:conversation:)` and `fork(beforeTurn:)`.
+Research: `Intent.rewind(toTurn:code:conversation:)` and `Intent.fork(turn:)` already exist in `CoxClient.Intent` and the core (`cox_app::intent::dispatch`); the core's `toTurn` is the first turn undone, so the prompt's own turn is passed, as Edit and resend does (`ComposerStore.resend`). `PromptHover.swift` already hosts one SwiftUI view per hovered prompt at its bubble's top trailing corner; the marked number reuses that tracking at the bubble's leading edge. A fork returns its child session (`CoreClient.send`), which the app opens as it opens any fork.
+Plan: `TranscriptCards` gains `promptGutter`; the hovered prompt shows it at the gutter; its click shows `RewindMenu` in an `NSPopover`; `PromptActing` maps the menu's intents to the store and closes the popover.
+Check: a CoxTranscript test hovers prompt 2, opens the menu and picks Code only and Fork, and the fixture session receives `.rewind(toTurn: 2, code: true, conversation: false)` and `.fork(turn: 2)`.
+
+- Result: `CoxTranscriptText`: `TranscriptCards.promptGutter` and `promptMenu`; a hovered prompt hosts the gutter view over the number T37.47 draws (on the view's background, so the drawn number does not show through), the pointer on it keeps the hover, a point left of the column finds its prompt, and `openMenu(_:)` shows `promptMenu` in a transient `NSPopover` under the number, anchored on the text view so the hover ending does not close it. `CoxTranscript/PromptActing.swift`: the gutter is the marked `TurnGutter` (accent, `arrow.uturn.backward`); `PromptRewindMenu` shows `RewindMenu` and fills its count from `SessionStore.rewindMenu(turn:)` (T37.46) once open; `perform(_: RewindMenu.Intent)` sends `rewind(toTurn:code:conversation:)` or `fork(beforeTurn:)` and reports a failure through the composer. Opening the forked child as a window stays with the app's existing fork path.
+- Tests: `PromptRewindTests`: in a 1 000-pt window prompt 2's hover shows the gutter over its drawn number, the pointer on it keeps the hover, and `openMenu` presents the popover; Code only, Conversation only and Fork reach the fixture session as `.rewind(toTurn: 2, code: true, conversation: false)`, `.rewind(toTurn: 2, code: false, conversation: true)` and `.fork(turn: 2)`; without a store nothing is sent. `PromptBubbleTests`' hover and action tests still pass.
+- Check output summary: `swift test --no-parallel --build-system swiftbuild` in CoxTranscript: the new suite passes; the snapshot suites fail on this Mac as before (macOS 27 vs CI's macOS 26), and the 200 tok/s busy budget read 26 % against 25 % with a load average of 70; CoxTranscriptText: 39 tests pass bar the 10 000-block launch budget under the same load; `xcrun swift-format lint --strict` clean.
+
+### T37.49. Welcome hero facts and suggestions from cox-app
+
+Model: Cursor / grok bot · Status: done 2026-10-02 · Depends: — · Size: ~200 · Files: `crates/cox-app/src/welcome.rs`, `crates/cox-ffi/src/…`, `desktop/macos/Packages/CoxCore/…`, `desktop/macos/App/SessionWindow.swift`
+Goal: Figma frame 22's summary line ("Rust workspace · 31 crates · AGENTS.md loaded") and its three suggestions come from the session's folder, replacing `MockWelcomeService` (`// MOCK:` in CoxModel and `SessionWindow.welcome`).
+Research: the instruction files a session loads are `cox_ext::instructions::load(..).files` (`crates/cox-ext/src/instructions.rs`), so "AGENTS.md loaded" names what the model really gets (T7.8). The workspace kind and size need a manifest read: `Cargo.toml` `[workspace] members` globs (`toml_edit` is already a workspace dependency of `cox-config`; `cargo_metadata` is in `Cargo.lock` only transitively and would spawn `cargo`, which the app must not do at open), `package.json` `workspaces`, `go.mod`, `pyproject.toml`; the first match wins and an unknown folder shows only the instruction files. The suggestions are three fixed prompts (explain the architecture, find and fix a failing test, review the uncommitted diff), with the test command taken from the detected kind (`cargo nextest run` when `.config/nextest.toml` exists, else `cargo test`; `npm test`; `go test ./...`; `pytest`) and the diff one shown only inside a git repository (`cox_tools::git`). Logic stays in Rust (DS§1); `cox-ffi` only forwards (D11).
+Plan: `cox_app::welcome::facts(cwd) -> Welcome` (summary, suggestions) with unit tests over scratch folders; a forwarding `App.welcome(cwd)` export; CoxCore's `CoreWelcomeService` conforms to `WelcomeService`; the mock is deleted.
+Check: cox-app tests for a Cargo workspace, a single crate, a Node workspace and an empty folder; the app shows the real line for this repository.
+
+- Result: `crates/cox-app/src/welcome.rs`: `App::welcome(cwd)` loads the instruction chain as a session would (`cox_session::instruction_roots`, the config's `instruction_budget_tokens`) and `facts(cwd, files, in_git)` builds the line — `Rust workspace · N crates` from `[workspace] members` (paths and `dir/*` globs, less `exclude`), `Rust crate`, `Node workspace · N packages` / `Node project` from `package.json` `workspaces`, `Go module`, `Python project` — then `<files> loaded` by file name; the suggestions name the project folder and the kind's test command (`cargo nextest` with `.config/nextest.toml`, `cargo test`, `npm test`, `go test ./...`, `pytest`), and the diff review only under a git root (`cox_config::load::find_git_root`, no `git` run). `cox-ffi`: `App.welcome(cwd)` forwards on the runtime; `Welcome` and `Suggestion` cross as remote records. Swift: `WelcomeFacts`, `WelcomeSuggestion` and `WelcomeService` move to CoxClient with a `FixtureWelcome`; CoxCore's `LiveCoreClient` conforms (`WelcomeConvert.swift`); `MockWelcomeService` and `SessionWindow.welcome` are deleted, and the window passes the live client (a fixture without a core shows the question alone). cox-app depends on `toml_edit` directly (already in its tree through cox-config).
+- Tests: cox-app `welcome::tests` — a Cargo workspace (3 crates with a glob, a path and an exclude; nextest; two instruction files), a single crate (`cargo test`, no diff suggestion outside git), a Node workspace (2 packages) and an empty folder (no summary, generic test prompt). CoxCore `thisRepositoryReadsAsARustWorkspaceWithItsInstructions`: through the real core this repository reads `Rust workspace · … · AGENTS.md …` with the diff suggestion. The CoxModel and CoxTranscript welcome tests use `FixtureWelcome`.
+- Check output summary: `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo nextest run -p cox-ffi -p cox-app` 231 passed (forward-only included); `cargo nextest run -p cox --test deps` 10 passed; `just desktop-xcframework` built; CoxCore `swift test` 25 passed; CoxModel 130 passed; CoxTranscript welcome and rewind tests pass; `cargo fmt --check`, `xcrun swift-format lint --strict` clean.

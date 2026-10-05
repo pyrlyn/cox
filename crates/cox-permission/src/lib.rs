@@ -1,8 +1,16 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The single place a tool call is allowed, denied or escalated (AGENTS.md
 //! trust boundaries; plan.md §1.8). Pure: rules compile once from config,
 //! then `decide` is a function of the call, the mode, the policy and the
 //! session grants — no I/O, so the 30-row table and the proptest need no
 //! session around them. A tool never checks its own permission.
+
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
 
 pub mod policy;
 pub mod rules;

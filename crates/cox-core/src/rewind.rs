@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `/rewind` (T26.2): put the workspace, the conversation or both back to
 //! the start of an earlier turn, one file back to before a turn
 //! (T37.28.3), or one hunk of a file's net diff (T51.19). Separate from `checkpoint.rs` because that

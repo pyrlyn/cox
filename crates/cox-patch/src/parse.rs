@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The V4A grammar: text → [`Patch`] and back. No I/O, no filesystem — a
 //! patch that parses here has still not been checked against a single file,
 //! which is what lets the fuzz target and the round-trip property run

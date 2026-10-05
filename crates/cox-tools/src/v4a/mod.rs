@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `apply_patch`: Codex's V4A patch grammar (plan.md D4/D8, T3.5). Parsing,
 //! hunk matching and staging (`parse`, `stage`) moved to the pure
 //! `cox-patch` crate (T32.6) — no filesystem, no `ToolCx`. [`tool`] is the

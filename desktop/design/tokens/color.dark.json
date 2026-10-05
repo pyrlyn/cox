@@ -1331,6 +1331,44 @@
             }
           }
         }
+      },
+      "app": {
+        "top": {
+          "$type": "color",
+          "$value": {
+            "colorSpace": "srgb",
+            "components": [
+              0.1059,
+              0.1412,
+              0.251
+            ],
+            "hex": "#1b2440"
+          }
+        },
+        "bottom": {
+          "$type": "color",
+          "$value": {
+            "colorSpace": "srgb",
+            "components": [
+              0.1765,
+              0.2392,
+              0.4314
+            ],
+            "hex": "#2d3d6e"
+          }
+        },
+        "glyph": {
+          "$type": "color",
+          "$value": {
+            "colorSpace": "srgb",
+            "components": [
+              1.0,
+              0.8235,
+              0.4784
+            ],
+            "hex": "#ffd27a"
+          }
+        }
       }
     },
     "role": {

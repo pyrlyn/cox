@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `StopButton` (DS§6.3 row `StopButton`, the mockup's `.stop`): interrupts the running turn,
 // with its shortcut beside it. Separate because it is the one capsule drawn inverted — the
 // darkest thing in a light toolbar, the lightest in a dark one — so it is found at a glance.

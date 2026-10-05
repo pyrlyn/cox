@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The menu-bar extra's rows (T51.14, mockup 26, DT§5.6): the inbox's approvals and questions
 // that can still be answered, each under its session's title, the sessions running now as the
 // sidebar lists them, and today's figures from Rust's ledger summary. Here, not in CoxUI,

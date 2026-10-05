@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T35.7 Check: Cursor's `agent` CLI end to end, with the test-only
 //! `fake_agent` binary (`tests/support/fake_agent.rs`) standing in for it
 //! and replaying the documented shapes `cox-vendor cursor-fixtures` wrote to

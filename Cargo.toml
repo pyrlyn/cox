@@ -12,7 +12,7 @@ version = "0.1.2"
 edition = "2024"
 rust-version = "1.98"
 # GPLv3 or the royalty-free licence in LICENSE-ROYALTY-FREE.md, at the user's choice (README "License", A68).
-license = "GPL-3.0-only OR LicenseRef-cox-Royalty-Free"
+license = "GPL-3.0-or-later OR LicenseRef-cox-Royalty-Free"
 repository = "https://github.com/listepo/cox"
 
 # Versions verified against crates.io 2026-09-02 (R§4.5). No new dependency
@@ -196,6 +196,24 @@ pretty_assertions = "1.4"
 vt100 = "0.16"
 portable-pty = "0.9"
 async-trait = "0.1"
+
+# Lints every member inherits through `[lints] workspace = true`. CI runs
+# clippy with `-D warnings`, so `warn` here fails CI just like `deny`.
+# `unsafe_code` is denied; the few places that need it (edition-2024 env
+# mutation, fork/exec hooks, libproc and Landlock FFI, the uniffi glue) carry
+# a targeted `allow` with a `// why:` comment.
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+# `unwrap_used` and `expect_used` are left out for now: with `-D warnings`
+# they would fail on the existing non-test call sites and integration-test
+# helpers (which `allow-unwrap-in-tests` does not cover). Add them once those
+# are converted.
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
 
 # Dev builds: debug info for our own crates only. The bulk of a debug target/
 # tree is DWARF for dependencies nobody steps through; line tables still give

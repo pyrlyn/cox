@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // New session's agent sheet (DT§3.3.1, mockup 27, T52.8): when the config names an external ACP
 // agent, New session asks who drives the session; with cox alone, or on a recording, it opens at
 // once. Wiring only — CoxModel's `AgentPicker` owns the list and the rule that an agent that

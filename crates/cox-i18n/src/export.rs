@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Lowers the embedded gettext catalogs to the native apps' resource formats:
 //! Apple `<code>.lproj/Localizable.strings` (plain messages) and
 //! `Localizable.stringsdict` (plural messages) for `desktop/macos`, and

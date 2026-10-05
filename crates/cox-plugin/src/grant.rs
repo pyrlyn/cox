@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The grant check (PL§3, T33.6): whether a discovered plugin may load
 //! under the grant on file. Pure — the caller reads the `plugin_grants` row
 //! through `PluginStore` and passes it in — so every surface (session open,
@@ -158,6 +162,19 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
             .join(" ");
         out.insert(format!("agent:{} {argv} key={}", a.name, a.key_env));
     }
+    // The line names the fixed host, the key env, the model and what leaves
+    // the machine, so approving it is informed and any change asks again.
+    for a in &manifest.cloud_agents {
+        let model = a.model.as_deref().unwrap_or("default");
+        out.insert(format!(
+            "cloud-agent:{} {} host={} key={} model={model}; sends the prompt and the repository's GitHub URL; \
+             the service clones the repository and pushes a branch on its servers, billed to your plan",
+            a.name,
+            a.backend.name(),
+            a.backend.host(),
+            a.key_env,
+        ));
+    }
     // `subagent:` so a definition file never reads as the process-spawning
     // `agent:` line above.
     for a in &manifest.agents {
@@ -207,6 +224,7 @@ mod tests {
             models: Vec::new(),
             mcp: Vec::new(),
             external_agents: Vec::new(),
+            cloud_agents: Vec::new(),
             agents: Vec::new(),
         }
     }
@@ -297,6 +315,38 @@ mod tests {
             check(&m, "d1", Some(&grant("d1", &[line]))),
             Verdict::NeedsApproval { added, .. }
                 if added == ["agent:cursor npx acp --trust key=CURSOR_API_KEY"]
+        ));
+    }
+
+    #[test]
+    fn grant_lists_cloud_agent_host_key_and_off_machine_code() {
+        let mut m = manifest(Capabilities::default());
+        m.cloud_agents.push(cox_plugin_api::CloudAgentDecl {
+            name: "bg".into(),
+            backend: cox_plugin_api::CloudBackend::Cursor,
+            key_env: "CURSOR_API_KEY".into(),
+            model: None,
+            description: None,
+        });
+        let lines = capability_list(&m);
+        assert_eq!(lines.len(), 1);
+        let line = &lines[0];
+        for part in [
+            "cloud-agent:bg cursor",
+            "host=api.cursor.com",
+            "key=CURSOR_API_KEY",
+            "GitHub URL",
+            "clones the repository and pushes a branch on its servers",
+        ] {
+            assert!(line.contains(part), "{part:?} missing from {line:?}");
+        }
+        let stored = grant("d1", &[line]);
+        assert_eq!(check(&m, "d1", Some(&stored)), Verdict::Granted);
+
+        m.cloud_agents[0].key_env = "OTHER_KEY".into();
+        assert!(matches!(
+            check(&m, "d1", Some(&stored)),
+            Verdict::NeedsApproval { added, .. } if added.len() == 1
         ));
     }
 

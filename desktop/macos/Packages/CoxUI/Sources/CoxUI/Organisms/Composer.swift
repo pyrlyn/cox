@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `Composer` (DS§6.4 row `Composer`, the mockup's `.composer`; DT§5.3; mockup screens 1, 5–7):
 // where the next message is written — the text, the files it mentions and attaches, shell mode with its
 // "share output" switch, the prompts queued behind the running turn, the completion rows for

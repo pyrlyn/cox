@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ComposerChip` (DS§6.3 row `ComposerChip`, the mockup's `.chip` and `.chip.blue`): one thing
 // the next message carries besides its text — an @-mentioned file, an attachment, a slash
 // command, shell mode, the prompts queued behind the running turn, the permission mode, the

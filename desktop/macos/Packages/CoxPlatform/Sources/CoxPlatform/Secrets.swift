@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Provider keys in the macOS Keychain (DT§5.7, research.md 9.5.8): generic
 // password items under service `cox`, account = provider section — the item
 // the CLI's `keyring::Entry::new("cox", section)` (cox-provider-http) reads

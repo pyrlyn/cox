@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Ivan Tugay
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 """`just test`: run the nextest tests of the workspace crates a change can break (A99, T50.7).
 
 Why a script and not a tool: nextest's `rdeps()` filterset already adds every

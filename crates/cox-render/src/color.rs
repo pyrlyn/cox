@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Colour depth (T14.2): what the terminal in front of us can actually
 //! show. syntect hands the markdown renderer 24-bit colours and the cells
 //! use named ones; a terminal that understands neither would print them as
@@ -244,6 +248,8 @@ mod tests {
     }
 
     #[test]
+    // why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+    #[allow(unsafe_code)]
     fn tmux_skips_the_query_without_touching_the_terminal() {
         // SAFETY: test-only env mutation, no other test in this module reads TMUX.
         unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/default,1234,0") };

@@ -1,0 +1,7 @@
+# actionlint 1.7.12 predates GitHub's `xcode-27` image (macOS with Xcode 27, preview since
+# 2026-07-16), the only hosted image with Xcode 27; it is GitHub-hosted, not self-hosted.
+# Mirrors pyrlyn/infra's .github/actionlint.yaml.
+self-hosted-runner:
+  labels:
+    - xcode-27
+    - xcode-27-xlarge

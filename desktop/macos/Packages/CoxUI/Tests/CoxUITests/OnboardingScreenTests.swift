@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The first-run window's check (T37.31, DT§5.8): with no provider key the checklist says what is
 // missing and offers Settings; with every check passing it offers nothing but the project step.
 // Both in every light/dark × Solid/Frosted cell, and the row in each status. The project drop zone

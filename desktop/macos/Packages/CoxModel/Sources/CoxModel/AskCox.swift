@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // "Ask cox in <project>" (T51.17): a new session in the project, then the prompt sent as the
 // composer's Send, so the turn runs like any other; its approvals land in the inbox and the
 // engine decides as always. Here, not in the app's intent, so open-then-send is tested without

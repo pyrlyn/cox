@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `read`'s `mode=outline`: a short `line: signature` listing of a file's
 //! top-level shape, so the model can decide what to `read`/`lines=` into
 //! full detail instead of paying for the whole file (plan.md T3.2 step 3;

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The interactive surfaces' side of a session: `open` loads config from
 //! the flags and hands it to `cox_session::open`, printing the warnings it
 //! returns; the TUI loop (`run_tui`), `cox init`, `--worktree` and the

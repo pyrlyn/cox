@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `AcpBanner` (DT§3.3.1, mockup 27's `.notice`, T52.8): the line an external agent's transcript
 // opens with — who drives the session, and that its own model, auth and billing apply. Separate
 // from `NoticeRow` only to fix the wording in one place; the shape is the notice's.

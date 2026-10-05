@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox ext` (plan.md T7.3 step 3): what instruction files, skills, commands
 //! and agent definitions are in effect for this cwd. Lives in the binary
 //! because it needs both the config roots and every cox-ext discoverer;

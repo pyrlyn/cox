@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // "Ask cox in <project>" (T51.17): the intent opens a new session in the project, then sends
 // the prompt as the composer's Send, and the session stays held until a window joins it.
 

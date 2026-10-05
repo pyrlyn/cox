@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The MCP page's logins box (T37.30.3, DT§5.7): per MCP server, whether cox can reach it, its
 // status badge (T37.45.4, mockup 20's `.badge`), Show log when something went wrong, and a Log in
 // or Log out button. Composition only (DS§5): the line, badge, log and action arrive in the state

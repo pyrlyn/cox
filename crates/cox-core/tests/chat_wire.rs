@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The loop over the real Chat Completions state machine (T38.1): a
 //! provider that runs SSE bodies through `OpenAiChatStream` exactly as
 //! `OpenAiChatProvider::stream_once` does, so the test proves that what the

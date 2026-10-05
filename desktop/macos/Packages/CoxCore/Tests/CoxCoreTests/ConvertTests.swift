@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The generated cox-ffi values convert to the `CoxClient` values a recorded
 // fixture decodes to, so the stores see the same timeline live and replayed.
 
@@ -151,14 +155,16 @@ import Testing
   let row = CoxFFIBindings.CostRow(label: "explore", values: ["9.8k", "0.03"], detail: true)
   let total = CoxFFIBindings.CostRow(label: "Session", values: ["9.8k", "0.03"], detail: false)
   let live = CoxFFIBindings.TurnCosts(
-    columns: ["In", "$"], rows: [row], total: total, project: "Project cox today: $0.03")
+    columns: ["In", "$"], rows: [row], total: total, project: "Project cox today: $0.03",
+    budget: [CoxFFIBindings.BudgetRow(label: "Session", text: "$0.03 of $5.00", fraction: 0.006)])
   #expect(
     CoxClient.TurnCosts(live)
       == CoxClient.TurnCosts(
         columns: ["In", "$"],
         rows: [CoxClient.CostRow(label: "explore", values: ["9.8k", "0.03"], detail: true)],
         total: CoxClient.CostRow(label: "Session", values: ["9.8k", "0.03"]),
-        project: "Project cox today: $0.03"))
+        project: "Project cox today: $0.03",
+        budget: [CoxClient.BudgetRow(label: "Session", text: "$0.03 of $5.00", fraction: 0.006)]))
 }
 
 /// T37.44.13: a remote session's palette goes through the core's ranking and back: actions before

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A terminal pane's shell as the views see it (T51.5, DT§3.2): cox-ffi's `TerminalHandle`
 // reduced to bytes in and bytes out, so CoxPlatform's SwiftTerm view and its tests never load
 // the XCFramework. The shell itself runs in Rust (`cox_app::terminal`): Swift never spawns a

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox mcp`: built-in tools served over MCP stdio (T6.2). This module owns
 //! the wire side only. Which tools are offered, how a call is gated and
 //! where its output is archived come from the binary through [`Gate`] and

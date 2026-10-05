@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Diff view (T5.4, T24.5): a `ToolResult.diff` as coloured unified-diff
 //! lines under a per-file `± path  +n −m` header, collapsible to that header
 //! alone. A replaced line pair shows which words changed; a viewport of at

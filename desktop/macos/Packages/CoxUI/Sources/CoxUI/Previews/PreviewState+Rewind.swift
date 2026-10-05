@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the rewind timeline (T37.28.1): the Changes tab's checkpoints with
 // the last one lifted, as a gutter mark would point at it. Separate so organisms built in
 // parallel add their fixtures without editing one file.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // What the toolbar's model popover offers, as the catalog and as the core's sections (T58.4.7),
 // and which providers can answer (DT§5.1, T37.22.6, A110), field for field as cox-ffi exports
 // `cox_app::models`. Separate from the session seam

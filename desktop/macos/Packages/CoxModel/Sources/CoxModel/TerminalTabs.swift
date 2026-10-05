@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // A session's terminal tabs (T51.6, DT§3.2, mockup 24): the shells `+` opened, which one the
 // pane shows, and closing them with the session. Separate from the timeline because nothing a
 // shell prints is a patch; the shells run in Rust (`cox_app::terminal`) and this only keeps

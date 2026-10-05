@@ -11,8 +11,6 @@
 //! - [`ui`] — the `Widget` tree `cox_render` returns (PL§8); its schema is
 //!   part of `docs/plugin-abi.schema.json`.
 
-#![warn(missing_docs)]
-
 pub mod abi;
 pub mod manifest;
 pub mod ui;
@@ -24,9 +22,9 @@ pub use abi::{
 };
 
 pub use manifest::{
-    API_MAJOR, AgentDecl, AgentMode, Capabilities, ExternalAgentDecl, FsCaps, Limits,
-    ManifestError, McpDecl, ModelDecl, ModelTier, PluginManifest, PriceDecl, ProviderApi,
-    ProviderAuth, ProviderDecl, UiCaps, is_plugin_id,
+    API_MAJOR, AgentDecl, AgentMode, Capabilities, CloudAgentDecl, CloudBackend, ExternalAgentDecl,
+    FsCaps, Limits, ManifestError, McpDecl, ModelDecl, ModelTier, PluginManifest, PriceDecl,
+    ProviderApi, ProviderAuth, ProviderDecl, UiCaps, is_plugin_id,
 };
 
 pub use ui::{StyleToken, Widget};

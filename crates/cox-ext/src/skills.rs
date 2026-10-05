@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Agent Skills (T7.2): `SKILL.md` discovery, the index line the model sees
 //! up front, and the deferred `skill` tool that returns a body on demand.
 //! The body stays out of the prompt until invoked — that is the whole point

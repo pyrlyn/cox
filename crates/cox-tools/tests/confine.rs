@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Exhaustive escape-attempt table for `cox_tools::path::confine`, the one
 //! function every path from the model must pass through (AGENTS.md trust
 //! boundaries). Lives in its own integration test (not `path.rs`'s inline

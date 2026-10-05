@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // T52.11: the compare view's store reads the columns, lists what a keep prunes, and never
 // discards a worktree with changes on the first yes.
 

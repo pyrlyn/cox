@@ -47,7 +47,7 @@ yet stable.
 
 ## Install
 
-Prebuilt binaries for macOS (Apple silicon and Intel) and Linux (x86-64 and arm64):
+Prebuilt binaries for macOS (Apple silicon) and Linux (x86-64 and arm64):
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/pyrlyn/cox/releases/latest/download/cox-installer.sh | sh

@@ -1,0 +1,12 @@
+{
+  "id": "run-1",
+  "agentId": "bc-1",
+  "status": "FINISHED",
+  "createdAt": "2026-10-03T10:00:00Z",
+  "updatedAt": "2026-10-03T10:00:41Z",
+  "durationMs": 41000,
+  "result": "Fixed the flaky test.",
+  "git": {
+    "branches": [{ "repoUrl": "https://github.com/pyrlyn/cox", "branch": "cursor/fix-flaky" }]
+  }
+}

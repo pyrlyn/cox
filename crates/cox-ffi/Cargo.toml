@@ -46,3 +46,6 @@ async-trait = { workspace = true }
 # the version the lockfile already holds.
 syn = { version = "3.0.5", default-features = false, features = ["full", "parsing"] }
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

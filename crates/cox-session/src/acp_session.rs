@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! A top-level session driven by an external ACP agent (T52.4, DT§3.3.1):
 //! one agent process for the session's life, not one per turn as the
 //! subagent driver in `external_agents` runs it. Here, beside that driver,

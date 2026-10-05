@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T4.1: `bash` under Seatbelt — the three guarantees (no writes outside the
 //! workspace, `.git` read-only inside it, no network unless allowed), run
 //! through the real tool against a scratch workspace. macOS only; the

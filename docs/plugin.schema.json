@@ -106,6 +106,14 @@
       },
       "default": []
     },
+    "cloud_agents": {
+      "description": "`[[cloud_agents]]` entries: a background task run as a hosted cloud\nagent (P56, `docs/design/v0.3-cursor-cloud.md`). The host drives it;\nno wasm export backs it.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CloudAgentDecl"
+      },
+      "default": []
+    },
     "agents": {
       "description": "`[[agents]]` subagent definition files the package ships (T45.3);\neach is one approval line, and a local definition of the same name\nwins over it.",
       "type": "array",
@@ -570,6 +578,56 @@
           "description": "The line-oriented `stream-json` protocol (EA§5): a pure host-side\nline mapper onto `cox_protocol::Event`/`Item`.",
           "type": "string",
           "const": "stream-json"
+        }
+      ]
+    },
+    "CloudAgentDecl": {
+      "description": "A `[[cloud_agents]]` entry (P56): a background task run as a hosted\ncloud agent. There is deliberately no URL field: the host for a backend\nis fixed in cox, so a plugin cannot point the user's key at another\nserver.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The `agent(preset: \"<name>\")` dispatch name.",
+          "type": "string"
+        },
+        "backend": {
+          "description": "Which hosted service runs it.",
+          "$ref": "#/$defs/CloudBackend"
+        },
+        "key_env": {
+          "description": "Env var the host resolves the key from; a name, never a value.",
+          "type": "string",
+          "default": "CURSOR_API_KEY"
+        },
+        "model": {
+          "description": "The backend's model id; the backend's own default when absent.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "description": "One-line description shown at approval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "backend"
+      ]
+    },
+    "CloudBackend": {
+      "description": "The hosted services a `[[cloud_agents]]` entry can name. Closed: each\nvariant fixes a host (`CloudBackend::host`), so adding one is a reviewed\ncode change rather than a manifest string.",
+      "oneOf": [
+        {
+          "description": "Cursor Cloud Agents (`api.cursor.com`).",
+          "type": "string",
+          "const": "cursor"
         }
       ]
     },

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The session repo map (P43, `docs/design/v0.2-repomap.md`): built once
 //! before the first request of the session the user talks to, archived
 //! before use, replayed from the archive on resume (invariant 6), and

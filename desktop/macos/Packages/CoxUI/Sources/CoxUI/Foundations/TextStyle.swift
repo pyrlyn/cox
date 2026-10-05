@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `.textStyle(_:)` (DS§3.2, DS§6.1): font, line height, tracking and tabular digits from a
 // `FontToken`, at the user's text size. Separate so no view spells a font and every text
 // scales together.

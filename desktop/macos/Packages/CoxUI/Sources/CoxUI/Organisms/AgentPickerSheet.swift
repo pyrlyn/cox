@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `AgentPickerSheet` (DT§3.3.1, mockup 27, T52.8): New session asks who drives it — cox or an
 // external ACP agent. An agent that cannot start here is listed with why, and cannot be picked.
 // Separate so the app only presents it: CoxModel's `AgentPicker` owns the list and the rule, the

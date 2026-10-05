@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Pixel diff of a CoxUI snapshot against its Figma or mockup frame (A119, DS§2).
 // sharp decodes and resamples (a 2x frame against a 1x snapshot needs a real downscale, not
 // nearest-neighbour), pixelmatch decides which pixels differ; only the grouping of differing

@@ -1,0 +1,43 @@
+name: desktop macOS toolchain and CoxFFI
+description: >-
+  Everything the macOS app builds on, for ci.yml's desktop-macos job and the
+  desktop build workflow (T37.32.3), so both build the app the same way: the
+  pinned Xcode 27, its Metal toolchain, the mise.toml Rust, and
+  desktop/macos/build/CoxFFI.xcframework for Apple Silicon only (A67). Runs on
+  the xcode-27 image.
+
+runs:
+  using: composite
+  steps:
+    - uses: pyrlyn/infra/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+      with:
+        version: '27'
+
+    # Since Xcode 26 the Metal toolchain is a separate component, and the xcode-27 image does
+    # not ship it for Xcode 27: SwiftTerm's Shaders.metal (CoxPlatform) then fails to compile.
+    # Download it for the Xcode setup-xcode just selected.
+    - name: Metal toolchain
+      shell: bash
+      run: |
+        xcodebuild -showComponent MetalToolchain || true
+        xcodebuild -downloadComponent MetalToolchain
+
+    - uses: ./.github/actions/rust
+
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+    - name: CoxFFI.xcframework
+      shell: bash
+      run: bash scripts/desktop/xcframework.sh
+
+    - name: arm64 only
+      shell: bash
+      run: |
+        set -euo pipefail
+        libs=$(find desktop/macos/build/CoxFFI.xcframework -name '*.a')
+        [ -n "$libs" ] || { echo "no library in CoxFFI.xcframework" >&2; exit 1; }
+        for lib in $libs; do
+          archs=$(lipo -archs "$lib")
+          echo "$lib: $archs"
+          [ "$archs" = arm64 ] || { echo "expected arm64 only" >&2; exit 1; }
+        done

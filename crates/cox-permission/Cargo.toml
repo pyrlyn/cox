@@ -13,3 +13,6 @@ globset = { workspace = true }
 [dev-dependencies]
 # `Engine::decide`'s doctest builds a `ToolCall` input.
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

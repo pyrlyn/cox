@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `PreviewState` fixtures for the MCP page's status badges and log (T37.45.4): mockup 20's
 // servers — two connected, one needing a login, one failed with a log — plus one no session has
 // tried yet, and the same page with MCP off. Separate from `PreviewState+SettingsLogins.swift`

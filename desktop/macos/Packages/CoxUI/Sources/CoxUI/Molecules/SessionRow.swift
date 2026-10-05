@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `SessionRow` (DS§6.3 row `SessionRow`, the mockup's `.row`): one session in the sidebar — its
 // state, title, what it is doing and what it has cost. Separate so every list of sessions
 // (sidebar groups, search results) draws a session the same way.

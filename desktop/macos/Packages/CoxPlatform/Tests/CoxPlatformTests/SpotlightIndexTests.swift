@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Spotlight index without Spotlight (T51.16): a row becomes an item with the title, the
 // project and the time and no other text; a session that leaves the list is deleted; the first
 // sync of a launch replaces what an earlier one left; a result's activity opens its session.

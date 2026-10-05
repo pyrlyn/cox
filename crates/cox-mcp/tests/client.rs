@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! T7.6: the client namespaces and gates a server's tools over an
 //! in-process duplex, survives a server that dies mid-session, and
 //! discovers servers from config, `.mcp.json` and `~/.claude.json`.
@@ -7,6 +11,9 @@
 //! the handshake declares no `io.modelcontextprotocol/ui` extension, a
 //! `ui://` resource is never fetched, and a tool with
 //! `_meta.ui.resourceUri` yields the same `ToolOutput` as its UI-less twin.
+
+// why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
+#![allow(unsafe_code)]
 
 use std::collections::HashMap;
 use std::path::PathBuf;

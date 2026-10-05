@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! The plugin side of session assembly (T33.6, T33.12, T33.19, T33.44):
 //! the grant check that decides which plugins load, their tools, `[[mcp]]`
 //! servers, `[[provider]]` sections and external agents, and starting them
@@ -121,6 +125,13 @@ pub fn load_plugins(
         let enable = grant::enable_command(id, p.source);
         match grant::check(manifest, digest, stored.as_ref()) {
             Verdict::Granted => {
+                // PL§7d (T33.14.1): `cox_http` to a provider host would skip
+                // the ledger and the budget, so such a plugin stays out.
+                if let Err(e) = cox_plugin::net::refuse_provider_hosts(manifest, &config.providers)
+                {
+                    notices.push(format!("plugin {id} is not loaded: {e}"));
+                    continue;
+                }
                 // T33.44: compiled once under its real grant and kept;
                 // `start_plugins` runs `cox_init`. A failure is a visible
                 // warning, never fatal (D14). No `wasm` (PL§13/§14,
@@ -625,6 +636,60 @@ mod tests {
         assert!(
             !pkg.join("bin/agent.ran").exists(),
             "loading spawned the agent"
+        );
+    }
+
+    /// T33.14.1 (PL§7d): a granted plugin whose `net` covers a configured
+    /// provider host is not loaded, with a notice naming the host.
+    #[cfg(feature = "plugins")]
+    #[test]
+    fn granted_plugin_with_provider_host_in_net_is_not_loaded() {
+        use cox_protocol::{PluginGrant, PluginStore as _};
+
+        let home = tempfile::tempdir().expect("tempdir");
+        let repo = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(repo.path().join(".git")).expect("git");
+        let pkg = repo.path().join(".cox/plugins/leak");
+        std::fs::create_dir_all(&pkg).expect("mkdir");
+        std::fs::write(
+            pkg.join("plugin.wasm"),
+            r#"(module (func (export "cox_init") (result i32) (i32.const 0)))"#,
+        )
+        .expect("wasm");
+        std::fs::write(
+            pkg.join("plugin.toml"),
+            "api = 1\nid = \"leak\"\nversion = \"0.1.0\"\nname = \"Leak\"\n\
+             wasm = \"plugin.wasm\"\n\n[capabilities]\nnet = [\"api.anthropic.com\"]\n",
+        )
+        .expect("manifest");
+        let manifest =
+            cox_plugin::discover::load_manifest(&pkg, &pkg.join("plugin.toml"), Some("leak"))
+                .expect("valid manifest")
+                .0;
+        let store = Arc::new(Store::open(home.path()).expect("store"));
+        let root = cox_config::load::find_git_root(repo.path());
+        let scope = cox_plugin::grant::scope(cox_plugin::Source::Project, root.as_deref())
+            .expect("project scope");
+        store
+            .grant_put(&PluginGrant {
+                plugin_id: "leak".into(),
+                scope,
+                digest: cox_plugin::package_digest(&pkg).expect("digest"),
+                capabilities: serde_json::json!(cox_plugin::grant::capability_list(&manifest)),
+                enabled: true,
+                source: serde_json::json!({}),
+                decided_at: "2026-10-03T00:00:00Z".into(),
+            })
+            .expect("grant");
+        let out = load_plugins(&Config::default(), home.path(), repo.path(), store, None);
+        assert!(out.live.plugins().is_empty(), "the plugin loaded");
+        assert!(
+            out.notices
+                .iter()
+                .any(|n| n.contains("plugin leak is not loaded")
+                    && n.contains("provider host api.anthropic.com")),
+            "{:?}",
+            out.notices
         );
     }
 

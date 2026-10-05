@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Cards in the transcript text (T37.41, DT§5.2): a tool, approval, question or
 // subagent block is one attachment character hosting a SwiftUI view, so a drag selects
 // it as one unit and the text around it stays one string (research.md
@@ -27,6 +31,11 @@ public struct TranscriptCards {
   var toggle: @MainActor (BlockID) -> Void = { _ in }
   /// The actions a hovered prompt shows over its bubble (`PromptHover.swift`); `nil` shows none.
   public var promptActions: (@MainActor (Block) -> AnyView)?
+  /// The turn number a hovered prompt shows over the drawn one, left of its bubble (T37.48,
+  /// Figma frame 14); its `open` shows `promptMenu` under it. `nil` shows none.
+  public var promptGutter: (@MainActor (Block, _ open: @escaping @MainActor () -> Void) -> AnyView)?
+  /// What a prompt's gutter opens, in a popover; `close` dismisses it.
+  public var promptMenu: (@MainActor (Block, _ close: @escaping @MainActor () -> Void) -> AnyView)?
 
   public init<Card: View, Tile: View, Header: View>(
     _ view: @escaping @MainActor (Block) -> Card,

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Draws a plugin's `Widget` tree (PL§8) with ratatui's own widgets. Apart
 //! from `cox-plugin-api::ui` because that crate builds for wasm32 and knows
 //! no terminal; here is where a `StyleToken` becomes a `Theme` colour and

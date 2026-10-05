@@ -47,6 +47,8 @@ public enum Space {
     public static let toolbarTrailing: CGFloat = 14
     /// Under the composer: the mockup's .composer margin-bottom 18px
     public static let composerBottom: CGFloat = 18
+    /// The welcome hero's gaps (screen 22): the mockup's 14px under the app icon and beside a suggestion card's text
+    public static let welcome: CGFloat = 14
 }
 
 public enum Radius {
@@ -113,6 +115,16 @@ public enum Size {
     public static let paletteIcon: CGFloat = 26
     /// Review's file list: the mockup's 260px column (screen 08)
     public static let reviewFileListWidth: CGFloat = 260
+    /// The welcome hero's app icon (screen 22): the mockup's .appicon, 56px
+    public static let appIconHero: CGFloat = 56
+    /// Above the welcome hero (screen 22): the mockup's .reading padding-top 170px
+    public static let welcomeTop: CGFloat = 170
+    /// A prompt's turn number in the gutter (screens 01, 14): the mockup's .gutter, 32px wide
+    public static let turnGutter: CGFloat = 32
+    /// From the gutter's leading edge to the bubble (screens 01, 14): the mockup's .gutter left -44px
+    public static let turnGutterOffset: CGFloat = 44
+    /// A prompt's rewind scope menu (screen 14): the mockup's .popover, 330px wide
+    public static let rewindMenuWidth: CGFloat = 330
 }
 
 public extension FontToken {
@@ -128,6 +140,10 @@ public extension FontToken {
     static let titleSession = FontToken(size: 13, weight: .medium, design: .default, lineHeight: 1.45, tracking: 0)
     /// The command palette's query: the mockup's .palette .q, 18px regular (screen 12)
     static let titlePalette = FontToken(size: 18, weight: .regular, design: .default, lineHeight: 1.3, tracking: 0)
+    /// The welcome hero's question (screen 22): the mockup's h2, 20px bold
+    static let titleWelcome = FontToken(size: 20, weight: .bold, design: .default, lineHeight: 1.3, tracking: 0)
+    /// A welcome suggestion's title (screen 22): the mockup's .card b, 13px bold
+    static let titleCard = FontToken(size: 13, weight: .bold, design: .default, lineHeight: 1.45, tracking: 0)
     /// Default UI text
     static let body = FontToken(size: 13, weight: .regular, design: .default, lineHeight: 1.45, tracking: 0)
     /// Assistant and user messages
@@ -168,6 +184,8 @@ public extension FontToken {
     static let monoTerminal = FontToken(size: 11.5, weight: .regular, design: .monospaced, lineHeight: 1.5, tracking: 0)
     /// The command in an approval card's well: the mockup's .appr .cmd, 12.5px
     static let monoCommand = FontToken(size: 12.5, weight: .regular, design: .monospaced, lineHeight: 1.45, tracking: 0)
+    /// The app icon's cx (screens 22, 23): the mockup's .appicon, 22px (800 there; bold is the heaviest weight the token pipeline maps), letter-spacing -1px
+    static let monoAppIcon = FontToken(size: 22, weight: .bold, design: .monospaced, lineHeight: 1, tracking: -0.045)
 }
 
 public extension ElevationToken {

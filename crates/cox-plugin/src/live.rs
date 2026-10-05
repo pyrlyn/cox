@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! A session's live plugins (PL§3–§6, T33.44): each granted plugin compiled
 //! once under its real grant, initialised once, and shared as one
 //! `Arc<PluginHost>` by its hooks, the event tap and (T33.12) its tools.

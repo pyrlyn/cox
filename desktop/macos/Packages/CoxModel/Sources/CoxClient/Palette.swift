@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The command palette's rows (DT§5.5, T37.44.13), as cox-ffi's `PaletteItem` and `PaletteHit`:
 // what the window offers (its actions and the listed sessions) and what the core ranked for a
 // query, with the session's `/` commands and `@` files added. Separate from the completion rows

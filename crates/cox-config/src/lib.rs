@@ -15,6 +15,10 @@
 //! all printing) and re-exports the rest at its old `config_load` and
 //! `config_cmd` paths.
 
+// why: this crate was not under `missing_docs` before the workspace lints;
+// drop this allow once its public items are documented.
+#![allow(missing_docs)]
+
 use std::path::PathBuf;
 
 pub mod cmd;

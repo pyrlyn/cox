@@ -1,0 +1,100 @@
+name: desktop build
+
+# The macOS app half of a release; the CLI is build-cli.yml. No trigger of its own: release.yml
+# (the one release workflow) calls both on the tagged commit and publishes the DMG with the CLI
+# archives. A Debug Cox.app with every macOS feature the app has (T37.32.3, DT§7),
+# Developer ID-signed with the pyrlyn org certificate through .github/actions/macos-signing
+# (ad-hoc only when a caller passes require-signing: false and no certificate), packed by
+# scripts/desktop/dmg.sh into Cox-<version>-<run>-debug-arm64.dmg, checked (mounts, holds a
+# Cox.app with its Info.plist and executable, signature valid) and uploaded as the
+# `desktop-macos-dmg` artifact. Debug, so no hardened runtime and no notarization (T37.32.2):
+# Gatekeeper asks once, through System Settings -> Privacy & Security -> Open Anyway.
+#
+# The unsigned app build on pull requests stays in ci.yml's desktop-macos job (checks, not a
+# release). A test DMG is a test release: a vX.Y.Z-test.N tag through release.yml.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to build; empty builds the calling run's commit.
+        type: string
+        required: false
+        default: ''
+      require-signing:
+        description: Fail instead of signing ad-hoc when the certificate secrets are missing.
+        type: boolean
+        required: false
+        default: false
+    # Only the certificate: the caller passes these two by name, never `secrets: inherit`.
+    secrets:
+      MACOS_CERTIFICATE:
+        required: false
+      MACOS_CERTIFICATE_PWD:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  app:
+    runs-on: xcode-27
+    # A hung xcodebuild would otherwise hold the runner for 6 h; a cold Rust cache needs headroom.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: ./.github/actions/desktop-macos
+
+      - name: Import signing certificate
+        uses: ./.github/actions/macos-signing
+        with:
+          certificate: ${{ secrets.MACOS_CERTIFICATE }}
+          password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          required: ${{ inputs.require-signing && 'true' || 'false' }}
+
+      # The run number is the build number, so two DMGs of one version are told apart in Finder
+      # and in About.
+      - name: Cox.app
+        run: |
+          set -euo pipefail
+          mise install aqua:yonaskolb/XcodeGen
+          mise exec -- bash scripts/desktop/app.sh CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+
+      - name: DMG
+        id: dmg
+        run: echo "path=$(bash scripts/desktop/dmg.sh | tail -n 1)" >> "$GITHUB_OUTPUT"
+
+      # The DMG as someone downloads it: it mounts, holds Cox.app with its Info.plist and the
+      # executable that plist names, and the app's signature holds.
+      - name: Check the DMG
+        env:
+          DMG: ${{ steps.dmg.outputs.path }}
+        run: |
+          set -euo pipefail
+          mnt="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$DMG"
+          trap 'hdiutil detach "$mnt" -force >/dev/null || true' EXIT
+          app="$mnt/Cox.app"
+          [ -d "$app" ] || { echo "no Cox.app in $DMG" >&2; ls -la "$mnt" >&2; exit 1; }
+          [ -L "$mnt/Applications" ] || { echo "no /Applications link in $DMG" >&2; exit 1; }
+          plist="$app/Contents/Info.plist"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$plist")"
+          [ -x "$app/Contents/MacOS/$exe" ] || { echo "$exe is not an executable in Cox.app" >&2; exit 1; }
+          lipo -archs "$app/Contents/MacOS/$exe" | grep -qw arm64
+          codesign --verify --deep --strict --verbose=2 "$app"
+          echo "$(basename "$DMG"): Cox.app $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$plist") ($exe), $(du -h "$DMG" | cut -f1)"
+
+      - name: Remove signing keychain
+        if: always() && env.SIGNING_KEYCHAIN != ''
+        run: security delete-keychain "$SIGNING_KEYCHAIN"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-macos-dmg
+          path: ${{ steps.dmg.outputs.path }}
+          if-no-files-found: error

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // Review's line comments (T37.28.4): a click anchors the draft at the line's number, a removed
 // line at its old number, and Send posts the whole draft as one `Intent.send` and empties it;
 // while a turn runs it queues, unless `[desktop.review] send = "now"` (A108).

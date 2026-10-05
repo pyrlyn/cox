@@ -21,3 +21,6 @@ thiserror = { workspace = true }
 # Toml provider, already workspace-pinned); loading proper lives in
 # `cox-plugin` (PL§2), so the api crate carries no TOML parser of its own.
 figment = { workspace = true }
+
+[lints]
+workspace = true

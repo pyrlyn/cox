@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `ApprovalCard` and `QuestionCard`'s check (T37.27, DS§6.4): a snapshot per state × light/dark ×
 // Solid/Frosted — a pending approval, a subagent's risky one, one with its grant and Edit…
 // (T37.27.6), allowed and denied lines, a

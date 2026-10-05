@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The Context tab's state from the token meter (T37.29.3.1): the recorded fixture's context split
 // reaches the tab through SessionStore, a part of an unknown kind is left out, and "Compact now"
 // sends one manual compaction; the cost by turn (T37.29.3.2) reaches it with the total last, and
@@ -96,7 +100,11 @@ import Testing
       CostRow(label: "explore", values: ["9.8k", "600", "0/9.8k", "0.03"], detail: true),
     ],
     total: CostRow(label: "Session", values: ["41.2k", "2.8k", "28.0k/12.9k", "0.32"]),
-    project: "Project cox today: $3.18 · this week: $21.40.")
+    project: "Project cox today: $3.18 · this week: $21.40.",
+    budget: [
+      BudgetRow(label: "Session", text: "$0.32 of $5.00", fraction: 0.064),
+      BudgetRow(label: "This month", text: "$12.00"),
+    ])
   let session = FixtureSession(fixture: Fixture(batches: [], snapshot: []), costs: costs)
   let history = try await SessionStore(session: session).costHistory()
   #expect(history.columns == costs.columns)
@@ -104,6 +112,7 @@ import Testing
   #expect(history.rows.map(\.isDetail) == [false, true, false])
   #expect(history.rows.last?.values == ["41.2k", "2.8k", "28.0k/12.9k", "0.32"])
   #expect(history.footnote == "Project cox today: $3.18 · this week: $21.40.")
+  #expect(history.budget == costs.budget)
 }
 
 @Test func anEmptyLedgerHidesTheCostHistoryButKeepsTheProjectFootnote() {

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // `TaskOutputSheet` (DS§6.4 row `TasksTab`, its shell row's detail; DT§5.1; T37.22.6): the whole
 // output a background shell left in the archive, the lossless copy `cox expand <id>` prints, in the
 // same dark well `TerminalTail` draws its last lines in. Separate so the Tasks tab only opens it;

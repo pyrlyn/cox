@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 // The token meter's generated `MeterText` ⇄ `CoxClient.MeterText`, field for field (T37.25, A98).
 // Separate from `Convert.swift` so the meter's text can grow without that file doing so.
 

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! Session full-text search (T10.3): `rollout_fts` writes and reads, plus
 //! the session listing `cox sessions` prints. Raw SQL lives here —
 //! `cox-store` is the only crate that contains SQL (D9).

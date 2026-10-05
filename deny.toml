@@ -5,7 +5,6 @@
 targets = [
     { triple = "x86_64-unknown-linux-gnu" },
     { triple = "aarch64-apple-darwin" },
-    { triple = "x86_64-apple-darwin" },
 ]
 
 [licenses]
@@ -26,8 +25,8 @@ allow = [
     # wasmtime and cranelift (under extism, T33.3/A52): Apache-2.0 plus the
     # LLVM exception, which only waives the attribution clause for binaries.
     "Apache-2.0 WITH LLVM-exception",
-    # cox's own crates (A68): "GPL-3.0-only OR LicenseRef-cox-Royalty-Free".
-    # Only this ref is allowed, not GPL-3.0-only itself, so no GPL dependency
+    # cox's own crates (A68): "GPL-3.0-or-later OR LicenseRef-cox-Royalty-Free".
+    # Only this ref is allowed, not GPL-3.0-or-later itself, so no GPL dependency
     # can slip in and break the royalty-free option.
     "LicenseRef-cox-Royalty-Free",
 ]
@@ -60,6 +59,11 @@ ignore = [
     { id = "RUSTSEC-2026-0222", reason = "wasmtime 43 via extism 1.30.0: not guest-triggerable; needs the embedder to put an object from one Engine into another Engine's Store through specific APIs (debug_register_module, StructRefPre/ArrayRefPre/ExnRefPre::new, Tag::new, breakpoints). Neither extism nor cox calls them, and each extism Plugin keeps its own Engine and Store with no cross-plugin objects. Remove when extism ships wasmtime >= 48 (extism main already pins 48; no release since v1.30.0, 2026-06-04); review by 2026-12-31" },
     { id = "RUSTSEC-2026-0269", reason = "wasmtime 43 via extism 1.30.0: a WASI filesystem sandbox escape through trailing slashes. cox builds every plugin with WASI off and no preopens (cox-plugin host.rs), so no guest has a filesystem to escape; preopens (T33.14) stay blocked until the bump. Remove when extism ships wasmtime >= 48 (extism main already pins 48; no release since v1.30.0, 2026-06-04); review by 2026-12-31" },
     { id = "RUSTSEC-2026-0316", reason = "wasmtime 43 via extism 1.30.0: a guest-returned value lifted through the component-model `Val` API can allocate past the hostcall fuel limit. Only hosts using `wasmtime::component::Val` are affected; extism 1.30.0 and cox use core modules only (no `wasmtime::component` anywhere in either). Fixed in 48.0.3; remove when extism ships wasmtime >= 48.0.3 (T33.43); review by 2026-12-31" },
+    # Temporary exception: wasmtime stays pinned to 43 because extism 1.30.0
+    # (the newest release) requires that major and cannot be upgraded yet;
+    # the fixes are only in 48.0.4+ and 49.0.2+. Lift together with the pin.
+    # https://rustsec.org/advisories/RUSTSEC-2026-0327.html
+    { id = "RUSTSEC-2026-0327", reason = "wasmtime 43 via extism 1.30.0: unvalidated result count of an async-lifted component-model callback overflows a native stack buffer. Only hosts running components with async-lifted exports are affected; extism 1.30.0 and cox load core modules only (no `wasmtime::component` anywhere in either). Temporary: wasmtime is pinned to extism's major and extism cannot be upgraded yet; fixed in 48.0.4 / 49.0.2; remove when extism ships wasmtime >= 48.0.4 and the pin is lifted; review by 2026-12-31. https://rustsec.org/advisories/RUSTSEC-2026-0327.html" },
 ]
 
 [sources]

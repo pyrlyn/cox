@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Ivan Tugay
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
 //! `cox record <name>`: write a provider cassette for `Replay` (plan.md T1.5).
 //! Live session capture waits on T2.1; this command hashes a one-shot
 //! request from `-p` and stores an `--sse` body (or a fixture path).
