@@ -96,6 +96,16 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T58.28 | todo | P2 | 3 | 0% | |
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
+| T59.1 | todo | P1 | 4 | 0% | |
+| T59.2 | todo | P1 | 2 | 0% | |
+| T59.3 | todo | P1 | 4 | 0% | |
+| T59.4 | todo | P2 | 4 | 0% | |
+| T59.5 | todo | P2 | 3 | 0% | |
+| T59.6 | todo | P3 | 3 | 0% | |
+| T59.7 | todo | P3 | 4 | 0% | |
+| T59.8 | todo | P3 | 2 | 0% | |
+| T59.9 | todo | P3 | 2 | 0% | |
+| T59.10 | todo | P3 | 2 | 0% | |
 
 ## Reference
 
@@ -1908,6 +1918,296 @@ Check: the spike's test passes or the card records the failure with its cause.
 
 **Order.** T58.1 (gate) and T58.4 first; then T58.2, T58.3 → T58.5, T58.8 → T58.7, T58.9 → the creator approves the mockups → T58.10 → the feature cards T58.11–T58.27 in parallel, T58.28 after its open question, T58.29 with T58.10, T58.30 with T58.12.
 
+### P59 — Empryo-derived improvements (goal: compaction keeps every touched path without asking the model to remember it, tool output costs fewer tokens, and an edit learns its own new diagnostics; each card proves its gain with `just bench` or a test)
+
+Rationale in §6 A132. Idea-only, clean-room: Empryo is BSL 1.1, no code copied. Source: the study of [proxysoul/Empryo](https://github.com/proxysoul/Empryo) (formerly SoulForge) at `669ff91`; each card cites Empryo files for the idea only, and the implementation is written from the card. Line numbers are at `ef07970`.
+
+**Order.** T59.1, T59.2 and T59.3 first, in parallel. Then T59.4 (after T43.6 lands its numbers), T59.5, T59.6, T59.7. Then T59.8, T59.9 and T59.10 last.
+
+Where each of the 14 portable ideas from the study lands in cox:
+
+1. PageRank map — T59.4.
+2. Edge IDF / confidence — T59.4 (edge weights).
+3. Git co-change — T59.4 (cox already has `recent_changes`, `crates/cox-tools/src/git.rs:78`).
+4. Blast radius under a budget — does not fit: cox has no impact tool and no symbol graph between sessions; rtok T377 serves it to cox over MCP.
+5. Trigram index — does not fit: `cox-search` greps live with `grep-searcher`, and nothing persists an index between sessions; rtok T378 is gated on a measured need first.
+6. Clone detection — does not fit: no persisted index to run MinHash over, and no measured question that it answers.
+7. Grep → symbol intercept — does not fit: cox owns its `grep` tool and has no symbol index; the agent can call `outline` directly, and rtok T369 covers hosts it hooks.
+8. Post-edit diagnostics delta — T59.3.
+9. Backend fallback / LSP hygiene — T59.3 (never spawn from an edit; a dead server is skipped, not retried) and T59.6.
+10. Compound tools — T59.5 (`project` check), T59.7 (`rename_symbol`).
+11. Deterministic compaction state — T59.1.
+12. Memory RRF / file affinity — T59.10.
+13. Edit robustness — already there: `edit` has the whitespace-insensitive line-window fallback (`crates/cox-tools/src/edit.rs:162-227`); no card.
+14. Shell compress / tee — T59.2 (fold repeated lines); the "tee" half is the existing archive (`cx.archive`).
+
+#### T59.1 Deterministic working state pre-fills compaction
+
+Model: opus · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 4
+
+Goal: after `compact`, the summary lists every file the session read, edited or created, every failing command and the open task, built from the transcript and not from the model's recall, and the model's summary costs at least 40 % fewer output tokens.
+
+Files:
+- `crates/cox-core/src/compact.rs`
+- `crates/cox-core/src/prompts/compact.md`
+- `crates/cox-protocol/src/config.rs`
+
+Steps:
+1. A pure `working_state(messages: &[Message]) -> WorkingState` next to `transcript` (`compact.rs:127`): walk tool calls and results (content types in `crates/cox-protocol/src/types.rs:1502-1532`) and collect `(path, action)` with action read / edited / created (edit, write, `apply_patch`), failing `bash` commands with their exit code and last error line, and the last user request. Ordered by first appearance, so it is deterministic (Empryo idea: `src/core/compaction/working-state.ts`, `extractor.ts`).
+2. `summarise` (`compact.rs:341`) renders the state as the "Files touched" and "Errors seen" sections that `prompts/compact.md` already asks for, and tells the model to write only the narrative sections; the final summary is state block + model text. The model text stays under `MAX_SUMMARY_TOKENS` (`compact.rs:23`).
+3. `compaction.strategy = "llm" | "state+llm"` in `config.rs`, default `llm` until the Check numbers are in `research.md`; regenerate schemas.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a unit test over a scripted transcript asserts every touched path and the failing command appear in the summary with `state+llm`; a `just bench` compaction replay records path recall (100 % with `state+llm`), compact output tokens (−40 %) and pass rate against `llm` in `research.md`; the default flips only if the pass rate does not drop.
+
+Out of scope: per-file line ranges, dropping the model call entirely, the TUI view of the state.
+
+#### T59.2 Fold repeated output lines before the visible cut
+
+Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
+
+Goal: runs of identical or digit-only-different lines in tool output (progress bars, `Compiling …`, repeated warnings) fold to one line plus `(×N)` before `truncate::visible`, cutting context tokens by at least 5 % on the bench with no error line lost.
+
+Files:
+- `crates/cox-core/src/truncate.rs`
+- `crates/cox-core/src/turn.rs`
+
+Steps:
+1. `fold_repeats(text: &str) -> Cow<str>` in `truncate.rs`: compare each line with the previous one after masking digit runs; fold runs of ≥ 3; never fold a line that matches `error|panicked|FAILED|warning:` the first time it appears (a repeat still folds). Rtok's `cmd` rules are the reference behaviour; a shared crate is a later amendment, not a new dependency here.
+2. Call it at the `truncate::visible` call site (`turn.rs:679`) so the archived full output is untouched and `expand` still returns the raw bytes.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: table tests for folding, digit masking and the error-line rule pass; `research.md` has the bench row (context-token-turns −5 %, pass rate unchanged).
+
+Out of scope: per-command rules, ANSI handling beyond what `visible` does today.
+
+#### T59.3 `edit` and `write` report the diagnostics they introduced
+
+Model: opus · Status: open · Depends: T41.6 · Size: ~190 · Priority: P1 · Complexity: 4
+
+Goal: when a language server for the file is already running, `edit`/`write` end their result with the diagnostics that are new since before the change (at most 10 lines, errors first), so the model does not spend a `bash` check call to find its own error; bench check-call count −20 %.
+
+Files:
+- `crates/cox-tools/src/lsp/mod.rs`
+- `crates/cox-tools/src/edit.rs`
+- `crates/cox-session/src/tools.rs`
+
+Steps:
+1. Move the server pool out of `DiagnosticsTool` (`lsp/mod.rs:40-49`) into a shared `Arc<LspPool>` with `running_for(path) -> Option<Arc<Server>>` that never spawns (the §1 `diagnostics` row, `plan.md:591`, starts a server lazily from `diagnostics` only; an edit must never start one). Build it once in the registry (`cox-session/src/tools.rs:27`) and hand it to `diagnostics`, `edit` and `write` (`WriteTool`, `write.rs:65`, gets the same 3-line hook).
+2. In `EditTool` (`edit.rs:33`): before writing, take the server's last diagnostics for the file; after writing, call `Server::diagnostics` (`server.rs:253`) with a short wait (`lsp.after_edit_ms`, default 1500) and append only the set difference keyed by (range start line, code, message). A dead or slow server adds nothing — never an error and never a retry.
+3. `[lsp] after_edit = false` by default in `cox-protocol` config; the fake launcher (`lsp/mod.rs:65`) drives the tests.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: tests with the fake server show the new error after an edit that introduces it, nothing when the server is not running, and nothing extra for errors that existed before; `research.md` has the bench row (bash check calls −20 %, pass rate not lower).
+
+Out of scope: starting servers, code actions, diagnostics for files the edit did not touch.
+
+#### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
+
+Model: sonnet · Status: open · Depends: T43.6 · Size: ~200 · Priority: P2 · Complexity: 4
+
+Goal: under the same byte budget, the map shows the files the next commit touches more often than the recency-only order, by at least 15 pp on a 200-commit backtest, and stays a pure function of file bytes, git order and budget (P43's byte-stable rule).
+
+Files:
+- `crates/cox-tools/src/repomap.rs`
+- `crates/cox-tools/src/rank.rs` (new)
+- `crates/cox-tools/src/git.rs`
+
+Steps:
+1. `rank.rs`: build a file graph from the outline tags already extracted for `render` (`repomap.rs:64`; `cox-syntax` `outline.rs:68`): edge A → B when A mentions a name defined in B, weight `ln(N/df)` of the name (names in more than 5 % of files are dropped). PageRank, damping 0.85, 20 iterations, ties in path order (Empryo idea: `repo-map.ts`, `repo-map-utils.ts`).
+2. Seed the personalization vector from `recent_changes` (`git.rs:78`) and add co-change edges from the same `git log` call (commits touching > 20 files are skipped, pairs with count ≥ 2). No prompt input: the map stays built once per session.
+3. `order` (`repomap.rs:53`) sorts by rank when `repomap.rank = "graph"`; default stays `"recent"` until the backtest row is in `research.md`.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
+
+Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
+
+#### T59.5 `project` tool: run the project's own check command
+
+Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: one `project` tool call with `action = check | test | lint | fmt` runs the detected command (`just check`, `cargo test`, `npm test`, `go test ./...`, …) through the normal `bash` sandbox and approval path and returns the folded result, replacing the model's guess of the command; bench mean tool calls per task −5 %.
+
+Files:
+- `crates/cox-tools/src/project.rs` (new)
+- `crates/cox-session/src/tools.rs`
+- `crates/cox-protocol/src/config.rs`
+
+Steps:
+1. Detection in order: `[project]` config, `justfile` recipes, `Cargo.toml`, `package.json` scripts, `go.mod`, `pyproject.toml` (Empryo idea: `src/core/tools/project.ts`, `toolchain.ts`).
+2. Run through the existing `bash` tool's executor so `Engine` approval and the sandbox are unchanged; output passes T59.2's folding.
+3. Register behind `tools.project = false`.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: detection table tests for each manifest; an approval test shows `project` asks exactly like `bash` for the same command; bench row in `research.md`.
+
+Out of scope: installing toolchains, parsing test output into structures.
+
+#### T59.6 LSP `definition` and `references` tools on the running servers
+
+Model: sonnet · Status: open · Depends: T59.3 · Size: ~190 · Priority: P3 · Complexity: 3
+
+Goal: `definition(path, line, col)` and `references(path, line, col)` answer from a language server when one runs for the file and fall back to an `outline`/`grep` answer with a `(no server)` note otherwise, so navigation needs no extra `grep` round trip.
+
+Files:
+- `crates/cox-tools/src/lsp/client.rs`
+- `crates/cox-tools/src/lsp/server.rs`
+- `crates/cox-tools/src/lsp/nav.rs` (new)
+
+Steps:
+1. Hand-rolled wire types for `textDocument/definition` and `textDocument/references` next to the existing ones (`client.rs:174`; P41 rejects `lsp-types`, `plan.md:1245-1253`).
+2. `Server` methods next to `start` (`server.rs:194`); results as `path:line` lines, capped and archived over the cap.
+3. Use `LspPool::running_for` from T59.3; the fallback is a plain-text answer, never a spawn from this tool unless `diagnostics` would spawn too.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: fake-server tests for both requests and the fallback.
+
+Out of scope: rename (T59.7), hover, workspace symbols.
+
+#### T59.7 `rename_symbol` through the server's `textDocument/rename`
+
+Model: opus · Status: open · Depends: T59.6 · Size: ~200 · Priority: P3 · Complexity: 4
+
+Goal: one tool call renames a symbol across files using the server's `WorkspaceEdit`, applied as one approved change with the same per-file archive as `edit`, and refuses when no server runs (no text-search rename).
+
+Files:
+- `crates/cox-tools/src/lsp/rename.rs` (new)
+- `crates/cox-tools/src/lsp/client.rs`
+- `crates/cox-tools/src/write.rs`
+
+Steps:
+1. `prepareRename` then `rename`; convert `WorkspaceEdit` (`changes` and `documentChanges` text edits only; file create/rename ops are refused) into per-file new contents (Empryo idea: `rename-symbol.ts`).
+2. Apply through `write.rs`'s path (`write.rs:42`) with the archive-before-write pattern of `edit.rs:126`; one `Engine` approval for the whole set, listing the files.
+3. After apply, T59.3's diagnostics delta per file.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: fake-server test renames across two files, one approval, both archived; refusal without a server; a stale-version edit is refused.
+
+Out of scope: rename without a server, file moves.
+
+#### T59.8 `read` by symbol name
+
+Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
+
+Goal: `read(path, symbol = "Foo::bar")` returns only that definition's lines from the `cox-syntax` outline, so the model stops reading a whole file to see one function.
+
+Files:
+- `crates/cox-tools/src/read.rs`
+- `crates/cox-syntax/src/outline.rs`
+
+Steps:
+1. Optional `symbol` input in `read`'s spec (`read.rs:48`) and handling in its call path (`read.rs:81`); resolve via `outline` spans; on several matches list them with lines, on none fall back to the existing "closest" message (Empryo idea: `read-file.ts`).
+2. The line range then goes through the existing ranged-read path, so caps and archives are unchanged.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: tests for a unique, an ambiguous and a missing symbol in Rust and TypeScript fixtures.
+
+Out of scope: symbol-addressed edit (separate card after this one shows use in the bench).
+
+#### T59.9 Investigate: file claims for parallel subagents
+
+Model: sonnet · Status: open · Depends: — · Size: ~0 (research) · Priority: P3 · Complexity: 2
+
+Goal: decide with evidence whether parallel subagents (`Concurrency::Parallel`, `crates/cox-core/src/subagent.rs:395`) need per-file write claims (Empryo idea: `WorkspaceCoordinator.ts`, a claim table that makes the second writer wait or fail), or whether worktrees (P44) already cover it.
+
+Files:
+- `research.md`
+
+Steps:
+1. Count, in `just bench` runs with parallel subagents, how often two subagents wrote the same file in one parent turn.
+2. Write the number, the command and the commit to `research.md`; propose a card only if the rate is above 1 % of parallel runs.
+
+Check:
+```bash
+just bench
+```
+
+Done when: the `research.md` row exists and this card is closed or followed by a sized card.
+
+Out of scope: implementing claims.
+
+#### T59.10 Memory entries linked to files boost recall
+
+Model: sonnet · Status: open · Depends: — · Size: ~150 · Priority: P3 · Complexity: 2
+
+Goal: a memory entry that names a file is ranked above an equally text-matching entry when that file was read or edited in the session.
+
+Files:
+- `crates/cox-store/migrations/<new>/up.sql` (a `memory_files` table; migrations count as fixtures, not source files)
+- `crates/cox-store/src/lib.rs`
+- `crates/cox-store/src/schema.rs`
+
+Steps:
+1. Fill `memory_files(memory_id, path)` on save from paths in the body that exist under the workspace.
+2. `memory_search` (`lib.rs:483`, FTS from `00000000000001_init/up.sql:36`) takes the session's touched paths and merges a file-linked list with the FTS list by RRF, ties by id. Diesel DSL only, no raw SQL in Rust.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a store test shows the linked entry first and an unchanged order without touched paths.
+
+Out of scope: embeddings, UI.
+
+---
+
 ## 4. Definition of done for v0.1
 
 1. `cox` runs a multi-turn coding session against Anthropic, OpenAI Responses and a local Ollama model with the same tool set, with the sandbox on, on macOS and Linux.
@@ -2102,6 +2402,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A129 T58.4.4, T58.4.6, T58.4.14, T58.1, T58.8, T58.28, T37.44, T52.17, T51.22 follow-ups — by the creator (2026-09-29). (1) **Sidebar filter (T58.4.4/T58.4.5)**: the filter moves to Rust; matching the localized `age` part is dropped; diacritic folding is kept only if a crate already in the workspace provides it (no new dependency), otherwise the filter stays case-insensitive only. (2) **Short model names (T58.4.6/T58.4.14)**: the core adds a separate `short_name` field; `Status.model_name` and `ModelChoice.display_name` keep their existing meaning, so the TUI and ACP do not change. (3) **Patch application and the tool tail cut** stay mirrored in each client, checked by fixture replay, not lifted into the protocol. (4) **Windows M2/M3** pieces (terminal, browser, tray, ACP, best-of-N, plugin panels) stay uncarded until a Windows M2/M3 is planned; the `ideas.md` line already covers them. (5) **Packaging (T58.28)**: packaged with external location (a sparse package) for actionable-notification identity, installed by cox's own installer, not full MSIX virtualization — answers A127 open question 3. (6) **Accent colour (T58.8)**: the cox token accent, as on macOS; a "follow the system accent" setting may come later — answers A127 open question 7. (7) **Bindings way out (T58.1)**: do not move `cox-ffi` back to uniffi 0.31; keep waiting for upstream (PR #176 adds uniffi 0.32); if the gate is not met by its review date, carry a fork under `forks/` with #176 applied — answers A127 open question 1. (8) New card **T37.44.18** "Terminal well token is opaque dark": `surface.terminal` becomes an opaque dark value matching mockup 24 (`#15161a`) in both appearances, with a High Contrast value as the token pipeline requires. (9) New card **T37.44.19** "Mockup 24 keeps the composer": the composer stays above the terminal pane; mockup 24 changes to match. (10) New card **T52.23** "Desktop draws plugin `tool:`/`item:` renderers", split for size into **T52.23.1** (Rust: `cox-app` render path, a `Block` field, `cox-ffi` types) and **T52.23.2** (Swift: CoxModel and the CoxUI tool card); T52.17's renderer-widgets-inside-tool-cards part moves here, so T52.17 closes on its panel, status-segment, overlay and command parts. (11) New card **T51.23** "Panes draw from `glass.fill` and `glass.border`": CoxUI's pane fill and rim move off `surface.*`/`separator` onto the T51.1 glass tokens, and the specular sweep's white literal (`Specular.swift`, `TranscriptView.swift`) gets a token in the same change; light and dark snapshots are re-recorded on purpose. Why: the creator's decisions on the CoxModel audit's open items and the design follow-ups the verification passes and A127/A128 left open. Effect: T58.4.4, T58.4.6, T58.4.14, T58.1, T58.8 and T58.28 are rewritten; T52.17's card gains one sentence; T37.44.18, T37.44.19, T52.23.1, T52.23.2 and T51.23 are new cards; no other card or status changes.
 - A127 §1.1 (planned `cox-ffi` `cdylib`, planned `desktop/windows/` row, the "Planned by A127" note), §3 (new P57: T57.1–T57.13, P58: T58.1–T58.30) — a Windows build of the core and a Windows desktop client, by the creator (2026-09-29). (1) **UI stack: WinUI 3 + C# over the in-process Rust core through `cox-ffi` (UniFFI).** C# bindings are generated by uniffi-bindgen-cs (NordSecurity). All logic stays in Rust (`cox-app`), as in the Swift client (DT goal 1: no logic re-implemented in the UI). (2) **Scope: M1 parity only**, the DT§3.1 feature set. M2 and M3 (terminal pane, browser pane, pop-out windows, tray and hotkey, ACP host, best-of-N, plugin panels) are not in these phases and not in `roadmap.md`; `ideas.md` holds them as one line. (3) **Sandbox: as D7 says.** On Windows there is no sandbox, a loud warning, and `on-request` forced; the Windows sandbox stays deferred (A123 (2), `docs/design/v0.3-windows-sandbox.md`); the UI shows the warning (T58.25). This supersedes DT§1 "Non-goals (v1): Windows/Linux GUI" for Windows (Linux GUI stays a non-goal); `docs/design/desktop.md` §1 carries a pointer. It is also the "Windows release target first, as its own decision" that A123 (2) asked for: T57.12 adds the target, the release stays the creator's step. Facts behind the cards, checked 2026-09-29 (`research.md` §10, ledger #41–#44): uniffi-bindgen-cs's latest release `v0.11.0+v0.31.0` is on uniffi 0.31, cox-ffi pins 0.32.2, the 0.32 upgrade is open PR #176 and async callback interfaces are broken (issue #165), so T58.1 is a gate like T33.43; the current Windows App SDK is 2.5.1 (the 1.8 line's servicing ended 2026-09-24); .NET 10 is the LTS; D7's forced `on-request` is only a doc comment today (T57.3); keyring 4.2.0 and portable-pty 0.9.0 already have Windows backends; `nix` and process groups are the blockers. D1 names one macOS app linking `cox-ffi` as a static library; a C# app loads it as a DLL, so T58.1 adds `cdylib` and T58.2 proposes D1's new wording. Open questions for the creator: (1) **Bindings way out** if T58.1's gate is not met by 2026-12-31: wait, move `cox-ffi` to uniffi 0.31 (a version change), or carry a fork under `forks/`. (2) **Shell on Windows** for `bash`, `!` and hooks (T57.2): Git Bash else PowerShell (Claude Code), `pwsh` → Windows PowerShell → `cmd` (Codex), or Git Bash required. (3) **Packaging** (T58.28): MSIX with virtualization off, packaged with external location, or unpackaged self-contained. (4) **Minimum Windows version and architectures**: Windows 10 or 11 only (Mica needs Windows 11, with a solid fallback), x64 only or also ARM64 (cargo-dist's Windows signing covers x64 only). (5) **process-wrap 10.0.1** as the one kill path for process trees (T57.5; not in `rust.md`; alternatives win32job or raw `windows-sys`). (6) **Which policies the D7 rule forces**: only `on-failure` becomes `on-request`, or also `untrusted` and `never` (T57.3 keeps the stricter two until answered). (7) **Accent colour**: the cox token accent, or the user's Windows accent (T58.8). Why: the creator wants the desktop client on Windows with the same core and no second implementation of its logic. Effect: P57 and P58; no existing card changes; P58's feature cards wait on T58.1 and on the creator's approval of T58.9's mockups.
 - A131 §3 P7 (new T7.8; numbered A67 on its branch, renumbered on merge because main's A67 is P37), by the creator. Why: T7.1 landed the instruction-chain loader but left wiring it into `context::assemble` for later (its done.md "Not done" line), and no later card picked it up, so `system[2]` is still a one-line stub and no surface sends `AGENTS.md`/`CLAUDE.md` to the model (§4 item 3). Effect: one card; the surface loads the chain and hands the text to `cox-core` (D2); the stub stays only for a workspace with no instruction file, so its prefix bytes do not change. The card touches more than three source files because the ACP factory builds its session without `open`, and the e2e needs the scripted provider to match on system blocks. No decision changes.
+- A132 §3 (new P59: T59.1–T59.10) — Empryo-derived improvements, from a study of proxysoul/Empryo at `669ff91` (2026-10-02). Idea-only, clean-room: Empryo is BSL 1.1 (commercial, embedded and hosted use not granted; Change Date 2030-03-15), no code copied, and cards cite its files for the idea only. Why: deterministic compaction state, output folding, post-edit diagnostics and a graph-ranked map are the parts that port to Rust and have a falsifiable bench or test. Effect: ten new cards in a new phase; no existing card, default or status changes; the study ideas that do not fit cox or already exist in it are listed with a one-line reason in P59.
 - A134 §3 P33 (T33.45 step 1; build cards T33.45.1–T33.45.10 build cards T33.45.1–T33.45.10), proposed by Claude Code / opus-5.5 under T33.45 and approved by the creator (2026-10-03); the cards are in §3 P33 and the task table, and T33.45 stays open until they land. Design: `docs/design/plugins.md` §15. Decisions: (1) **Surfaces.** `SessionSpec.surface` maps to a plugin `Surface`: `tui` and `plain` → `terminal`, `app` (local or over `cox app-server`) → `desktop`, `headless`, `acp`. (2) **Shared API** = `api = 1` minus keys, plus `InitIn.surface` and `Span.link` (OSC 8 in the terminal, a click-to-open link in the app). The 24-cell segment budget, the drop-first order and the 8-row panel are shared host layout, not terminal-only: `cox-app` already applies them (`SEGMENT_COLS`, `PANEL_ROWS`). (3) **Terminal-only API** = leader keys (`[capabilities.terminal] keys`; `ui.keys` stays an alias under `api = 1`); `cox:tui/v1` is reserved with no function yet. (4) **Desktop-only API** = an inspector tab, toolbar items, palette actions (both run a declared command through `cox_command`), actionable notifications (`cox_desktop_notify` in `cox:desktop/v1`) and package images in widgets; no sidebar section (a plugin lives in one session, the sidebar spans the window), no menu-bar items, never plugin UI code. (5) **Declaring**: `surfaces = [...]`, default every surface; `[capabilities.terminal]`, `[capabilities.desktop]`; new grant lines `terminal.keys`, `desktop.inspector|toolbar|palette|notify`; a stored `ui.keys` reads as `terminal.keys`; one grant covers both surfaces. (6) **Unavailable surface**: not loaded with a `Notice(Info)`; the other surface's grant left out of `granted`; its `InitOut` entries dropped with one `Notice(Info)`; a surface host function answers `AbiError::NotOnThisSurface`, checked before the grant; values degrade (image → `alt`, link → text). (7) **Versioning**: the ABI parts stay `api = 1`; the manifest denies unknown keys, so a cox older than this refuses a manifest using the new keys and skips the plugin (fail open). Why: the creator's A131. No §0 decision changes. The creator confirmed (2026-10-03): `plain` is `terminal`; a plugin skipped for its surface gets a `Notice(Info)`; an older cox skips a manifest with the new keys rather than relaxing the unknown-key rule. The creator did **not** confirm leaving out a sidebar section in (4): that stays an open question for the creator, and no card below depends on it. Cards (≤ 200 LOC and ≤ 3 files each; together they cover T33.45's original Check): T33.45.1–T33.45.10 in §3 P33.
 - A135 §3 P37 (new T37.32.3), T37.32.2, `desktop/macos/project.yml` — by the creator (2026-10-03): the first macOS app build on CI is a Debug build with every macOS feature, not a release build; it runs by hand and with every release; the bundle id is `io.github.pyrlyn.cox` (the repository moved to pyrlyn). Why: a build to download and try before T37.32.2's notarized release. Effect: T37.32.3; T37.32.2 keeps Hardened Runtime, notarization, Sparkle, the bundled CLI and the cask, and reuses the signing action and `dmg.sh`. No decision in §0 changes; no new dependency.
 
