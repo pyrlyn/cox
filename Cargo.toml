@@ -13,7 +13,7 @@ edition = "2024"
 rust-version = "1.98"
 # GPLv3 or the royalty-free licence in LICENSE-ROYALTY-FREE.md, at the user's choice (README "License", A68).
 license = "GPL-3.0-or-later OR LicenseRef-cox-Royalty-Free"
-repository = "https://github.com/listepo/cox"
+repository = "https://github.com/pyrlyn/cox"
 
 # Versions verified against crates.io 2026-09-02 (R§4.5). No new dependency
 # without a one-line reason in the commit message and a row in plan.md §1.
