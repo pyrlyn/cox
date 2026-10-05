@@ -62,7 +62,7 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
       # A no-op on the Linux targets.
-      - uses: pyrlyn/infra/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
         with:
           version: '27'
       # The Rust mise.toml pins, checked like in ci.yml; scripts/package.sh

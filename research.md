@@ -1259,7 +1259,7 @@ Scope: what stops the workspace from building on Windows today, and the stack th
 
 | # | Fact | Source (checked 2026-09-29) |
 |---|---|---|
-| 10.1.1 | CI drops Windows from the shared matrix on purpose: "cox is Unix-only (a pty through nix, std::os::unix in cox-tools; no Windows release target)"; the shared workflow already has a `windows-latest` / `x86_64-pc-windows-msvc` row | `.github/workflows/ci.yml:34`; `pyrlyn/infra/.github/workflows/ci-rust.yml@189816ac` line 128 |
+| 10.1.1 | CI drops Windows from the shared matrix on purpose: "cox is Unix-only (a pty through nix, std::os::unix in cox-tools; no Windows release target)"; the shared workflow already has a `windows-latest` / `x86_64-pc-windows-msvc` row | `.github/workflows/ci.yml:34`; `pyrlyn/ci/.github/workflows/ci-rust.yml@189816ac` line 128 |
 | 10.1.2 | cargo-dist 0.32.0 builds four targets, none for Windows | `dist-workspace.toml:13` |
 | 10.1.3 | `nix` 0.31 is an unconditional dependency of `cox-app`, `cox-ext`, `cox-session` and `cox-tools`; only `cox-sandbox` already gates it (`cfg(target_os = "linux")`, with landlock and seccompiler) | `Cargo.toml:107`; each crate's `Cargo.toml` |
 | 10.1.4 | `bash` runs on a pty from `nix::pty::openpty`, starts the child with `setsid`, kills with `killpg`, and polls and sets termios through nix; it imports `std::os::unix::process::{CommandExt, ExitStatusExt}` | `crates/cox-tools/src/bash/mod.rs` |

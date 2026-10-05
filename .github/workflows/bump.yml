@@ -1,5 +1,5 @@
 # The only way to a release, and the only thing that creates a `v*` tag
-# (pyrlyn/infra bump.yml). `scripts/release.sh <level> --local` raises
+# (pyrlyn/ci bump.yml). `scripts/release.sh <level> --local` raises
 # [workspace.package].version (only when it is already tagged), refreshes
 # Cargo.lock and writes the CHANGELOG.md section from the commits since the
 # last tag, as one `chore: release vX.Y.Z` commit. bump pushes it to
@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   bump:
-    uses: pyrlyn/infra/.github/workflows/bump.yml@a4f93a2606a5dd8f697ad3d876440ab3e2eb4ae9 # main
+    uses: pyrlyn/ci/.github/workflows/bump.yml@a4f93a2606a5dd8f697ad3d876440ab3e2eb4ae9 # main
     permissions:
       contents: write # the bump branch, the tag and the release
       pull-requests: write # merge or close the bump pull request
