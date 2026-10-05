@@ -34,7 +34,7 @@ jobs:
       docs-only: ${{ steps.config.outputs.docs-only }}
     steps:
       - id: config
-        uses: pyrlyn/infra/.github/actions/config@f231304c2539f5cd84aadf48c449540b33c6020d # main
+        uses: pyrlyn/infra/.github/actions/config@f880dee803f157cd4268a503418b4ecaf4da7078 # main
 
   # The shared pyrlyn/infra workflow, pinned by commit (descendant of e6e376e, which
   # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27):
@@ -44,7 +44,7 @@ jobs:
   rust:
     needs: config
     if: ${{ !cancelled() }}
-    uses: pyrlyn/infra/.github/workflows/ci-rust.yml@f231304c2539f5cd84aadf48c449540b33c6020d # main
+    uses: pyrlyn/infra/.github/workflows/ci-rust.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
     # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
     # `actions: write` on the calling job.
     permissions:
@@ -252,7 +252,7 @@ jobs:
   # skipping them. A skipped macOS job reports `skipped` under its own name,
   # which a required check treats as passed.
   changes:
-    uses: pyrlyn/infra/.github/workflows/changes.yml@f231304c2539f5cd84aadf48c449540b33c6020d # main
+    uses: pyrlyn/infra/.github/workflows/changes.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
     permissions:
       contents: read
     with:
