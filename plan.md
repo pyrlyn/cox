@@ -2361,7 +2361,7 @@ Done when: snapshots show the chip ready and with the badge, and the popover wit
 
 #### T60.8 `desktop.appearance.specular`: the glare setting
 
-Model: sonnet · Status: open · Depends: — · Size: ~80 · Priority: P2 · Complexity: 2
+Model: Claude Code / sonnet · Status: in progress · Depends: — · Size: ~80 · Priority: P2 · Complexity: 2
 
 Goal: a config key for the glass glare, 0 (none) … 1 (the material's full sweep), default 1 (today's look).
 
