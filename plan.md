@@ -2324,7 +2324,7 @@ Done when: `ComposerStoreTests` show submit refused without a usable provider, `
 
 #### T60.6 Model and mode move from the toolbar to the composer
 
-Model: sonnet · Status: open · Depends: — · Size: ~200 · Priority: P1 · Complexity: 3
+Model: Claude Code / sonnet · Status: in progress · Depends: — · Size: ~200 · Priority: P1 · Complexity: 3
 
 Goal: the session toolbar no longer shows the model capsule or the Ask/Plan/Auto segmented control; the composer's model chip opens the model popover anchored to the chip, and its mode chip opens a menu of Ask, Plan, Auto and Bypass (Bypass with its warning), with ⇧⇥ still cycling. The Bypass danger strip under the toolbar stays.
 
