@@ -9605,3 +9605,28 @@ Out of scope: a key the server rejects (counts as usable until a turn fails; T60
 - Result: `crates/cox-app/src/readiness.rs` (new module, kept out of `models.rs` while T60.1 edits it) holds `Readiness { Ready, NoProvider, NoKey { provider }, Unreachable { provider } }`, the pure `readiness(config, usable)` rule and `Readiness::message()` (the four user texts, English: `cox-app` has no `cox-i18n` dependency, a client localizes by the variant). `App::readiness(cwd)` re-probes on every call; under a test double (`COX_PROVIDER`, as `cox-session`'s LM Studio probe) it is `Ready`. `LiveSession::send` of `Intent::Send` and `Intent::Queue`, and a plugin's prompt, return `AppError::NotReady` before any turn starts. `best_of::launch` asks once per group and marks every cox candidate `failed: <message>` before its worktree exists; agent candidates are not gated. `models::sections` and `models::loopback` became `pub(crate)`. Docs: DT§3.3.2 (new) and DT§5.3.
 - Tests: `readiness::tests` (no key, loopback not listening, no provider, texts), `tests/app.rs` `readiness_is_no_key_for_the_default_provider_and_ready_with_an_injected_key` (injected host key, never the keychain) and `a_turn_intent_is_refused_while_the_provider_is_not_ready`, `tests/best_of.rs` `best_of_refuses_a_cox_candidate_without_a_usable_provider_before_its_worktree`.
 - Check output summary: `cargo nextest run -p cox-app -p cox-ffi` 243 passed; `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+#### T60.3 Choose the provider before the first turn
+
+Model: Claude Code / opus · Status: done 2026-10-07 · Depends: T60.1 · Size: ~200 · Priority: P1 · Complexity: 4
+
+Goal: the user picks another provider's model in the model menu while the session has no turn yet; the session is reopened on that provider with the same cwd and id-less draft; after the first turn the pick is refused with "start a new session to change provider". Optionally the pick is saved as the default.
+
+Files:
+- `crates/cox-app/src/intent.rs` (`Intent::SwitchProvider { provider, model, make_default }`)
+- `crates/cox-app/src/live.rs` (no turn yet → close and reopen through `cox_session::open_with_keys` with `tiers.code.provider` and `model` overridden in the `SessionSpec`; else the refusal)
+- `crates/cox-app/src/app.rs` (`make_default` writes `tiers.code.provider` and `tiers.code.model` to the user config through `cox-config`'s `set`)
+
+Steps:
+1. The reopen keeps the window's session slot; the old empty session is ended, not left behind.
+2. Docs: DT§5.3 the provider pick and its first-turn limit; `roadmap.md` holds the mid-session switch.
+
+Check: as T60.1.
+
+Done when: a `tests/app.rs` case switches an empty session from `anthropic` to a scripted second section and sees `Status.provider` change, and a session with one turn refuses.
+
+Out of scope: switching provider mid-session (roadmap, A138).
+
+- Result: `Intent::SwitchProvider { provider, model, make_default }` dispatches to `Dispatch::SwitchProvider`; an external agent's session refuses it by name. `LiveSession::send` runs it: the session's own provider is a plain `SwitchModel { Code }`; another one, only while no turn was spawned and the core's history is empty, reopens the session in place — `open_with` resumes the same id through `cox_session::open_with_keys` with `tiers.code.provider`/`model` overridden — so the window's slot, the `sessions` row and the rollout stay one session (no orphan row, no store change); the old session is ended only after the new one opened, so a provider that cannot open leaves it running. After a turn: `AppError::ProviderLocked`, "start a new session to change provider". `make_default` writes both keys through the Settings setter (`App::make_default`, both or neither). The inbox tee no longer expires items of an id a reopened session still runs (`App::is_open`). After merging T60.2: the send gate reads the session's own provider (`LiveSession::readiness()`, `App::readiness_of`), so a session reopened on a usable pick may send while the default has no key. `cox-ffi` mirrors the variant; the Swift side and a `readiness()` export are T60.4. DT§5.3 documents the pick, its first-turn limit and the calls.
+- Tests: `intent::tests::switch_provider_is_a_reopen_and_needs_a_provider`; `tests/app.rs` `an_empty_session_reopens_on_the_picked_provider_in_place` (same id, provider `second`, status model, old stream closes, one row, a turn runs), `a_provider_pick_made_default_lands_in_the_user_config`, `a_session_with_a_turn_refuses_another_provider`, `a_session_reopened_on_a_usable_provider_may_send`.
+- Check output summary: `cargo nextest run -p cox-app -p cox-ffi -p cox-session` 305 passed; `cargo clippy -p cox-app -p cox-ffi -p cox-session --all-targets -- -D warnings` clean; `cargo fmt --check` clean.

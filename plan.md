@@ -2242,27 +2242,6 @@ Done when: a status test shows `provider = "anthropic"` on open and after a code
 
 Out of scope: switching provider (T60.3), FFI (T60.4).
 
-#### T60.3 Choose the provider before the first turn
-
-Model: Claude Code / opus · Status: in progress · Depends: T60.1 · Size: ~200 · Priority: P1 · Complexity: 4
-
-Goal: the user picks another provider's model in the model menu while the session has no turn yet; the session is reopened on that provider with the same cwd and id-less draft; after the first turn the pick is refused with "start a new session to change provider". Optionally the pick is saved as the default.
-
-Files:
-- `crates/cox-app/src/intent.rs` (`Intent::SwitchProvider { provider, model, make_default }`)
-- `crates/cox-app/src/live.rs` (no turn yet → close and reopen through `cox_session::open_with_keys` with `tiers.code.provider` and `model` overridden in the `SessionSpec`; else the refusal)
-- `crates/cox-app/src/app.rs` (`make_default` writes `tiers.code.provider` and `tiers.code.model` to the user config through `cox-config`'s `set`)
-
-Steps:
-1. The reopen keeps the window's session slot; the old empty session is ended, not left behind.
-2. Docs: DT§5.3 the provider pick and its first-turn limit; `roadmap.md` holds the mid-session switch.
-
-Check: as T60.1.
-
-Done when: a `tests/app.rs` case switches an empty session from `anthropic` to a scripted second section and sees `Status.provider` change, and a session with one turn refuses.
-
-Out of scope: switching provider mid-session (roadmap, A138).
-
 #### T60.4 FFI and Swift client for readiness, provider and provider switch
 
 Model: sonnet · Status: open · Depends: T60.1, T60.2, T60.3 · Size: ~180 · Priority: P0 · Complexity: 3
