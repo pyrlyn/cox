@@ -5,7 +5,8 @@
 // The `Composer` organism's and `CompletionList`'s check (T37.24, DS§6.3–§6.4): a snapshot per
 // state × light/dark × Solid/Frosted — empty, a file mentioned with more files offered,
 // commands offered, a shell line with a prompt queued, an image and a file attached, the
-// mode and model chips (T37.24.7) with think off, and with think on (T37.24.10).
+// mode and model chips (T37.24.7) with think off, and with think on (T37.24.10), and with the
+// provider's reason under the composer (T60.5).
 
 import SwiftUI
 import Testing
@@ -19,7 +20,7 @@ import Testing
       ("empty", PreviewState.composerEmpty), ("mention", PreviewState.composerMention),
       ("commands", PreviewState.composerCommands), ("shell-queued", PreviewState.composerShell),
       ("attachments", PreviewState.composerAttachments), ("status", PreviewState.composerStatus),
-      ("think", PreviewState.composerThink),
+      ("think", PreviewState.composerThink), ("not-ready", PreviewState.composerNotReady),
     ]
     for (look, state) in states {
       try assertCoxSnapshot(

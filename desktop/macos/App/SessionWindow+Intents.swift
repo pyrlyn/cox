@@ -38,7 +38,8 @@ extension SessionWindow {
   func composer(for showing: OpenedSession) -> SessionComposer {
     SessionComposer(
       store: showing.composer, modelLabel: ShellState.agentModel(showing, sidebar: model.sidebar),
-      openModel: { screen.popover = screen.popover == .model ? nil : .model })
+      openModel: { screen.popover = screen.popover == .model ? nil : .model },
+      openProviders: { openProviders() })
   }
 
   func handle(_ intent: SessionToolbar.Intent) {

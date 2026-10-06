@@ -49,7 +49,7 @@ struct SessionWindow: View {
   /// The checklist's provider-key row, for the sidebar's footer dot.
   @State private var providerCheck: CheckRow?
   /// The providers a turn could run on now, for the footer's count (A110); nil until probed.
-  @State private var usable: [String]?
+  @State var usable: [String]?
   /// Review shows in the column instead of the transcript, at this file or the first changed one.
   @State var reviewing: Reviewing?
   /// Why the first session did not open.
@@ -71,6 +71,7 @@ struct SessionWindow: View {
   @State private var bestOf = BestOfLauncher()
   @Environment(\.coxAppearance) private var base
   @Environment(\.openWindow) private var openWindow
+  @Environment(\.openSettings) var openSettings
 
   init(model: AppModel, popOut: PopOut? = nil) {
     self.model = model
@@ -131,6 +132,7 @@ struct SessionWindow: View {
       .commandPalette(palette?.state, send: handle)
       .task { if current == nil { await open(resume: popOut?.session) } }
       .task { await watch() }
+      .refreshingProviders(onKeysOf: model.settings) { await refreshProviders() }
       .task { if popOut == nil { await model.remotes.watch() } }
       .onDisappear {
         for session in opened.values { session.close(in: model.registry, window: windowID) }
@@ -206,7 +208,7 @@ struct SessionWindow: View {
             }
           let panels = PluginWidgets.panels(showing.store)
           if !panels.isEmpty { PluginPanel(panels).fixedSize(horizontal: false, vertical: true) }
-          BestOfBar(launcher: bestOf, open: showing, model: model) { sessions in
+          BestOfBar(launcher: bestOf, open: showing, model: model, usable: usable) { sessions in
             for session in sessions where opened[session.id] == nil {
               opened[session.id] = OpenedSession(model.registry.adopt(session, window: windowID))
             }

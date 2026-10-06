@@ -55,8 +55,21 @@ public struct Composer: View {
     public var model: String?
     /// The next turn goes to the think tier (A103); its chip stands beside the model's.
     public var think = false
+    /// Why sending waits for the provider (T60.5, A138); `canSend` is off while it shows.
+    public var notice: Notice?
 
     public init() {}
+  }
+
+  /// What stands under the composer while the session's provider cannot answer: the core's
+  /// reason and the button that goes to Settings › Providers, `nil` for none.
+  public struct Notice: Equatable, Sendable {
+    public var message: String
+    public var action: String?
+
+    public init(message: String, action: String? = nil) {
+      (self.message, self.action) = (message, action)
+    }
   }
 
   /// A mentioned file: its `@path`, as the core's completion inserted it, and its label.
@@ -120,6 +133,8 @@ public struct Composer: View {
     case openModel
     /// The think chip: the think tier for the next turn, or not.
     case toggleThink
+    /// The notice's button: the window opens Settings at Providers.
+    case noticeAction
   }
 
   let state: State
@@ -134,6 +149,11 @@ public struct Composer: View {
     VStack(alignment: .leading, spacing: Space.s) {
       if let failure = state.failure { ComposerFailure(text: failure) }
       pane
+      if let notice = state.notice {
+        ComposerNotice(text: notice.message, kind: .warning, action: notice.action) {
+          send(.noticeAction)
+        }
+      }
     }
     .frame(maxWidth: Size.readingWidth)
     .accessibilityElement(children: .contain)
@@ -191,14 +211,30 @@ public struct Composer: View {
 private struct ComposerFailure: View {
   let text: String
 
+  var body: some View { ComposerNotice(text: text, kind: .error) }
+}
+
+/// A `NoticeRow` on the composer's readable glass, with an optional button at its trailing end:
+/// the failure above the pane and the provider notice below it (T60.5) share this shape.
+private struct ComposerNotice: View {
+  let text: String
+  let kind: NoticeRow.Kind
+  var action: String?
+  var perform: () -> Void = {}
+
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: Radius.xxl, style: .continuous)
-    NoticeRow(text, kind: .error)
-      .padding(.horizontal, Space.l)
-      .padding(.vertical, Space.s)
-      .glassPane(shape, surface: Color(.surfaceWindow), role: .readable)
-      .hairline(in: shape)
-      .elevation(.e3, cornerRadius: Radius.xxl)
+    HStack(spacing: Space.m) {
+      NoticeRow(text, kind: kind)
+      if let action {
+        Button(action, action: perform).buttonStyle(CoxButtonStyle(.secondary, size: .small))
+      }
+    }
+    .padding(.horizontal, Space.l)
+    .padding(.vertical, Space.s)
+    .glassPane(shape, surface: Color(.surfaceWindow), role: .readable)
+    .hairline(in: shape)
+    .elevation(.e3, cornerRadius: Radius.xxl)
   }
 }
 

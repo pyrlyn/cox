@@ -16,6 +16,17 @@ extension PreviewState {
     .init(id: "agent:gemini", label: "Gemini CLI", unavailable: "gemini is not on PATH"),
   ])
 
+  /// The session's provider has no key: the capsule is disabled and the model on a provider with
+  /// no key cannot be added (T60.5). Codex does not need one and stays added, so the capsule is
+  /// disabled with two candidates, not for want of a second.
+  static let bestOfNotReady = BestOfControl.State(
+    options: [
+      .init(id: "agent:codex", label: "Codex", isPicked: true),
+      .init(
+        id: "cox:claude-sonnet-5", label: "cox · Sonnet 5",
+        unavailable: "No key for anthropic, or it is not running."),
+    ], unavailable: "No API key for anthropic.")
+
   private static let prompt = "Split CheckoutForm into address, payment and summary components."
 
   private static let claudeColumn = BestOfCompare.Column(

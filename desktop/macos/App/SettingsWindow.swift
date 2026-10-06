@@ -33,6 +33,12 @@ struct SettingsWindow: View {
           sliderWrites.onIdle = { dragged = [:] }
           await settings.load()
         }
+        // Asked for by another window; `initial` covers a window the ask itself opened.
+        .onChange(of: settings.requestedGroup, initial: true) {
+          guard let group = settings.requestedGroup else { return }
+          page = SettingsPage(rawValue: group.rawValue) ?? page
+          settings.requestedGroup = nil
+        }
       } else if case .failure(let error) = model.launch.live {
         Text(String(describing: error)).textSelection(.enabled).padding(Space.xxl)
       }

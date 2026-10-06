@@ -111,6 +111,31 @@ import Testing
     #expect(session.sent.suffix(2) == [.interrupt, .send(text: "now", attachments: [])])
   }
 
+  /// T60.5: with no usable provider ⏎ and ⌘⏎ do nothing and the draft stays; once the core says the
+  /// provider is usable the same key sends it.
+  @Test func returnAndCommandReturnAreIgnoredWhileTheProviderIsNotReady() async throws {
+    let session = FixtureSession(
+      fixture: Fixture(batches: [], snapshot: []), readiness: .noKey(provider: "anthropic"))
+    let store = ComposerStore(session: SessionStore(session: session))
+    let host = ComposerHost(SessionComposer(store: store))
+    defer { host.close() }
+    // The composer reads the provider as it appears.
+    await host.settle(until: { !store.readiness.isReady })
+
+    host.type("fix the bug")
+    host.press(.return)
+    host.press(.commandReturn)
+    await host.settle(until: { false }, limit: .milliseconds(300))
+    #expect(session.sent.isEmpty)
+    #expect(store.text == "fix the bug")
+
+    session.setReadiness(.ready)
+    await store.refreshReadiness()
+    host.press(.return)
+    await host.settle(until: { !session.sent.isEmpty })
+    #expect(session.sent == [.send(text: "fix the bug", attachments: [])])
+  }
+
   @Test func upInTheEmptyComposerBringsBackTheEarlierPromptsNewestFirst() {
     let session = FixtureSession(
       fixture: Fixture(batches: [], snapshot: []), prompts: ["run the tests", "add a cache"])

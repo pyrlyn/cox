@@ -34,6 +34,9 @@ public final class SettingsStore {
   /// The sidebar's search: `sections` keeps only the settings whose label or dotted key holds
   /// it, so the pages and their boxes shrink to the matches. Empty keeps every setting.
   public var filter = ""
+  /// The page another window asked Settings to open at (the composer's "Add key" asks for
+  /// Models & Providers, T60.5); the Settings window takes it and sets it back to `nil`.
+  public var requestedGroup: SettingsGroup?
   /// The project whose layer applies.
   public let cwd: String
   @ObservationIgnored private let client: any SettingsClient
