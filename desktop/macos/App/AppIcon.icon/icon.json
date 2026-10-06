@@ -1,0 +1,20 @@
+{
+  "fill" : {
+    "solid" : "srgb:0.05882,0.10196,0.07843,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "cox-glyph.svg",
+          "name" : "cox-glyph"
+        }
+      ]
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}

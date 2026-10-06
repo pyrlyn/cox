@@ -21,7 +21,7 @@ let package = Package(
   targets: [
     .target(
       name: "CoxUI",
-      resources: [.process("Tokens/Colors.xcassets")],
+      resources: [.process("Tokens/Colors.xcassets"), .process("Brand.xcassets")],
       plugins: [.plugin(name: "SwiftLintBuildToolPlugin", package: "SwiftLintPlugins")]
     ),
     .testTarget(

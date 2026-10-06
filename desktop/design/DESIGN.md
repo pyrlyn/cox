@@ -370,7 +370,7 @@ component.
 | --- | --- | --- |
 | `StatusDot` | running, waiting, idle, error | `.dot .d-*` |
 | `IconTile(kind, symbol)` | neutral, edit, shell, search, write; the tool picks the DS§3.7 symbol. `IconTile(face:glyph:symbol:)` takes its caller's colours, as a Settings page's | `.tool .ic.c-*`, `.set-side .sq` |
-| `AppIcon()` | cox's mark: `cx` in `font.mono.appIcon` and `tile.app.glyph` on the `tile.app` top-to-bottom gradient (145°), `size.appIconHero` square, `radius.xxl`, e2; decorative (Figma frame 22) | `.appicon` |
+| `AppIcon()` | cox's mark: the brand's terminal-pane tile (`brand/logo/cox-mark.svg`, copied into CoxUI's `Brand.xcassets` as a vector by `just brand-icons`), `size.appIconHero` square, e2; decorative (Figma frame 22) | `.appicon` |
 | `KeyCap` | glass; inverted (an outline in `surface.window`, on StopButton's `text.primary` face) | `.kbd` |
 | `Badge` | neutral, user, project (`role.project`), env, default, warning, danger; `radius.badge` | `.badge .b-*` |
 | `CountBadge` | `text.onAccent` digits on a `status.warning` pill at e1, `size.countBadge` high | `.sect .cnt` |

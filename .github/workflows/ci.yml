@@ -389,7 +389,8 @@ jobs:
 
   # The desktop design tokens (T37.17, DS§2): regenerate Tokens.swift,
   # Colors.xcassets and tokens.css from desktop/design/tokens/*.json and fail
-  # on any change, like the config-schema drift test. Node only, so Linux.
+  # on any change, like the config-schema drift test. Node only, so Linux. Also the app icons
+  # scripts/brand_icons.py derives from brand/logo/cox-mark.svg (plain Python).
   desktop-tokens:
     needs: config
     if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
@@ -400,6 +401,11 @@ jobs:
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           install_args: node
+
+      - name: brand icons match brand/logo
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_brand_icons.py'
+          python3 scripts/brand_icons.py --check
 
       - name: regenerate the tokens
         working-directory: desktop/design

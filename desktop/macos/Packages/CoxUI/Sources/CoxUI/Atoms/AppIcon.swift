@@ -1,28 +1,21 @@
-// `AppIcon` (the mockup's `.appicon`, Figma frame 22-empty-session): cox's mark — `cx` in the
-// mono app-icon face on the app tile's gradient. Separate so the welcome hero, and later the
-// first-run window and notifications, draw the one mark from the `tile.app` tokens.
+// `AppIcon` (the mockup's `.appicon`, Figma frame 22-empty-session): cox's mark — the brand's
+// terminal-pane tile from brand/logo/cox-mark.svg, kept as a vector in Brand.xcassets by
+// `just brand-icons`. Separate so the welcome hero, and later the first-run window and
+// notifications, draw the one mark the app icon and the site use.
 
 import SwiftUI
 
-/// A `Size.appIconHero` tile, `Radius.xxl` corners, lifted to e2. Decorative: the title beside
-/// it names the app.
+/// A `Size.appIconHero` mark lifted to e2. Decorative: the title beside it names the app.
 public struct AppIcon: View {
   public init() {}
 
   public var body: some View {
-    let shape = RoundedRectangle(cornerRadius: Radius.xxl, style: .continuous)
-    Text(verbatim: "cx")
-      .textStyle(.monoAppIcon)
-      .foregroundStyle(Color(.tileAppGlyph))
+    Image(.coxMark)
+      .resizable()
+      .interpolation(.high)
       .frame(width: Size.appIconHero, height: Size.appIconHero)
-      .background {
-        // The mockup's 145° gradient, top leading to bottom trailing.
-        shape.fill(
-          LinearGradient(
-            colors: [Color(.tileAppTop), Color(.tileAppBottom)], startPoint: .topLeading,
-            endPoint: .bottomTrailing))
-      }
-      .elevation(.e2, cornerRadius: Radius.xxl)
+      // The mark's own tile corner (rx 12 of 64), so the shadow follows the artwork.
+      .elevation(.e2, cornerRadius: Size.appIconHero * 12 / 64)
       .accessibilityHidden(true)
   }
 }
