@@ -99,4 +99,3 @@
 - T60.7. Provider in the model chip and a grouped model popover
 - T60.8. `desktop.appearance.specular`: the glare setting
 - T60.9. Glare slider in Appearance
-- T60.10. Best of: the real failure reason, no negative zero, no actions on a failed candidate

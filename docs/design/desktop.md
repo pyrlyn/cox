@@ -281,6 +281,30 @@ the table uses the `@agentclientprotocol/*` names.
 8. cox's own slash commands are off in external sessions; `/…` goes to the
    agent verbatim.
 
+#### 3.3.2 Best of n: what a failed candidate shows (T60.10)
+
+A client reads the compare view with `compare(group)` (`cox_app::best_of`),
+which returns one `CandidateView` per candidate; every rule below is decided
+there or in the helper that maps a view to a column, so a Windows or Linux
+client draws the same column from the same fields.
+
+- **State.** A candidate that did not start, or whose turn stopped on an
+  error or a refusal, is `Failed { why }`. `why` is the text the sidebar and
+  the "Needs you" inbox show for that session (`Need::Failed`, for example
+  `provider error: provider auth failed`), never a generic line; the generic
+  "its turn failed" is only the fallback when the inbox no longer holds the
+  failure (the person dismissed it).
+- **Cost.** Shown as `$0.00` with two decimals. An amount that rounds to zero
+  prints without a sign: an empty sum of ledger rows is `-0.0` in IEEE
+  arithmetic, and a client must not print `$-0.00`. `cox-app` sums with a
+  `0.0` seed, and the client's money formatter clamps again.
+- **Actions.** "Keep this one" is enabled only for a `Done` candidate that
+  still has its worktree, while no other candidate was kept. "Open in Review"
+  needs a session and a candidate that is not pruned; on a `Failed` candidate
+  it also needs at least one changed file (a failed turn may have written
+  files worth a look, an empty one has nothing to open). Both are disabled on
+  a failed candidate with no changes.
+
 ## 4. Architecture
 
 ### 4.1 Layers

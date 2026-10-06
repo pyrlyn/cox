@@ -9579,3 +9579,24 @@ Check: cox-app tests for a Cargo workspace, a single crate, a Node workspace and
 - Result: `crates/cox-app/src/welcome.rs`: `App::welcome(cwd)` loads the instruction chain as a session would (`cox_session::instruction_roots`, the config's `instruction_budget_tokens`) and `facts(cwd, files, in_git)` builds the line — `Rust workspace · N crates` from `[workspace] members` (paths and `dir/*` globs, less `exclude`), `Rust crate`, `Node workspace · N packages` / `Node project` from `package.json` `workspaces`, `Go module`, `Python project` — then `<files> loaded` by file name; the suggestions name the project folder and the kind's test command (`cargo nextest` with `.config/nextest.toml`, `cargo test`, `npm test`, `go test ./...`, `pytest`), and the diff review only under a git root (`cox_config::load::find_git_root`, no `git` run). `cox-ffi`: `App.welcome(cwd)` forwards on the runtime; `Welcome` and `Suggestion` cross as remote records. Swift: `WelcomeFacts`, `WelcomeSuggestion` and `WelcomeService` move to CoxClient with a `FixtureWelcome`; CoxCore's `LiveCoreClient` conforms (`WelcomeConvert.swift`); `MockWelcomeService` and `SessionWindow.welcome` are deleted, and the window passes the live client (a fixture without a core shows the question alone). cox-app depends on `toml_edit` directly (already in its tree through cox-config).
 - Tests: cox-app `welcome::tests` — a Cargo workspace (3 crates with a glob, a path and an exclude; nextest; two instruction files), a single crate (`cargo test`, no diff suggestion outside git), a Node workspace (2 packages) and an empty folder (no summary, generic test prompt). CoxCore `thisRepositoryReadsAsARustWorkspaceWithItsInstructions`: through the real core this repository reads `Rust workspace · … · AGENTS.md …` with the diff suggestion. The CoxModel and CoxTranscript welcome tests use `FixtureWelcome`.
 - Check output summary: `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo nextest run -p cox-ffi -p cox-app` 231 passed (forward-only included); `cargo nextest run -p cox --test deps` 10 passed; `just desktop-xcframework` built; CoxCore `swift test` 25 passed; CoxModel 130 passed; CoxTranscript welcome and rewind tests pass; `cargo fmt --check`, `xcrun swift-format lint --strict` clean.
+
+#### T60.10 Best of: the real failure reason, no negative zero, no actions on a failed candidate
+
+Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
+
+Goal: a failed candidate shows its turn's error text (e.g. "provider auth failed") instead of "its turn failed"; a cost of −0.00 prints as $0.00 everywhere; "Open in Review" and "Keep this one" are disabled on a failed candidate with no changes.
+
+Files:
+- `crates/cox-app/src/best_of.rs` (`state_of` takes the reason from the inbox's failed-turn item for that session)
+- the Swift cost formatter in `CoxModel` (clamps −0 to 0)
+- `desktop/macos/Packages/CoxModel/Sources/CoxModel/BestOfStore.swift` (`canReview`, `canKeep`)
+
+Steps:
+1. Docs: DT§3.3 Best of compare: what a failed column shows and which actions it allows.
+
+Check: `mise exec -- cargo nextest run -p cox-app --test best_of`; `swift test` in `CoxModel` and `CoxUI`.
+
+Done when: the Rust test shows the provider error as the reason, a formatter test prints `$0.00` for −0.0, and the `BestOfTests` snapshot shows the failed column with disabled actions.
+Result: `best_of::state_of` takes a failed candidate's reason from the inbox's `Need::Failed` item for its session (the text the sidebar shows), the old line only when the item was dismissed. Root cause of `$-0.00`: `Iterator::sum` of zero `f64` rows is `-0.0` since Rust 1.83 (rustc 1.98.1 here), so a turn that failed before any usage row gave `session_cost` = `-0.0`, which `String(format: "%.2f")` prints as `-0.00`; the header total was `0 + -0.0`, which is `+0.0`. `workspace::session_cost` and `queries::project_spend` now fold from `0.0`, and `usd` (CoxModel, now public, used by `App/BestOf.swift`) clamps amounts that round to zero. `canReview` / `canKeep(anotherKept:)` moved out of the untested `App/BestOf.swift` onto `CandidateView` in CoxModel: a failed candidate with no files offers neither action. DT§3.3.2 documents it.
+- Check output summary: `cargo nextest run -p cox-app -p cox-ffi -p cox-store` 271 passed (incl. `best_of_failed_candidate_shows_the_provider_error`); `cargo clippy -p cox-app -p cox-store -p cox-ffi --all-targets -- -D warnings` and `cargo fmt --check` clean; CoxModel `swift test` 133 passed (formatter, canReview/canKeep); CoxUI `BestOfTests` logic tests pass and the new `bestOfFailedTurns` snapshots are recorded; the existing BestOf snapshots do not match on this machine before or after this change (font rendering), so they were not re-recorded.
+
