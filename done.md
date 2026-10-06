@@ -9666,3 +9666,33 @@ Done when: `FoundationsTests` show specular = token × setting and 0 in Solid; `
 - Result: `AppearanceEdit.specular` writes `desktop.appearance.specular`; `DesktopAppearance.specular` reads it as optional and defaults to 1, so a core without the key (before T60.8) still decodes the section. `Appearance.specularScale` (init parameter, default 1) scales the material's specular token and clamps to 0…1; Solid, Reduce Transparency and Increase Contrast stay at 0. The Appearance popover has a "Glare" slider (None…Full) below Depth, disabled in Solid, under Reduce Transparency, under Increase Contrast and when a layer above the user file sets the key; its note says why under Increase Contrast. `AppearanceState` maps stored, state and edit like Depth, and `applied(to:)` and the material swatches carry the scale. Settings › Appearance rows are generated from Rust's settings view, so the Glare row appears with T60.8's key. DS§3.5 gives the formula (`clamp(material.*Specular × specularScale, 0, 1)`), DS§6 the popover row, in platform-neutral words.
 - Tests: `FoundationsTests` `glareScalesTheMaterialsSpecularToken` and `glareNeverBringsTheSweepBackInSolidOrUnderIncreaseContrast`; `AppearanceSettingsTests` read the key, write it, and `aMissingSpecularKeyReadsAsFullGlare`; `AppearancePopoverTests` report the intent and redraw with the scale; the twelve `appearancePopover` snapshots re-recorded with the slider.
 - Check output summary: CoxModel `swift test` 131 passed; CoxUI `swift test`: every non-snapshot test passes, and the `appearancePopover` snapshots pass against the new references; the other snapshots in the suite mismatch on this machine (macOS 27.0.1) with or without this change, and the other popover-bearing references (locked, Reduce Transparency, main screen with the popover open) still need re-recording where the references were made; SwiftLint `--strict` on `App` and the touched sources and `swift-format lint --strict` clean.
+
+#### T60.1 Provider in the session status and the model menu
+
+Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
+
+Goal: the core tells every client which provider the session's code tier runs on, and the model menu lists the models of every configured provider section, grouped by provider, each section marked usable or not.
+
+Files:
+- `crates/cox-app/src/patch.rs` (`Status` gains `provider: Option<String>` and `provider_name: Option<String>`, the section's display name)
+- `crates/cox-app/src/status.rs` (`StatusFold::open` and `ModelSwitched{Code}` fill it from `config.tiers.code.provider`)
+- `crates/cox-app/src/models.rs` (`ModelSection` gains `provider` and `usable: bool`; `menu` takes the usable list and adds every configured provider section's models after the tier's own, one section per provider)
+
+Steps:
+1. `Status.provider` from `tiers.code.provider`; `None` for an ACP-driven session.
+2. `menu(config, usable)` groups by provider; a section whose provider is not in `usable` keeps its rows but is `usable: false`.
+3. Docs: DT§4.3 names `Status.provider` and the grouped menu.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app
+mise exec -- cargo clippy -p cox-app --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a status test shows `provider = "anthropic"` on open and after a code-tier switch, and a `menu` snapshot shows two provider sections with one marked unusable.
+
+Out of scope: switching provider (T60.3), FFI (T60.4).
+
+- Result: `Status` gains `provider` and `provider_name` (`models::provider_name`: brand for the native sections, the section name for a custom one); `StatusFold` keeps each tier's provider and sets them on open and on the latest main turn's tier, and a `code` model switch keeps the section. `TimelinePatch::Status` now boxes its `Status` (the clippy large-variant lint). `ModelSection` gains `provider` and `usable`; `menu(config, choices, usable)` lists each tier's provider, then every other configured provider that lists models, titled with its name on the `Code` tier; a model is listed once per provider. `App::model_menu(cwd, usable)` and `cox-ffi`'s `model_menu(cwd, usable)` take the `usable_providers` answer. cox-ffi remote declarations updated. DT§4.3 documents both. Swift callers of `modelMenu(cwd:)` and the new fields are T60.4.
+- Check output: `cargo nextest run -p cox-app -p cox-ffi` 241 passed; `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo fmt --check` clean.

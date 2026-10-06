@@ -2215,32 +2215,6 @@ Every card in this phase:
 - updates the shared docs in the same change — behaviour in `docs/design/desktop.md` (DT§), visuals and tokens in `desktop/design/DESIGN.md` (DS§) and `desktop/design/tokens/`, settings in `docs/config.md` and `docs/config.jsonschema` — written platform-neutral, naming the Rust call a client makes, so a Windows or Linux agent can build the same feature from the docs alone;
 - leaves a test that fails without it (`insta` or a unit test in Rust, swift-snapshot-testing or Swift Testing in Swift).
 
-#### T60.1 Provider in the session status and the model menu
-
-Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
-
-Goal: the core tells every client which provider the session's code tier runs on, and the model menu lists the models of every configured provider section, grouped by provider, each section marked usable or not.
-
-Files:
-- `crates/cox-app/src/patch.rs` (`Status` gains `provider: Option<String>` and `provider_name: Option<String>`, the section's display name)
-- `crates/cox-app/src/status.rs` (`StatusFold::open` and `ModelSwitched{Code}` fill it from `config.tiers.code.provider`)
-- `crates/cox-app/src/models.rs` (`ModelSection` gains `provider` and `usable: bool`; `menu` takes the usable list and adds every configured provider section's models after the tier's own, one section per provider)
-
-Steps:
-1. `Status.provider` from `tiers.code.provider`; `None` for an ACP-driven session.
-2. `menu(config, usable)` groups by provider; a section whose provider is not in `usable` keeps its rows but is `usable: false`.
-3. Docs: DT§4.3 names `Status.provider` and the grouped menu.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-app
-mise exec -- cargo clippy -p cox-app --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: a status test shows `provider = "anthropic"` on open and after a code-tier switch, and a `menu` snapshot shows two provider sections with one marked unusable.
-
-Out of scope: switching provider (T60.3), FFI (T60.4).
 
 #### T60.3 Choose the provider before the first turn
 

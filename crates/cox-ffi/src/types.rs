@@ -149,6 +149,8 @@ pub struct Suggestion {
 pub struct ModelSection {
     pub tier: Tier,
     pub title: String,
+    pub provider: String,
+    pub usable: bool,
     pub models: Vec<MenuModel>,
 }
 
@@ -229,7 +231,7 @@ pub enum TimelinePatch {
         usage: Box<UsageView>,
     },
     Status {
-        status: Status,
+        status: Box<Status>,
     },
     PluginSlot {
         slot: Box<PluginSlot>,
@@ -319,6 +321,8 @@ pub struct Status {
     pub model_name: Option<String>,
     pub short_name: Option<String>,
     pub effort: Option<Effort>,
+    pub provider: Option<String>,
+    pub provider_name: Option<String>,
 }
 
 #[uniffi::remote(Record)]

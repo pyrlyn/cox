@@ -229,9 +229,9 @@ pub enum TimelinePatch {
         usage: Box<UsageView>,
     },
     /// The session's status beside the block list (DT§4.3); a queue keeps
-    /// only the latest.
+    /// only the latest. Boxed: with the provider it is the largest variant.
     Status {
-        status: Status,
+        status: Box<Status>,
     },
     /// One plugin slot's whole state (T52.14, PL§8) beside the block list;
     /// a queue keeps only the latest per plugin and slot.
@@ -267,6 +267,16 @@ pub struct Status {
     /// The effort that model runs at: the `/effort` override, else the
     /// `code` tier's configured effort.
     pub effort: Option<Effort>,
+    /// The `[providers.<name>]` section the tier of `model` calls (A138):
+    /// the `code` tier's on open, then the tier of the latest main turn.
+    /// `/model` changes the model, never the section. `None` when the
+    /// session has no tiers of its own, as under ACP.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// What a person calls that provider (`Anthropic`, `LM Studio`,
+    /// `models::provider_name`); `None` with `provider`.
+    #[serde(default)]
+    pub provider_name: Option<String>,
 }
 
 /// The last `TAIL_LINES` lines of `text`, a trailing newline kept so the
