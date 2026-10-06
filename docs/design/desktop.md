@@ -663,6 +663,27 @@ as the text shown: a prompt without its tiles, a folded thought as nothing.
 - ↑ in an empty composer walks the prompt history (`user_prompts`).
 - The chips row below: attachment button, permission mode (⇧⇥ cycles), model
   and effort, "think" toggle.
+- Provider pick (T60.3, A138): the model menu also lists the models of the
+  other configured provider sections. Picking one sends
+  `Intent::SwitchProvider { provider, model, make_default }` through
+  `LiveSession::send` (`SessionHandle.send` over the FFI). A model of the
+  section the session already runs on is a plain code-tier model switch,
+  allowed at any time; it returns no session. Another section is allowed
+  only while the session has no turn yet (no turn spawned, empty history):
+  the core reopens the session in place — the same session id, cwd, row and
+  rollout, with `tiers.code.provider` and `tiers.code.model` overridden for
+  this session — ends the old one and returns the reopened session, which
+  the client puts in the window's slot instead of the old handle (whose
+  patch stream then closes). The composer keeps its draft and attachments:
+  they live in the client until sent. If the new provider cannot open (no
+  key, a broken section) the error comes back and the old session runs on.
+  After the first turn the pick fails with `AppError::ProviderLocked`, "start
+  a new session to change provider"; the client offers a new session.
+  `make_default` also writes both keys to the user `config.toml` through the
+  Settings setter (refused like Settings when a project layer pins them), so
+  the next session and a later resume of this one open on it; without it a
+  resumed session opens on the configured default, as after `/model`.
+  Switching provider mid-session is not offered (`roadmap.md`).
 
 ### 5.4 Review
 

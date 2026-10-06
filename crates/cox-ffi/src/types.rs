@@ -609,6 +609,11 @@ pub enum Intent {
         tier: Tier,
         model: Option<ModelId>,
     },
+    SwitchProvider {
+        provider: String,
+        model: ModelId,
+        make_default: bool,
+    },
     SetEffort {
         effort: Option<Effort>,
     },

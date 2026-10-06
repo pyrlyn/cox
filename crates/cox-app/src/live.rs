@@ -6,8 +6,9 @@
 //! keys and login prompt, its events folded into the app's inbox and fed to
 //! a [`Controller`], and each intent run the way [`dispatch`] says — a turn
 //! spawned and never awaited, a queued turn after the running one, a fork
-//! or handoff opened as a new session. Separate from `app.rs`, which owns
-//! what outlives one session.
+//! or handoff opened as a new session, a provider pick before the first
+//! turn reopened in place (T60.3). Separate from `app.rs`, which owns what
+//! outlives one session.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -18,7 +19,7 @@ use cox_protocol::SandboxPolicy;
 use cox_protocol::ids::{ArchiveId, SessionId, TaskId};
 use cox_protocol::plugin::{CommandOut, NoticeLevel};
 use cox_protocol::traits::Store as _;
-use cox_protocol::types::{Event, Level, Submission, TodoItem};
+use cox_protocol::types::{Event, Level, ModelId, Submission, Tier, TodoItem};
 use cox_render::diffmodel::DiffModel;
 use cox_sanitize::sanitize;
 use cox_session::SessionSpec;
@@ -76,6 +77,9 @@ pub struct LiveSession {
     /// under as its `bash` calls do (T51.3).
     sandbox: SandboxPolicy,
     theme: String,
+    /// The provider section the code tier runs on; `None` for an external
+    /// agent's session, which brings its own (T60.3).
+    provider: Option<String>,
     warnings: Vec<String>,
     /// The turn spawned last; a queued one starts after it.
     turn: Mutex<Option<JoinHandle<()>>>,
@@ -90,6 +94,18 @@ impl LiveSession {
         theme: String,
     ) -> Result<Arc<Self>, AppError> {
         let config = app.config(&cwd)?;
+        Self::open_with(app, config, cwd, resume, theme).await
+    }
+
+    /// [`LiveSession::open`] with `config` in place of the one `cwd` loads:
+    /// a provider pick overrides its code tier (T60.3).
+    async fn open_with(
+        app: Arc<App>,
+        config: cox_protocol::Config,
+        cwd: PathBuf,
+        resume: Option<(SessionId, History)>,
+        theme: String,
+    ) -> Result<Arc<Self>, AppError> {
         let mut timeline = Timeline::new(&theme);
         let mut status = StatusFold::open(&config);
         if let Some((id, _)) = &resume {
@@ -155,6 +171,7 @@ impl LiveSession {
             warnings: opened.warnings.iter().map(ToString::to_string).collect(),
             turn: Mutex::new(None),
             sandbox: cox_session::sandbox_policy(&opened.config),
+            provider: Some(opened.config.tiers.code.provider),
             roots: opened.config.core.workspace_roots,
             app,
             driver: Driver::Core(session),
@@ -211,6 +228,7 @@ impl LiveSession {
             warnings: Vec::new(),
             turn: Mutex::new(None),
             sandbox: cox_session::agent_policy(&config),
+            provider: None,
             roots,
             app,
             driver: Driver::Agent {
@@ -238,6 +256,12 @@ impl LiveSession {
             Driver::Core(_) => None,
             Driver::Agent { agent, .. } => Some(agent),
         }
+    }
+
+    /// The provider section the code tier runs on (T60.3); `None` in an
+    /// external agent's session.
+    pub fn provider(&self) -> Option<&str> {
+        self.provider.as_deref()
     }
 
     /// Why this stored agent session opened read-only (T52.6): the agent
@@ -315,11 +339,68 @@ impl LiveSession {
                 let summary = session.handoff_summary(&objective).await;
                 cox_session::handoff(home, &self.cwd, parent, &objective, summary.as_deref())?
             }
+            Dispatch::SwitchProvider {
+                provider,
+                model,
+                make_default,
+            } => {
+                return self
+                    .switch_provider(session, provider, model, make_default)
+                    .await;
+            }
         };
         let (app, cwd) = (Arc::clone(&self.app), self.cwd.clone());
         Self::open(app, cwd, Some(child), self.theme.clone())
             .await
             .map(Some)
+    }
+
+    /// T60.3 (DT§5.3): `provider`'s `model` for the code tier. The same
+    /// provider is a plain model switch. Another one rebuilds the session,
+    /// so only while no turn has run: the reopen resumes this id with the
+    /// overridden config, which keeps the window's slot, the session row
+    /// and the rollout as one session, and this one is ended only once the
+    /// other runs, so a provider that cannot open leaves it as it was.
+    async fn switch_provider(
+        &self,
+        session: &Session,
+        provider: String,
+        model: ModelId,
+        make_default: bool,
+    ) -> Result<Option<Arc<Self>>, AppError> {
+        if self.provider.as_deref() == Some(provider.as_str()) {
+            let switch = Submission::SwitchModel {
+                tier: Tier::Code,
+                model: Some(model.clone()),
+            };
+            session.submit(switch).await?;
+            if make_default {
+                self.app.make_default(&self.cwd, &provider, &model.0)?;
+            }
+            return Ok(None);
+        }
+        // A spawned turn may not have reached the history yet.
+        let spawned = self
+            .turn
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some();
+        if spawned || !session.history().await.is_empty() {
+            return Err(AppError::ProviderLocked);
+        }
+        let mut config = self.app.config(&self.cwd)?;
+        config.tiers.code.provider.clone_from(&provider);
+        config.tiers.code.model.clone_from(&model.0);
+        let id = session.id();
+        let resume = Some((id, cox_session::resume(&self.app.home, id)?));
+        let (app, cwd) = (Arc::clone(&self.app), self.cwd.clone());
+        let next = Self::open_with(app, config, cwd, resume, self.theme.clone()).await?;
+        if make_default && let Err(e) = self.app.make_default(&self.cwd, &provider, &model.0) {
+            next.end();
+            return Err(e);
+        }
+        self.end();
+        Ok(Some(next))
     }
 
     /// What the inspector's Changes tab lists (T37.29.1): the blocks, the
@@ -696,7 +777,11 @@ fn tee(
                 plugins.render_item(block, &target, source);
             }
         }
-        app.expire(id);
+        // A session reopened on another provider (T60.3) goes on under
+        // this id; its items are not this one's to expire.
+        if !app.is_open(id) {
+            app.expire(id);
+        }
     });
     rx
 }
