@@ -4,7 +4,7 @@
 
 // T52.12's CoxUI check (DT§3.3.1, mockup 27): the composer's best-of-n control and the compare
 // view with two and three candidates, one of them failed, and both questions "Keep this one"
-// asks, each in light/dark × Solid/Frosted.
+// asks, each in light/dark × Solid/Frosted; and (T60.10) every candidate failed on the provider.
 
 import SwiftUI
 import Testing
@@ -26,6 +26,12 @@ import Testing
     try assertCoxSnapshot(
       PreviewPane { BestOfCompare(state: PreviewState.bestOfThree) { _ in } }, variant,
       named: "three.\(variant.name)")
+  }
+
+  @Test(arguments: Variant.all) func bestOfFailedTurns(_ variant: Variant) throws {
+    try assertCoxSnapshot(
+      PreviewPane { BestOfCompare(state: PreviewState.bestOfFailedTurns) { _ in } }, variant,
+      named: variant.name)
   }
 
   @Test(arguments: Variant.all) func bestOfKeep(_ variant: Variant) throws {
@@ -51,5 +57,11 @@ import Testing
     }
     #expect(failed.map(\.label) == ["Codex"])
     #expect(failed.allSatisfy { !$0.canKeep && !$0.canReview })
+  }
+
+  @Test func bestOfFailedTurnsShowTheRealReasonAndNoCostSign() {
+    let columns = PreviewState.bestOfFailedTurns.columns
+    #expect(columns.allSatisfy { $0.status == .failed("provider error: provider auth failed") })
+    #expect(columns.allSatisfy { $0.cost == "$0.00" && !$0.canKeep && !$0.canReview })
   }
 }

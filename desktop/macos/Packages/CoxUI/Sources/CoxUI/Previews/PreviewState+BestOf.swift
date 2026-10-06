@@ -46,6 +46,23 @@ extension PreviewState {
   static let bestOfThree = BestOfCompare.State(
     prompt: prompt, total: "$0.38", columns: [claudeColumn, coxColumn, codexColumn])
 
+  /// A candidate whose turn failed after it started, as Best of reads it back: the provider's
+  /// own error, no files, nothing to review or keep (T60.10).
+  private static let failedTurnColumn = BestOfCompare.Column(
+    id: 2, label: "cox · Opus 5", status: .failed("provider error: provider auth failed"),
+    branch: "best-01k6x-3", cost: "$0.00", duration: "0s")
+
+  /// Every candidate's turn failed on the provider: both columns show the error, and neither
+  /// offers an action.
+  static let bestOfFailedTurns = BestOfCompare.State(
+    prompt: prompt, total: "$0.00",
+    columns: [
+      BestOfCompare.Column(
+        id: 1, label: "cox · Sonnet 5", status: .failed("provider error: provider auth failed"),
+        branch: "best-01k6x-2", cost: "$0.00", duration: "0s"),
+      failedTurnColumn,
+    ])
+
   /// "Keep this one" on Claude Agent: the worktree it prunes.
   static let bestOfConfirm = BestOfCompare.State(
     prompt: prompt, total: "$0.38", columns: [claudeColumn, coxColumn, codexColumn],

@@ -2355,24 +2355,6 @@ Check: `swift test` in `CoxModel` and `CoxUI`.
 
 Done when: `FoundationsTests` show specular = token × setting and 0 in Solid; `AppearanceSettingsTests` decode the key; a popover snapshot shows the slider.
 
-#### T60.10 Best of: the real failure reason, no negative zero, no actions on a failed candidate
-
-Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
-
-Goal: a failed candidate shows its turn's error text (e.g. "provider auth failed") instead of "its turn failed"; a cost of −0.00 prints as $0.00 everywhere; "Open in Review" and "Keep this one" are disabled on a failed candidate with no changes.
-
-Files:
-- `crates/cox-app/src/best_of.rs` (`state_of` takes the reason from the inbox's failed-turn item for that session)
-- the Swift cost formatter in `CoxModel` (clamps −0 to 0)
-- `desktop/macos/Packages/CoxModel/Sources/CoxModel/BestOfStore.swift` (`canReview`, `canKeep`)
-
-Steps:
-1. Docs: DT§3.3 Best of compare: what a failed column shows and which actions it allows.
-
-Check: `mise exec -- cargo nextest run -p cox-app --test best_of`; `swift test` in `CoxModel` and `CoxUI`.
-
-Done when: the Rust test shows the provider error as the reason, a formatter test prints `$0.00` for −0.0, and the `BestOfTests` snapshot shows the failed column with disabled actions.
-
 ---
 
 ## 4. Definition of done for v0.1

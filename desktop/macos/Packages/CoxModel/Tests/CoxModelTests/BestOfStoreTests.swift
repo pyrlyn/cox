@@ -64,4 +64,31 @@ struct BestOfStoreTests {
     #expect(store.pending == nil)
     #expect(store.columns.map(\.state) == [.kept, .pruned, .pruned])
   }
+
+  @Test func bestOfFailedCandidateWithoutChangesOffersNoActions() {
+    var failed = column(0, .cox(model: nil), .failed(why: "provider error: provider auth failed"))
+    failed.files = []
+    #expect(!failed.canReview)
+    #expect(!failed.canKeep(anotherKept: false))
+    failed.files = [FileStat(path: "Form.tsx", added: 1, removed: 0)]
+    #expect(failed.canReview, "a failed turn that wrote files can still be looked at")
+    #expect(!failed.canKeep(anotherKept: false), "but never kept")
+  }
+
+  @Test func bestOfKeepsTheOtherActionRules() {
+    let done = column(0, .cox(model: nil), .done)
+    #expect(done.canReview)
+    #expect(done.canKeep(anotherKept: false))
+    #expect(!done.canKeep(anotherKept: true))
+    #expect(!column(1, .cox(model: nil), .pruned).canReview)
+    #expect(column(2, .cox(model: nil), .running).canReview)
+  }
+
+  @Test func bestOfCostNeverPrintsNegativeZero() {
+    #expect(usd(-0.0) == "$0.00")
+    #expect(usd(-0.004) == "$0.00")
+    #expect(usd(0) == "$0.00")
+    #expect(usd(0.376) == "$0.38")
+    #expect(usd(-1.5) == "$-1.50")
+  }
 }

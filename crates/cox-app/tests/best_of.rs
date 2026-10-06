@@ -240,6 +240,33 @@ async fn best_of_one_failure_leaves_the_others_running() {
 }
 
 #[tokio::test]
+async fn best_of_failed_candidate_shows_the_provider_error() {
+    let (dir, trees) = scratch();
+    // The scenario is read when each session opens, so this reaches both.
+    std::fs::write(
+        dir.path().join("scenario.toml"),
+        "[[turn]]\nerror = \"auth failed\"\n",
+    )
+    .expect("scenario");
+    let app = app(dir.path(), &trees);
+    let launch = launch(&app, dir.path(), vec![cox(), cox()]).await;
+    for session in &launch.sessions {
+        finish(session).await;
+    }
+    let views = app.compare(&launch.group.id).await.expect("compare");
+    for view in &views {
+        assert_eq!(
+            view.state,
+            CandidateState::Failed {
+                why: "provider error: bad request: auth failed".into()
+            }
+        );
+        // A turn that failed before any usage row: the sum of nothing must not be -0.0.
+        assert!(view.cost_usd.is_sign_positive(), "{}", view.cost_usd);
+    }
+}
+
+#[tokio::test]
 async fn best_of_total_is_the_sum_of_ledger_rows() {
     let (dir, trees) = scratch();
     let app = app(dir.path(), &trees);

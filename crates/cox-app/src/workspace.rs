@@ -318,12 +318,12 @@ impl Workspace {
 
     /// One session's cost from its ledger rows.
     pub(crate) fn session_cost(&self, session: &SessionId) -> Result<f64, WorkspaceError> {
+        // Seeded with `0.0`: `Iterator::sum` of no rows is `-0.0`, which a client printed as "$-0.00".
         Ok(self
             .store
             .usage_ledger(session)?
             .iter()
-            .map(|row| row.usage.usage.cost_usd)
-            .sum())
+            .fold(0.0, |total, row| total + row.usage.usage.cost_usd))
     }
 }
 
