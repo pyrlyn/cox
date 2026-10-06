@@ -31,10 +31,11 @@ extension PreviewState {
   static let agentPickerFailed = AgentPickerSheet.State(
     rows: [agents[0]], failure: "config: [external_agents.claude] needs a command")
 
-  /// Mockup 27's toolbar: the agent in the model chip, no cox ledger cost, no context share.
+  /// Mockup 27's toolbar: no cox ledger cost, no context share; the agent is named by the
+  /// composer's model chip (T60.6).
   static let toolbarAgent = SessionToolbar.State(
     title: "Refactor checkout form", project: project, branch: "wt/checkout-form",
-    model: "Claude Agent · ACP", cost: "—", context: "–", isRunning: true)
+    cost: "—", context: "–", isRunning: true)
 
   /// The Info tab of a Claude Agent session.
   static let infoAgents = InfoTab.State(session: infoSession, agents: agents)

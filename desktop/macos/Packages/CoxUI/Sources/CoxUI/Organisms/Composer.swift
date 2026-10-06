@@ -17,7 +17,8 @@ import SwiftUI
 /// failed stands above it as a `NoticeRow`. ⏎ sends (or picks the selected row while rows
 /// show), ⇧⏎ breaks the line, ⌘⏎ sends now, ↑ ↓ ⇥ and ⎋ drive the rows, ↑ in an empty composer
 /// walks the earlier prompts, ⌫ in an empty shell line leaves shell mode, ⇧⇥ asks for the next
-/// permission mode, and ⌘V of files or an image attaches them. The draft is the caller's: the
+/// permission mode, and ⌘V of files or an image attaches them. The mode chip opens a menu of the
+/// four modes and the model chip the model popover (T60.6, DT§5.3). The draft is the caller's: the
 /// editor's copy reports every change.
 public struct Composer: View {
   public struct State: Equatable, Sendable {
@@ -111,8 +112,12 @@ public struct Composer: View {
     case removeAttachment(String)
     /// The token meter: opens or closes its popover.
     case toggleTokens
-    /// ⇧⇥ or the mode chip: the next permission mode, which the core picks.
+    /// ⇧⇥: the next permission mode, which the core picks.
     case cycleMode
+    /// A row of the mode chip's menu: that permission mode (Bypass after its confirmation).
+    case setMode(SessionMode)
+    /// The model chip: opens or closes the model popover, which the screen hangs over the chip.
+    case openModel
     /// The think chip: the think tier for the next turn, or not.
     case toggleThink
   }
@@ -329,65 +334,6 @@ private enum ComposerPaste {
   /// command-key letters (Latin on a Cyrillic layout), which is what the menu matches too.
   private static func isPaste(_ event: NSEvent) -> Bool {
     WindowKeys.holds(event, only: .command) && event.characters == "v"
-  }
-}
-
-/// The paperclip, the mode, the model and think, shell mode and its switch, mentions, the queue, Send.
-private struct ComposerChipRow: View {
-  let state: Composer.State
-  let send: (Composer.Intent) -> Void
-
-  var body: some View {
-    HStack(spacing: Space.s) {
-      Button {
-        send(.attach)
-      } label: {
-        ComposerChip("", kind: .attachment)
-      }
-      .buttonStyle(.plain)
-      .help("Attach files")
-      .accessibilityLabel("Attach files")
-      if let mode = state.mode {
-        Button {
-          send(.cycleMode)
-        } label: {
-          ComposerChip(mode.title, kind: .mode(mode), shortcut: "⇧⇥")
-        }
-        .buttonStyle(.plain)
-        .help("Next permission mode (⇧⇥)")
-      }
-      if let model = state.model {
-        ComposerChip(model, kind: .model)
-        ThinkChip(isOn: state.think) { send(.toggleThink) }
-      }
-      if state.isShell {
-        ComposerChip("Shell", kind: .shell) { send(.leaveShell) }
-        Toggle(
-          "Share output", isOn: Binding(get: { state.shareOutput }, set: { send(.shareOutput($0)) })
-        )
-        .toggleStyle(CoxToggleStyle())
-      }
-      ForEach(state.mentions) { mention in
-        ComposerChip(mention.label, kind: .mention) { send(.removeMention(mention.id)) }
-      }
-      if state.queued > 0 {
-        ComposerChip("Queued · \(state.queued)", kind: .queued)
-      }
-      Spacer(minLength: Space.m)
-      if let meter = state.meter {
-        // Its figures never wrap; the chips before it truncate instead.
-        TokenMeter(state: meter, isOpen: state.tokens != nil) { send(.toggleTokens) }.fixedSize()
-      }
-      Button {
-        send(.submit)
-      } label: {
-        Image(systemName: "arrow.up").symbolStyle(.body)
-      }
-      .buttonStyle(SendButtonStyle())
-      .disabled(!state.canSend)
-      .help(state.isRunning ? "Queue after this turn (⏎) · send now (⌘⏎)" : "Send (⏎)")
-      .accessibilityLabel(state.isRunning ? "Queue" : "Send")
-    }
   }
 }
 

@@ -59,16 +59,25 @@ enum ShellState {
     _ open: OpenedSession?, sidebar: SidebarStore, popover: SessionToolbar.Popover?
   ) -> SessionToolbar.State {
     guard let open else { return SessionToolbar.State(popover: popover) }
-    let figures = ToolbarState(
-      usage: open.store.usage, entry: sidebar.entry(open.store.session.id), info: open.info,
-      agents: open.agents)
+    let figures = toolbarFigures(open, sidebar: sidebar)
     return SessionToolbar.State(
       title: figures.title, project: figures.project, branch: figures.branch,
-      model: figures.model ?? open.composer.model ?? "",
       mode: open.store.status.mode.map(SessionMode.init) ?? .ask,
       cost: figures.cost, context: figures.context, contextFraction: figures.contextFraction,
       isRunning: open.store.isTurnRunning, popover: popover,
       pluginStatus: PluginWidgets.status(open.store))
+  }
+
+  /// What the model chip names for an external agent's session (`Claude Agent · ACP`), which has
+  /// no model of cox's own; `nil` for cox's own sessions, whose chip shows the core's model.
+  static func agentModel(_ open: OpenedSession, sidebar: SidebarStore) -> String? {
+    toolbarFigures(open, sidebar: sidebar).model
+  }
+
+  private static func toolbarFigures(_ open: OpenedSession, sidebar: SidebarStore) -> ToolbarState {
+    ToolbarState(
+      usage: open.store.usage, entry: sidebar.entry(open.store.session.id), info: open.info,
+      agents: open.agents)
   }
 
   static func models(_ menu: ModelMenu?) -> ModelPopover.State {

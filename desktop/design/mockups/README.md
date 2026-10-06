@@ -13,3 +13,8 @@ Screens 01–27 are the solid light/dark set; 28–30 are the glass main screen 
 popover) and 31–32 the same screen in dark glass (frosted, glossy). The colours come from `../tokens/tokens.css`, which `just desktop-tokens` generates from
 `../tokens/`; the page gives them short names and keeps only mockup-only values (wallpaper, window
 shadow, glass materials) inline.
+
+Note (T60.6, A138): the mockups still draw the model capsule and the Ask/Plan/Auto control in the toolbar. In the
+app they are the composer's model chip (opens the model popover over it) and mode chip (opens a menu of Ask, Plan,
+Auto and Bypass); the toolbar keeps neither. `docs/design/desktop.md` DT§5.1 and DT§5.3 and `../DESIGN.md` §6.4 are
+the source for the placement.
