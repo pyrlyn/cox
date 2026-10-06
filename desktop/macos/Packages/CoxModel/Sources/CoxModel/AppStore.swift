@@ -56,6 +56,22 @@ public final class AppStore {
     return shared
   }
 
+  /// Puts the reopened `client` in place of the session it replaces (`Intent.switchProvider`,
+  /// T60.3): the core reopens a session under the same id on the picked provider, so the windows
+  /// holding it keep their slot and get fresh stores. The old pull stops and the old client
+  /// closes; `nil` when no window shows the session, and the caller closes `client` itself.
+  public func replace(_ session: String, with client: any SessionClient) -> Shared? {
+    guard let old = entries[session] else { return nil }
+    old.pull.cancel()
+    old.shared.store.closeTerminals()
+    old.shared.store.session.close()
+    let store = SessionStore(session: client)
+    let shared = Shared(store: store, composer: ComposerStore(session: store))
+    entries[session] = Entry(
+      shared: shared, pull: Task { await store.run() }, windows: old.windows)
+    return shared
+  }
+
   /// `window` stops showing `session`. The last window to go stops the pull, ends the session's
   /// shells and closes the client; the core keeps any running turn.
   public func release(_ session: String, window: UUID) {

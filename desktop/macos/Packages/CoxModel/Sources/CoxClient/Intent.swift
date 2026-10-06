@@ -17,6 +17,10 @@ public enum Intent: Equatable, Sendable {
   case compact(focus: String?)
   case setMode(mode: PermissionMode)
   case switchModel(tier: Tier, model: String?)
+  /// The code tier on another provider's `model`, before the first turn (T60.3): the session is
+  /// reopened under the same id, and `send` hands back the reopened one to put in its window.
+  /// `makeDefault` also writes the pick to the user config.
+  case switchProvider(provider: String, model: String, makeDefault: Bool)
   case setEffort(effort: Effort?)
   case rewind(toTurn: UInt32, code: Bool, conversation: Bool)
   case redo

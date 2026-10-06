@@ -511,6 +511,28 @@ Rules:
   `AppHost`, so CoxPlatform tests without the XCFramework and CoxCore never
   links AppKit. The app passes `HostBridge(MacHost())` to `LiveCoreClient`.
 
+- Provider readiness and the provider pick (T60.4, A138; platform-neutral, a
+  Windows or Linux client binds the same exports):
+  - `App.readiness(cwd) -> Readiness` (async, it probes): whether a turn in
+    `cwd` may start on the configured code-tier provider. `SessionHandle.readiness()`
+    (async) answers for an open session and is the one to gate it on, since a
+    provider picked before the first turn is the session's own while the config
+    still names the default. `Readiness` is `Ready | NoProvider | NoKey{provider}
+    | Unreachable{provider}`; `readiness_message(readiness) -> Option<String>` is
+    the text to show where Send is disabled (`None` when ready), so no client
+    words it.
+  - `AppError::NotReady{readiness, message}` is a send the core refused for that
+    reason (a client that forgot the gate still cannot start a turn);
+    `AppError::ProviderLocked{message}` is a provider pick after the first turn.
+  - `Status.provider` and `Status.provider_name` name the section the code tier
+    runs on, `SessionHandle.provider()` the same without a status;
+    `model_menu(cwd, usable)` returns `ModelSection { tier, title, provider,
+    usable, models }`, `usable` being `provider in usable_providers(cwd)`.
+  - `Intent::SwitchProvider { provider, model, make_default }`: the session is
+    reopened on that provider under the same id and `send` returns the reopened
+    `SessionHandle`. The client swaps it into the window that holds the session
+    (stop the old pull, show the new handle) and does not open another window.
+
 ### 4.5 Threads, runtime, backpressure, cancellation
 
 - **One tokio runtime per process**, created by `cox-ffi` on first use

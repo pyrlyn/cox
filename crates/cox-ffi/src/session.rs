@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use cox_app::TerminalHandle as Terminal;
 use cox_app::diffmodel::DiffModel;
+use cox_app::Readiness;
 use cox_app::live::LiveSession;
 use cox_app::{
     Block, Changes, Completion, Info, Intent, PaletteHit, PaletteItem, PluginKey, TaskTarget,
@@ -64,6 +65,18 @@ impl SessionHandle {
         Ok(on_runtime(async move { self.live.send(intent).await })
             .await??
             .map(Self::new))
+    }
+
+    /// The provider section the code tier runs on (T60.3); `None` in an
+    /// external agent's session.
+    pub fn provider(&self) -> Option<String> {
+        self.live.provider().map(str::to_owned)
+    }
+
+    /// Whether a turn may start now on this session's own provider (T60.3):
+    /// one picked before the first turn counts, not the config's default.
+    pub async fn readiness(self: Arc<Self>) -> Result<Readiness, AppError> {
+        Ok(on_runtime(async move { self.live.readiness().await }).await??)
     }
 
     /// What the inspector's Changes tab lists (T37.29.1).
