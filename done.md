@@ -9580,7 +9580,7 @@ Check: cox-app tests for a Cargo workspace, a single crate, a Node workspace and
 - Tests: cox-app `welcome::tests` — a Cargo workspace (3 crates with a glob, a path and an exclude; nextest; two instruction files), a single crate (`cargo test`, no diff suggestion outside git), a Node workspace (2 packages) and an empty folder (no summary, generic test prompt). CoxCore `thisRepositoryReadsAsARustWorkspaceWithItsInstructions`: through the real core this repository reads `Rust workspace · … · AGENTS.md …` with the diff suggestion. The CoxModel and CoxTranscript welcome tests use `FixtureWelcome`.
 - Check output summary: `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo nextest run -p cox-ffi -p cox-app` 231 passed (forward-only included); `cargo nextest run -p cox --test deps` 10 passed; `just desktop-xcframework` built; CoxCore `swift test` 25 passed; CoxModel 130 passed; CoxTranscript welcome and rewind tests pass; `cargo fmt --check`, `xcrun swift-format lint --strict` clean.
 
-#### T60.2 Launch readiness: no turn without a usable provider
+### T60.2. Launch readiness: no turn without a usable provider
 
 Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: T60.1 · Size: ~180 · Priority: P0 · Complexity: 3
 
@@ -9625,7 +9625,7 @@ Done when: `cox config set desktop.appearance.specular 0.5` loads back 0.5, and 
 - Tests: `cox-config` `config_set_desktop_specular_round_trips` (default 1.0, 0.5 loads and reads `user`, 0 and 1 load) and 1.5 added to `config_rejects_out_of_range_desktop_values`.
 - Check output summary: `cargo nextest run -p cox-protocol -p cox-config -p cox-app` 375 passed; `cargo clippy -p cox-protocol -p cox-config -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo fmt --check` clean; real binary on a scratch `COX_HOME`: `config set desktop.appearance.specular 0.5` then `config get` prints 0.5, and 1.5 is refused on load (`1.5 is out of range 0..=1`; `set` itself writes the file first, as it does for `depth`).
 
-#### T60.10 Best of: the real failure reason, no negative zero, no actions on a failed candidate
+### T60.10. Best of: the real failure reason, no negative zero, no actions on a failed candidate
 
 Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
 
@@ -9645,7 +9645,7 @@ Done when: the Rust test shows the provider error as the reason, a formatter tes
 Result: `best_of::state_of` takes a failed candidate's reason from the inbox's `Need::Failed` item for its session (the text the sidebar shows), the old line only when the item was dismissed. Root cause of `$-0.00`: `Iterator::sum` of zero `f64` rows is `-0.0` since Rust 1.83 (rustc 1.98.1 here), so a turn that failed before any usage row gave `session_cost` = `-0.0`, which `String(format: "%.2f")` prints as `-0.00`; the header total was `0 + -0.0`, which is `+0.0`. `workspace::session_cost` and `queries::project_spend` now fold from `0.0`, and `usd` (CoxModel, now public, used by `App/BestOf.swift`) clamps amounts that round to zero. `canReview` / `canKeep(anotherKept:)` moved out of the untested `App/BestOf.swift` onto `CandidateView` in CoxModel: a failed candidate with no files offers neither action. DT§3.3.3 documents it.
 - Check output summary: `cargo nextest run -p cox-app -p cox-ffi -p cox-store` 271 passed (incl. `best_of_failed_candidate_shows_the_provider_error`); `cargo clippy -p cox-app -p cox-store -p cox-ffi --all-targets -- -D warnings` and `cargo fmt --check` clean; CoxModel `swift test` 133 passed (formatter, canReview/canKeep); CoxUI `BestOfTests` logic tests pass and the new `bestOfFailedTurns` snapshots are recorded; the existing BestOf snapshots do not match on this machine before or after this change (font rendering), so they were not re-recorded.
 
-#### T60.9 Glare slider in Appearance
+### T60.9. Glare slider in Appearance
 
 Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: T60.8 · Size: ~150 · Priority: P2 · Complexity: 2
 
@@ -9667,7 +9667,7 @@ Done when: `FoundationsTests` show specular = token × setting and 0 in Solid; `
 - Tests: `FoundationsTests` `glareScalesTheMaterialsSpecularToken` and `glareNeverBringsTheSweepBackInSolidOrUnderIncreaseContrast`; `AppearanceSettingsTests` read the key, write it, and `aMissingSpecularKeyReadsAsFullGlare`; `AppearancePopoverTests` report the intent and redraw with the scale; the twelve `appearancePopover` snapshots re-recorded with the slider.
 - Check output summary: CoxModel `swift test` 131 passed; CoxUI `swift test`: every non-snapshot test passes, and the `appearancePopover` snapshots pass against the new references; the other snapshots in the suite mismatch on this machine (macOS 27.0.1) with or without this change, and the other popover-bearing references (locked, Reduce Transparency, main screen with the popover open) still need re-recording where the references were made; SwiftLint `--strict` on `App` and the touched sources and `swift-format lint --strict` clean.
 
-#### T60.1 Provider in the session status and the model menu
+### T60.1. Provider in the session status and the model menu
 
 Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
 
@@ -9697,7 +9697,7 @@ Out of scope: switching provider (T60.3), FFI (T60.4).
 - Result: `Status` gains `provider` and `provider_name` (`models::provider_name`: brand for the native sections, the section name for a custom one); `StatusFold` keeps each tier's provider and sets them on open and on the latest main turn's tier, and a `code` model switch keeps the section. `TimelinePatch::Status` now boxes its `Status` (the clippy large-variant lint). `ModelSection` gains `provider` and `usable`; `menu(config, choices, usable)` lists each tier's provider, then every other configured provider that lists models, titled with its name on the `Code` tier; a model is listed once per provider. `App::model_menu(cwd, usable)` and `cox-ffi`'s `model_menu(cwd, usable)` take the `usable_providers` answer. cox-ffi remote declarations updated. DT§4.3 documents both. Swift callers of `modelMenu(cwd:)` and the new fields are T60.4.
 - Check output: `cargo nextest run -p cox-app -p cox-ffi` 241 passed; `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
 
-#### T60.3 Choose the provider before the first turn
+### T60.3. Choose the provider before the first turn
 
 Model: Claude Code / opus · Status: done 2026-10-07 · Depends: T60.1 · Size: ~200 · Priority: P1 · Complexity: 4
 
@@ -9722,7 +9722,7 @@ Out of scope: switching provider mid-session (roadmap, A138).
 - Tests: `intent::tests::switch_provider_is_a_reopen_and_needs_a_provider`; `tests/app.rs` `an_empty_session_reopens_on_the_picked_provider_in_place` (same id, provider `second`, status model, old stream closes, one row, a turn runs), `a_provider_pick_made_default_lands_in_the_user_config`, `a_session_with_a_turn_refuses_another_provider`, `a_session_reopened_on_a_usable_provider_may_send`.
 - Check output summary: `cargo nextest run -p cox-app -p cox-ffi -p cox-session` 305 passed; `cargo clippy -p cox-app -p cox-ffi -p cox-session --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
 
-### T60.6 Model and mode move from the toolbar to the composer
+### T60.6. Model and mode move from the toolbar to the composer
 
 Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: — · Size: ~200 · Priority: P1 · Complexity: 3
 
@@ -9748,7 +9748,7 @@ Check output:
 - CoxTranscript `ComposerFlowTests` 9 passed, including `clickingTheModelChipAsksTheWindowToOpenTheModelPopover` (a synthesized click) and `shiftTabAsksForTheModeTheCoreNamesNext`; CoxModel `swift test` 131 passed (`theModeMenuAsksForTheModePickedNotTheNextOne`).
 - `scripts/desktop/app.sh` builds `Cox.app`; `swiftlint lint --strict` and `xcrun swift-format lint --strict` clean on the changed files.
 
-#### T60.4 FFI and Swift client for readiness, provider and provider switch
+### T60.4. FFI and Swift client for readiness, provider and provider switch
 
 Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: T60.1, T60.2, T60.3 · Size: ~180 · Priority: P0 · Complexity: 3
 
@@ -9769,7 +9769,7 @@ Done when: `tests/forward_only.rs` passes and a CoxClient fixture test decodes a
 - Result: `cox-ffi` exports the `Readiness` enum (`Ready | NoProvider | NoKey{provider} | Unreachable{provider}`), `readiness_message(readiness)` (the core's text), `App.readiness(cwd)` and `SessionHandle.readiness()` (async; the session-effective one a client gates an open session on) and `SessionHandle.provider()`. `AppError` gains `NotReady{readiness, message}` and `ProviderLocked{message}` beside the generic ones, mapped in the existing `From` exemption. `Status.provider/provider_name`, `ModelSection.provider/usable` and `Intent::SwitchProvider` were already complete across the boundary. Swift: `CoxClient.Readiness` (`reason` + the core's `message`), `ModelSection.provider/usable`, `ModelsClient.modelMenu(cwd:usable:)` and `readiness(cwd:)`, `Status.provider/providerName`, `Intent.switchProvider(provider:model:makeDefault:)`, `SessionClient.provider()/readiness()` (a default of ready for a session whose host gates its sends, a remote one), fixtures (`FixtureModels`, `FixtureSession(provider:readiness:)`), the CoxCore conversions and the one `App/` call site. `AppStore.replace(_:with:)` puts the reopened session a provider switch returns into the windows holding it under the same id; the window wiring is T60.7. DT§4.4 lists the exports. No fixture shape changed, so none was re-recorded.
 - Check output: `cargo nextest run -p cox-ffi -p cox-app` 256 passed (incl. `tests/forward_only.rs`); `cargo clippy -p cox-ffi -p cox-app --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `swift test` CoxModel 140 and CoxCore 27 passed; CoxUI builds with its tests; `just desktop-app` builds `Cox.app`; SwiftLint `--strict` on `App` and swift-format `--strict` clean.
 
-#### T60.5 Composer: Send, ⏎ and Best of wait for a usable provider
+### T60.5. Composer: Send, ⏎ and Best of wait for a usable provider
 
 Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: T60.4 · Size: ~180 · Priority: P0 · Complexity: 3
 
@@ -9792,7 +9792,7 @@ Done when: `ComposerStoreTests` show submit refused without a usable provider, `
 - Tests: `ComposerStoreTests` `aTurnIsRefusedWhileTheProviderIsNotReadyButShellAndCommandsStillGo`, `aKeyStoredLaterLetsTheKeptDraftGoOnTheNextRead`, `theNoticeActionNamesTheSettingsStepTheReasonNeeds`, `aBestOfCandidateOnAProviderNobodyCanUseIsUnavailableWithTheReason`; `ComposerFlowTests` `returnAndCommandReturnAreIgnoredWhileTheProviderIsNotReady` (real ⏎ and ⌘⏎ key events); `BestOfTests` `bestOfCannotLaunchWhileTheProviderIsNotReadyHoweverManyAreAdded` and snapshots `bestOfNotReady` (4) and `ComposerSnapshotTests/composer` `not-ready` (4), recorded here; no other reference was re-recorded (this macOS renders the rest differently from CI's image).
 - Check output summary: `swift test` CoxModel 144 passed; CoxTranscript `ComposerFlowTests` 10 passed (its other failures are snapshot mismatches that fail on the base too, checked on `PinnedDecisionTests`); CoxUI `BestOfTests` logic and `bestOfNotReady` pass; `scripts/desktop/app.sh` builds `Cox.app`; SwiftLint `--strict` and `swift-format lint --strict` clean on the touched files.
 
-#### T60.7 Provider in the model chip and a grouped model popover
+### T60.7. Provider in the model chip and a grouped model popover
 
 Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: T60.4, T60.6 · Size: ~200 · Priority: P1 · Complexity: 3
 
