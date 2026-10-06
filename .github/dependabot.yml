@@ -31,13 +31,6 @@ updates:
         update-types: ["patch"]
       actions:
         update-types: ["minor", "major"]
-  - package-ecosystem: npm
-    directory: "/website"
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 5
     groups:
       npm-patch:
         update-types: ["patch"]

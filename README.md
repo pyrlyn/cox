@@ -8,7 +8,7 @@
 
 **cox** is named for the coxswain: it steers the work while models, tools, and extensions row. It is being built as one reliable, testable agent core with several ways to use it: an interactive terminal UI, headless automation, editor integration through ACP, and MCP tools for other agents.
 
-[Documentation](https://pyrlyn.github.io/cox/) · [Getting started](docs/getting-started.md) · [Architecture](https://pyrlyn.github.io/cox/docs/architecture/) · [Configuration](https://pyrlyn.github.io/cox/docs/configuration/)
+[Documentation](https://pyrlyn.github.io/landing/cox/docs/) · [Getting started](docs/getting-started.md) · [Configuration](docs/config.md)
 
 ## 60-second start
 
@@ -56,19 +56,6 @@ mise exec -- cargo fmt --check
 mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo test --workspace
 ```
-
-## Documentation site
-
-The public documentation site is a Hugo project in [`website/`](website/), styled with Tailwind CSS.
-
-```bash
-cd website
-npm ci
-npm run build:css
-hugo --minify --destination public
-```
-
-GitHub Actions builds and deploys the site from `main` to [GitHub Pages](https://pyrlyn.github.io/cox/).
 
 ## Project layout
 

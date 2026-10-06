@@ -2,7 +2,7 @@
 title: cox
 tagline: A modular terminal coding agent in Rust with a safe, event-driven core.
 repo: https://github.com/pyrlyn/cox
-homepage: https://pyrlyn.github.io/cox/
+homepage: https://pyrlyn.github.io/landing/cox/
 install: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/pyrlyn/cox/releases/latest/download/cox-installer.sh | sh"
 version: "0.1.0"
 accent: "#A8E06C"
@@ -14,8 +14,8 @@ order: 3
 pyrlyn/landing (main) as content/projects/cox.md on every change to main and on every v*
 tag; front matter follows CONTENT_CONTRACT.md in that repository.
 Sources (checked 2026-09-27): README.md, docs/ and the clap CLI in crates/cox/src/cli.rs; version
-from the latest GitHub release (v0.1.0); accent is the dark-theme --accent in
-website/assets/css/main.css. -->
+from the latest GitHub release (v0.1.0); accent is the dark-theme --pyr-accent and
+accentLight the light one in brand/dist/tokens.css. -->
 
 ## Overview
 
@@ -114,7 +114,7 @@ cox mcp --allow-write
 ## Links
 
 - Repository: <https://github.com/pyrlyn/cox>
-- Documentation: <https://pyrlyn.github.io/cox/>
+- Documentation: <https://pyrlyn.github.io/landing/cox/docs/>
 - Getting started: <https://github.com/pyrlyn/cox/blob/main/docs/getting-started.md>
 - Releases: <https://github.com/pyrlyn/cox/releases>
 - Changelog: <https://github.com/pyrlyn/cox/blob/main/CHANGELOG.md>

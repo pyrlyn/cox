@@ -79,7 +79,7 @@ and points Sonar at the report with **`sonar.rust.lcov.reportPaths=coverage/lcov
 (not `sonar.coverageReportPaths`). The step is best effort: if tests fail or the report
 is missing, the scan still runs, just without coverage.
 
-Scope: only `crates/` is analyzed. `fuzz/`, `evals/`, `fixtures/`, `scripts/`, `website/`
+Scope: only `crates/` is analyzed. `fuzz/`, `evals/`, `fixtures/`, `scripts/`
 and `config/` are outside `sonar.sources`; snapshot files and test fixtures are excluded.
 
 ### Follow-ups (optional)
