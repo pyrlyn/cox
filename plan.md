@@ -2208,6 +2208,210 @@ Out of scope: embeddings, UI.
 
 ---
 
+### P60 — Provider readiness, composer controls and glare (goal: the desktop app never starts a turn or a Best of candidate on a provider it cannot use, shows which provider runs, picks model, provider and mode in the composer, and lets the user set the glass glare; every rule lives in `cox-app` and the shared docs, so the Windows and any later Linux client repeat it without the Swift code, A138)
+
+Every card in this phase:
+- keeps the rule in Rust (`cox-app`, `cox-config`) and exposes it through `cox-ffi`; Swift only renders it (DS§1);
+- updates the shared docs in the same change — behaviour in `docs/design/desktop.md` (DT§), visuals and tokens in `desktop/design/DESIGN.md` (DS§) and `desktop/design/tokens/`, settings in `docs/config.md` and `docs/config.jsonschema` — written platform-neutral, naming the Rust call a client makes, so a Windows or Linux agent can build the same feature from the docs alone;
+- leaves a test that fails without it (`insta` or a unit test in Rust, swift-snapshot-testing or Swift Testing in Swift).
+
+#### T60.1 Provider in the session status and the model menu
+
+Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
+
+Goal: the core tells every client which provider the session's code tier runs on, and the model menu lists the models of every configured provider section, grouped by provider, each section marked usable or not.
+
+Files:
+- `crates/cox-app/src/patch.rs` (`Status` gains `provider: Option<String>` and `provider_name: Option<String>`, the section's display name)
+- `crates/cox-app/src/status.rs` (`StatusFold::open` and `ModelSwitched{Code}` fill it from `config.tiers.code.provider`)
+- `crates/cox-app/src/models.rs` (`ModelSection` gains `provider` and `usable: bool`; `menu` takes the usable list and adds every configured provider section's models after the tier's own, one section per provider)
+
+Steps:
+1. `Status.provider` from `tiers.code.provider`; `None` for an ACP-driven session.
+2. `menu(config, usable)` groups by provider; a section whose provider is not in `usable` keeps its rows but is `usable: false`.
+3. Docs: DT§4.3 names `Status.provider` and the grouped menu.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app
+mise exec -- cargo clippy -p cox-app --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a status test shows `provider = "anthropic"` on open and after a code-tier switch, and a `menu` snapshot shows two provider sections with one marked unusable.
+
+Out of scope: switching provider (T60.3), FFI (T60.4).
+
+#### T60.2 Launch readiness: no turn without a usable provider
+
+Model: sonnet · Status: open · Depends: T60.1 · Size: ~180 · Priority: P0 · Complexity: 3
+
+Goal: one Rust rule decides whether a prompt may be sent: the session's code-tier provider is set and is in `usable_providers` (A110); Best of refuses a candidate whose provider is not usable before it creates a worktree, with the reason.
+
+Files:
+- `crates/cox-app/src/models.rs` (`Readiness { Ready, NoProvider, NoKey { provider }, Unreachable { provider } }` and `readiness(config, usable)`; a loopback section that does not listen is `Unreachable`, a keyed one without a key `NoKey`)
+- `crates/cox-app/src/app.rs` (`App::readiness(cwd)`; `usable_providers` re-probes on every call, so a key added in Settings counts at once)
+- `crates/cox-app/src/best_of.rs` (`launch` marks such a candidate `failed: "no key for <provider>"` without starting it)
+
+Steps:
+1. The rule and its four outcomes, each with a short user text (`cox-i18n` message ids).
+2. `LiveSession::send` of a turn intent while not `Ready` returns an error rather than starting a turn, so a client that forgets the gate still cannot start one.
+3. Docs: DT§5.3 "Sending is disabled until …" with the four texts; DT§3.3 Best of names the refusal.
+
+Check: as T60.1, plus `mise exec -- cargo nextest run -p cox-app --test best_of`.
+
+Done when: tests show `NoKey` for the default `anthropic` tier with no key, `Ready` with an injected key (never the real keychain, A49), a refused `send`, and a Best of candidate refused with the reason.
+
+Out of scope: a key the server rejects (counts as usable until a turn fails; T60.10 shows that turn's reason).
+
+#### T60.3 Choose the provider before the first turn
+
+Model: opus · Status: open · Depends: T60.1 · Size: ~200 · Priority: P1 · Complexity: 4
+
+Goal: the user picks another provider's model in the model menu while the session has no turn yet; the session is reopened on that provider with the same cwd and id-less draft; after the first turn the pick is refused with "start a new session to change provider". Optionally the pick is saved as the default.
+
+Files:
+- `crates/cox-app/src/intent.rs` (`Intent::SwitchProvider { provider, model, make_default }`)
+- `crates/cox-app/src/live.rs` (no turn yet → close and reopen through `cox_session::open_with_keys` with `tiers.code.provider` and `model` overridden in the `SessionSpec`; else the refusal)
+- `crates/cox-app/src/app.rs` (`make_default` writes `tiers.code.provider` and `tiers.code.model` to the user config through `cox-config`'s `set`)
+
+Steps:
+1. The reopen keeps the window's session slot; the old empty session is ended, not left behind.
+2. Docs: DT§5.3 the provider pick and its first-turn limit; `roadmap.md` holds the mid-session switch.
+
+Check: as T60.1.
+
+Done when: a `tests/app.rs` case switches an empty session from `anthropic` to a scripted second section and sees `Status.provider` change, and a session with one turn refuses.
+
+Out of scope: switching provider mid-session (roadmap, A138).
+
+#### T60.4 FFI and Swift client for readiness, provider and provider switch
+
+Model: sonnet · Status: open · Depends: T60.1, T60.2, T60.3 · Size: ~180 · Priority: P0 · Complexity: 3
+
+Goal: Swift sees `Status.provider`, the grouped menu with `usable`, `readiness` and `Intent.switchProvider`, with fixtures, so the views in T60.5–T60.7 build against them.
+
+Files:
+- `crates/cox-ffi/src/types.rs`, `crates/cox-ffi/src/lib.rs` (forward-only, D11)
+- `desktop/macos/Packages/CoxModel/Sources/CoxClient/` (`Models.swift`, `Timeline.swift`, `Intent` mirror) and `desktop/macos/Packages/CoxCore/Sources/CoxCore/` conversions; fixture clients
+
+Steps:
+1. Remote types and exports; `just desktop-xcframework` regenerates the bindings.
+2. Docs: DT§4.4 lists the new exports.
+
+Check: `mise exec -- cargo nextest run -p cox-ffi`, then `swift test` in `CoxModel` and `CoxCore`.
+
+Done when: `tests/forward_only.rs` passes and a CoxClient fixture test decodes a status with a provider and a menu with an unusable section.
+
+#### T60.5 Composer: Send, ⏎ and Best of wait for a usable provider
+
+Model: sonnet · Status: open · Depends: T60.4 · Size: ~180 · Priority: P0 · Complexity: 3
+
+Goal: while `readiness` is not `Ready`, Send is disabled, ⏎ and ⌘⏎ do nothing, the "Best of n" capsule is disabled, and a notice under the composer gives the reason with "Add key", which opens Settings › Providers; Best of options on an unusable provider are `unavailable` with the reason.
+
+Files:
+- `desktop/macos/Packages/CoxModel/Sources/CoxModel/ComposerStore.swift` (`canSend` and the `submit`/`submitNow` guards read readiness)
+- `desktop/macos/App/SessionWindow.swift` (reads `readiness` on open, on window focus and after a Settings key change)
+- `desktop/macos/App/BestOf.swift` (`unavailable` per option, `canLaunch` false when not `Ready`)
+
+Steps:
+1. The notice uses the existing `NoticeRow`; no new component.
+2. Docs: DT§5.3 and DS§6.4 (Composer row) describe the disabled state and the notice.
+
+Check: `swift test` in `CoxModel`, `CoxTranscript` and `CoxUI`.
+
+Done when: `ComposerStoreTests` show submit refused without a usable provider, `ComposerFlowTests` show ⏎ ignored, and `BestOfTests` snapshot the disabled capsule.
+
+#### T60.6 Model and mode move from the toolbar to the composer
+
+Model: sonnet · Status: open · Depends: — · Size: ~200 · Priority: P1 · Complexity: 3
+
+Goal: the session toolbar no longer shows the model capsule or the Ask/Plan/Auto segmented control; the composer's model chip opens the model popover anchored to the chip, and its mode chip opens a menu of Ask, Plan, Auto and Bypass (Bypass with its warning), with ⇧⇥ still cycling. The Bypass danger strip under the toolbar stays.
+
+Files:
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/SessionToolbar.swift`
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/Composer.swift`
+- `desktop/macos/App/ShellState.swift` and the popover anchoring in `App/SessionWindow.swift`
+
+Steps:
+1. Reuse `ModelPopover` and `ModeSegmented`'s options; no new component.
+2. Docs: DT§5.1 window anatomy and DT§5.3 composer; DS§6.4/§6.5 toolbar and composer rows; the mockup note that the toolbar's model and mode moved (A138).
+
+Check: `swift test` in `CoxUI`; the toolbar and composer snapshots re-recorded in the package's record mode.
+
+Done when: `MainScreenTests` and `ComposerTests` snapshots show the new layout, and a test opens the model popover and the mode menu from the chips.
+
+#### T60.7 Provider in the model chip and a grouped model popover
+
+Model: sonnet · Status: open · Depends: T60.4, T60.6 · Size: ~200 · Priority: P1 · Complexity: 3
+
+Goal: the composer's model chip reads "[icon] Anthropic · Sonnet 5 · high" — the provider's monogram, its name in secondary text, the model and effort — with a `status.danger` badge when readiness is not `Ready`; the popover groups models by provider, an unusable provider's rows greyed with "Add key".
+
+Files:
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Molecules/ModelCapsule.swift` (or the composer's model chip) and `ModelPopover`
+- `desktop/macos/Packages/CoxModel/Sources/CoxModel/ModelMenu.swift` (sections by provider; a pick on another provider sends `switchProvider`)
+- `scripts/` provider monogram generator and `desktop/design/tokens/` provider entries (A136: icons come from a script, never hand-copied; vendor trademarks are not used, so each provider gets a generated monogram)
+
+Steps:
+1. Docs: DS§3.7 icons (provider monograms and how they are generated), DS§6.3 the chip, DT§5.3 the pick.
+
+Check: `swift test` in `CoxUI` and `CoxModel`; the generator's own test.
+
+Done when: snapshots show the chip ready and with the badge, and the popover with two providers, one greyed.
+
+#### T60.8 `desktop.appearance.specular`: the glare setting
+
+Model: sonnet · Status: open · Depends: — · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: a config key for the glass glare, 0 (none) … 1 (the material's full sweep), default 1 (today's look).
+
+Files:
+- `crates/cox-protocol/src/config.rs` (`DesktopAppearanceConfig.specular`, `unit_interval`)
+- `crates/cox-protocol/default.toml` and `docs/config.md`, `docs/config.jsonschema` (regenerated by the drift test's bless step)
+- `crates/cox-config/src/cmd.rs` (set/load test)
+
+Check: `mise exec -- cargo nextest run -p cox-protocol -p cox-config`, clippy, fmt.
+
+Done when: `cox config set desktop.appearance.specular 0.5` loads back 0.5, and 1.5 is refused.
+
+#### T60.9 Glare slider in Appearance
+
+Model: sonnet · Status: open · Depends: T60.8 · Size: ~150 · Priority: P2 · Complexity: 2
+
+Goal: a "Glare" slider in the Appearance popover and Settings › Appearance; the drawn specular is the material's token times the setting; disabled in Solid and under Increase Contrast, where the sweep is already off.
+
+Files:
+- `desktop/macos/Packages/CoxModel/Sources/CoxModel/AppearanceSettings.swift` (`AppearanceEdit.specular`, `DesktopAppearance.specular`)
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Foundations/Appearance.swift` and `Organisms/AppearancePopover.swift`
+- `desktop/macos/App/AppearanceState.swift`
+
+Steps:
+1. Docs: DS§3.5 Materials — the glare scale and its formula, so other clients draw the same strength.
+
+Check: `swift test` in `CoxModel` and `CoxUI`.
+
+Done when: `FoundationsTests` show specular = token × setting and 0 in Solid; `AppearanceSettingsTests` decode the key; a popover snapshot shows the slider.
+
+#### T60.10 Best of: the real failure reason, no negative zero, no actions on a failed candidate
+
+Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
+
+Goal: a failed candidate shows its turn's error text (e.g. "provider auth failed") instead of "its turn failed"; a cost of −0.00 prints as $0.00 everywhere; "Open in Review" and "Keep this one" are disabled on a failed candidate with no changes.
+
+Files:
+- `crates/cox-app/src/best_of.rs` (`state_of` takes the reason from the inbox's failed-turn item for that session)
+- the Swift cost formatter in `CoxModel` (clamps −0 to 0)
+- `desktop/macos/Packages/CoxModel/Sources/CoxModel/BestOfStore.swift` (`canReview`, `canKeep`)
+
+Steps:
+1. Docs: DT§3.3 Best of compare: what a failed column shows and which actions it allows.
+
+Check: `mise exec -- cargo nextest run -p cox-app --test best_of`; `swift test` in `CoxModel` and `CoxUI`.
+
+Done when: the Rust test shows the provider error as the reason, a formatter test prints `$0.00` for −0.0, and the `BestOfTests` snapshot shows the failed column with disabled actions.
+
+---
+
 ## 4. Definition of done for v0.1
 
 1. `cox` runs a multi-turn coding session against Anthropic, OpenAI Responses and a local Ollama model with the same tool set, with the sandbox on, on macOS and Linux.
@@ -2407,6 +2611,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A135 §3 P37 (new T37.32.3), T37.32.2, `desktop/macos/project.yml` — by the creator (2026-10-03): the first macOS app build on CI is a Debug build with every macOS feature, not a release build; it runs by hand and with every release; the bundle id is `io.github.pyrlyn.cox` (the repository moved to pyrlyn). Why: a build to download and try before T37.32.2's notarized release. Effect: T37.32.3; T37.32.2 keeps Hardened Runtime, notarization, Sparkle, the bundled CLI and the cask, and reuses the signing action and `dmg.sh`. No decision in §0 changes; no new dependency.
 - A136 `scripts/brand_icons.py`, `desktop/macos/App/AppIcon.icon`, CoxUI `Brand.xcassets` — by the creator (2026-10-06): the brand pack's logo (`brand/logo/`) is used for the project's icons and logos, and every icon or logo is produced by a program or script, never hand-copied. `just brand-icons` derives the macOS app icon (an Icon Composer document: the mark's tile colour as the fill, the rest of the mark as its layer, so macOS 26 draws its own squircle and grid) and CoxUI's vector `CoxMark` from `brand/logo/cox-mark.svg`; CI's `desktop-tokens` job runs its tests and `--check`. The empty `AppIcon.appiconset` is removed; `AppIcon()` draws the mark instead of the `cx` placeholder, and the README shows it straight from `brand/logo/`. Why: the app shipped with no icon and a placeholder mark. The PNG exports in `brand/logo/png/` are rendered the same way, by resvg (new mise pin `aqua:linebender/resvg`); the landing-v1 512 px copy, a hand export, is dropped. CI checks the outputs in `desktop-macos-lint`, on the Apple Silicon runners where the PNG bytes match a local render. Effect: one new tool (resvg); the `tile.app.*` and `font.mono.appIcon` tokens are now unused but stay until the next Figma token sync.
 - A137 A7, A8, A19 — by the creator (2026-10-06): the Hugo site in `website/` and its `deploy-pages` workflow are removed; `docs/` stays the one place for user docs, published by `sync-docs` to <https://pyrlyn.github.io/landing/cox/docs/>. Dependabot's npm entry for `/website` goes with it; README, CONTRIBUTING, `docs/site.md` and `docs/sonarcloud-setup.md` point at `docs/` and the landing site. Why: one documentation source instead of two that drift. Effect: the site's own `architecture` and `screens` pages, which had no `docs/` counterpart, move to `docs/architecture.md` and `docs/screens.md` (images from `docs/screenshots/`, the `just screenshots` output); the already-published GitHub Pages site at `pyrlyn.github.io/cox` is no longer updated until Pages is turned off in the repository settings.
+- A138 §3 (new P60: T60.1–T60.10), `roadmap.md` — by the creator (2026-10-07), after a Best of run where every candidate failed with "provider auth failed": (1) the app never starts a turn or a Best of candidate on a provider it cannot use — the provider comes from `tiers.code.provider` and must be in `usable_providers` (A110), and the user can also pick another provider's model in the window before the first turn; (2) the provider is shown in the model chip as an icon, its name and a problem badge; (3) the toolbar's model capsule and Ask/Plan/Auto control move into the composer, whose chips already show them; (4) a glare slider (`desktop.appearance.specular`, a 0–1 scale on the material's sweep) joins Appearance; (5) the Best of compare shows the real failure reason, never `$-0.00`, and no actions on a failed candidate; (6) every desktop improvement updates the shared docs (DT§, DS§, `docs/config.md`) so the Windows and any later Linux client can repeat it. Why: the creator's request. Effect: P60; switching provider mid-session goes to `roadmap.md`. No §0 decision changes.
 
 ## 7. Risk register
 
