@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Activity;
 use crate::Intent;
+use crate::Need;
 use crate::app::{App, AppError};
 use crate::live::LiveSession;
 use crate::workspace::WorkspaceError;
@@ -329,10 +330,24 @@ fn state_of(app: &App, group: &BestOf, n: usize, launched: &Launched) -> Candida
         Some(Activity::Running) => CandidateState::Running,
         Some(Activity::WaitingOnYou) => CandidateState::WaitingOnYou,
         Some(Activity::Failed) => CandidateState::Failed {
-            why: "its turn failed".into(),
+            why: failure_text(app, launched.session),
         },
         Some(Activity::Idle) | None => CandidateState::Done,
     }
+}
+
+/// The error the failed turn of `session` stopped on, as the sidebar shows
+/// it; a generic line only when the inbox no longer holds it (dismissed).
+fn failure_text(app: &App, session: Option<SessionId>) -> String {
+    app.inbox()
+        .into_iter()
+        .find_map(|item| match item.need {
+            Need::Failed { text } if Some(item.session) == session && !text.is_empty() => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| "its turn failed".into())
 }
 
 /// When `session` last wrote to `cox.db`, in milliseconds since the epoch.
