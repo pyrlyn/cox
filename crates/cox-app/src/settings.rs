@@ -501,7 +501,10 @@ mod tests {
         let (_dir, user, project) = scratch();
         let before = fs::read(&user).expect("read");
         let err = set(&user, &project, "desktop.appearance.opacity", "1.5").expect_err("range");
-        assert!(matches!(err, SettingsError::Load(_)), "{err}");
+        assert!(
+            matches!(err, SettingsError::Edit(ConfigError::Rejected(_))),
+            "{err}"
+        );
         assert_eq!(fs::read(&user).expect("read"), before);
     }
 }

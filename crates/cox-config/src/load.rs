@@ -686,6 +686,20 @@ pub fn load_in(
     })
 }
 
+/// Whether `contents`, as the user `config.toml`, deserializes over the
+/// defaults the way [`load`] would read it (T22.12): `cox config set` asks
+/// before writing, so a value the loader rejects never reaches the file.
+/// Only the default and user layers: a broken project file or `COX_*` var
+/// is not the edit's fault and must not block a valid one.
+pub fn check_user_toml(contents: &str) -> Result<(), CoreError> {
+    Figment::new()
+        .merge(named("default", Toml::string(DEFAULT_CONFIG_TOML)))
+        .merge(named("user", Toml::string(contents)))
+        .extract::<Config>()
+        .map(drop)
+        .map_err(to_core_error)
+}
+
 /// Serializes every test in this crate that mutates process-wide env vars
 /// (`COX_HOME`, `COX_*`) — `cargo test` runs a binary's tests concurrently
 /// by default, and env vars are global process state, so without this lock

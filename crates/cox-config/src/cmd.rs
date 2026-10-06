@@ -186,7 +186,9 @@ fn set_value_in(path: &Path, key: &str, value: TomlValue) -> Result<(), ConfigEr
     // value, so a leading `# comment` above `key = old` survives a `set`.
     *table.entry(last).or_insert(Item::None) = Item::Value(value);
 
-    write_file(path, &doc.to_string())
+    let contents = doc.to_string();
+    config_load::check_user_toml(&contents)?;
+    write_file(path, &contents)
 }
 
 #[cfg(test)]
@@ -251,14 +253,32 @@ mod tests {
         let cwd = tempdir().expect("tempdir");
         let mut result = None;
         crate::load::temp_env(&[("COX_HOME", home.path().to_str())], || {
-            set(key, value).expect("set succeeds");
-            result = Some(config_load::load(
-                cwd.path(),
-                &JsonValue::Object(Default::default()),
-                |_| None,
-            ));
+            result = Some(match set(key, value) {
+                Ok(_) => {
+                    config_load::load(cwd.path(), &JsonValue::Object(Default::default()), |_| None)
+                }
+                Err(ConfigError::Rejected(rejected)) => Err(rejected),
+                Err(other) => panic!("set {key} = {value}: {other}"),
+            });
         });
         result.expect("temp_env ran the closure")
+    }
+
+    #[test]
+    fn set_refuses_out_of_range_value_and_leaves_file_untouched() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "# mine\n[desktop.appearance]\ndepth = 0.5\n").expect("seed");
+        let before = fs::read(&path).expect("read");
+
+        match set_value_in(&path, "desktop.appearance.depth", parse_value("1.5")) {
+            Err(ConfigError::Rejected(CoreError::Config { key, message })) => {
+                assert_eq!(key, "desktop.appearance.depth");
+                assert!(message.contains("out of range"), "{message}");
+            }
+            other => panic!("expected Rejected, got {other:?}"),
+        }
+        assert_eq!(fs::read(&path).expect("read"), before);
     }
 
     #[test]
