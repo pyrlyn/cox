@@ -39,7 +39,7 @@ use crate::status::StatusFold;
 use crate::tasks::{self, TaskTarget};
 use crate::terminal::{self, TerminalHandle, TerminalSpec};
 use crate::{Block, Completer, Completion, Controller, Dispatch, Intent, SessionGrant, Timeline};
-use crate::{TimelinePatch, dispatch};
+use crate::{Readiness, TimelinePatch, dispatch};
 
 /// The core's own bound (DT§4.5).
 const EVENTS: usize = 256;
@@ -316,6 +316,9 @@ impl LiveSession {
                 return Ok(None);
             }
         }
+        if matches!(intent, Intent::Send { .. } | Intent::Queue { .. }) {
+            self.ensure_ready().await?;
+        }
         let parent = session.id();
         let home = &self.app.home;
         let child = match dispatch(intent)? {
@@ -401,6 +404,27 @@ impl LiveSession {
         }
         self.end();
         Ok(Some(next))
+    }
+
+    /// [`App::readiness`] for this session (T60.3): a provider picked
+    /// before the first turn is its own, while the config file may still
+    /// name the default, so a client gating an open session asks this.
+    pub async fn readiness(&self) -> Result<Readiness, AppError> {
+        let mut config = self.app.config(&self.cwd)?;
+        if let Some(provider) = &self.provider {
+            config.tiers.code.provider.clone_from(provider);
+        }
+        Ok(self.app.readiness_of(&config).await)
+    }
+
+    /// A turn needs a provider that can answer (T60.2, DT§5.3); checked here
+    /// as well as by the client's disabled Send, so a client that forgets the
+    /// gate cannot start one.
+    async fn ensure_ready(&self) -> Result<(), AppError> {
+        match self.readiness().await? {
+            Readiness::Ready => Ok(()),
+            blocked => Err(AppError::NotReady(blocked)),
+        }
     }
 
     /// What the inspector's Changes tab lists (T37.29.1): the blocks, the
@@ -662,6 +686,15 @@ impl LiveSession {
             }
             Some(CommandOut::Nothing) | None => return,
         };
+        if matches!(intent, Intent::Send { .. })
+            && let Err(e) = self.ensure_ready().await
+        {
+            // A plugin's prompt has no caller to return the refusal to.
+            if let Ok(session) = self.core("Notice") {
+                let _ = session.notice(Level::Warn, e.to_string()).await;
+            }
+            return;
+        }
         match dispatch(intent) {
             Ok(Dispatch::Submit {
                 submission,

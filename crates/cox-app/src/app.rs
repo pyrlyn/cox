@@ -114,6 +114,9 @@ pub enum AppError {
     /// whose cache and tool calls belong to that provider's wire.
     #[error("start a new session to change provider")]
     ProviderLocked,
+    /// T60.2 (DT§5.3): a turn was refused because its provider cannot answer.
+    #[error("{}", .0.message().unwrap_or_default())]
+    NotReady(crate::readiness::Readiness),
 }
 
 impl From<SessionError> for AppError {

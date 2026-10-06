@@ -230,6 +230,17 @@ pub(crate) async fn launch(
         candidates: Vec::new(),
         kept: None,
     };
+    // Once for the group: every cox candidate runs on the same provider, and
+    // one that cannot answer would only fail inside its session, after its
+    // worktree exists (T60.2). An agent candidate brings its own.
+    let blocked = match request
+        .candidates
+        .iter()
+        .any(|c| matches!(c, Candidate::Cox { .. }))
+    {
+        true => app.readiness(&request.project).await?.message(),
+        false => None,
+    };
     let mut sessions = Vec::new();
     for (n, candidate) in request.candidates.into_iter().enumerate() {
         let mut launched = Launched {
@@ -240,6 +251,11 @@ pub(crate) async fn launch(
             started_ms: now_ms(),
             pruned: false,
         };
+        if let (Candidate::Cox { .. }, Some(why)) = (&launched.candidate, &blocked) {
+            launched.failed = Some(why.clone());
+            group.candidates.push(launched);
+            continue;
+        }
         let name = format!("best-{id}-{}", n + 1);
         match app
             .workspace()

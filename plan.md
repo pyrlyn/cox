@@ -2242,28 +2242,6 @@ Done when: a status test shows `provider = "anthropic"` on open and after a code
 
 Out of scope: switching provider (T60.3), FFI (T60.4).
 
-#### T60.2 Launch readiness: no turn without a usable provider
-
-Model: sonnet · Status: open · Depends: T60.1 · Size: ~180 · Priority: P0 · Complexity: 3
-
-Goal: one Rust rule decides whether a prompt may be sent: the session's code-tier provider is set and is in `usable_providers` (A110); Best of refuses a candidate whose provider is not usable before it creates a worktree, with the reason.
-
-Files:
-- `crates/cox-app/src/models.rs` (`Readiness { Ready, NoProvider, NoKey { provider }, Unreachable { provider } }` and `readiness(config, usable)`; a loopback section that does not listen is `Unreachable`, a keyed one without a key `NoKey`)
-- `crates/cox-app/src/app.rs` (`App::readiness(cwd)`; `usable_providers` re-probes on every call, so a key added in Settings counts at once)
-- `crates/cox-app/src/best_of.rs` (`launch` marks such a candidate `failed: "no key for <provider>"` without starting it)
-
-Steps:
-1. The rule and its four outcomes, each with a short user text (`cox-i18n` message ids).
-2. `LiveSession::send` of a turn intent while not `Ready` returns an error rather than starting a turn, so a client that forgets the gate still cannot start one.
-3. Docs: DT§5.3 "Sending is disabled until …" with the four texts; DT§3.3 Best of names the refusal.
-
-Check: as T60.1, plus `mise exec -- cargo nextest run -p cox-app --test best_of`.
-
-Done when: tests show `NoKey` for the default `anthropic` tier with no key, `Ready` with an injected key (never the real keychain, A49), a refused `send`, and a Best of candidate refused with the reason.
-
-Out of scope: a key the server rejects (counts as usable until a turn fails; T60.10 shows that turn's reason).
-
 #### T60.3 Choose the provider before the first turn
 
 Model: Claude Code / opus · Status: in progress · Depends: T60.1 · Size: ~200 · Priority: P1 · Complexity: 4
