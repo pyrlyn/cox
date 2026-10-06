@@ -89,6 +89,10 @@ public protocol SessionClient: AnyObject, Sendable {
   /// The provider section the code tier runs on; `nil` in an external agent's session
   /// (`cox_app::live::LiveSession::provider`, T60.3).
   func provider() -> String?
+  /// Whether `Intent.switchProvider` can reopen this session on another provider: a local one
+  /// can, a remote one (the ssh app-server has no such message) cannot, so its popover lists the
+  /// other providers' models disabled.
+  var canSwitchProvider: Bool { get }
   /// Whether a turn may start now on this session's own provider (`LiveSession::readiness`,
   /// T60.3): one picked before the first turn counts, not the config's default. The core refuses
   /// a send that ignores it.
@@ -107,6 +111,7 @@ extension SessionClient {
   /// A session whose host gates its own sends (a remote one) has no provider to name here and
   /// reports ready.
   public func provider() -> String? { nil }
+  public var canSwitchProvider: Bool { true }
   public func readiness() async throws -> Readiness { .ready }
   /// A client with no plugins has no overlay to hide.
   public func closePluginOverlay() {}
@@ -225,6 +230,8 @@ public final class FixtureSession: SessionClient {
     var waiting: Set<String> = []
     /// The pull parked until they are answered.
     var parked: CheckedContinuation<Void, Never>?
+    /// The session a `switchProvider` hands back, as the core reopens one (T60.7).
+    var reopened: (any SessionClient)?
   }
 
   public convenience init(
@@ -292,7 +299,14 @@ public final class FixtureSession: SessionClient {
       return state.waiting.isEmpty ? state.parked.take() : nil
     }
     resume?.resume()
+    if case .switchProvider = intent { return state.withLock { $0.reopened } }
     return nil
+  }
+
+  /// A `switchProvider` hands back `session` as the reopened one, as the core does before a
+  /// first turn.
+  public func reopens(as session: any SessionClient) {
+    state.withLock { $0.reopened = session }
   }
 
   /// The rows of the token's sigil whose insert holds the rest of the token in order, in list
@@ -342,6 +356,9 @@ public final class FixtureSession: SessionClient {
 
   /// A shell with no process: it prints nothing until a test says so.
   public func openTerminal(cols: UInt16, rows: UInt16) -> any TerminalClient { FixtureTerminal() }
+
+  /// `close` was called: the window that held it let it go.
+  public var isClosed: Bool { state.withLock { $0.closed } }
 
   public func close() {
     let resume = state.withLock { state in

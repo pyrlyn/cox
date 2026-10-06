@@ -21,16 +21,21 @@ public struct SessionComposer: View {
   /// What the model chip names instead of the core's model: an external agent's session has
   /// none of cox's own, and the toolbar that used to name its agent no longer shows the model.
   let modelLabel: String?
+  /// Why the session's provider cannot answer, the core's `Readiness` message: the model chip
+  /// wears a badge with it as its tooltip (T60.7). `nil` while it can.
+  let modelProblem: String?
   /// The model chip was clicked: the window opens or closes the model popover over it.
   let openModel: () -> Void
   @State private var isPicking = false
   @State private var isTokensOpen = false
 
   public init(
-    store: ComposerStore, modelLabel: String? = nil, openModel: @escaping () -> Void = {}
+    store: ComposerStore, modelLabel: String? = nil, modelProblem: String? = nil,
+    openModel: @escaping () -> Void = {}
   ) {
     self.store = store
     self.modelLabel = modelLabel
+    self.modelProblem = modelProblem
     self.openModel = openModel
   }
 
@@ -102,6 +107,11 @@ public struct SessionComposer: View {
     state.failure = store.failure
     state.mode = store.mode.map(SessionMode.init)
     state.model = modelLabel ?? store.model
+    if modelLabel == nil, let provider = store.session.status.provider {
+      state.provider = ProviderMark(
+        slug: provider, name: store.session.status.providerName ?? provider)
+      state.modelProblem = modelProblem
+    }
     state.think = store.think
     if let usage = store.session.usage {
       state.meter = TokenMeter.State(usage, isRunning: store.isRunning)

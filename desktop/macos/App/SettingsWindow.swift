@@ -15,7 +15,9 @@ import SwiftUI
 
 struct SettingsWindow: View {
   let model: AppModel
-  @State private var page = SettingsPage.general
+  /// The page shown; kept in `UserDefaults` so the session window's "Add key" can open Settings on
+  /// Models & Providers (T60.7).
+  @AppStorage(SettingsPage.storageKey) private var storedPage = SettingsPage.general.rawValue
   @State private var sliderWrites = Coalescer()
   /// Slider values sent but not yet stored, by key.
   @State private var dragged: [String: Double] = [:]
@@ -50,6 +52,11 @@ struct SettingsWindow: View {
   /// `[desktop.appearance]` as the session window draws it; the defaults until settings load.
   private var appearance: AppearancePopover.State {
     model.settings.map { AppearancePopover.State($0) } ?? AppearancePopover.State()
+  }
+
+  private var page: SettingsPage {
+    get { SettingsPage(rawValue: storedPage) ?? .general }
+    nonmutating set { storedPage = newValue.rawValue }
   }
 
   private var isRefused: Binding<Bool> {

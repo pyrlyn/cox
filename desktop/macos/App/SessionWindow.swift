@@ -71,6 +71,9 @@ struct SessionWindow: View {
   @State private var bestOf = BestOfLauncher()
   @Environment(\.coxAppearance) private var base
   @Environment(\.openWindow) private var openWindow
+  @Environment(\.openSettings) var openSettings
+  /// Why the core refused a provider switch after the first turn (T60.3); offers a new session.
+  @State var lockedMessage: String?
 
   init(model: AppModel, popOut: PopOut? = nil) {
     self.model = model
@@ -129,6 +132,12 @@ struct SessionWindow: View {
           palette: showing.map { _ in togglePalette })
       )
       .commandPalette(palette?.state, send: handle)
+      .alert("Change the provider in a new session", isPresented: isLocked) {
+        Button("New session") { Task { await newSession() } }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text(lockedMessage ?? "")
+      }
       .task { if current == nil { await open(resume: popOut?.session) } }
       .task { await watch() }
       .task { if popOut == nil { await model.remotes.watch() } }
@@ -174,6 +183,10 @@ struct SessionWindow: View {
 
   private var isRefused: Binding<Bool> {
     Binding(get: { refused != nil }, set: { if !$0 { refused = nil } })
+  }
+
+  private var isLocked: Binding<Bool> {
+    Binding(get: { lockedMessage != nil }, set: { if !$0 { lockedMessage = nil } })
   }
 
   @ViewBuilder private var column: some View {
@@ -232,8 +245,9 @@ struct SessionWindow: View {
             .frame(maxWidth: SessionBrowser.paneWidth)
         }
       }
-      // A new view per session, so the transcript's text is rebuilt from the one it shows.
-      .id(current)
+      // A new view per session, so the transcript's text is rebuilt from the one it shows; and
+      // per provider switch, which swaps the stores under one session id (T60.7).
+      .id(showing.viewID)
       .pluginOverlaySheet(showing.store)
     } else if let failure {
       Text(failure).textSelection(.enabled)
@@ -256,7 +270,7 @@ struct SessionWindow: View {
         case .refused(let why): refused = why
         }
       }
-      .id(current)
+      .id(showing.viewID)
     }
   }
 
@@ -330,6 +344,7 @@ struct SessionWindow: View {
       }
       // After it shows: Info asks git about the cwd, which can take a while.
       if let info = try? await client.info() { opened[client.id]?.info = info }
+      opened[client.id]?.readiness = (try? await client.readiness()) ?? .ready
     } catch {
       // Without a first session the column says why; later, an alert does.
       if current == nil {

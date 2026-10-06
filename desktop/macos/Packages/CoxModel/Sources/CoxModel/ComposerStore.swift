@@ -54,6 +54,16 @@ public final class ComposerStore {
     self.session = session
   }
 
+  /// Takes over what `old` was about to send, for the composer of a session reopened under the
+  /// same id (`AppStore.replace`, T60.7): the text, its shell mode, mentions, attachments,
+  /// caret and the think toggle live here, not in the core, so they would be lost otherwise.
+  func carryDraft(from old: ComposerStore) {
+    (text, isShell, shareOutput) = (old.text, old.isShell, old.shareOutput)
+    (mentions, attachments, selectedRange, think) = (
+      old.mentions, old.attachments, old.selectedRange, old.think
+    )
+  }
+
   /// Something to send.
   public var canSend: Bool { draft(.queue).canSend }
 

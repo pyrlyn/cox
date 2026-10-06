@@ -15,6 +15,10 @@ public enum SettingsPage: String, CaseIterable, Identifiable, Sendable {
 
   public var id: Self { self }
 
+  /// The `UserDefaults` key of the page the Settings window shows, so another window (the model
+  /// popover's "Add key", T60.7) can choose it before opening Settings; UI-only state.
+  public static let storageKey = "CoxSettingsPage"
+
   var title: String {
     switch self {
     case .general: "General"

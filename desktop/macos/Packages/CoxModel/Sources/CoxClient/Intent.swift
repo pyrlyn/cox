@@ -37,6 +37,15 @@ public enum Intent: Equatable, Sendable {
   case rename(title: String)
 }
 
+/// The core refused a provider switch because the session already ran a turn (`AppError::
+/// ProviderLocked`, T60.3); `message` is Rust's text, and the window offers a new session.
+public struct ProviderLocked: Error, Equatable, CustomStringConvertible {
+  public let message: String
+  public var description: String { message }
+
+  public init(_ message: String) { self.message = message }
+}
+
 public struct Attachment: Equatable, Sendable {
   public var name: String
   public var mediaType: String

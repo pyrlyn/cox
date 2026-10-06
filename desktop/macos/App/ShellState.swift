@@ -23,6 +23,11 @@ struct OpenedSession {
   let composer: ComposerStore
   /// What it reported after it showed; nil until then.
   var info: Info?
+  /// Whether the session's own provider can answer a turn (`SessionClient.readiness`), read when
+  /// it opens and again after a provider switch reopened it (T60.7); the model chip's badge.
+  var readiness = Readiness.ready
+  /// The chip's badge tooltip: the core's message while it is not ready.
+  var problem: String? { readiness.isReady ? nil : readiness.message ?? "No provider can answer" }
   /// The models its cwd's config offers, for best-of's options; empty until read.
   var models: [ModelChoice] = []
   /// The model popover's sections the core built for its cwd (T58.4.13); empty until read.
@@ -39,7 +44,24 @@ struct OpenedSession {
   let terminals = TerminalSurfaces()
 
   /// The toolbar's model menu for what the session runs on now.
-  var menu: ModelMenu { ModelMenu(sections: modelSections, status: store.status) }
+  var menu: ModelMenu {
+    ModelMenu(
+      sections: modelSections, status: store.status,
+      canSwitchProvider: store.session.canSwitchProvider)
+  }
+
+  /// A view id that changes when a provider switch swaps the stores under the same session id,
+  /// so the transcript and the inspector are rebuilt from the new ones.
+  var viewID: String { "\(store.session.id)/\(ObjectIdentifier(store).hashValue)" }
+
+  /// This session after a provider switch reopened it under the same id (T60.7): the new stores,
+  /// with what the window already read about it kept; the old terminal views detach.
+  func reopened(as shared: AppStore.Shared) -> OpenedSession {
+    terminals.endAll()
+    var next = OpenedSession(shared)
+    (next.info, next.models, next.modelSections, next.agents) = (info, models, modelSections, agents)
+    return next
+  }
 
   init(_ shared: AppStore.Shared) {
     (store, composer) = (shared.store, shared.composer)
@@ -88,7 +110,8 @@ enum ShellState {
           rows: section.rows.map {
             CompletionList.Row(id: $0.id, title: $0.name, detail: $0.detail)
           },
-          selected: section.rows.first(where: \.isSelected)?.id)
+          selected: section.rows.first(where: \.isSelected)?.id, provider: section.provider,
+          isEnabled: section.isEnabled, offersKey: !section.usable, note: section.unavailable)
       })
   }
 

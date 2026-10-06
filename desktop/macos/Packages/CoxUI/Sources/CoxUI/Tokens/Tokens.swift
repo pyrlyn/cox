@@ -89,6 +89,8 @@ public enum Size {
     /// CountBadge's height and least width: the mockup's .cnt line-height 16px
     public static let countBadge: CGFloat = 16
     public static let hairline: CGFloat = 0.5
+    /// A provider's generated monogram in the composer's model chip and the model popover's headers (T60.7, DS§3.7)
+    public static let providerMonogram: CGFloat = 16
     /// A quote's bar in the transcript (A97), coloured quote.bar
     public static let quoteBar: CGFloat = 3
     public static let windowMinWidth: CGFloat = 1100

@@ -24,6 +24,9 @@ extension SessionWindow {
     case .model(let row):
       screen.popover = nil
       if let intent = showing?.menu.pick(row) { send(intent) }
+    case .addKey:
+      screen.popover = nil
+      showProviderSettings()
     case .appearance(let change):
       screen.appearance.apply(change)
       screen.appearance.fillTexts()
@@ -34,11 +37,19 @@ extension SessionWindow {
   }
 
   /// The composer under the transcript: its model chip names an external agent's session's agent
-  /// and opens the model popover over itself (T60.6).
+  /// and opens the model popover over itself (T60.6), and wears a badge while the session's
+  /// provider cannot answer (T60.7).
   func composer(for showing: OpenedSession) -> SessionComposer {
     SessionComposer(
       store: showing.composer, modelLabel: ShellState.agentModel(showing, sidebar: model.sidebar),
+      modelProblem: showing.problem,
       openModel: { screen.popover = screen.popover == .model ? nil : .model })
+  }
+
+  /// Settings on Models & Providers, where a key is added.
+  func showProviderSettings() {
+    UserDefaults.standard.set(SettingsPage.models.rawValue, forKey: SettingsPage.storageKey)
+    openSettings()
   }
 
   func handle(_ intent: SessionToolbar.Intent) {
@@ -112,14 +123,30 @@ extension SessionWindow {
     send(intent, to: store)
   }
 
-  /// A refusal shows until dismissed.
+  /// A refusal shows until dismissed; a provider switch puts the session it reopened in the
+  /// window's place, and one the core locked offers a new session.
   func send(_ intent: Intent, to store: SessionStore) {
     Task {
       do {
-        _ = try await store.send(intent)
+        if let shared = try await model.registry.send(intent, to: store) {
+          await swap(store.session.id, to: shared)
+        }
+      } catch let locked as ProviderLocked {
+        lockedMessage = locked.message
       } catch {
         refused = String(describing: error)
       }
     }
+  }
+
+  /// A provider switch reopened `session` under the same id (DT§5.3): `AppStore` already gave
+  /// its windows the new stores, their slot and the draft; this window's `OpenedSession` is
+  /// rebuilt over them, and the registry entry that notifications and the menu bar answer through
+  /// points at them.
+  private func swap(_ session: String, to shared: AppStore.Shared) async {
+    model.register(shared.store, as: session)
+    guard let old = opened[session] else { return }
+    opened[session] = old.reopened(as: shared)
+    opened[session]?.readiness = (try? await shared.store.session.readiness()) ?? .ready
   }
 }

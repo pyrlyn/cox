@@ -60,8 +60,12 @@ final class RemoteSession: SessionClient {
     await handle.nextPatches()?.map { CoxClient.TimelinePatch($0) }
   }
 
+  /// The ssh app-server has no provider switch: its popover lists the other providers disabled.
+  var canSwitchProvider: Bool { false }
+
   func send(_ intent: CoxClient.Intent) async throws -> (any SessionClient)? {
-    try await handle.send(intent: CoxFFIBindings.Intent(intent)).map { RemoteSession($0) }
+    if case .switchProvider = intent { throw RemoteUnsupported("Changing the provider") }
+    return try await handle.send(intent: CoxFFIBindings.Intent(intent)).map { RemoteSession($0) }
   }
 
   /// The wire's completion is a round trip; the composer asks on each keystroke and waits for

@@ -53,6 +53,12 @@ public struct Composer: View {
     public var mode: SessionMode?
     /// The model and its effort as the core names them, `claude-sonnet-5 · high`; `nil` hides it.
     public var model: String?
+    /// The provider the model runs on (`Status.provider`, T60.7); `nil` leaves the chip with the
+    /// model alone, as for an external agent's session.
+    public var provider: ProviderMark?
+    /// Why that provider cannot answer, the core's `Readiness` message; the chip shows a
+    /// `status.danger` badge and this as its tooltip. `nil` while it can.
+    public var modelProblem: String?
     /// The next turn goes to the think tier (A103); its chip stands beside the model's.
     public var think = false
 

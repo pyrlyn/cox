@@ -58,17 +58,33 @@ public final class AppStore {
 
   /// Puts the reopened `client` in place of the session it replaces (`Intent.switchProvider`,
   /// T60.3): the core reopens a session under the same id on the picked provider, so the windows
-  /// holding it keep their slot and get fresh stores. The old pull stops and the old client
-  /// closes; `nil` when no window shows the session, and the caller closes `client` itself.
+  /// holding it keep their slot and get fresh stores, the composer with the old one's draft. The
+  /// old pull stops and the old client closes; `nil` when no window shows the session, and the
+  /// caller closes `client` itself.
   public func replace(_ session: String, with client: any SessionClient) -> Shared? {
     guard let old = entries[session] else { return nil }
     old.pull.cancel()
     old.shared.store.closeTerminals()
     old.shared.store.session.close()
     let store = SessionStore(session: client)
-    let shared = Shared(store: store, composer: ComposerStore(session: store))
+    let composer = ComposerStore(session: store)
+    // Typed before the first turn, so the draft is what the switch must not lose (DT§5.3).
+    composer.carryDraft(from: old.shared.composer)
+    let shared = Shared(store: store, composer: composer)
     entries[session] = Entry(
       shared: shared, pull: Task { await store.run() }, windows: old.windows)
+    return shared
+  }
+
+  /// Sends `intent` to `store`'s session. A provider switch hands back the session the core
+  /// reopened under the same id, which takes the windows' slot (`replace`); the stores that now
+  /// hold it come back for the caller to rebuild its window's state from, `nil` for any other
+  /// intent or when no window shows the session.
+  public func send(_ intent: Intent, to store: SessionStore) async throws -> Shared? {
+    let result = try await store.send(intent)
+    guard case .switchProvider = intent, let reopened = result else { return nil }
+    let shared = replace(store.session.id, with: reopened)
+    if shared == nil { reopened.close() }
     return shared
   }
 

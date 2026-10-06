@@ -31,14 +31,17 @@ struct ComposerChipRow: View {
         Button {
           send(.openModel)
         } label: {
-          ComposerChip(model, kind: .model)
+          ComposerChip(
+            model, kind: .model, provider: state.provider, hasProblem: state.modelProblem != nil)
         }
         .buttonStyle(.plain)
         // The screen hangs the model popover over this chip.
         .anchorPreference(key: ModelChipAnchor.self, value: .bounds) { $0 }
-        .help("Model")
+        .help(state.modelProblem ?? "Model")
         .accessibilityLabel("Model")
-        .accessibilityValue(model)
+        .accessibilityValue(
+          [state.provider?.name, model, state.modelProblem].compactMap { $0 }
+            .joined(separator: ", "))
         ThinkChip(isOn: state.think) { send(.toggleThink) }
       }
       if state.isShell {

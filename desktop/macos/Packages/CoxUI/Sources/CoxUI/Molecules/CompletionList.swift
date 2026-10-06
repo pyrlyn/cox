@@ -76,6 +76,9 @@ public struct CompletionList: View {
 struct CompletionRow: View {
   let row: CompletionList.Row
   let isSelected: Bool
+  /// A row that cannot be picked is greyed and its button off (the model popover's rows of a
+  /// provider with no key, T60.7).
+  var isEnabled = true
   let action: () -> Void
 
   var body: some View {
@@ -84,13 +87,17 @@ struct CompletionRow: View {
       HStack(spacing: Space.ml) {
         Text(row.title)
           .textStyle(.body)
-          .foregroundStyle(isSelected ? Color(.textOnAccent) : Color(.textPrimary))
+          .foregroundStyle(
+            isSelected ? Color(.textOnAccent) : Color(isEnabled ? .textPrimary : .textTertiary)
+          )
           .lineLimit(1)
           .truncationMode(.middle)
         Spacer(minLength: Space.m)
         Text(row.detail)
           .textStyle(.footnote)
-          .foregroundStyle(isSelected ? Color(.textOnAccent) : Color(.textSecondary))
+          .foregroundStyle(
+            isSelected ? Color(.textOnAccent) : Color(isEnabled ? .textSecondary : .textTertiary)
+          )
           .lineLimit(1)
           .truncationMode(.middle)
       }
@@ -100,6 +107,7 @@ struct CompletionRow: View {
       .contentShape(shape)
     }
     .buttonStyle(.plain)
+    .disabled(!isEnabled)
     .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
 }
