@@ -2266,7 +2266,7 @@ Out of scope: a key the server rejects (counts as usable until a turn fails; T60
 
 #### T60.3 Choose the provider before the first turn
 
-Model: opus · Status: open · Depends: T60.1 · Size: ~200 · Priority: P1 · Complexity: 4
+Model: Claude Code / opus · Status: in progress · Depends: T60.1 · Size: ~200 · Priority: P1 · Complexity: 4
 
 Goal: the user picks another provider's model in the model menu while the session has no turn yet; the session is reopened on that provider with the same cwd and id-less draft; after the first turn the pick is refused with "start a new session to change provider". Optionally the pick is saved as the default.
 
