@@ -2376,7 +2376,7 @@ Done when: `cox config set desktop.appearance.specular 0.5` loads back 0.5, and 
 
 #### T60.9 Glare slider in Appearance
 
-Model: sonnet · Status: open · Depends: T60.8 · Size: ~150 · Priority: P2 · Complexity: 2
+Model: Claude Code / sonnet · Status: in progress · Depends: T60.8 · Size: ~150 · Priority: P2 · Complexity: 2
 
 Goal: a "Glare" slider in the Appearance popover and Settings › Appearance; the drawn specular is the material's token times the setting; disabled in Solid and under Increase Contrast, where the sweep is already off.
 
