@@ -2217,7 +2217,7 @@ Every card in this phase:
 
 #### T60.1 Provider in the session status and the model menu
 
-Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
+Model: Claude Code / sonnet · Status: in progress · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
 
 Goal: the core tells every client which provider the session's code tier runs on, and the model menu lists the models of every configured provider section, grouped by provider, each section marked usable or not.
 
