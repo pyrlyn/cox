@@ -40,7 +40,7 @@ cox uses IBM Plex Mono for UI (as the base) and IBM Plex Sans for docs body only
 | `cox-mark.svg` | Mark 64×64: forest tile, pane frame, chartreuse cursor |
 | `cox-wordmark.svg` | Mark + `cox` in IBM Plex Mono 600 (live text) |
 | `cox-favicon.svg` | Favicon |
-| `png/cox-icon-logo-512-landing-v1.png`, `png/cox-icon-favicon-256.png` | PNGs from `docs/assets/landing-v1/` |
-| `png/cox-favicon-{32x32,64x64}.png`, `png/cox-apple-touch-icon-180.png`, `png/cox-icon-logo-{512,1024}.png` | Rendered from the SVGs |
+| `png/cox-favicon-{32x32,64x64}.png`, `png/cox-icon-favicon-256.png` | Rendered from `cox-favicon.svg` by `just brand-icons` |
+| `png/cox-apple-touch-icon-180.png`, `png/cox-icon-logo-{512,1024}.png` | Rendered from `cox-mark.svg` by `just brand-icons` |
 
 Don't revive the helm wheel: the mark is a terminal pane, not nautical.

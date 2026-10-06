@@ -261,6 +261,8 @@ jobs:
       swift-paths: |
         ^desktop/
         ^scripts/desktop/
+        ^brand/logo/
+        ^scripts/brand_icons
 
   # SwiftLint's no-literal rules and swift-format for the macOS app (T37.18,
   # DS§9). The fixtures prove the custom rules still reject what DS§9 bans; the
@@ -281,7 +283,16 @@ jobs:
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          install_args: aqua:realm/SwiftLint
+          install_args: aqua:realm/SwiftLint aqua:linebender/resvg
+
+      # The icons and logo rasters scripts/brand_icons.py derives from brand/logo/*.svg. Here,
+      # not on Linux: resvg's PNG bytes are only stable on one architecture, and Apple Silicon
+      # is where they are generated.
+      - name: brand icons match brand/logo
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts -p 'test_brand_icons.py'
+          python3 scripts/brand_icons.py --check
 
       - name: swiftlint fixtures
         working-directory: desktop/macos

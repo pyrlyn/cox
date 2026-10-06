@@ -1,7 +1,4 @@
----
-title: "Architecture"
-weight: 2
----
+# Architecture
 
 ## One event stream
 
@@ -17,12 +14,16 @@ This makes the hard part of an agent observable: a test can replay a scripted pr
 | `cox-protocol` | Cross-crate types and traits |
 | `cox-core` | Turns, context, routing, budgets, permissions, compaction |
 | `cox-provider` | Model-provider adapters and replay fixtures |
-| `cox-tools` | Built-in tools, path confinement, and sandboxing |
+| `cox-tools` | Built-in tools |
+| `cox-sandbox` | Path confinement and the platform sandbox |
+| `cox-permission` | The permission engine |
 | `cox-mcp` | MCP client and server support |
 | `cox-store` | SQLite sessions, rollouts, archived output, and cost ledger |
 | `cox-ext` | Instructions, skills, commands, agents, and hooks |
 | `cox-tui` | Terminal presentation |
 | `cox-acp` | Agent Client Protocol adapter |
+
+These are the main crates; [`AGENTS.md`](../AGENTS.md) lists every crate in the workspace and what it owns.
 
 The core owns no direct filesystem, process, or network I/O. Those operations are defined as traits in `cox-protocol` and implemented at the edge of the system.
 
