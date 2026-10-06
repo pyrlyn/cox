@@ -2244,7 +2244,7 @@ Out of scope: switching provider (T60.3), FFI (T60.4).
 
 #### T60.2 Launch readiness: no turn without a usable provider
 
-Model: sonnet · Status: open · Depends: T60.1 · Size: ~180 · Priority: P0 · Complexity: 3
+Model: Claude Code / sonnet · Status: in progress · Depends: T60.1 · Size: ~180 · Priority: P0 · Complexity: 3
 
 Goal: one Rust rule decides whether a prompt may be sent: the session's code-tier provider is set and is in `usable_providers` (A110); Best of refuses a candidate whose provider is not usable before it creates a worktree, with the reason.
 
