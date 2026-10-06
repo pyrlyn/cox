@@ -14,6 +14,8 @@ extension PreviewState {
   /// The mockup's reflection, 78 % of the range, and its Depth, "High".
   private static let reflection = 47.0
   private static let depth = 0.8
+  /// A glare below the default, so the slider's thumb is off its end in the snapshot.
+  private static let specular = 0.6
 
   /// The popover as mockup screen 28 (Frosted) or 29 (Glossy) shows it; Solid keeps the
   /// frosted values, which its disabled sliders show.
@@ -27,6 +29,7 @@ extension PreviewState {
     (state.depth, state.tint) = (depth, true)
     state.transparencyText = isGlossy ? "70%" : "58%"
     (state.blurText, state.depthText) = (isGlossy ? "Strong" : "34 pt", "High")
+    (state.specular, state.specularText) = (specular, "60%")
     return state
   }
 

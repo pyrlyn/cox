@@ -11,13 +11,14 @@ import Testing
 
 @testable import CoxModel
 
-/// The five `[desktop.appearance]` rows as `cox_app::settings` exports them, at their defaults.
+/// The `[desktop.appearance]` rows as `cox_app::settings` exports them, at their defaults.
 private let appearanceView = SettingsView(
   settings: [
     row("blur", "34.0", .number(min: 0, max: 60)),
     row("depth", "1.0", .number(min: 0, max: 1)),
     row("material", "\"frosted\"", .choice(options: ["frosted", "glossy", "solid"])),
     row("opacity", "0.42", .number(min: 0, max: 1)),
+    row("specular", "0.5", .number(min: 0, max: 1)),
     row("tint", "true", .toggle),
   ],
   userFile: "/home/.cox/config.toml")
@@ -42,7 +43,8 @@ private func loaded() async -> Loaded {
   #expect(
     store.appearance
       == DesktopAppearance(
-        material: .frosted, opacity: 0.42, blur: 34, blurRange: 0...60, depth: 1, tint: true))
+        material: .frosted, opacity: 0.42, blur: 34, blurRange: 0...60, depth: 1, specular: 0.5,
+        tint: true))
 }
 
 @MainActor
@@ -58,19 +60,21 @@ private func loaded() async -> Loaded {
 @Test func everyEditWritesItsOwnKeyAsJson() async {
   let (store, client) = await loaded()
   for edit in [
-    AppearanceEdit.material(.glossy), .blur(12), .depth(0.25), .tint(false),
+    AppearanceEdit.material(.glossy), .blur(12), .depth(0.25), .specular(0.75), .tint(false),
   ] {
     await store.apply(edit)
   }
   #expect(
     client.sent == [
       "desktop.appearance.material=\"glossy\"", "desktop.appearance.blur=12",
-      "desktop.appearance.depth=0.25", "desktop.appearance.tint=false",
+      "desktop.appearance.depth=0.25", "desktop.appearance.specular=0.75",
+      "desktop.appearance.tint=false",
     ])
   #expect(
     store.appearance
       == DesktopAppearance(
-        material: .glossy, opacity: 0.42, blur: 12, blurRange: 0...60, depth: 0.25, tint: false))
+        material: .glossy, opacity: 0.42, blur: 12, blurRange: 0...60, depth: 0.25,
+        specular: 0.75, tint: false))
 }
 
 @Test func aMissingOrMistypedKeyReadsAsNoSection() {
@@ -78,6 +82,13 @@ private func loaded() async -> Loaded {
   var mistyped = appearanceView.settings
   mistyped[2].value = "\"chrome\""
   #expect(DesktopAppearance(mistyped) == nil)
+}
+
+/// A core older than T60.8 has no `specular` row; the rest of the section must still decode.
+@Test func aMissingSpecularKeyReadsAsFullGlare() {
+  let older = appearanceView.settings.filter { $0.key != "desktop.appearance.specular" }
+  #expect(DesktopAppearance(older)?.specular == 1)
+  #expect(DesktopAppearance(appearanceView.settings)?.specular == 0.5)
 }
 
 @MainActor

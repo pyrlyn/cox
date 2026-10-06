@@ -9579,3 +9579,26 @@ Check: cox-app tests for a Cargo workspace, a single crate, a Node workspace and
 - Result: `crates/cox-app/src/welcome.rs`: `App::welcome(cwd)` loads the instruction chain as a session would (`cox_session::instruction_roots`, the config's `instruction_budget_tokens`) and `facts(cwd, files, in_git)` builds the line — `Rust workspace · N crates` from `[workspace] members` (paths and `dir/*` globs, less `exclude`), `Rust crate`, `Node workspace · N packages` / `Node project` from `package.json` `workspaces`, `Go module`, `Python project` — then `<files> loaded` by file name; the suggestions name the project folder and the kind's test command (`cargo nextest` with `.config/nextest.toml`, `cargo test`, `npm test`, `go test ./...`, `pytest`), and the diff review only under a git root (`cox_config::load::find_git_root`, no `git` run). `cox-ffi`: `App.welcome(cwd)` forwards on the runtime; `Welcome` and `Suggestion` cross as remote records. Swift: `WelcomeFacts`, `WelcomeSuggestion` and `WelcomeService` move to CoxClient with a `FixtureWelcome`; CoxCore's `LiveCoreClient` conforms (`WelcomeConvert.swift`); `MockWelcomeService` and `SessionWindow.welcome` are deleted, and the window passes the live client (a fixture without a core shows the question alone). cox-app depends on `toml_edit` directly (already in its tree through cox-config).
 - Tests: cox-app `welcome::tests` — a Cargo workspace (3 crates with a glob, a path and an exclude; nextest; two instruction files), a single crate (`cargo test`, no diff suggestion outside git), a Node workspace (2 packages) and an empty folder (no summary, generic test prompt). CoxCore `thisRepositoryReadsAsARustWorkspaceWithItsInstructions`: through the real core this repository reads `Rust workspace · … · AGENTS.md …` with the diff suggestion. The CoxModel and CoxTranscript welcome tests use `FixtureWelcome`.
 - Check output summary: `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo nextest run -p cox-ffi -p cox-app` 231 passed (forward-only included); `cargo nextest run -p cox --test deps` 10 passed; `just desktop-xcframework` built; CoxCore `swift test` 25 passed; CoxModel 130 passed; CoxTranscript welcome and rewind tests pass; `cargo fmt --check`, `xcrun swift-format lint --strict` clean.
+
+#### T60.9 Glare slider in Appearance
+
+Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: T60.8 · Size: ~150 · Priority: P2 · Complexity: 2
+
+Goal: a "Glare" slider in the Appearance popover and Settings › Appearance; the drawn specular is the material's token times the setting; disabled in Solid and under Increase Contrast, where the sweep is already off.
+
+Files:
+- `desktop/macos/Packages/CoxModel/Sources/CoxModel/AppearanceSettings.swift` (`AppearanceEdit.specular`, `DesktopAppearance.specular`)
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Foundations/Appearance.swift` and `Organisms/AppearancePopover.swift`
+- `desktop/macos/App/AppearanceState.swift`
+
+Steps:
+1. Docs: DS§3.5 Materials — the glare scale and its formula, so other clients draw the same strength.
+
+Check: `swift test` in `CoxModel` and `CoxUI`.
+
+Done when: `FoundationsTests` show specular = token × setting and 0 in Solid; `AppearanceSettingsTests` decode the key; a popover snapshot shows the slider.
+
+- Result: `AppearanceEdit.specular` writes `desktop.appearance.specular`; `DesktopAppearance.specular` reads it as optional and defaults to 1, so a core without the key (before T60.8) still decodes the section. `Appearance.specularScale` (init parameter, default 1) scales the material's specular token and clamps to 0…1; Solid, Reduce Transparency and Increase Contrast stay at 0. The Appearance popover has a "Glare" slider (None…Full) below Depth, disabled in Solid, under Reduce Transparency, under Increase Contrast and when a layer above the user file sets the key; its note says why under Increase Contrast. `AppearanceState` maps stored, state and edit like Depth, and `applied(to:)` and the material swatches carry the scale. Settings › Appearance rows are generated from Rust's settings view, so the Glare row appears with T60.8's key. DS§3.5 gives the formula (`clamp(material.*Specular × specularScale, 0, 1)`), DS§6 the popover row, in platform-neutral words.
+- Tests: `FoundationsTests` `glareScalesTheMaterialsSpecularToken` and `glareNeverBringsTheSweepBackInSolidOrUnderIncreaseContrast`; `AppearanceSettingsTests` read the key, write it, and `aMissingSpecularKeyReadsAsFullGlare`; `AppearancePopoverTests` report the intent and redraw with the scale; the twelve `appearancePopover` snapshots re-recorded with the slider.
+- Check output summary: CoxModel `swift test` 131 passed; CoxUI `swift test`: every non-snapshot test passes, and the `appearancePopover` snapshots pass against the new references; the other snapshots in the suite mismatch on this machine (macOS 27.0.1) with or without this change, and the other popover-bearing references (locked, Reduce Transparency, main screen with the popover open) still need re-recording where the references were made; SwiftLint `--strict` on `App` and the touched sources and `swift-format lint --strict` clean.
+

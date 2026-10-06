@@ -2374,24 +2374,6 @@ Check: `mise exec -- cargo nextest run -p cox-protocol -p cox-config`, clippy, f
 
 Done when: `cox config set desktop.appearance.specular 0.5` loads back 0.5, and 1.5 is refused.
 
-#### T60.9 Glare slider in Appearance
-
-Model: Claude Code / sonnet · Status: in progress · Depends: T60.8 · Size: ~150 · Priority: P2 · Complexity: 2
-
-Goal: a "Glare" slider in the Appearance popover and Settings › Appearance; the drawn specular is the material's token times the setting; disabled in Solid and under Increase Contrast, where the sweep is already off.
-
-Files:
-- `desktop/macos/Packages/CoxModel/Sources/CoxModel/AppearanceSettings.swift` (`AppearanceEdit.specular`, `DesktopAppearance.specular`)
-- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Foundations/Appearance.swift` and `Organisms/AppearancePopover.swift`
-- `desktop/macos/App/AppearanceState.swift`
-
-Steps:
-1. Docs: DS§3.5 Materials — the glare scale and its formula, so other clients draw the same strength.
-
-Check: `swift test` in `CoxModel` and `CoxUI`.
-
-Done when: `FoundationsTests` show specular = token × setting and 0 in Solid; `AppearanceSettingsTests` decode the key; a popover snapshot shows the slider.
-
 #### T60.10 Best of: the real failure reason, no negative zero, no actions on a failed candidate
 
 Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
