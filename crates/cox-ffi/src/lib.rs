@@ -384,9 +384,14 @@ impl App {
         Ok(self.owner.models(Path::new(&cwd))?)
     }
 
-    /// The model popover's sections for a session in `cwd` (T58.4.7).
-    pub fn model_menu(&self, cwd: String) -> Result<Vec<ModelSection>, AppError> {
-        Ok(self.owner.model_menu(Path::new(&cwd))?)
+    /// The model popover's sections for a session in `cwd` (T58.4.7);
+    /// `usable` is `usable_providers`' answer, which marks each section.
+    pub fn model_menu(
+        &self,
+        cwd: String,
+        usable: Vec<String>,
+    ) -> Result<Vec<ModelSection>, AppError> {
+        Ok(self.owner.model_menu(Path::new(&cwd), &usable)?)
     }
 
     /// The providers a turn in `cwd` could run on now (A110); it probes

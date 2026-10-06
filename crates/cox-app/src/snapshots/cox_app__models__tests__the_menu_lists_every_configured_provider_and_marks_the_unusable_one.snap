@@ -1,0 +1,44 @@
+---
+source: crates/cox-app/src/models.rs
+expression: sections
+---
+[
+    ModelSection {
+        tier: Code,
+        title: "Code",
+        provider: "anthropic",
+        usable: true,
+        models: [
+            MenuModel {
+                id: "claude-sonnet-5",
+                display_name: Some(
+                    "Claude Sonnet 5",
+                ),
+                short_name: Some(
+                    "Sonnet 5",
+                ),
+                efforts: "",
+            },
+        ],
+    },
+    ModelSection {
+        tier: Code,
+        title: "OpenAI",
+        provider: "openai",
+        usable: false,
+        models: [
+            MenuModel {
+                id: "gpt-6",
+                display_name: None,
+                short_name: None,
+                efforts: "",
+            },
+            MenuModel {
+                id: "gpt-6-mini",
+                display_name: None,
+                short_name: None,
+                efforts: "",
+            },
+        ],
+    },
+]

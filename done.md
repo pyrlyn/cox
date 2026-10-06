@@ -9579,3 +9579,33 @@ Check: cox-app tests for a Cargo workspace, a single crate, a Node workspace and
 - Result: `crates/cox-app/src/welcome.rs`: `App::welcome(cwd)` loads the instruction chain as a session would (`cox_session::instruction_roots`, the config's `instruction_budget_tokens`) and `facts(cwd, files, in_git)` builds the line — `Rust workspace · N crates` from `[workspace] members` (paths and `dir/*` globs, less `exclude`), `Rust crate`, `Node workspace · N packages` / `Node project` from `package.json` `workspaces`, `Go module`, `Python project` — then `<files> loaded` by file name; the suggestions name the project folder and the kind's test command (`cargo nextest` with `.config/nextest.toml`, `cargo test`, `npm test`, `go test ./...`, `pytest`), and the diff review only under a git root (`cox_config::load::find_git_root`, no `git` run). `cox-ffi`: `App.welcome(cwd)` forwards on the runtime; `Welcome` and `Suggestion` cross as remote records. Swift: `WelcomeFacts`, `WelcomeSuggestion` and `WelcomeService` move to CoxClient with a `FixtureWelcome`; CoxCore's `LiveCoreClient` conforms (`WelcomeConvert.swift`); `MockWelcomeService` and `SessionWindow.welcome` are deleted, and the window passes the live client (a fixture without a core shows the question alone). cox-app depends on `toml_edit` directly (already in its tree through cox-config).
 - Tests: cox-app `welcome::tests` — a Cargo workspace (3 crates with a glob, a path and an exclude; nextest; two instruction files), a single crate (`cargo test`, no diff suggestion outside git), a Node workspace (2 packages) and an empty folder (no summary, generic test prompt). CoxCore `thisRepositoryReadsAsARustWorkspaceWithItsInstructions`: through the real core this repository reads `Rust workspace · … · AGENTS.md …` with the diff suggestion. The CoxModel and CoxTranscript welcome tests use `FixtureWelcome`.
 - Check output summary: `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo nextest run -p cox-ffi -p cox-app` 231 passed (forward-only included); `cargo nextest run -p cox --test deps` 10 passed; `just desktop-xcframework` built; CoxCore `swift test` 25 passed; CoxModel 130 passed; CoxTranscript welcome and rewind tests pass; `cargo fmt --check`, `xcrun swift-format lint --strict` clean.
+
+#### T60.1 Provider in the session status and the model menu
+
+Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
+
+Goal: the core tells every client which provider the session's code tier runs on, and the model menu lists the models of every configured provider section, grouped by provider, each section marked usable or not.
+
+Files:
+- `crates/cox-app/src/patch.rs` (`Status` gains `provider: Option<String>` and `provider_name: Option<String>`, the section's display name)
+- `crates/cox-app/src/status.rs` (`StatusFold::open` and `ModelSwitched{Code}` fill it from `config.tiers.code.provider`)
+- `crates/cox-app/src/models.rs` (`ModelSection` gains `provider` and `usable: bool`; `menu` takes the usable list and adds every configured provider section's models after the tier's own, one section per provider)
+
+Steps:
+1. `Status.provider` from `tiers.code.provider`; `None` for an ACP-driven session.
+2. `menu(config, usable)` groups by provider; a section whose provider is not in `usable` keeps its rows but is `usable: false`.
+3. Docs: DT§4.3 names `Status.provider` and the grouped menu.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app
+mise exec -- cargo clippy -p cox-app --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a status test shows `provider = "anthropic"` on open and after a code-tier switch, and a `menu` snapshot shows two provider sections with one marked unusable.
+
+Out of scope: switching provider (T60.3), FFI (T60.4).
+
+- Result: `Status` gains `provider` and `provider_name` (`models::provider_name`: brand for the native sections, the section name for a custom one); `StatusFold` keeps each tier's provider and sets them on open and on the latest main turn's tier, and a `code` model switch keeps the section. `TimelinePatch::Status` now boxes its `Status` (the clippy large-variant lint). `ModelSection` gains `provider` and `usable`; `menu(config, choices, usable)` lists each tier's provider, then every other configured provider that lists models, titled with its name on the `Code` tier; a model is listed once per provider. `App::model_menu(cwd, usable)` and `cox-ffi`'s `model_menu(cwd, usable)` take the `usable_providers` answer. cox-ffi remote declarations updated. DT§4.3 documents both. Swift callers of `modelMenu(cwd:)` and the new fields are T60.4.
+- Check output: `cargo nextest run -p cox-app -p cox-ffi` 241 passed; `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo fmt --check` clean.

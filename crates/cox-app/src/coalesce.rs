@@ -340,10 +340,10 @@ mod tests {
     #[test]
     fn only_the_latest_status_stays_queued_and_a_reset_keeps_it() {
         let status = |queued| TimelinePatch::Status {
-            status: crate::Status {
+            status: Box::new(crate::Status {
                 queued,
                 ..Default::default()
-            },
+            }),
         };
         let reset = TimelinePatch::Reset { blocks: vec![] };
         let queue = coalesced(&[status(1), append("t", "a"), status(2), reset.clone()]);

@@ -381,13 +381,25 @@ enum TimelinePatch {
   AppendText { id: BlockId, text: String }      // thinking, tool output tail
   DocTail { id: BlockId, from: u32, blocks: Vec<DocBlock> }  // markdown: closed blocks are frozen, only the tail is re-sent
   Remove { id: BlockId }
-  Status { status: Status }                     // beside the list: `queued`, the turns waiting behind the running one (T37.24.8); `mode`, the `next_mode` ⇧⇥ asks for, and the main turn's `model` and `effort`, seeded from config and kept by `StateChanged`/`TurnStarted`/`ModelSwitched` (T37.24.7), with the catalog's `model_name` for that model (A111, T37.22.7); a queue keeps only the latest
+  Status { status: Status }                     // beside the list: `queued`, the turns waiting behind the running one (T37.24.8); `mode`, the `next_mode` ⇧⇥ asks for, and the main turn's `model` and `effort`, seeded from config and kept by `StateChanged`/`TurnStarted`/`ModelSwitched` (T37.24.7), with the catalog's `model_name` for that model (A111, T37.22.7), and `provider` (the `[providers.<name>]` section of the tier that model runs on: the `code` tier's on open, then the latest main turn's tier; `None` for an ACP session) with `provider_name`, what a person calls it (`models::provider_name`: `Anthropic`, `LM Studio`, a custom section's own name) (T60.1, A138); a queue keeps only the latest
   Usage { usage: UsageView }                    // token meter (DS§7): ledger totals, tok/s, TTFT, and `text` (MeterText, T37.25): every figure formatted, with the window share and the system/tools/instructions/history parts from the core's `ContextBreakdown` scaled to the last call's context (A98, T37.25.1), what the window has left, and the turn's cache hit (the Context tab, T37.29.3.1); a queue keeps only the latest
 }
 ```
 
 Keyed by id, not index, so SwiftUI identity is stable and a dropped patch can
 be healed by `Reset`. Streaming markdown re-parses only the open tail block.
+
+**Model menu (T60.1, A138).** `App::model_menu(cwd, usable)` returns the
+model popover's sections, grouped by provider: one `ModelSection` per tier's
+provider (`title` `Code`, `Think` or `Cheap`) in first-listed order, then one
+per further configured `[providers.<name>]` section that lists models, titled
+with `provider_name` and attached to the `Code` tier, by name. Each section
+carries its `provider` and `usable`, true when `provider` is in `usable`, the
+answer of `App::usable_providers(cwd)` (a key found or a local server
+listening, A110); a client fetches that first and passes it in, so the menu
+itself never probes a server. A section whose provider is not usable keeps its
+rows and is drawn disabled. A model id is listed once per provider. A client on
+any platform needs only these two calls and the `Status.provider` above.
 
 **Inbox.** Every pending approval and question from every session, oldest
 first, with `session`, `source` and an expiry flag. Drives the "Needs you"
