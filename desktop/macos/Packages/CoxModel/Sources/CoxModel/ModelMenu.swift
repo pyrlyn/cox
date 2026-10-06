@@ -3,7 +3,7 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 // The composer's model popover (DT§5.1, DT§5.3, T37.22.6, T60.7): the core's sections, each by
-// the provider it lists (A138), each row by the core's short name (A111, A129), the one the
+// the provider it lists (A139), each row by the core's short name (A111, A129), the one the
 // session runs on marked. A pick is `/model <tier> <id>`, the TUI's switch, or — for a model of
 // another provider than the session's — `Intent.switchProvider`; a section whose provider has no
 // key stays listed but its rows do not pick. Here, not in CoxUI, because the store owns what the

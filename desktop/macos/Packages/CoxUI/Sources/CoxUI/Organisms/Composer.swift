@@ -61,7 +61,7 @@ public struct Composer: View {
     public var modelProblem: String?
     /// The next turn goes to the think tier (A103); its chip stands beside the model's.
     public var think = false
-    /// Why sending waits for the provider (T60.5, A138); `canSend` is off while it shows.
+    /// Why sending waits for the provider (T60.5, A139); `canSend` is off while it shows.
     public var notice: Notice?
 
     public init() {}

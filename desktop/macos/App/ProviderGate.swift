@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// What the session window does about a provider that cannot answer (DT§5.3, T60.5, A138): the
+// What the session window does about a provider that cannot answer (DT§5.3, T60.5, A139): the
 // composer's "Add key" opens Settings at Models & Providers, and the usable providers and each
 // open session's readiness are read again when the window becomes key and when a provider key is
 // stored in Settings. Separate from `SessionWindow` to keep its body the layout; the rule itself

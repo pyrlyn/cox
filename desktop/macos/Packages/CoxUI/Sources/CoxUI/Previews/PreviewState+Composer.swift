@@ -121,7 +121,7 @@ extension PreviewState {
   }
 
   /// The provider has no key: Send is off with the draft kept, and the core's reason stands
-  /// under the composer with the way to Settings (T60.5, A138).
+  /// under the composer with the way to Settings (T60.5, A139).
   static var composerNotReady: Composer.State {
     var state = composerStatus
     state.text = "Fix the flaky retry test in the sync worker"

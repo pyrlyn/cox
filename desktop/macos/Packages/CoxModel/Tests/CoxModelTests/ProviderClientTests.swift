@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// What the client seam carries for provider readiness and the provider pick (T60.4, A138): a
+// What the client seam carries for provider readiness and the provider pick (T60.4, A139): a
 // status with its provider, a menu with an unusable section, a session's readiness, and a
 // reopened session replacing the one a window shows.
 

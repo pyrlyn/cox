@@ -51,6 +51,10 @@ pub enum ConfigError {
     /// A value that has no TOML form a config key takes (`null`, an object).
     #[error("`{key}` cannot be set to {value}")]
     UnsupportedValue { key: String, value: String },
+    /// The edited file would not load (out of range, unknown variant, wrong
+    /// type), so `cox config set` left it as it was (T22.12).
+    #[error(transparent)]
+    Rejected(#[from] cox_protocol::CoreError),
 }
 
 /// `Config`'s JSON Schema, the one `docs/config.jsonschema` commits.

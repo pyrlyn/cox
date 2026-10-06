@@ -230,7 +230,7 @@ them), and every shell layer, the window's too, is rimmed by `glass.border`; in 
 their plain `surface.*` and the `separator` hairline (T51.23). The specular sweep and streak are
 `glass.specular` at `material.*Specular` strength, in SwiftUI and in the transcript's AppKit bubble.
 
-Glare (T60.9, A138) scales that strength: the drawn specular is
+Glare (T60.9, A139) scales that strength: the drawn specular is
 `clamp(material.*Specular × specularScale, 0, 1)`, where `specularScale` is the `0…1` setting
 `desktop.appearance.specular` (1 draws the material as tokened, 0 draws no sweep or streak), so
 every client draws the same strength from the same setting. Solid, and any client's
@@ -249,7 +249,7 @@ the filter prompt 7.1:1, laid over opaque `surface.window` (§8).
   Appearance. They are stored in Rust-owned config under `[desktop.appearance]`
   (`material`, `opacity`, `blur`, `depth`, `specular`, `tint`), so they have a schema and provenance like any other
   setting.
-- Glare (T60.8, A138): `desktop.appearance.specular`, 0 (none) to 1 (default, today's look), scales the
+- Glare (T60.8, A139): `desktop.appearance.specular`, 0 (none) to 1 (default, today's look), scales the
   sweep: a client draws `glass.specular` at `material.*Specular × specular`. Solid and Increase Contrast
   stay at 0 whatever the setting.
 - Text-bearing surfaces — messages, code, diffs, terminal, popovers, the composer — never drop below
@@ -448,7 +448,7 @@ component.
 | --- | --- | --- |
 | `ShellPane(.window/.sidebar/.column/.inspector)` | glassPane, hairline, elevation: e5 window, e2 side panes, flat column | `.window`, `.sidebar`, `.col`, `.insp` |
 | `Sidebar` | ShellPane, SessionFilter, SectionHeader + CountBadge, project disclosure, SessionRow, footer (New session, provider StatusDot); an expired "Needs you" item's row is not a button and shows its title in `text.secondary`, not a faded label (§8); a remote host's group (T52.21) heads its rows with a host badge — `server.rack` and the ssh alias in `font.control`, `text.secondary`, in a `fill.primary` well at `radius.s` — and, once disconnected, a `status.danger` StatusDot, "Disconnected" in `font.caption` and a plain small Reconnect button; its rows are then read-only | `.sidebar` |
-| `SessionToolbar` | Breadcrumb, then the plugins' `status.left`/`status.right` segments (PluginWidgetView, one line each, at most 24 code-face cells wide, truncated; a `ViewThatFits` drops them first when the bar is narrow; T52.17), CostCapsule, StopButton, icon CapsuleStyle buttons (Appearance ⌘⌥A, inspector ⌃⌘I, sidebar ⌃⌘S while hidden; tooltips name the keys), the Bypass strip under the bar. The model and the mode moved to the composer's chips (T60.6, A138); the bar keeps the mode in its state only for the strip | `.toolbar` |
+| `SessionToolbar` | Breadcrumb, then the plugins' `status.left`/`status.right` segments (PluginWidgetView, one line each, at most 24 code-face cells wide, truncated; a `ViewThatFits` drops them first when the bar is narrow; T52.17), CostCapsule, StopButton, icon CapsuleStyle buttons (Appearance ⌘⌥A, inspector ⌃⌘I, sidebar ⌃⌘S while hidden; tooltips name the keys), the Bypass strip under the bar. The model and the mode moved to the composer's chips (T60.6, A139); the bar keeps the mode in its state only for the strip | `.toolbar` |
 | `ToolCard(content, isExpanded:)` | ToolHeader + one detail: the edit's DiffHunkViews or a TerminalTail. A running call shows its tail under a flat header; a finished one folds the detail behind the chevron (open state is the card's own); opened, a readable face at e2 with a hairline rim, `radius.l`. Public with the value types it takes (T37.23) | `.tool`, `.tool.exp` |
 | `ApprovalCard(content, act:)`, `ApprovalCard(content, act:, edit:)` | header (warning symbol, title, RiskChip), the command in a `surface.code` well, the reasons (why, which subagent) in caption, then Allow / Allow for session / Edit… (when given `edit` and an input) / Deny as regular-height CoxButtonStyle and "Session grant: …" in footnote at the trailing end (under the buttons when it does not fit), on `fill.primary` under a hairline; Edit… puts the input as JSON in the well with Run edited (only while it parses) and Cancel (T37.27.6); a readable face at e1 with a `status.warning` leading edge, `radius.xxl`. Decided, it shrinks to a NoticeRow: "Allowed by you · for session". CoxTranscript's `DecisionCard` fills it from the block and sends the choice as an `Intent` (T37.27) | `.appr` |
 | `QuestionCard(content, answer:)` | the same frame with an `accent` edge: who asks, the question in `font.transcript`, one CoxButtonStyle button per option, then a field and Answer on the action row; answered, a NoticeRow "You answered: …" (T37.27) | `.appr` (question) |

@@ -30,7 +30,7 @@ public struct BestOfControl: View {
     public var isLaunching: Bool
     /// Why the last launch failed.
     public var failure: String?
-    /// Why nothing can launch now: the session's provider cannot answer (T60.5, A138). The
+    /// Why nothing can launch now: the session's provider cannot answer (T60.5, A139). The
     /// capsule is disabled and says it.
     public var unavailable: String?
 

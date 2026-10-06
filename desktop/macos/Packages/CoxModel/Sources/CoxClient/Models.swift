@@ -36,7 +36,7 @@ public struct ModelSection: Equatable, Sendable {
   public var tier: Tier
   /// `Code`, `Think`, `Cheap`.
   public var title: String
-  /// The `[providers.<name>]` section whose models these are (A138); `""` on a fixture that
+  /// The `[providers.<name>]` section whose models these are (A139); `""` on a fixture that
   /// omits it.
   public var provider: String
   /// Whether that provider can answer now (a key found or a local server listening); an

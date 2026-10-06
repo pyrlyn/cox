@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// The model popover grouped by provider and the provider pick it sends (T60.7, A138, DT§5.3): a
+// The model popover grouped by provider and the provider pick it sends (T60.7, A139, DT§5.3): a
 // model of another provider is a provider switch, one of the session's own is the model switch,
 // a provider with no key does not pick, a remote session cannot change provider, and the session
 // a switch reopens takes the window's slot with its draft.

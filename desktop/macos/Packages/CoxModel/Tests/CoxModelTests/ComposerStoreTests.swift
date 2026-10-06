@@ -308,7 +308,7 @@ private func usage(done: Bool) -> UsageView {
   #expect(!store.think)
 }
 
-/// T60.5 (A138): while the provider cannot answer, a turn is not sent — by ⏎ or by ⌘⏎ — however the
+/// T60.5 (A139): while the provider cannot answer, a turn is not sent — by ⏎ or by ⌘⏎ — however the
 /// view asks; a shell line and a `/` command start no turn, so they still go.
 @MainActor
 @Test func aTurnIsRefusedWhileTheProviderIsNotReadyButShellAndCommandsStillGo() async {

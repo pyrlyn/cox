@@ -80,7 +80,7 @@ pub fn choices(config: &Config) -> Vec<ModelChoice> {
     out
 }
 
-/// What a person calls a `[providers.<name>]` section (A138). The native
+/// What a person calls a `[providers.<name>]` section (A139). The native
 /// sections have a brand; a custom one has only the name its owner gave it.
 pub fn provider_name(section: &str) -> String {
     match section {
@@ -103,7 +103,7 @@ pub struct ModelSection {
     /// `Code`, `Think`, `Cheap` for a tier's own provider; the provider's
     /// name (`OpenAI`) for one only configured.
     pub title: String,
-    /// The `[providers.<name>]` section the rows belong to (A138).
+    /// The `[providers.<name>]` section the rows belong to (A139).
     pub provider: String,
     /// Whether a turn could run on that provider now (`usable`, A110); the
     /// rows stay listed when it cannot, so a client can show them disabled.

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// Whether a turn can start (DT§5.3, T60.2, A138), as cox-ffi's `Readiness`. The rule and its
+// Whether a turn can start (DT§5.3, T60.2, A139), as cox-ffi's `Readiness`. The rule and its
 // wording are the core's; this carries the answer to the composer, which only renders it.
 
 /// `cox_app::Readiness` with the text the core words for it.

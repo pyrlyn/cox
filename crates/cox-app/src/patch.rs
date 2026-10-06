@@ -267,7 +267,7 @@ pub struct Status {
     /// The effort that model runs at: the `/effort` override, else the
     /// `code` tier's configured effort.
     pub effort: Option<Effort>,
-    /// The `[providers.<name>]` section the tier of `model` calls (A138):
+    /// The `[providers.<name>]` section the tier of `model` calls (A139):
     /// the `code` tier's on open, then the tier of the latest main turn.
     /// `/model` changes the model, never the section. `None` when the
     /// session has no tiers of its own, as under ACP.

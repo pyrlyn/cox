@@ -1,4 +1,4 @@
-//! Whether a prompt may be sent at all (DT§5.3, A138): the session's
+//! Whether a prompt may be sent at all (DT§5.3, A139): the session's
 //! code-tier provider must be set and in the usable list (A110). One rule in
 //! Rust, so the macOS app, a Windows or Linux client and `LiveSession::send`
 //! agree and a client that forgets the gate still cannot start a turn.

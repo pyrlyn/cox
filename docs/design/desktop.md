@@ -281,7 +281,7 @@ the table uses the `@agentclientprotocol/*` names.
 8. cox's own slash commands are off in external sessions; `/…` goes to the
    agent verbatim.
 
-#### 3.3.2 Best of: a cox candidate needs a usable provider (T60.2, A138)
+#### 3.3.2 Best of: a cox candidate needs a usable provider (T60.2, A139)
 
 `App::best_of` asks `App::readiness(project)` once for the group. When it is
 not `Ready`, every cox candidate is refused before its worktree is made:
@@ -292,7 +292,7 @@ up. An agent candidate (`Candidate::Agent`) brings its own provider and is not
 gated. The rule is the composer's (DT§5.3), so a client shows the same text
 in the launch sheet and may disable Best of with it.
 
-#### 3.3.3 Best of n: what a failed candidate shows (T60.10, A138)
+#### 3.3.3 Best of n: what a failed candidate shows (T60.10, A139)
 
 A client reads the compare view with `compare(group)` (`cox_app::best_of`),
 which returns one `CandidateView` per candidate; every rule below is decided
@@ -416,7 +416,7 @@ enum TimelinePatch {
   AppendText { id: BlockId, text: String }      // thinking, tool output tail
   DocTail { id: BlockId, from: u32, blocks: Vec<DocBlock> }  // markdown: closed blocks are frozen, only the tail is re-sent
   Remove { id: BlockId }
-  Status { status: Status }                     // beside the list: `queued`, the turns waiting behind the running one (T37.24.8); `mode`, the `next_mode` ⇧⇥ asks for, and the main turn's `model` and `effort`, seeded from config and kept by `StateChanged`/`TurnStarted`/`ModelSwitched` (T37.24.7), with the catalog's `model_name` for that model (A111, T37.22.7), and `provider` (the `[providers.<name>]` section of the tier that model runs on: the `code` tier's on open, then the latest main turn's tier; `None` for an ACP session) with `provider_name`, what a person calls it (`models::provider_name`: `Anthropic`, `LM Studio`, a custom section's own name) (T60.1, A138); a queue keeps only the latest
+  Status { status: Status }                     // beside the list: `queued`, the turns waiting behind the running one (T37.24.8); `mode`, the `next_mode` ⇧⇥ asks for, and the main turn's `model` and `effort`, seeded from config and kept by `StateChanged`/`TurnStarted`/`ModelSwitched` (T37.24.7), with the catalog's `model_name` for that model (A111, T37.22.7), and `provider` (the `[providers.<name>]` section of the tier that model runs on: the `code` tier's on open, then the latest main turn's tier; `None` for an ACP session) with `provider_name`, what a person calls it (`models::provider_name`: `Anthropic`, `LM Studio`, a custom section's own name) (T60.1, A139); a queue keeps only the latest
   Usage { usage: UsageView }                    // token meter (DS§7): ledger totals, tok/s, TTFT, and `text` (MeterText, T37.25): every figure formatted, with the window share and the system/tools/instructions/history parts from the core's `ContextBreakdown` scaled to the last call's context (A98, T37.25.1), what the window has left, and the turn's cache hit (the Context tab, T37.29.3.1); a queue keeps only the latest
 }
 ```
@@ -424,7 +424,7 @@ enum TimelinePatch {
 Keyed by id, not index, so SwiftUI identity is stable and a dropped patch can
 be healed by `Reset`. Streaming markdown re-parses only the open tail block.
 
-**Model menu (T60.1, A138).** `App::model_menu(cwd, usable)` returns the
+**Model menu (T60.1, A139).** `App::model_menu(cwd, usable)` returns the
 model popover's sections, grouped by provider: one `ModelSection` per tier's
 provider (`title` `Code`, `Think` or `Cheap`) in first-listed order, then one
 per further configured `[providers.<name>]` section that lists models, titled
@@ -511,7 +511,7 @@ Rules:
   `AppHost`, so CoxPlatform tests without the XCFramework and CoxCore never
   links AppKit. The app passes `HostBridge(MacHost())` to `LiveCoreClient`.
 
-- Provider readiness and the provider pick (T60.4, A138; platform-neutral, a
+- Provider readiness and the provider pick (T60.4, A139; platform-neutral, a
   Windows or Linux client binds the same exports):
   - `App.readiness(cwd) -> Readiness` (async, it probes): whether a turn in
     `cwd` may start on the configured code-tier provider. `SessionHandle.readiness()`
@@ -639,7 +639,7 @@ Default window 1 440 × 900, minimum 900 × 600. A three-column
   a thin red strip under the whole toolbar for as long as it is on. The model
   and the permission mode are not here: they are the composer's chips (§5.3),
   so a client places them beside the text they apply to, and the toolbar keeps
-  only the mode it needs for the strip (T60.6, A138).
+  only the mode it needs for the strip (T60.6, A139).
 - **Sidebar**: filter field; "Needs you" (sessions with a pending approval or
   question, orange count); "Running"; then projects as disclosure groups.
   A row: status glyph (● running, ◐ waiting for you, ○ idle, ✕ error),
@@ -731,7 +731,7 @@ as the text shown: a prompt without its tiles, a folded thought as nothing.
 - Paste or drop images and files; they show as removable chips.
 - While a turn runs, ⏎ queues the message (the send button shows "Queued ·
   1"); ⌘⏎ interrupts and sends now; ⌘. interrupts.
-- Sending is disabled until the session can answer (T60.2, A138). A client
+- Sending is disabled until the session can answer (T60.2, A139). A client
   asks `App::readiness(cwd)` (async: it re-probes, so a key added in Settings
   or a server just started counts at once) and, unless it returns `Ready`,
   disables Send, ⏎ and Best of and shows `Readiness::message()` beside the
@@ -822,7 +822,7 @@ as the text shown: a prompt without its tiles, a folded thought as nothing.
   keeps the old handle until it is reopened; the switch is only possible before
   the first turn, so this is rare. `AppError::ProviderLocked` is shown with the
   core's message and a "New session" button instead of the swap.
-- Provider pick (T60.3, A138): the model menu also lists the models of the
+- Provider pick (T60.3, A139): the model menu also lists the models of the
   other configured provider sections. Picking one sends
   `Intent::SwitchProvider { provider, model, make_default }` through
   `LiveSession::send` (`SessionHandle.send` over the FFI). A model of the

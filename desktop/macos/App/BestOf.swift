@@ -39,7 +39,7 @@ final class BestOfLauncher {
   /// Every other agent this cwd can run, cox if an agent drives the session, and cox on each
   /// code-tier model; `driver` is the session's own agent, `nil` for cox. While the session's
   /// provider cannot answer nothing launches, and a cox candidate on a provider outside `usable`
-  /// cannot be added (T60.5, A138).
+  /// cannot be added (T60.5, A139).
   func state(_ open: OpenedSession, driver: String?, usable: [String]?) -> BestOfControl.State {
     let readiness = open.composer.readiness
     let agents = open.agents.compactMap { agent -> BestOfControl.Option? in
