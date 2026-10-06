@@ -83,13 +83,18 @@ impl App {
     /// added in Settings or a server just started counts at once; call it off
     /// the main thread.
     pub async fn readiness(&self, cwd: &Path) -> Result<Readiness, AppError> {
-        let config = self.config(cwd)?;
+        Ok(self.readiness_of(&self.config(cwd)?).await)
+    }
+
+    /// [`App::readiness`] for a session's own `config`: one reopened on a
+    /// picked provider (T60.3) runs on it, not on the default.
+    pub(crate) async fn readiness_of(&self, config: &Config) -> Readiness {
         if test_double() {
-            return Ok(Readiness::Ready);
+            return Readiness::Ready;
         }
         let host = &self.host;
         let keys = |section: &str| host.secret(section);
-        Ok(readiness(&config, &usable(&config, &keys).await))
+        readiness(config, &usable(config, &keys).await)
     }
 }
 

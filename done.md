@@ -9696,3 +9696,28 @@ Out of scope: switching provider (T60.3), FFI (T60.4).
 
 - Result: `Status` gains `provider` and `provider_name` (`models::provider_name`: brand for the native sections, the section name for a custom one); `StatusFold` keeps each tier's provider and sets them on open and on the latest main turn's tier, and a `code` model switch keeps the section. `TimelinePatch::Status` now boxes its `Status` (the clippy large-variant lint). `ModelSection` gains `provider` and `usable`; `menu(config, choices, usable)` lists each tier's provider, then every other configured provider that lists models, titled with its name on the `Code` tier; a model is listed once per provider. `App::model_menu(cwd, usable)` and `cox-ffi`'s `model_menu(cwd, usable)` take the `usable_providers` answer. cox-ffi remote declarations updated. DT§4.3 documents both. Swift callers of `modelMenu(cwd:)` and the new fields are T60.4.
 - Check output: `cargo nextest run -p cox-app -p cox-ffi` 241 passed; `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+#### T60.3 Choose the provider before the first turn
+
+Model: Claude Code / opus · Status: done 2026-10-07 · Depends: T60.1 · Size: ~200 · Priority: P1 · Complexity: 4
+
+Goal: the user picks another provider's model in the model menu while the session has no turn yet; the session is reopened on that provider with the same cwd and id-less draft; after the first turn the pick is refused with "start a new session to change provider". Optionally the pick is saved as the default.
+
+Files:
+- `crates/cox-app/src/intent.rs` (`Intent::SwitchProvider { provider, model, make_default }`)
+- `crates/cox-app/src/live.rs` (no turn yet → close and reopen through `cox_session::open_with_keys` with `tiers.code.provider` and `model` overridden in the `SessionSpec`; else the refusal)
+- `crates/cox-app/src/app.rs` (`make_default` writes `tiers.code.provider` and `tiers.code.model` to the user config through `cox-config`'s `set`)
+
+Steps:
+1. The reopen keeps the window's session slot; the old empty session is ended, not left behind.
+2. Docs: DT§5.3 the provider pick and its first-turn limit; `roadmap.md` holds the mid-session switch.
+
+Check: as T60.1.
+
+Done when: a `tests/app.rs` case switches an empty session from `anthropic` to a scripted second section and sees `Status.provider` change, and a session with one turn refuses.
+
+Out of scope: switching provider mid-session (roadmap, A138).
+
+- Result: `Intent::SwitchProvider { provider, model, make_default }` dispatches to `Dispatch::SwitchProvider`; an external agent's session refuses it by name. `LiveSession::send` runs it: the session's own provider is a plain `SwitchModel { Code }`; another one, only while no turn was spawned and the core's history is empty, reopens the session in place — `open_with` resumes the same id through `cox_session::open_with_keys` with `tiers.code.provider`/`model` overridden — so the window's slot, the `sessions` row and the rollout stay one session (no orphan row, no store change); the old session is ended only after the new one opened, so a provider that cannot open leaves it running. After a turn: `AppError::ProviderLocked`, "start a new session to change provider". `make_default` writes both keys through the Settings setter (`App::make_default`, both or neither). The inbox tee no longer expires items of an id a reopened session still runs (`App::is_open`). After merging T60.2: the send gate reads the session's own provider (`LiveSession::readiness()`, `App::readiness_of`), so a session reopened on a usable pick may send while the default has no key. `cox-ffi` mirrors the variant; the Swift side and a `readiness()` export are T60.4. DT§5.3 documents the pick, its first-turn limit and the calls.
+- Tests: `intent::tests::switch_provider_is_a_reopen_and_needs_a_provider`; `tests/app.rs` `an_empty_session_reopens_on_the_picked_provider_in_place` (same id, provider `second`, status model, old stream closes, one row, a turn runs), `a_provider_pick_made_default_lands_in_the_user_config`, `a_session_with_a_turn_refuses_another_provider`, `a_session_reopened_on_a_usable_provider_may_send`.
+- Check output summary: `cargo nextest run -p cox-app -p cox-ffi -p cox-session` 305 passed; `cargo clippy -p cox-app -p cox-ffi -p cox-session --all-targets -- -D warnings` clean; `cargo fmt --check` clean.

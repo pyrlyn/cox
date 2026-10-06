@@ -110,6 +110,10 @@ pub enum AppError {
     /// T52.9: a best-of-n launch had nothing to launch, or names no group.
     #[error(transparent)]
     BestOf(#[from] crate::best_of::BestOfError),
+    /// T60.3: a session's provider is fixed once its history holds a turn,
+    /// whose cache and tool calls belong to that provider's wire.
+    #[error("start a new session to change provider")]
+    ProviderLocked,
     /// T60.2 (DT§5.3): a turn was refused because its provider cannot answer.
     #[error("{}", .0.message().unwrap_or_default())]
     NotReady(crate::readiness::Readiness),
@@ -421,6 +425,41 @@ impl App {
     fn live_sessions(&self) -> Vec<Arc<LiveSession>> {
         let all = self.live.lock().unwrap_or_else(PoisonError::into_inner);
         all.iter().filter_map(Weak::upgrade).collect()
+    }
+
+    /// Whether a session here runs `id`: one reopened on another provider
+    /// (T60.3) keeps its predecessor's id.
+    pub(crate) fn is_open(&self, id: SessionId) -> bool {
+        self.live_sessions().iter().any(|l| l.id() == id)
+    }
+
+    /// T60.3: `provider` and `model` become the code tier's default in this
+    /// home's `config.toml`, through the setter Settings uses, so a key a
+    /// project layer pins is refused the same way. Both or neither: a
+    /// provider left with the other section's model would not open.
+    pub(crate) fn make_default(
+        &self,
+        cwd: &Path,
+        provider: &str,
+        model: &str,
+    ) -> Result<(), AppError> {
+        let user = self.user_config();
+        let previous = std::fs::read(&user).ok();
+        let write = || -> Result<(), SettingsError> {
+            let json = |v: &str| serde_json::Value::from(v).to_string();
+            crate::settings::set(&user, cwd, "tiers.code.provider", &json(provider))?;
+            crate::settings::set(&user, cwd, "tiers.code.model", &json(model))?;
+            Ok(())
+        };
+        let Err(e) = write() else {
+            return Ok(());
+        };
+        // Best effort: the first key may be written already.
+        let _ = match previous {
+            Some(bytes) => std::fs::write(&user, bytes),
+            None => std::fs::remove_file(&user),
+        };
+        Err(e.into())
     }
 
     /// Sets `key` to `json` in this home's `config.toml`; the new view.
