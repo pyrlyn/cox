@@ -2218,7 +2218,7 @@ Every card in this phase:
 
 #### T60.4 FFI and Swift client for readiness, provider and provider switch
 
-Model: sonnet · Status: open · Depends: T60.1, T60.2, T60.3 · Size: ~180 · Priority: P0 · Complexity: 3
+Model: Claude Code / sonnet · Status: in progress · Depends: T60.1, T60.2, T60.3 · Size: ~180 · Priority: P0 · Complexity: 3
 
 Goal: Swift sees `Status.provider`, the grouped menu with `usable`, `readiness` and `Intent.switchProvider`, with fixtures, so the views in T60.5–T60.7 build against them.
 
