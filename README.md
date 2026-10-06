@@ -1,3 +1,5 @@
+<img src="brand/logo/cox-mark.svg" width="96" height="96" alt="cox logo">
+
 # cox
 
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=listepo_cox&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=listepo_cox) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=listepo_cox&metric=coverage)](https://sonarcloud.io/component_measures?id=listepo_cox&metric=coverage) [![Tests](https://img.shields.io/sonar/tests/listepo_cox?server=https%3A%2F%2Fsonarcloud.io&compact_message)](https://sonarcloud.io/component_measures?id=listepo_cox&metric=tests)
