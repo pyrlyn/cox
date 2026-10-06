@@ -20,7 +20,7 @@ env:
   CARGO_TERM_COLOR: always
 
 # Every job installs Rust from mise.toml, the single source of the Rust
-# version: the `rust` job through the shared pyrlyn/infra workflow, the others
+# version: the `rust` job through the shared pyrlyn/ci workflow, the others
 # through .github/actions/rust. Both fail when rustc is not that pin.
 jobs:
   # infra's config action on .github/infra.yml: `docs-only` is "true" when every changed file
@@ -34,9 +34,9 @@ jobs:
       docs-only: ${{ steps.config.outputs.docs-only }}
     steps:
       - id: config
-        uses: pyrlyn/infra/.github/actions/config@f880dee803f157cd4268a503418b4ecaf4da7078 # main
+        uses: pyrlyn/ci/.github/actions/config@f880dee803f157cd4268a503418b4ecaf4da7078 # main
 
-  # The shared pyrlyn/infra workflow, pinned by commit (descendant of e6e376e, which
+  # The shared pyrlyn/ci workflow, pinned by commit (descendant of e6e376e, which
   # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27):
   # fmt once, then per target clippy (--all-targets --all-features), check, and
   # nextest on every target (Linux x86_64 and aarch64, macOS aarch64; macOS is
@@ -44,7 +44,7 @@ jobs:
   rust:
     needs: config
     if: ${{ !cancelled() }}
-    uses: pyrlyn/infra/.github/workflows/ci-rust.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
+    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
     # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
     # `actions: write` on the calling job.
     permissions:
@@ -240,7 +240,7 @@ jobs:
         if: env.RUN == 'true'
         run: bash scripts/footprint.sh --check
 
-  # Which suites this change needs, from the shared pyrlyn/infra classification
+  # Which suites this change needs, from the shared pyrlyn/ci classification
   # (changes.yml): per ecosystem, whether anything changed and whether a
   # dependency manifest or lock changed (`*_deps`, which forces that full suite).
   # Only the macOS jobs below read it. The Rust jobs above always run in full on
@@ -252,7 +252,7 @@ jobs:
   # skipping them. A skipped macOS job reports `skipped` under its own name,
   # which a required check treats as passed.
   changes:
-    uses: pyrlyn/infra/.github/workflows/changes.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
+    uses: pyrlyn/ci/.github/workflows/changes.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
     permissions:
       contents: read
     with:
@@ -275,7 +275,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pyrlyn/infra/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
         with:
           version: '27'
 
@@ -462,6 +462,6 @@ jobs:
       # The shared action skips new branches, bot and earlier auto-revert commits, bases
       # missing locally and pushes touching .github/ (GITHUB_TOKEN cannot push workflow
       # files). No re-apply PR, as before (that would need pull-requests: write).
-      - uses: pyrlyn/infra/.github/actions/revert-on-failure@863d8960601216eec62d4aa78924f84ce61d72b9
+      - uses: pyrlyn/ci/.github/actions/revert-on-failure@863d8960601216eec62d4aa78924f84ce61d72b9
         with:
           reapply-pr: "false"

@@ -6,7 +6,7 @@
 # Linux job A (plan.md T4.2): install bubblewrap and let it create user
 # namespaces, so the sandbox picks bwrap and can wrap an argv, then export
 # COX_EXPECT_SANDBOX=bwrap. Run by .github/actions/bwrap and by the `rust`
-# job's setup-command in ci.yml (pyrlyn/infra ci-rust.yml).
+# job's setup-command in ci.yml (pyrlyn/ci ci-rust.yml).
 set -euo pipefail
 sudo apt-get update
 sudo apt-get install -y bubblewrap

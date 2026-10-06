@@ -1,7 +1,7 @@
 name: release
 
 # The one release workflow, and its one trigger. It never tags a normal release: bump.yml
-# (Actions -> Bump and release, pyrlyn/infra bump.yml) is the only way to one. bump runs
+# (Actions -> Bump and release, pyrlyn/ci bump.yml) is the only way to one. bump runs
 # `scripts/release.sh --local`, opens a pull request with the version commit, rebase-merges it
 # once every required check is green, tags the commit that landed on main, creates a *draft*
 # release with the CHANGELOG.md section for the version, and dispatches this workflow with
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.ref }}
-      - uses: pyrlyn/infra/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
         with:
           version: '27'
       # The Rust mise.toml pins, checked like in ci.yml. `cox-plugin-fixtures`
@@ -329,8 +329,8 @@ jobs:
           git push origin HEAD
 
   # A failed release opens or comments on a `release-failure` issue that mentions and assigns
-  # @listepo (pyrlyn/infra notify-release-failure): GitHub cannot filter Actions notifications
-  # per workflow, so this is the release failure notification. Pinned to pyrlyn/infra
+  # @listepo (pyrlyn/ci notify-release-failure): GitHub cannot filter Actions notifications
+  # per workflow, so this is the release failure notification. Pinned to pyrlyn/ci
   # ci/notify-release-failure; repin to its merge commit.
   notify-failure:
     needs: [version, verify, cli, desktop, publish, tap]
@@ -341,7 +341,7 @@ jobs:
       actions: read # failed job names
       issues: write
     steps:
-      - uses: pyrlyn/infra/.github/actions/notify-release-failure@d709124d53dd4923eff8f594b3155842508b0049
+      - uses: pyrlyn/ci/.github/actions/notify-release-failure@d709124d53dd4923eff8f594b3155842508b0049
         with:
           ref: ${{ needs.version.outputs.tag || github.ref_name }}
           needs: ${{ toJSON(needs) }}
