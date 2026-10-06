@@ -8,7 +8,7 @@
 
 **cox** is named for the coxswain: it steers the work while models, tools, and extensions row. It is being built as one reliable, testable agent core with several ways to use it: an interactive terminal UI, headless automation, editor integration through ACP, and MCP tools for other agents.
 
-[Documentation](https://pyrlyn.github.io/landing/cox/docs/) · [Getting started](docs/getting-started.md) · [Configuration](docs/config.md)
+[Documentation](https://pyrlyn.github.io/landing/cox/docs/) · [Getting started](docs/getting-started.md) · [Architecture](docs/architecture.md) · [Configuration](docs/config.md) · [Screens](docs/screens.md)
 
 ## 60-second start
 
