@@ -175,8 +175,7 @@ struct BestOfSheet: View {
           BestOfCompare.File(path: $0.path, added: Int($0.added), removed: Int($0.removed))
         },
         cost: cost(view), duration: duration(view.durationMs),
-        canReview: view.session != nil && view.state != .pruned,
-        canKeep: !isKept && view.state == .done && view.worktree != nil)
+        canReview: view.canReview, canKeep: view.canKeep(anotherKept: isKept))
     }
     var confirm: BestOfCompare.Confirm?
     if let pending = store.pending {
@@ -191,7 +190,7 @@ struct BestOfSheet: View {
     }
     let total = store.columns.reduce(0) { $0 + $1.costUsd }
     return BestOfCompare.State(
-      prompt: prompt, total: String(format: "$%.2f", total), columns: columns, confirm: confirm,
+      prompt: prompt, total: usd(total), columns: columns, confirm: confirm,
       notes: [store.failure].compactMap(\.self) + store.refused)
   }
 
@@ -213,7 +212,7 @@ struct BestOfSheet: View {
   /// An external agent bills itself: no cox ledger cost to show.
   private static func cost(_ view: CandidateView) -> String {
     if case .agent = view.candidate { return "—" }
-    return String(format: "$%.2f", view.costUsd)
+    return usd(view.costUsd)
   }
 
   private static func duration(_ milliseconds: UInt64) -> String {
