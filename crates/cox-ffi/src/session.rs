@@ -9,9 +9,9 @@
 
 use std::sync::Arc;
 
+use cox_app::Readiness;
 use cox_app::TerminalHandle as Terminal;
 use cox_app::diffmodel::DiffModel;
-use cox_app::Readiness;
 use cox_app::live::LiveSession;
 use cox_app::{
     Block, Changes, Completion, Info, Intent, PaletteHit, PaletteItem, PluginKey, TaskTarget,

@@ -136,3 +136,12 @@ enum ShellState {
     }
   }
 }
+
+extension ModelsClient {
+  /// The model popover's sections for a session in `cwd`, each marked by the providers a turn
+  /// could run on: the list the footer already read, else one probe now (T60.4).
+  func modelSections(cwd: String, usable known: [String]?) async -> [ModelSection] {
+    let usable = if let known { known } else { (try? await usableProviders(cwd: cwd)) ?? [] }
+    return (try? modelMenu(cwd: cwd, usable: usable)) ?? []
+  }
+}

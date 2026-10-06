@@ -13,7 +13,8 @@ import Testing
 @testable import CoxModel
 
 @Test func aStatusDecodesItsProviderAndAnOldFixtureWithoutOneStillDecodes() throws {
-  let json = #"{"queued":0,"model":"claude-sonnet-5","provider":"anthropic","provider_name":"Anthropic"}"#
+  let json =
+    #"{"queued":0,"model":"claude-sonnet-5","provider":"anthropic","provider_name":"Anthropic"}"#
   let status = try JSONDecoder().decode(Status.self, from: Data(json.utf8))
   #expect(status.provider == "anthropic")
   #expect(status.providerName == "Anthropic")

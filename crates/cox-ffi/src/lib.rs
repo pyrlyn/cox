@@ -19,10 +19,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use cox_app::ModelSection;
+use cox_app::Readiness;
 use cox_app::WorkspaceError;
 use cox_app::app::{App as Owner, AppError as OwnerError};
 use cox_app::best_of::{BestOfId, BestOfRequest, CandidateView, Picked};
-use cox_app::Readiness;
 use cox_app::onboarding::CheckRow;
 use cox_app::remote::RemoteError;
 use cox_app::terminal::TerminalError;

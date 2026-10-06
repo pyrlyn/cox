@@ -2216,24 +2216,6 @@ Every card in this phase:
 - leaves a test that fails without it (`insta` or a unit test in Rust, swift-snapshot-testing or Swift Testing in Swift).
 
 
-#### T60.4 FFI and Swift client for readiness, provider and provider switch
-
-Model: Claude Code / sonnet · Status: in progress · Depends: T60.1, T60.2, T60.3 · Size: ~180 · Priority: P0 · Complexity: 3
-
-Goal: Swift sees `Status.provider`, the grouped menu with `usable`, `readiness` and `Intent.switchProvider`, with fixtures, so the views in T60.5–T60.7 build against them.
-
-Files:
-- `crates/cox-ffi/src/types.rs`, `crates/cox-ffi/src/lib.rs` (forward-only, D11)
-- `desktop/macos/Packages/CoxModel/Sources/CoxClient/` (`Models.swift`, `Timeline.swift`, `Intent` mirror) and `desktop/macos/Packages/CoxCore/Sources/CoxCore/` conversions; fixture clients
-
-Steps:
-1. Remote types and exports; `just desktop-xcframework` regenerates the bindings.
-2. Docs: DT§4.4 lists the new exports.
-
-Check: `mise exec -- cargo nextest run -p cox-ffi`, then `swift test` in `CoxModel` and `CoxCore`.
-
-Done when: `tests/forward_only.rs` passes and a CoxClient fixture test decodes a status with a provider and a menu with an unusable section.
-
 #### T60.5 Composer: Send, ⏎ and Best of wait for a usable provider
 
 Model: sonnet · Status: open · Depends: T60.4 · Size: ~180 · Priority: P0 · Complexity: 3

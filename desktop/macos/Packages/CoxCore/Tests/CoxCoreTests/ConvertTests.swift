@@ -203,8 +203,10 @@ import Testing
   defer { try? FileManager.default.removeItem(at: home) }
   let none = try client.modelMenu(cwd: home.path(), usable: [])
   #expect(!none.isEmpty && none.allSatisfy { !$0.usable && !$0.provider.isEmpty })
-  let all = try client.modelMenu(cwd: home.path(), usable: none.map(\.provider))
-  #expect(all.allSatisfy(\.usable))
+  let providers = none.map(\.provider)
+  let all = try client.modelMenu(cwd: home.path(), usable: providers)
+  let marked = all.allSatisfy { $0.usable }
+  #expect(marked)
 }
 
 /// T60.4: the core's readiness crosses with its own wording, and a provider switch is the

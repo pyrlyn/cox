@@ -9747,3 +9747,25 @@ Check output:
 - CoxUI `swift test --filter` over the touched suites: `ModeMenuTests` 3 passed; the re-recorded snapshots `composer-status`/`composer-think` (8), `mainScreen*` (11), `sessionToolbar` (4), `agentToolbar` (4), `AppearancePopoverTests/mainScreenDrawsThePopoversMaterial` (3) and `reduceTransparencyWindowIsSolid`, and the new `ModelPopoverTests/mainScreenHangsItOverTheComposersChip`, pass. Other CoxUI snapshots (Foundations, sidebar, composer's other states, …) already differ from their references on this machine's macOS 27 rendering, before and after this change; they were not re-recorded.
 - CoxTranscript `ComposerFlowTests` 9 passed, including `clickingTheModelChipAsksTheWindowToOpenTheModelPopover` (a synthesized click) and `shiftTabAsksForTheModeTheCoreNamesNext`; CoxModel `swift test` 131 passed (`theModeMenuAsksForTheModePickedNotTheNextOne`).
 - `scripts/desktop/app.sh` builds `Cox.app`; `swiftlint lint --strict` and `xcrun swift-format lint --strict` clean on the changed files.
+
+#### T60.4 FFI and Swift client for readiness, provider and provider switch
+
+Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: T60.1, T60.2, T60.3 · Size: ~180 · Priority: P0 · Complexity: 3
+
+Goal: Swift sees `Status.provider`, the grouped menu with `usable`, `readiness` and `Intent.switchProvider`, with fixtures, so the views in T60.5–T60.7 build against them.
+
+Files:
+- `crates/cox-ffi/src/types.rs`, `crates/cox-ffi/src/lib.rs` (forward-only, D11)
+- `desktop/macos/Packages/CoxModel/Sources/CoxClient/` (`Models.swift`, `Timeline.swift`, `Intent` mirror) and `desktop/macos/Packages/CoxCore/Sources/CoxCore/` conversions; fixture clients
+
+Steps:
+1. Remote types and exports; `just desktop-xcframework` regenerates the bindings.
+2. Docs: DT§4.4 lists the new exports.
+
+Check: `mise exec -- cargo nextest run -p cox-ffi`, then `swift test` in `CoxModel` and `CoxCore`.
+
+Done when: `tests/forward_only.rs` passes and a CoxClient fixture test decodes a status with a provider and a menu with an unusable section.
+
+- Result: `cox-ffi` exports the `Readiness` enum (`Ready | NoProvider | NoKey{provider} | Unreachable{provider}`), `readiness_message(readiness)` (the core's text), `App.readiness(cwd)` and `SessionHandle.readiness()` (async; the session-effective one a client gates an open session on) and `SessionHandle.provider()`. `AppError` gains `NotReady{readiness, message}` and `ProviderLocked{message}` beside the generic ones, mapped in the existing `From` exemption. `Status.provider/provider_name`, `ModelSection.provider/usable` and `Intent::SwitchProvider` were already complete across the boundary. Swift: `CoxClient.Readiness` (`reason` + the core's `message`), `ModelSection.provider/usable`, `ModelsClient.modelMenu(cwd:usable:)` and `readiness(cwd:)`, `Status.provider/providerName`, `Intent.switchProvider(provider:model:makeDefault:)`, `SessionClient.provider()/readiness()` (a default of ready for a session whose host gates its sends, a remote one), fixtures (`FixtureModels`, `FixtureSession(provider:readiness:)`), the CoxCore conversions and the one `App/` call site. `AppStore.replace(_:with:)` puts the reopened session a provider switch returns into the windows holding it under the same id; the window wiring is T60.7. DT§4.4 lists the exports. No fixture shape changed, so none was re-recorded.
+- Check output: `cargo nextest run -p cox-ffi -p cox-app` 256 passed (incl. `tests/forward_only.rs`); `cargo clippy -p cox-ffi -p cox-app --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `swift test` CoxModel 140 and CoxCore 27 passed; CoxUI builds with its tests; `just desktop-app` builds `Cox.app`; SwiftLint `--strict` on `App` and swift-format `--strict` clean.
+
