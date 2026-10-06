@@ -1413,6 +1413,9 @@ pub const DESKTOP_MAX_BLUR_PT: f64 = 60.0;
 /// DS§3.4: Depth scales every elevation level by 0…1; 1 draws the
 /// `elevation.*` tokens unscaled, as designed.
 pub const DESKTOP_DEFAULT_DEPTH: f64 = 1.0;
+/// DS§3.5: the glare scales the material's specular sweep by 0…1; 1 draws
+/// `material.*Specular` as designed, today's look.
+pub const DESKTOP_DEFAULT_SPECULAR: f64 = 1.0;
 /// `desktop/design/tokens/base.json` `font.transcript.size` (DS§3.2): the
 /// transcript's prose size in pt at 100 % text size. Copied like the opacity.
 pub const DESKTOP_DEFAULT_TEXT_SIZE_PT: f64 = 13.5;
@@ -1492,6 +1495,12 @@ pub struct DesktopAppearanceConfig {
     #[serde(deserialize_with = "unit_interval")]
     #[schemars(range(min = 0.0, max = 1.0))]
     pub depth: f64,
+    /// Glare: the specular sweep's strength, 0 (none) to 1 (the material's
+    /// full sweep). A client draws `material.*Specular × specular`; Solid and
+    /// Increase Contrast stay at 0 whatever this is (DS§3.5).
+    #[serde(deserialize_with = "unit_interval")]
+    #[schemars(range(min = 0.0, max = 1.0))]
+    pub specular: f64,
     /// Tint the glass from the wallpaper.
     pub tint: bool,
     /// `none` | `subtle`: the top-edge highlight in dark mode (A109).
@@ -1530,6 +1539,7 @@ impl Default for DesktopAppearanceConfig {
             opacity: DESKTOP_DEFAULT_OPACITY,
             blur: DESKTOP_DEFAULT_BLUR_PT,
             depth: DESKTOP_DEFAULT_DEPTH,
+            specular: DESKTOP_DEFAULT_SPECULAR,
             tint: true,
             dark_highlight: DarkHighlight::None,
             dark_highlight_scope: DarkHighlightScope::Controls,

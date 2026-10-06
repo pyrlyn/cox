@@ -240,8 +240,11 @@ the filter prompt 7.1:1, laid over opaque `surface.window` (§8).
 - The user sets material, window transparency, blur (frosted) or reflection (glossy), Depth, and
   "Tint from wallpaper" in the Appearance popover (toolbar paintbrush, ⌘⌥A) and in Settings ›
   Appearance. They are stored in Rust-owned config under `[desktop.appearance]`
-  (`material`, `opacity`, `blur`, `depth`, `tint`), so they have a schema and provenance like any other
+  (`material`, `opacity`, `blur`, `depth`, `specular`, `tint`), so they have a schema and provenance like any other
   setting.
+- Glare (T60.8, A138): `desktop.appearance.specular`, 0 (none) to 1 (default, today's look), scales the
+  sweep: a client draws `glass.specular` at `material.*Specular × specular`. Solid and Increase Contrast
+  stay at 0 whatever the setting.
 - Text-bearing surfaces — messages, code, diffs, terminal, popovers, the composer — never drop below
   `material.readableFloor`. The transparency slider only moves the window's background; the panes
   over it keep `glass.fill` (T51.23).
