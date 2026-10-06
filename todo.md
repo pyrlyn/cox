@@ -96,6 +96,5 @@
 - T60.5. Composer: Send, ⏎ and Best of wait for a usable provider
 - T60.6. Model and mode move from the toolbar to the composer
 - T60.7. Provider in the model chip and a grouped model popover
-- T60.8. `desktop.appearance.specular`: the glare setting
 - T60.9. Glare slider in Appearance
 - T60.10. Best of: the real failure reason, no negative zero, no actions on a failed candidate
