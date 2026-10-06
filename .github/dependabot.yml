@@ -4,7 +4,7 @@
 # them and merges a patch update once that run is green; minor and major
 # updates are labelled `needs-review`.
 # Cargo covers the workspace and the fuzz targets (their own workspace and
-# lockfile); npm covers the Hugo site's Tailwind toolchain.
+# lockfile).
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -31,8 +31,3 @@ updates:
         update-types: ["patch"]
       actions:
         update-types: ["minor", "major"]
-    groups:
-      npm-patch:
-        update-types: ["patch"]
-      npm-minor:
-        update-types: ["minor"]
