@@ -61,7 +61,7 @@ brand/
   tokens.json      cox roles + --cox-* extras, extends @pyrlyn/brand/base/tokens.json
   build.mjs        -> dist/tokens.css, dist/tokens.resolved.json, the table below
   DESIGN.md        cox brandbook (deltas only)
-  logo/ (+png/)    mark, wordmark, favicon; PNG exports
+  logo/ (+png/)    mark, wordmark, favicon; PNG exports rendered by `just brand-icons`
   preview/         light/dark preview PNGs
 ```
 
@@ -128,6 +128,8 @@ Brand constants: `--cox-brand-forest` `#0F1A14` · `--cox-brand-chartreuse` `#A8
 - `logo/cox-mark.svg`, `cox-wordmark.svg`, `cox-favicon.svg` are byte-identical to `docs/brand/logo.svg`,
   `logo-wordmark.svg`, `favicon.svg` (and `website/static/images/cox-mark.svg`, `favicon.svg`);
   `png/cox-icon-logo-512-landing-v1.png` and `png/cox-icon-favicon-256.png` = `docs/assets/landing-v1/`.
+  Since A136 every PNG in `logo/png/` is rendered from these SVGs by `just brand-icons`; the
+  landing-v1 512 px copy was dropped as a duplicate of `cox-icon-logo-512.png`.
 - The colour roles were taken from `docs/brand/tokens.css` at `03825e72`, which is still current `main`.
 
 ## Known gaps

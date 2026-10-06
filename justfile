@@ -181,10 +181,11 @@ i18n-check:
 desktop-tokens:
     cd desktop/design && mise exec -- npm ci --no-fund --no-audit && mise exec -- npm run build
 
-# The macOS app icon (desktop/macos/App/AppIcon.icon) and CoxUI's vector mark, derived
-# from brand/logo/cox-mark.svg; CI runs `--check` and fails on drift.
+# Every icon and logo raster from the SVGs in brand/logo/: the PNG exports in
+# brand/logo/png/ (resvg, the mise pin), the macOS app icon (desktop/macos/App/AppIcon.icon)
+# and CoxUI's vector mark. CI runs `--check` and fails on drift.
 brand-icons *args:
-    python3 scripts/brand_icons.py {{args}}
+    mise exec -- python3 scripts/brand_icons.py {{args}}
 
 # $CARGO_HOME sizes (no deletes) and ./target
 cache:

@@ -5,9 +5,24 @@
 """Tests for `brand_icons`: the app icons derived from brand/logo/cox-mark.svg."""
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
-from brand_icons import GLYPH, ICON, IMAGESET, MARK, BrandError, outputs, split_mark
+from brand_icons import (
+    FAVICON,
+    GLYPH,
+    ICON,
+    IMAGESET,
+    LOGO,
+    MARK,
+    PNGS,
+    BrandError,
+    outputs,
+    rasters,
+    split_mark,
+    sync,
+)
 
 MARK_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
@@ -54,6 +69,43 @@ class Outputs(unittest.TestCase):
         imageset = json.loads(files[IMAGESET / "Contents.json"])
         self.assertTrue(imageset["properties"]["preserves-vector-representation"])
         self.assertEqual(imageset["images"][0]["filename"], MARK.name)
+
+
+def fake_render(svg, size, out):
+    out.write_bytes(f"{svg.name}@{size}".encode())
+
+
+class Rasters(unittest.TestCase):
+    def test_small_sizes_come_from_the_favicon_and_large_ones_from_the_mark(self):
+        for name, (svg, size) in PNGS.items():
+            self.assertEqual(svg, FAVICON if "favicon" in name else MARK, name)
+            self.assertIn(str(size), name)
+
+    def test_every_png_lands_in_brand_logo_png_from_its_source(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            files = rasters(Path("/repo"), fake_render, Path(scratch))
+        self.assertEqual(files[LOGO / "png" / "cox-icon-logo-512.png"], b"cox-mark.svg@512")
+        self.assertEqual(files[LOGO / "png" / "cox-favicon-32x32.png"], b"cox-favicon.svg@32")
+        self.assertEqual(len(files), len(PNGS))
+
+
+class Sync(unittest.TestCase):
+    def test_check_reports_a_stale_file_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.png").write_bytes(b"old")
+            stale = sync(root, {Path("a.png"): b"new", Path("b.png"): b"x"}, check=True)
+            self.assertEqual(stale, [Path("a.png"), Path("b.png")])
+            self.assertEqual((root / "a.png").read_bytes(), b"old")
+            self.assertFalse((root / "b.png").exists())
+
+    def test_a_write_updates_only_what_differs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "same.png").write_bytes(b"same")
+            stale = sync(root, {Path("same.png"): b"same", Path("d/new.png"): b"n"}, check=False)
+            self.assertEqual(stale, [Path("d/new.png")])
+            self.assertEqual((root / "d/new.png").read_bytes(), b"n")
 
 
 if __name__ == "__main__":
