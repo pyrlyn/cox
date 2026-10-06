@@ -2322,25 +2322,6 @@ Check: `swift test` in `CoxModel`, `CoxTranscript` and `CoxUI`.
 
 Done when: `ComposerStoreTests` show submit refused without a usable provider, `ComposerFlowTests` show ⏎ ignored, and `BestOfTests` snapshot the disabled capsule.
 
-#### T60.6 Model and mode move from the toolbar to the composer
-
-Model: Claude Code / sonnet · Status: in progress · Depends: — · Size: ~200 · Priority: P1 · Complexity: 3
-
-Goal: the session toolbar no longer shows the model capsule or the Ask/Plan/Auto segmented control; the composer's model chip opens the model popover anchored to the chip, and its mode chip opens a menu of Ask, Plan, Auto and Bypass (Bypass with its warning), with ⇧⇥ still cycling. The Bypass danger strip under the toolbar stays.
-
-Files:
-- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/SessionToolbar.swift`
-- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/Composer.swift`
-- `desktop/macos/App/ShellState.swift` and the popover anchoring in `App/SessionWindow.swift`
-
-Steps:
-1. Reuse `ModelPopover` and `ModeSegmented`'s options; no new component.
-2. Docs: DT§5.1 window anatomy and DT§5.3 composer; DS§6.4/§6.5 toolbar and composer rows; the mockup note that the toolbar's model and mode moved (A138).
-
-Check: `swift test` in `CoxUI`; the toolbar and composer snapshots re-recorded in the package's record mode.
-
-Done when: `MainScreenTests` and `ComposerTests` snapshots show the new layout, and a test opens the model popover and the mode menu from the chips.
-
 #### T60.7 Provider in the model chip and a grouped model popover
 
 Model: sonnet · Status: open · Depends: T60.4, T60.6 · Size: ~200 · Priority: P1 · Complexity: 3

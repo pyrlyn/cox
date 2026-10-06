@@ -18,11 +18,20 @@ import SwiftUI
 /// the session waits on an approval or question, its `DecisionBar` sits above the composer.
 public struct SessionComposer: View {
   let store: ComposerStore
+  /// What the model chip names instead of the core's model: an external agent's session has
+  /// none of cox's own, and the toolbar that used to name its agent no longer shows the model.
+  let modelLabel: String?
+  /// The model chip was clicked: the window opens or closes the model popover over it.
+  let openModel: () -> Void
   @State private var isPicking = false
   @State private var isTokensOpen = false
 
-  public init(store: ComposerStore) {
+  public init(
+    store: ComposerStore, modelLabel: String? = nil, openModel: @escaping () -> Void = {}
+  ) {
     self.store = store
+    self.modelLabel = modelLabel
+    self.openModel = openModel
   }
 
   public var body: some View {
@@ -92,7 +101,7 @@ public struct SessionComposer: View {
     state.isRecalling = store.isRecalling
     state.failure = store.failure
     state.mode = store.mode.map(SessionMode.init)
-    state.model = store.model
+    state.model = modelLabel ?? store.model
     state.think = store.think
     if let usage = store.session.usage {
       state.meter = TokenMeter.State(usage, isRunning: store.isRunning)
@@ -110,16 +119,18 @@ public struct SessionComposer: View {
     case .removeAttachment(let id): if let index = Int(id) { store.removeAttachment(at: index) }
     case .recall(let step): store.recall(step)
     case .select(let range): store.select(range)
-    case .cycleMode, .toggleThink: chip(intent)
+    case .cycleMode, .setMode, .toggleThink, .openModel: chip(intent)
     default: draft(intent)
     }
   }
 
-  /// The chips that ask for something: the next mode, or think for the next turn.
+  /// The chips that ask for something: a mode, the model popover, or think for the next turn.
   private func chip(_ intent: Composer.Intent) {
     switch intent {
     case .cycleMode: Task { await store.cycleMode() }
+    case .setMode(let mode): Task { await store.setMode(PermissionMode(mode)) }
     case .toggleThink: store.toggleThink()
+    case .openModel: openModel()
     default: break
     }
   }

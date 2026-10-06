@@ -212,7 +212,7 @@ struct SessionWindow: View {
             }
           }
           // At its own height, so the transcript takes the rest of the column.
-          SessionComposer(store: showing.composer).fixedSize(horizontal: false, vertical: true)
+          composer(for: showing).fixedSize(horizontal: false, vertical: true)
           if isTerminalShown {
             SessionTerminal(
               store: showing.store, surfaces: showing.terminals,

@@ -4,18 +4,20 @@
 
 // `SessionToolbar` (DS§6.4 row `SessionToolbar`, the mockup's `.toolbar`; DT§5.1): the open
 // session's bar above the transcript — where it lives, its title renamed by a double-click
-// (A113), its model, mode and cost, Stop while a turn runs, the Appearance and inspector buttons
-// with their shortcuts, and the Bypass strip.
+// (A113), its cost, Stop while a turn runs, the Appearance and inspector buttons with their
+// shortcuts, and the Bypass strip. The model and the mode are the composer's chips (T60.6).
 // Separate so the window shell shows the session from one value the core fills, and reports what
 // the person does as intents.
 
 import SwiftUI
 
-/// `Breadcrumb` at the leading end; the capsules, Stop and the icon buttons at the trailing
+/// `Breadcrumb` at the leading end; the cost capsule, Stop and the icon buttons at the trailing
 /// end, `Size.toolbarHeight` tall on the window's own glass. It owns no session state. While
-/// the mode is Bypass a `status.danger` strip runs under the whole bar (DS§3.1, A89).
+/// the mode is Bypass a `status.danger` strip runs under the whole bar (DS§3.1, A89); the mode
+/// itself is chosen in the composer.
 public struct SessionToolbar: View {
-  /// The popover a capsule or button opens; the one open marks its capsule active.
+  /// The popover a capsule, button or composer chip opens; the one open marks its capsule active.
+  /// `model` hangs over the composer's model chip, not the bar.
   public enum Popover: Equatable, Sendable {
     case model, cost, appearance
   }
@@ -24,8 +26,7 @@ public struct SessionToolbar: View {
     public var title: String
     public var project: String
     public var branch: String?
-    /// The model and effort as the core formats them, `Sonnet 5 · high`.
-    public var model: String
+    /// Only the Bypass strip reads it; the composer's mode chip shows and sets it.
     public var mode: SessionMode
     /// What the core formatted: `$0.42` and `38%`, and the share the ring fills.
     public var cost: String
@@ -38,13 +39,12 @@ public struct SessionToolbar: View {
     public var pluginStatus: [PluginWidget]
 
     public init(
-      title: String = "", project: String = "", branch: String? = nil, model: String = "",
+      title: String = "", project: String = "", branch: String? = nil,
       mode: SessionMode = .ask, cost: String = "", context: String = "",
       contextFraction: Double = 0, isRunning: Bool = false, popover: Popover? = nil,
       pluginStatus: [PluginWidget] = []
     ) {
-      (self.title, self.project, self.branch, self.model, self.mode) =
-        (title, project, branch, model, mode)
+      (self.title, self.project, self.branch, self.mode) = (title, project, branch, mode)
       (self.cost, self.context, self.contextFraction) = (cost, context, contextFraction)
       (self.isRunning, self.popover, self.pluginStatus) = (isRunning, popover, pluginStatus)
     }
@@ -53,7 +53,6 @@ public struct SessionToolbar: View {
   public enum Intent: Equatable, Sendable {
     case showSidebar
     case open(Popover)
-    case mode(SessionMode)
     case stop
     case toggleInspector
     /// The title the person typed after double-clicking it (A113).
@@ -97,15 +96,12 @@ public struct SessionToolbar: View {
       }
       Spacer(minLength: Space.ml)
       if !state.pluginStatus.isEmpty {
-        // `ViewThatFits` falls back to nothing, so the segments go before any capsule does.
+        // `ViewThatFits` falls back to nothing, so the segments go before the cost capsule does.
         ViewThatFits(in: .horizontal) {
           PluginStatusSegments(widgets: state.pluginStatus)
           Color.clear.frame(width: 0, height: 0)
         }
       }
-      ModelCapsule(state.model, isOpen: state.popover == .model) { send(.open(.model)) }
-        .anchorPreference(key: ModelCapsuleAnchor.self, value: .bounds) { $0 }
-      ModeSegmented(selection: Binding(get: { state.mode }, set: { send(.mode($0)) }))
       CostCapsule(
         cost: state.cost, context: state.context, fraction: state.contextFraction,
         isOpen: state.popover == .cost

@@ -95,7 +95,6 @@
 - T60.3. Choose the provider before the first turn
 - T60.4. FFI and Swift client for readiness, provider and provider switch
 - T60.5. Composer: Send, ⏎ and Best of wait for a usable provider
-- T60.6. Model and mode move from the toolbar to the composer
 - T60.7. Provider in the model chip and a grouped model popover
 - T60.8. `desktop.appearance.specular`: the glare setting
 - T60.9. Glare slider in Appearance

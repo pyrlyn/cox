@@ -38,3 +38,22 @@ import Testing
     }
   }
 }
+
+/// The mode chip's menu (T60.6, DT§5.3): which choices act at once and which ask first.
+@Suite struct ModeMenuTests {
+  @Test func everyModeOtherThanBypassIsPickedAtOnce() {
+    for mode in [SessionMode.ask, .plan, .auto] {
+      #expect(ModeMenu.request(mode, from: .ask == mode ? .plan : .ask) == .pick)
+    }
+  }
+
+  @Test func bypassAsksForConfirmationFirst() {
+    for from in [SessionMode.ask, .plan, .auto] {
+      #expect(ModeMenu.request(.bypass, from: from) == .confirm)
+    }
+  }
+
+  @Test func theModeInForceAsksForNothing() {
+    for mode in SessionMode.allCases { #expect(ModeMenu.request(mode, from: mode) == .none) }
+  }
+}

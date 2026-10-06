@@ -49,7 +49,7 @@ extension PreviewState {
 
   /// The mockup's toolbar while the turn runs.
   static let toolbar = SessionToolbar.State(
-    title: sessions[0].title, project: project, branch: branch, model: model, cost: cost,
+    title: sessions[0].title, project: project, branch: branch, cost: cost,
     context: context, contextFraction: fractions[1], isRunning: true)
 
   static let main = MainScreenState(sidebar: sidebar, toolbar: toolbar)

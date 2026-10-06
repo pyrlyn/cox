@@ -9579,3 +9579,30 @@ Check: cox-app tests for a Cargo workspace, a single crate, a Node workspace and
 - Result: `crates/cox-app/src/welcome.rs`: `App::welcome(cwd)` loads the instruction chain as a session would (`cox_session::instruction_roots`, the config's `instruction_budget_tokens`) and `facts(cwd, files, in_git)` builds the line — `Rust workspace · N crates` from `[workspace] members` (paths and `dir/*` globs, less `exclude`), `Rust crate`, `Node workspace · N packages` / `Node project` from `package.json` `workspaces`, `Go module`, `Python project` — then `<files> loaded` by file name; the suggestions name the project folder and the kind's test command (`cargo nextest` with `.config/nextest.toml`, `cargo test`, `npm test`, `go test ./...`, `pytest`), and the diff review only under a git root (`cox_config::load::find_git_root`, no `git` run). `cox-ffi`: `App.welcome(cwd)` forwards on the runtime; `Welcome` and `Suggestion` cross as remote records. Swift: `WelcomeFacts`, `WelcomeSuggestion` and `WelcomeService` move to CoxClient with a `FixtureWelcome`; CoxCore's `LiveCoreClient` conforms (`WelcomeConvert.swift`); `MockWelcomeService` and `SessionWindow.welcome` are deleted, and the window passes the live client (a fixture without a core shows the question alone). cox-app depends on `toml_edit` directly (already in its tree through cox-config).
 - Tests: cox-app `welcome::tests` — a Cargo workspace (3 crates with a glob, a path and an exclude; nextest; two instruction files), a single crate (`cargo test`, no diff suggestion outside git), a Node workspace (2 packages) and an empty folder (no summary, generic test prompt). CoxCore `thisRepositoryReadsAsARustWorkspaceWithItsInstructions`: through the real core this repository reads `Rust workspace · … · AGENTS.md …` with the diff suggestion. The CoxModel and CoxTranscript welcome tests use `FixtureWelcome`.
 - Check output summary: `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo nextest run -p cox-ffi -p cox-app` 231 passed (forward-only included); `cargo nextest run -p cox --test deps` 10 passed; `just desktop-xcframework` built; CoxCore `swift test` 25 passed; CoxModel 130 passed; CoxTranscript welcome and rewind tests pass; `cargo fmt --check`, `xcrun swift-format lint --strict` clean.
+
+### T60.6 Model and mode move from the toolbar to the composer
+
+Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: — · Size: ~200 · Priority: P1 · Complexity: 3
+
+Goal: the session toolbar no longer shows the model capsule or the Ask/Plan/Auto segmented control; the composer's model chip opens the model popover anchored to the chip, and its mode chip opens a menu of Ask, Plan, Auto and Bypass (Bypass with its warning), with ⇧⇥ still cycling. The Bypass danger strip under the toolbar stays.
+
+Files:
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/SessionToolbar.swift`
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/Composer.swift`
+- `desktop/macos/App/ShellState.swift` and the popover anchoring in `App/SessionWindow.swift`
+
+Steps:
+1. Reuse `ModelPopover` and `ModeSegmented`'s options; no new component.
+2. Docs: DT§5.1 window anatomy and DT§5.3 composer; DS§6.4/§6.5 toolbar and composer rows; the mockup note that the toolbar's model and mode moved (A138).
+
+Check: `swift test` in `CoxUI`; the toolbar and composer snapshots re-recorded in the package's record mode.
+
+Done when: `MainScreenTests` and `ComposerTests` snapshots show the new layout, and a test opens the model popover and the mode menu from the chips.
+
+Result: the toolbar shows no model capsule and no Ask/Plan/Auto control; `SessionToolbar.State` keeps `mode` only for the Bypass strip and drops `model` and `Intent.mode`. The composer's model chip is a button (`Composer.Intent.openModel`) that opens `ModelPopover` over the chip: `MainScreen` reads the new `ModelChipAnchor` preference and opens the popover upwards from the chip, leading edges aligned. The mode chip is a `ModeMenu` (in `ModeSegmented.swift`) of Ask, Plan, Auto and Bypass (`Composer.Intent.setMode` → `ComposerStore.setMode` → `Intent::SetMode`); Bypass asks for a confirmation first, since the old control offered it only while it was already on. ⇧⇥ still cycles. An external agent's session names its agent in the model chip (`SessionComposer(modelLabel:)`), as the toolbar did (mockup 27). `ModelCapsule` is deleted (no user left); `ComposerChipRow` moved to its own file for SwiftLint's file length. Docs: DT§5.1, DT§5.3, DS§4, §6.3, §6.4, §6.5 and the mockups' README and `toolbar()` note.
+
+Check output:
+- CoxUI `swift test --filter` over the touched suites: `ModeMenuTests` 3 passed; the re-recorded snapshots `composer-status`/`composer-think` (8), `mainScreen*` (11), `sessionToolbar` (4), `agentToolbar` (4), `AppearancePopoverTests/mainScreenDrawsThePopoversMaterial` (3) and `reduceTransparencyWindowIsSolid`, and the new `ModelPopoverTests/mainScreenHangsItOverTheComposersChip`, pass. Other CoxUI snapshots (Foundations, sidebar, composer's other states, …) already differ from their references on this machine's macOS 27 rendering, before and after this change; they were not re-recorded.
+- CoxTranscript `ComposerFlowTests` 9 passed, including `clickingTheModelChipAsksTheWindowToOpenTheModelPopover` (a synthesized click) and `shiftTabAsksForTheModeTheCoreNamesNext`; CoxModel `swift test` 131 passed (`theModeMenuAsksForTheModePickedNotTheNextOne`).
+- `scripts/desktop/app.sh` builds `Cox.app`; `swiftlint lint --strict` and `xcrun swift-format lint --strict` clean on the changed files.
+

@@ -8,6 +8,7 @@
 
 import CoxClient
 import CoxModel
+import CoxTranscript
 import CoxUI
 import SwiftUI
 
@@ -32,12 +33,19 @@ extension SessionWindow {
     }
   }
 
+  /// The composer under the transcript: its model chip names an external agent's session's agent
+  /// and opens the model popover over itself (T60.6).
+  func composer(for showing: OpenedSession) -> SessionComposer {
+    SessionComposer(
+      store: showing.composer, modelLabel: ShellState.agentModel(showing, sidebar: model.sidebar),
+      openModel: { screen.popover = screen.popover == .model ? nil : .model })
+  }
+
   func handle(_ intent: SessionToolbar.Intent) {
     switch intent {
     case .showSidebar: toggleSidebar()
     case .toggleInspector: screen.isInspectorVisible.toggle()
     case .open(.appearance): screen.popover = screen.popover == .appearance ? nil : .appearance
-    case .mode(let mode): send(.setMode(mode: PermissionMode(mode)))
     case .stop: send(.interrupt)
     case .open(.cost):
       // DT§5.1: the cost pill opens Context & Cost.
