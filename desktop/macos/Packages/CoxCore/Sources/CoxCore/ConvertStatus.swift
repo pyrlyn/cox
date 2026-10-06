@@ -15,7 +15,21 @@ extension CoxClient.Status {
       queued: value.queued, mode: value.mode.map { .init($0) },
       nextMode: value.nextMode.map { .init($0) }, model: value.model,
       effort: value.effort.map { .init($0) }, modelName: value.modelName,
-      shortName: value.shortName)
+      shortName: value.shortName, provider: value.provider, providerName: value.providerName)
+  }
+}
+
+extension CoxClient.Readiness {
+  /// The core's answer with the core's wording (`readinessMessage`), so no client words it.
+  init(_ value: CoxFFIBindings.Readiness) {
+    let reason: Reason =
+      switch value {
+      case .ready: .ready
+      case .noProvider: .noProvider
+      case .noKey(let provider): .noKey(provider: provider)
+      case .unreachable(let provider): .unreachable(provider: provider)
+      }
+    self.init(reason, message: readinessMessage(readiness: value))
   }
 }
 

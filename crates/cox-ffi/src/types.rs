@@ -41,7 +41,7 @@ use cox_app::{
 use cox_app::{Fact, TurnFiles};
 use cox_app::{KeyError, PermissionRule, RuleKind, SessionGrant, SettingsGroup};
 use cox_app::{KeyValueRow, PluginKey, PluginSlot, SpanView, WidgetView};
-use cox_app::{MenuModel, ModelSection};
+use cox_app::{MenuModel, ModelSection, Readiness};
 use cox_app::{SettingControl, SettingInput, SettingOption};
 use cox_app::{Suggestion, Welcome};
 use cox_protocol::ids::{ArchiveId, CallId, SessionId, TaskId, TurnId};
@@ -143,6 +143,15 @@ pub struct Suggestion {
     pub title: String,
     pub detail: String,
     pub prompt: String,
+}
+
+/// T60.2: why a turn can or cannot start; the text is `readiness_message`.
+#[uniffi::remote(Enum)]
+pub enum Readiness {
+    Ready,
+    NoProvider,
+    NoKey { provider: String },
+    Unreachable { provider: String },
 }
 
 #[uniffi::remote(Record)]

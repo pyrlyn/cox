@@ -86,6 +86,13 @@ public protocol SessionClient: AnyObject, Sendable {
   /// A terminal pane's login shell in the session's cwd, under its sandbox, `cols` × `rows`
   /// cells (`cox_app::live::LiveSession::open_terminal`, T51.3).
   func openTerminal(cols: UInt16, rows: UInt16) throws -> any TerminalClient
+  /// The provider section the code tier runs on; `nil` in an external agent's session
+  /// (`cox_app::live::LiveSession::provider`, T60.3).
+  func provider() -> String?
+  /// Whether a turn may start now on this session's own provider (`LiveSession::readiness`,
+  /// T60.3): one picked before the first turn counts, not the config's default. The core refuses
+  /// a send that ignores it.
+  func readiness() async throws -> Readiness
   /// Stops the pull; the session keeps running (DT§4.5).
   func close()
   /// Hides the plugin overlay shown, as Esc does
@@ -97,6 +104,10 @@ public protocol SessionClient: AnyObject, Sendable {
 }
 
 extension SessionClient {
+  /// A session whose host gates its own sends (a remote one) has no provider to name here and
+  /// reports ready.
+  public func provider() -> String? { nil }
+  public func readiness() async throws -> Readiness { .ready }
   /// A client with no plugins has no overlay to hide.
   public func closePluginOverlay() {}
   /// Nor an area to lay a plugin out in.
@@ -201,6 +212,8 @@ public final class FixtureSession: SessionClient {
   private let fixedInfo: Info
   private let fixedCosts: TurnCosts
   private let inbox: FixtureInbox
+  private let fixedProvider: String?
+  private let fixedReadiness: Readiness
   private let state = Mutex(State())
 
   private struct State {
@@ -219,12 +232,13 @@ public final class FixtureSession: SessionClient {
     waitsForYou: Bool = false, prompts: [String] = [], changes: Changes = Changes(),
     plan: [TodoItem] = [], tasks: [String: TaskTarget] = [:], info: Info = Info(),
     reviews: [String: DiffModel] = [:], costs: TurnCosts = TurnCosts(),
-    outputs: [String: String] = [:]
+    outputs: [String: String] = [:], provider: String? = nil, readiness: Readiness = .ready
   ) {
     self.init(
       fixture: fixture, completions: completions, host: host, waitsForYou: waitsForYou,
       prompts: prompts, changes: changes, plan: plan, tasks: tasks, info: info,
-      reviews: reviews, costs: costs, outputs: outputs, inbox: FixtureInbox())
+      reviews: reviews, costs: costs, outputs: outputs, provider: provider, readiness: readiness,
+      inbox: FixtureInbox())
   }
 
   init(
@@ -232,13 +246,15 @@ public final class FixtureSession: SessionClient {
     prompts: [String] = [], changes: Changes = Changes(), plan: [TodoItem] = [],
     tasks: [String: TaskTarget] = [:], info: Info = Info(),
     reviews: [String: DiffModel] = [:], costs: TurnCosts = TurnCosts(),
-    outputs: [String: String] = [:], inbox: FixtureInbox
+    outputs: [String: String] = [:], provider: String? = nil, readiness: Readiness = .ready,
+    inbox: FixtureInbox
   ) {
     (self.fixture, self.completions, self.host, self.waitsForYou) =
       (fixture, completions, host, waitsForYou)
     (self.prompts, fixedChanges, fixedPlan, self.tasks, fixedInfo, self.inbox) =
       (prompts, changes, plan, tasks, info, inbox)
     (self.reviews, fixedCosts, self.outputs) = (reviews, costs, outputs)
+    (fixedProvider, fixedReadiness) = (provider, readiness)
   }
 
   public var sent: [Intent] { state.withLock { $0.sent } }
@@ -317,6 +333,10 @@ public final class FixtureSession: SessionClient {
   }
 
   public func info() async throws -> Info { fixedInfo }
+
+  public func provider() -> String? { fixedProvider }
+
+  public func readiness() async throws -> Readiness { fixedReadiness }
 
   public func turnCosts() async throws -> TurnCosts { fixedCosts }
 

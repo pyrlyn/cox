@@ -84,21 +84,26 @@ public struct Status: Equatable, Sendable, Decodable {
   public var modelName: String?
   /// The chip form the core already shortened, `Sonnet 5`; `nil` on old fixtures that omit it.
   public var shortName: String?
+  /// The provider section the code tier runs on (T60.1), and its display name; `nil` without.
+  public var provider, providerName: String?
 
   public init(
     queued: UInt32 = 0, mode: PermissionMode? = nil, nextMode: PermissionMode? = nil,
-    model: String? = nil, effort: Effort? = nil, modelName: String? = nil, shortName: String? = nil
+    model: String? = nil, effort: Effort? = nil, modelName: String? = nil, shortName: String? = nil,
+    provider: String? = nil, providerName: String? = nil
   ) {
     (
       self.queued, self.mode, self.nextMode, self.model, self.effort, self.modelName, self.shortName
     ) = (queued, mode, nextMode, model, effort, modelName, shortName)
+    (self.provider, self.providerName) = (provider, providerName)
   }
 
   enum CodingKeys: String, CodingKey {
-    case queued, mode, model, effort
+    case queued, mode, model, effort, provider
     case nextMode = "next_mode"
     case modelName = "model_name"
     case shortName = "short_name"
+    case providerName = "provider_name"
   }
 }
 

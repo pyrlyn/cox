@@ -139,10 +139,11 @@ extension LiveCoreClient: ModelsClient {
     }
   }
 
-  public func modelMenu(cwd: String) throws -> [CoxClient.ModelSection] {
-    try app.modelMenu(cwd: cwd).map { section in
+  public func modelMenu(cwd: String, usable: [String]) throws -> [CoxClient.ModelSection] {
+    try app.modelMenu(cwd: cwd, usable: usable).map { section in
       CoxClient.ModelSection(
-        tier: CoxClient.Tier(section.tier), title: section.title,
+        tier: CoxClient.Tier(section.tier), title: section.title, provider: section.provider,
+        usable: section.usable,
         models: section.models.map {
           CoxClient.MenuModel(
             id: $0.id, displayName: $0.displayName, shortName: $0.shortName,
@@ -153,5 +154,9 @@ extension LiveCoreClient: ModelsClient {
 
   public func usableProviders(cwd: String) async throws -> [String] {
     try await app.usableProviders(cwd: cwd)
+  }
+
+  public func readiness(cwd: String) async throws -> CoxClient.Readiness {
+    CoxClient.Readiness(try await app.readiness(cwd: cwd))
   }
 }

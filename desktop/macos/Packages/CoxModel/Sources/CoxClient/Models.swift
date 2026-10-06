@@ -36,10 +36,20 @@ public struct ModelSection: Equatable, Sendable {
   public var tier: Tier
   /// `Code`, `Think`, `Cheap`.
   public var title: String
+  /// The `[providers.<name>]` section whose models these are (A138); `""` on a fixture that
+  /// omits it.
+  public var provider: String
+  /// Whether that provider can answer now (a key found or a local server listening); an
+  /// unusable section keeps its rows so the user can see what a key would unlock.
+  public var usable: Bool
   public var models: [MenuModel]
 
-  public init(tier: Tier, title: String, models: [MenuModel]) {
-    (self.tier, self.title, self.models) = (tier, title, models)
+  public init(
+    tier: Tier, title: String, provider: String = "", usable: Bool = true, models: [MenuModel]
+  ) {
+    (self.tier, self.title, self.provider, self.usable, self.models) = (
+      tier, title, provider, usable, models
+    )
   }
 }
 
@@ -67,8 +77,13 @@ public struct MenuModel: Equatable, Sendable {
 public protocol ModelsClient: Sendable {
   /// Each tier's models for a session in `cwd`, the tier's configured one first.
   func models(cwd: String) throws -> [ModelChoice]
-  /// The model popover's sections for a session in `cwd`.
-  func modelMenu(cwd: String) throws -> [ModelSection]
+  /// The model popover's sections for a session in `cwd`, each marked usable when its provider
+  /// is in `usable` (`usableProviders`' answer, `cox_app::App::model_menu`, T60.1).
+  func modelMenu(cwd: String, usable: [String]) throws -> [ModelSection]
+  /// Whether a turn in `cwd` may start on the configured code-tier provider
+  /// (`cox_app::App::readiness`, T60.2); probes, so it waits. A window with a session open asks
+  /// `SessionClient.readiness` instead, which counts a provider picked before the first turn.
+  func readiness(cwd: String) async throws -> Readiness
   /// The provider sections a turn in `cwd` could run on now: a key found or a local server
   /// listening. Probes the servers, so it waits.
   func usableProviders(cwd: String) async throws -> [String]
@@ -87,21 +102,30 @@ public struct FixtureModels: ModelsClient {
 
   /// One section per tier in first-listed order; not the core's rule, which also lists a model
   /// once across tiers.
-  public func modelMenu(cwd: String) -> [ModelSection] {
+  public func modelMenu(cwd: String, usable: [String]) -> [ModelSection] {
     var sections: [ModelSection] = []
     for choice in fixedModels {
       let model = MenuModel(
         id: choice.id, displayName: choice.displayName, shortName: choice.shortName,
         efforts: choice.efforts.map(\.rawValue).joined(separator: " · "))
-      if let index = sections.firstIndex(where: { $0.tier == choice.tier }) {
+      if let index = sections.firstIndex(where: {
+        $0.tier == choice.tier && $0.provider == choice.provider
+      }) {
         sections[index].models.append(model)
       } else {
         sections.append(
           ModelSection(
-            tier: choice.tier, title: choice.tier.rawValue.capitalized, models: [model]))
+            tier: choice.tier, title: choice.tier.rawValue.capitalized, provider: choice.provider,
+            usable: usable.contains(choice.provider), models: [model]))
       }
     }
     return sections
   }
   public func usableProviders(cwd: String) async -> [String] { fixedProviders }
+
+  /// The first model's provider is the code tier's: ready when it is in the fixed list.
+  public func readiness(cwd: String) async -> Readiness {
+    guard let provider = fixedModels.first?.provider else { return .noProvider }
+    return fixedProviders.contains(provider) ? .ready : .noKey(provider: provider)
+  }
 }

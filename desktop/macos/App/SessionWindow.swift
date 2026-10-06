@@ -321,7 +321,7 @@ struct SessionWindow: View {
       // The local config's models; a remote session's cwd is not a path here.
       if remote == nil, let live = try? model.launch.live.get() {
         opened[client.id]?.models = (try? live.models(cwd: cwd)) ?? []
-        opened[client.id]?.modelSections = (try? live.modelMenu(cwd: cwd)) ?? []
+        opened[client.id]?.modelSections = await live.modelSections(cwd: cwd, usable: usable)
       }
       model.sidebar.refresh()
       // Loads the granted plugins, so after it shows; a remote cwd is not a path here either.

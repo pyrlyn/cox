@@ -369,6 +369,8 @@ extension CoxFFIBindings.Intent {
       case .bypass: self = .setMode(mode: .bypass)
       }
     case .switchModel(let tier, let model): self = .switchModel(tier: .init(tier), model: model)
+    case .switchProvider(let provider, let model, let makeDefault):
+      self = .switchProvider(provider: provider, model: model, makeDefault: makeDefault)
     case .setEffort(let effort):
       switch effort {
       case nil: self = .setEffort(effort: nil)

@@ -90,6 +90,5 @@
 - T58.28. Packaging
 - T58.29. UI automation smoke test
 - T58.30. Snapshot spike: WinUI controls to PNG
-- T60.4. FFI and Swift client for readiness, provider and provider switch
 - T60.5. Composer: Send, ⏎ and Best of wait for a usable provider
 - T60.7. Provider in the model chip and a grouped model popover

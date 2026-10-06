@@ -114,6 +114,12 @@ final class LiveSession: SessionClient {
     LiveTerminal(try handle.openTerminal(cols: cols, rows: rows))
   }
 
+  func provider() -> String? { handle.provider() }
+
+  func readiness() async throws -> CoxClient.Readiness {
+    CoxClient.Readiness(try await handle.readiness())
+  }
+
   func close() { handle.close() }
   func closePluginOverlay() { handle.closePluginOverlay() }
   func pluginArea(width: UInt16, height: UInt16) { handle.pluginArea(width: width, height: height) }
