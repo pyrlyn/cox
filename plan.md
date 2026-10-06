@@ -2218,7 +2218,7 @@ Every card in this phase:
 
 #### T60.5 Composer: Send, ⏎ and Best of wait for a usable provider
 
-Model: sonnet · Status: open · Depends: T60.4 · Size: ~180 · Priority: P0 · Complexity: 3
+Model: Claude Code / sonnet · Status: in progress · Depends: T60.4 · Size: ~180 · Priority: P0 · Complexity: 3
 
 Goal: while `readiness` is not `Ready`, Send is disabled, ⏎ and ⌘⏎ do nothing, the "Best of n" capsule is disabled, and a notice under the composer gives the reason with "Add key", which opens Settings › Providers; Best of options on an unusable provider are `unavailable` with the reason.
 
