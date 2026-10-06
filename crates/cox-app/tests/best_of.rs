@@ -240,6 +240,33 @@ async fn best_of_one_failure_leaves_the_others_running() {
 }
 
 #[tokio::test]
+async fn best_of_failed_candidate_shows_the_provider_error() {
+    let (dir, trees) = scratch();
+    // The scenario is read when each session opens, so this reaches both.
+    std::fs::write(
+        dir.path().join("scenario.toml"),
+        "[[turn]]\nerror = \"auth failed\"\n",
+    )
+    .expect("scenario");
+    let app = app(dir.path(), &trees);
+    let launch = launch(&app, dir.path(), vec![cox(), cox()]).await;
+    for session in &launch.sessions {
+        finish(session).await;
+    }
+    let views = app.compare(&launch.group.id).await.expect("compare");
+    for view in &views {
+        assert_eq!(
+            view.state,
+            CandidateState::Failed {
+                why: "provider error: bad request: auth failed".into()
+            }
+        );
+        // A turn that failed before any usage row: the sum of nothing must not be -0.0.
+        assert!(view.cost_usd.is_sign_positive(), "{}", view.cost_usd);
+    }
+}
+
+#[tokio::test]
 async fn best_of_total_is_the_sum_of_ledger_rows() {
     let (dir, trees) = scratch();
     let app = app(dir.path(), &trees);
@@ -358,4 +385,19 @@ async fn best_of_pick_refuses_dirty_without_second_confirmation() {
     let second = app.pick(&launch.group.id, 0, true).await.expect("pick");
     assert_eq!(second.pruned, std::slice::from_ref(&other));
     assert!(!other.exists());
+}
+
+#[tokio::test]
+async fn best_of_refuses_a_cox_candidate_without_a_usable_provider_before_its_worktree() {
+    let (dir, trees) = scratch();
+    // SAFETY: this test's own process (nextest).
+    unsafe { std::env::remove_var("COX_PROVIDER") };
+    let app = app(dir.path(), &trees);
+    let launch = launch(&app, dir.path(), vec![cox()]).await;
+    let candidate = &launch.group.candidates[0];
+    let why = candidate.failed.as_deref().expect("refused");
+    assert!(why.contains("anthropic") && why.contains("key"), "{why}");
+    assert!(candidate.worktree.is_none() && candidate.session.is_none());
+    assert!(trees.asked.lock().expect("asked").is_empty());
+    assert!(launch.sessions.is_empty());
 }

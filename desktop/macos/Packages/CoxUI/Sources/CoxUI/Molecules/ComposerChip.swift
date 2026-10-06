@@ -32,13 +32,21 @@ struct ComposerChip: View {
   let shortcut: String?
   /// Takes the chip out of the message; `nil` for a chip that cannot be removed.
   let onRemove: (() -> Void)?
+  /// The model chip's provider: its monogram stands for the sparkle and its name leads the label
+  /// in `text.secondary` (T60.7).
+  let provider: ProviderMark?
+  /// The model chip's provider cannot answer: a `status.danger` badge ends the chip.
+  let hasProblem: Bool
 
   init(
-    _ label: String, kind: Kind, shortcut: String? = nil, onRemove: (() -> Void)? = nil
+    _ label: String, kind: Kind, shortcut: String? = nil, provider: ProviderMark? = nil,
+    hasProblem: Bool = false, onRemove: (() -> Void)? = nil
   ) {
     self.label = label
     self.kind = kind
     self.shortcut = shortcut
+    self.provider = provider
+    self.hasProblem = hasProblem
     self.onRemove = onRemove
   }
 
@@ -46,14 +54,19 @@ struct ComposerChip: View {
     let shape = RoundedRectangle(cornerRadius: Radius.capsule, style: .continuous)
     // The mockup's 5 px gap takes the nearest step, `Space.xs`.
     HStack(spacing: Space.xs) {
-      if let symbol = kind.symbol { Image(systemName: symbol).symbolStyle(.caption) }
+      if let provider {
+        ProviderMonogram(provider)
+      } else if let symbol = kind.symbol {
+        Image(systemName: symbol).symbolStyle(.caption)
+      }
       // An empty label leaves the symbol alone, the paperclip's chip.
       if !label.isEmpty {
-        Text(label)
+        labelText
           .textStyle(.caption)
           .lineLimit(1)
           .truncationMode(.middle)
       }
+      if hasProblem { StatusDot(.error) }
       if let shortcut { KeyCap(shortcut) }
       if let onRemove { RemoveButton(label: label, action: onRemove) }
     }
@@ -67,6 +80,16 @@ struct ComposerChip: View {
     .hairline(in: shape)
     .elevation(.e1, cornerRadius: Radius.capsule)
     .accessibilityElement(children: .contain)
+  }
+}
+
+extension ComposerChip {
+  /// The label, led by the provider's name in `text.secondary` when the chip has one, the model
+  /// and effort after it in `text.primary`.
+  private var labelText: Text {
+    guard let provider else { return Text(label) }
+    return Text(provider.name).foregroundStyle(Color(.textSecondary))
+      + Text(" · \(label)").foregroundStyle(Color(.textPrimary))
   }
 }
 

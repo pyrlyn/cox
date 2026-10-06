@@ -41,7 +41,7 @@ use cox_app::{
 use cox_app::{Fact, TurnFiles};
 use cox_app::{KeyError, PermissionRule, RuleKind, SessionGrant, SettingsGroup};
 use cox_app::{KeyValueRow, PluginKey, PluginSlot, SpanView, WidgetView};
-use cox_app::{MenuModel, ModelSection};
+use cox_app::{MenuModel, ModelSection, Readiness};
 use cox_app::{SettingControl, SettingInput, SettingOption};
 use cox_app::{Suggestion, Welcome};
 use cox_protocol::ids::{ArchiveId, CallId, SessionId, TaskId, TurnId};
@@ -145,10 +145,21 @@ pub struct Suggestion {
     pub prompt: String,
 }
 
+/// T60.2: why a turn can or cannot start; the text is `readiness_message`.
+#[uniffi::remote(Enum)]
+pub enum Readiness {
+    Ready,
+    NoProvider,
+    NoKey { provider: String },
+    Unreachable { provider: String },
+}
+
 #[uniffi::remote(Record)]
 pub struct ModelSection {
     pub tier: Tier,
     pub title: String,
+    pub provider: String,
+    pub usable: bool,
     pub models: Vec<MenuModel>,
 }
 
@@ -229,7 +240,7 @@ pub enum TimelinePatch {
         usage: Box<UsageView>,
     },
     Status {
-        status: Status,
+        status: Box<Status>,
     },
     PluginSlot {
         slot: Box<PluginSlot>,
@@ -319,6 +330,8 @@ pub struct Status {
     pub model_name: Option<String>,
     pub short_name: Option<String>,
     pub effort: Option<Effort>,
+    pub provider: Option<String>,
+    pub provider_name: Option<String>,
 }
 
 #[uniffi::remote(Record)]
@@ -608,6 +621,11 @@ pub enum Intent {
     SwitchModel {
         tier: Tier,
         model: Option<ModelId>,
+    },
+    SwitchProvider {
+        provider: String,
+        model: ModelId,
+        make_default: bool,
     },
     SetEffort {
         effort: Option<Effort>,

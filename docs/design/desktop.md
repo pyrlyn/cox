@@ -85,7 +85,7 @@ piece it stands on; "new" means a gap closed in DT§4.7.
 | Composer | Multi-line; `@file` mentions with fuzzy match; `/commands` with completion; `!` shell mode; paste/drag images and files; queue while busy | `commands::parse`, `nucleo` matcher, `UserShell`, attachments (new) |
 | Approvals | Inline card + pinned copy above the composer; allow once, allow for session (shows the grant), deny with reason, edit then run | `ApprovalRequired`, `Decision` |
 | Questions (`ask_user`) | Card with the options as buttons and a free-text field | `QuestionAsked` (new) |
-| Permission mode and model | Toolbar controls; the change is echoed as typed state, not a notice | `SetPermissionMode`, `SwitchModel`, `SetEffort`, `StateChanged` (new) |
+| Permission mode and model | Composer chips (the toolbar no longer has them, T60.6); the change is echoed as typed state, not a notice | `SetPermissionMode`, `SwitchModel`, `SetEffort`, `StateChanged` (new) |
 | Review | Changed files for the session, unified or side-by-side diff, revert a file to any checkpoint, comment on a line to send it to the agent | `ToolResult.diff`, `Checkpoint`, `Rewind` |
 | Rewind timeline | Gutter marks per turn; "restore code", "restore conversation", or both; edit-and-resend a past prompt | `Rewind`, `Redo` |
 | Inspector | Tabs: Changes, Plan (live todo), Context & Cost, Tasks (subagents/background), Info | `ToolResult.structured` (new), `Usage`, `TaskCreated/Completed` |
@@ -281,6 +281,41 @@ the table uses the `@agentclientprotocol/*` names.
 8. cox's own slash commands are off in external sessions; `/…` goes to the
    agent verbatim.
 
+#### 3.3.2 Best of: a cox candidate needs a usable provider (T60.2, A139)
+
+`App::best_of` asks `App::readiness(project)` once for the group. When it is
+not `Ready`, every cox candidate is refused before its worktree is made:
+`Launched.failed` carries `Readiness::message()` (for example "No API key for
+anthropic. Add one in Settings, or pick another provider."), `worktree` and
+`session` stay `None`, and nothing is created for the compare view to clean
+up. An agent candidate (`Candidate::Agent`) brings its own provider and is not
+gated. The rule is the composer's (DT§5.3), so a client shows the same text
+in the launch sheet and may disable Best of with it.
+
+#### 3.3.3 Best of n: what a failed candidate shows (T60.10, A139)
+
+A client reads the compare view with `compare(group)` (`cox_app::best_of`),
+which returns one `CandidateView` per candidate; every rule below is decided
+there or in the helper that maps a view to a column, so a Windows or Linux
+client draws the same column from the same fields.
+
+- **State.** A candidate that did not start, or whose turn stopped on an
+  error or a refusal, is `Failed { why }`. `why` is the text the sidebar and
+  the "Needs you" inbox show for that session (`Need::Failed`, for example
+  `provider error: provider auth failed`), never a generic line; the generic
+  "its turn failed" is only the fallback when the inbox no longer holds the
+  failure (the person dismissed it).
+- **Cost.** Shown as `$0.00` with two decimals. An amount that rounds to zero
+  prints without a sign: an empty sum of ledger rows is `-0.0` in IEEE
+  arithmetic, and a client must not print `$-0.00`. `cox-app` sums with a
+  `0.0` seed, and the client's money formatter clamps again.
+- **Actions.** "Keep this one" is enabled only for a `Done` candidate that
+  still has its worktree, while no other candidate was kept. "Open in Review"
+  needs a session and a candidate that is not pruned; on a `Failed` candidate
+  it also needs at least one changed file (a failed turn may have written
+  files worth a look, an empty one has nothing to open). Both are disabled on
+  a failed candidate with no changes.
+
 ## 4. Architecture
 
 ### 4.1 Layers
@@ -381,13 +416,25 @@ enum TimelinePatch {
   AppendText { id: BlockId, text: String }      // thinking, tool output tail
   DocTail { id: BlockId, from: u32, blocks: Vec<DocBlock> }  // markdown: closed blocks are frozen, only the tail is re-sent
   Remove { id: BlockId }
-  Status { status: Status }                     // beside the list: `queued`, the turns waiting behind the running one (T37.24.8); `mode`, the `next_mode` ⇧⇥ asks for, and the main turn's `model` and `effort`, seeded from config and kept by `StateChanged`/`TurnStarted`/`ModelSwitched` (T37.24.7), with the catalog's `model_name` for that model (A111, T37.22.7); a queue keeps only the latest
+  Status { status: Status }                     // beside the list: `queued`, the turns waiting behind the running one (T37.24.8); `mode`, the `next_mode` ⇧⇥ asks for, and the main turn's `model` and `effort`, seeded from config and kept by `StateChanged`/`TurnStarted`/`ModelSwitched` (T37.24.7), with the catalog's `model_name` for that model (A111, T37.22.7), and `provider` (the `[providers.<name>]` section of the tier that model runs on: the `code` tier's on open, then the latest main turn's tier; `None` for an ACP session) with `provider_name`, what a person calls it (`models::provider_name`: `Anthropic`, `LM Studio`, a custom section's own name) (T60.1, A139); a queue keeps only the latest
   Usage { usage: UsageView }                    // token meter (DS§7): ledger totals, tok/s, TTFT, and `text` (MeterText, T37.25): every figure formatted, with the window share and the system/tools/instructions/history parts from the core's `ContextBreakdown` scaled to the last call's context (A98, T37.25.1), what the window has left, and the turn's cache hit (the Context tab, T37.29.3.1); a queue keeps only the latest
 }
 ```
 
 Keyed by id, not index, so SwiftUI identity is stable and a dropped patch can
 be healed by `Reset`. Streaming markdown re-parses only the open tail block.
+
+**Model menu (T60.1, A139).** `App::model_menu(cwd, usable)` returns the
+model popover's sections, grouped by provider: one `ModelSection` per tier's
+provider (`title` `Code`, `Think` or `Cheap`) in first-listed order, then one
+per further configured `[providers.<name>]` section that lists models, titled
+with `provider_name` and attached to the `Code` tier, by name. Each section
+carries its `provider` and `usable`, true when `provider` is in `usable`, the
+answer of `App::usable_providers(cwd)` (a key found or a local server
+listening, A110); a client fetches that first and passes it in, so the menu
+itself never probes a server. A section whose provider is not usable keeps its
+rows and is drawn disabled. A model id is listed once per provider. A client on
+any platform needs only these two calls and the `Status.provider` above.
 
 **Inbox.** Every pending approval and question from every session, oldest
 first, with `session`, `source` and an expiry flag. Drives the "Needs you"
@@ -463,6 +510,28 @@ Rules:
   through `NSWorkspace` for `http(s)` links only — and CoxCore's `HostBridge` adapts it to the generated
   `AppHost`, so CoxPlatform tests without the XCFramework and CoxCore never
   links AppKit. The app passes `HostBridge(MacHost())` to `LiveCoreClient`.
+
+- Provider readiness and the provider pick (T60.4, A139; platform-neutral, a
+  Windows or Linux client binds the same exports):
+  - `App.readiness(cwd) -> Readiness` (async, it probes): whether a turn in
+    `cwd` may start on the configured code-tier provider. `SessionHandle.readiness()`
+    (async) answers for an open session and is the one to gate it on, since a
+    provider picked before the first turn is the session's own while the config
+    still names the default. `Readiness` is `Ready | NoProvider | NoKey{provider}
+    | Unreachable{provider}`; `readiness_message(readiness) -> Option<String>` is
+    the text to show where Send is disabled (`None` when ready), so no client
+    words it.
+  - `AppError::NotReady{readiness, message}` is a send the core refused for that
+    reason (a client that forgot the gate still cannot start a turn);
+    `AppError::ProviderLocked{message}` is a provider pick after the first turn.
+  - `Status.provider` and `Status.provider_name` name the section the code tier
+    runs on, `SessionHandle.provider()` the same without a status;
+    `model_menu(cwd, usable)` returns `ModelSection { tier, title, provider,
+    usable, models }`, `usable` being `provider in usable_providers(cwd)`.
+  - `Intent::SwitchProvider { provider, model, make_default }`: the session is
+    reopened on that provider under the same id and `send` returns the reopened
+    `SessionHandle`. The client swaps it into the window that holds the session
+    (stop the old pull, show the new handle) and does not open another window.
 
 ### 4.5 Threads, runtime, backpressure, cancellation
 
@@ -548,7 +617,7 @@ Default window 1 440 × 900, minimum 900 × 600. A three-column
 
 ```
 ┌ toolbar ─────────────────────────────────────────────────────────────────────┐
-│ ◧  cox › main ⎇ wt/fix-login     [Sonnet 5 · high ▾] [Ask|Plan|Auto]  $0.42 · ctx 38% ■ ◨ │
+│ ◧  cox › main ⎇ wt/fix-login                                      $0.42 · ctx 38% ■ ◨ │
 ├──────────────┬──────────────────────────────────────────────┬─────────────────┤
 │ SIDEBAR 250  │ TRANSCRIPT  (reading column ≤ 760 pt)        │ INSPECTOR 320   │
 │ ⌕ Filter     │  12 │ You: fix the login redirect …          │ Changes · Plan  │
@@ -564,11 +633,13 @@ Default window 1 440 × 900, minimum 900 × 600. A three-column
 ```
 
 - **Toolbar** (Liquid Glass): sidebar toggle (⌃⌘S); breadcrumb *project › branch ›
-  worktree* (click: switch branch/worktree); model chip (tier · model · effort,
-  menu); permission-mode segmented control; cost pill (`$` for the session and
+  worktree* (click: switch branch/worktree); cost pill (`$` for the session and
   context-window fill; click opens Context & Cost); Stop button while a turn
   runs (⌘.); Appearance (⌘⌥A); inspector toggle (⌃⌘I). **Bypass mode** paints
-  a thin red strip under the whole toolbar for as long as it is on.
+  a thin red strip under the whole toolbar for as long as it is on. The model
+  and the permission mode are not here: they are the composer's chips (§5.3),
+  so a client places them beside the text they apply to, and the toolbar keeps
+  only the mode it needs for the strip (T60.6, A139).
 - **Sidebar**: filter field; "Needs you" (sessions with a pending approval or
   question, orange count); "Running"; then projects as disclosure groups.
   A row: status glyph (● running, ◐ waiting for you, ○ idle, ✕ error),
@@ -660,9 +731,122 @@ as the text shown: a prompt without its tiles, a folded thought as nothing.
 - Paste or drop images and files; they show as removable chips.
 - While a turn runs, ⏎ queues the message (the send button shows "Queued ·
   1"); ⌘⏎ interrupts and sends now; ⌘. interrupts.
+- Sending is disabled until the session can answer (T60.2, A139). A client
+  asks `App::readiness(cwd)` (async: it re-probes, so a key added in Settings
+  or a server just started counts at once) and, unless it returns `Ready`,
+  disables Send, ⏎ and Best of and shows `Readiness::message()` beside the
+  composer. The four outcomes and their texts:
+
+  | `Readiness` | Meaning | Text |
+  | --- | --- | --- |
+  | `Ready` | `tiers.code.provider` is a configured section and is in `usable_providers` (A110) | none |
+  | `NoProvider` | the provider is empty or names no `[providers.<name>]` section | "No provider is set for the code tier. Choose one in Settings." |
+  | `NoKey { provider }` | a keyed provider whose key is in neither its env var nor the host's store | "No API key for `<provider>`. Add one in Settings, or pick another provider." |
+  | `Unreachable { provider }` | a provider on loopback whose server does not accept connections | "`<provider>` is not running on this machine. Start its server, or pick another provider." |
+
+  The texts are English in `cox-app` for now (it has no `cox-i18n`
+  dependency); a client localizes by matching the variant. The gate is also
+  enforced in the core: `LiveSession::send` of `Intent::Send` or
+  `Intent::Queue` (and a plugin's prompt) returns `AppError::NotReady`
+  without starting a turn, so a client that forgets it still cannot send. A
+  key the server rejects counts as usable until a turn fails. Under a test
+  double (`COX_PROVIDER`) the answer is always `Ready`.
+
+  Client behaviour (T60.5; the same on every platform):
+  - **What waits.** A *turn* (`DraftKind::Turn`, queued or at once) waits for
+    `Ready`: Send, ⏎ and ⌘⏎ do nothing, the draft and its attachments stay, and
+    the rule lives in the composer's state, not only in the button, so a key
+    press is refused too. A shell line (`!`) and a `/` command start no turn
+    (the core's gate is on `Intent::Send` and `Intent::Queue` alone), so they
+    still go, and `/model` still works with no key.
+  - **The notice.** While not `Ready`, a warning row under the composer pane
+    shows the core's message and one button: "Add key" for `NoKey`, "Open
+    Settings" for `NoProvider` and `Unreachable`. It opens Settings at Models
+    & Providers, where the key field and the tiers are. The client words the
+    button; the message is the core's (`readiness_message`).
+  - **When to read.** Ask `SessionHandle.readiness()` (the session's own: it
+    honours a provider picked in the window, T60.3) when the session opens,
+    when its window becomes the key window, after a provider key is stored in
+    Settings, and after the session's provider changes (a pick, T60.7). Until
+    the first answer the composer counts as ready; the core's refusal is the
+    backstop and its `AppError::NotReady` reason is shown like any failed send.
+    A read that fails keeps the last answer.
+  - **Best of.** The "Best of n" button is disabled while the session is not
+    `Ready`, with the reason as its hint. Beside it, a cox candidate on a
+    model whose provider is not in `usableProviders(cwd)` is `unavailable` with
+    "No key for `<provider>`, or it is not running." and cannot be added; one
+    already picked is dropped from the group. The usable list is re-read at the
+    same moments as the readiness. An agent candidate brings its own provider
+    and is never marked.
 - ↑ in an empty composer walks the prompt history (`user_prompts`).
-- The chips row below: attachment button, permission mode (⇧⇥ cycles), model
-  and effort, "think" toggle.
+- The chips row below: attachment button, permission mode, model and effort,
+  "think" toggle.
+- **Permission mode chip.** Shows the mode in force (`Status.mode`). A click
+  opens a menu of Ask, Plan, Auto and Bypass with the current one checked;
+  picking one sends `Intent::SetMode { mode }` (Ask is the core's `default`).
+  ⇧⇥ sends the mode `Status.next_mode` names, as before; the chip moves only
+  when the core reports the change, never before. Bypass asks for a
+  confirmation first ("Tools run without asking. The shell still runs inside
+  the sandbox."): it was never one click away, since the old toolbar control
+  offered it only while it was already on.
+- **Model chip.** Reads "[monogram] Anthropic · Sonnet 5 · high": the provider's
+  monogram, its name in secondary text (`Status.provider_name`), then the model
+  and effort (`Status`, the core's short name). While the session's readiness is
+  not `Ready` (T60.5) a `status.danger` dot ends the chip and its tooltip is
+  `readiness.message`. A click opens the model popover over the chip and aligned
+  to its leading edge, opening upwards because the composer is the column's
+  bottom edge; a row sends its pick and closes it, and a click outside or ⎋
+  closes it too. An external agent's session (§4, mockup 27) shows the agent's
+  name (`Claude Agent · ACP`) in this chip, which the toolbar used to carry, and
+  no monogram or badge.
+- **Model popover (T60.7).** One section per tier's provider from the core's
+  catalog, then one per other configured provider section, the running model
+  marked. A section of a provider that is not usable (`usable_providers`, the
+  same list as Best of's) has its rows greyed and not pickable, and its header
+  shows "Add key", which opens Settings at Models & Providers. The list is
+  re-read when the readiness is, so a key stored in Settings ungreys the rows
+  at once.
+- **Client pick rule (T60.7).** The client's rule for a pick, which the
+  platform's model layer holds and the view only renders: a model of the
+  session's own provider, or of the think or cheap tier, sends the model switch;
+  a code-tier model of another provider sends `Intent::SwitchProvider`
+  (`make_default` off); a row of an unusable provider sends nothing. A session
+  that cannot switch provider (a remote host's, whose protocol has no such
+  intent) shows other providers' rows disabled with the note "A remote
+  session cannot change provider". The swap: `send` returns the
+  reopened session; the client replaces the window's session in its slot (same
+  id, so the window, its place in the list and its draft stay), rebuilds what it
+  derived from the old handle, registers the new one where the app's other
+  windows look sessions up, closes the old one, and re-reads the readiness and
+  the usable list for it. A window that showed the same session in another place
+  keeps the old handle until it is reopened; the switch is only possible before
+  the first turn, so this is rare. `AppError::ProviderLocked` is shown with the
+  core's message and a "New session" button instead of the swap.
+- Provider pick (T60.3, A139): the model menu also lists the models of the
+  other configured provider sections. Picking one sends
+  `Intent::SwitchProvider { provider, model, make_default }` through
+  `LiveSession::send` (`SessionHandle.send` over the FFI). A model of the
+  section the session already runs on is a plain code-tier model switch,
+  allowed at any time; it returns no session. Another section is allowed
+  only while the session has no turn yet (no turn spawned, empty history):
+  the core reopens the session in place — the same session id, cwd, row and
+  rollout, with `tiers.code.provider` and `tiers.code.model` overridden for
+  this session — ends the old one and returns the reopened session, which
+  the client puts in the window's slot instead of the old handle (whose
+  patch stream then closes). The composer keeps its draft and attachments:
+  they live in the client until sent. If the new provider cannot open (no
+  key, a broken section) the error comes back and the old session runs on.
+  After the first turn the pick fails with `AppError::ProviderLocked`, "start
+  a new session to change provider"; the client offers a new session.
+  `make_default` also writes both keys to the user `config.toml` through the
+  Settings setter (refused like Settings when a project layer pins them), so
+  the next session and a later resume of this one open on it; without it a
+  resumed session opens on the configured default, as after `/model`.
+  The send gate reads the session's own provider: an open session asks
+  `LiveSession::readiness()`, which is `App::readiness(cwd)` with the
+  session's picked provider in place of the configured one, so a reopened
+  session may send on its pick while `App::readiness(cwd)` still reports the
+  default. Switching provider after the first turn is not offered (`roadmap.md`).
 
 ### 5.4 Review
 

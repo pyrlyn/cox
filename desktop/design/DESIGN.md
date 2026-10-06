@@ -230,6 +230,13 @@ them), and every shell layer, the window's too, is rimmed by `glass.border`; in 
 their plain `surface.*` and the `separator` hairline (T51.23). The specular sweep and streak are
 `glass.specular` at `material.*Specular` strength, in SwiftUI and in the transcript's AppKit bubble.
 
+Glare (T60.9, A139) scales that strength: the drawn specular is
+`clamp(material.*Specular × specularScale, 0, 1)`, where `specularScale` is the `0…1` setting
+`desktop.appearance.specular` (1 draws the material as tokened, 0 draws no sweep or streak), so
+every client draws the same strength from the same setting. Solid, and any client's
+high-contrast mode, draw none whatever the scale; the Appearance popover's Glare slider is
+disabled then.
+
 In dark, lifted panes (e2 and up) draw `glass.highlight` as it is; controls (e1) draw it at
 `material.darkHighlight`'s share — none by default, as mockups 31 and 32 show (A109, §3.4).
 CoxUI keeps the light highlight in the elevation tokens and scales it by `glass.highlight`'s
@@ -240,8 +247,11 @@ the filter prompt 7.1:1, laid over opaque `surface.window` (§8).
 - The user sets material, window transparency, blur (frosted) or reflection (glossy), Depth, and
   "Tint from wallpaper" in the Appearance popover (toolbar paintbrush, ⌘⌥A) and in Settings ›
   Appearance. They are stored in Rust-owned config under `[desktop.appearance]`
-  (`material`, `opacity`, `blur`, `depth`, `tint`), so they have a schema and provenance like any other
+  (`material`, `opacity`, `blur`, `depth`, `specular`, `tint`), so they have a schema and provenance like any other
   setting.
+- Glare (T60.8, A139): `desktop.appearance.specular`, 0 (none) to 1 (default, today's look), scales the
+  sweep: a client draws `glass.specular` at `material.*Specular × specular`. Solid and Increase Contrast
+  stay at 0 whatever the setting.
 - Text-bearing surfaces — messages, code, diffs, terminal, popovers, the composer — never drop below
   `material.readableFloor`. The transparency slider only moves the window's background; the panes
   over it keep `glass.fill` (T51.23).
@@ -284,12 +294,27 @@ names map one-to-one:
 | — (Settings › Advanced) | `slider.horizontal.3` | — (Changes › deleted file) | `trash` |
 | — (Changes › checkpoint) | `clock` | | |
 
+**Provider monograms.** A vendor's logo is a trademark, so a provider is marked by a monogram
+instead, drawn at run time from two strings the core already sends: the provider's display name
+(`Status.provider_name`) and its section slug (`Status.provider`). No image asset exists, so there
+is nothing to copy by hand and no generator script (A136); the rule below is the whole source, and
+another client applies it to get the same marks.
+
+- **Letters.** The first letter of each of the first two words of the name, upper case: `Anthropic`
+  is `A`, `LM Studio` is `LS`. A name with no letter or digit shows `?`.
+- **Colour.** One of the five `tile.*` kinds (neutral, edit, shell, search, write), chosen by the
+  FNV-1a 32-bit hash of the slug's UTF-8 bytes (offset basis 2166136261, prime 16777619) modulo 5,
+  the kinds in that order. The slug rather than the name, so renaming a provider's label keeps its
+  colour; the hash rather than the language's own, which changes from launch to launch.
+- **Shape.** A `size.providerMonogram` square at `radius.xs`, the kind's face gradient behind its
+  glyph colour, the letters in `font.micro`.
+
 ## 4. Layout
 
 ```
 ┌ window (e5, radius.window) ───────────────────────────────────────────────────────────┐
-│ ┌ Sidebar (e2) ┐ ┌ Toolbar: Breadcrumb · spacer · ModelCapsule · ModeSegmented ·     ┐ │
-│ │ SessionFilter│ │          CostCapsule · StopButton · AppearanceButton · Inspector  │ │
+│ ┌ Sidebar (e2) ┐ ┌ Toolbar: Breadcrumb · spacer · CostCapsule · StopButton ·          ┐ │
+│ │ SessionFilter│ │          AppearanceButton · Inspector                            │ │
 │ │ SectionHeader│ ├ TranscriptPane (glass) ──────────────┐ ┌ Inspector (e2) ──────────┤ │
 │ │ SessionRow…  │ │   reading column 760, centred        │ │ InspectorTabs            │ │
 │ │              │ │   Turn → blocks                      │ │ tab content              │ │
@@ -370,6 +395,7 @@ component.
 | --- | --- | --- |
 | `StatusDot` | running, waiting, idle, error | `.dot .d-*` |
 | `IconTile(kind, symbol)` | neutral, edit, shell, search, write; the tool picks the DS§3.7 symbol. `IconTile(face:glyph:symbol:)` takes its caller's colours, as a Settings page's | `.tool .ic.c-*`, `.set-side .sq` |
+| `ProviderMonogram(provider)` | a `ProviderMark` (slug, display name): the name's initials in `font.micro` on a `size.providerMonogram` rounded square, face and glyph from the `tile.*` kind the slug's hash picks (DS§3.7); decorative, so hidden from accessibility | `—` (the mockup has no provider mark) |
 | `AppIcon()` | cox's mark: the brand's terminal-pane tile (`brand/logo/cox-mark.svg`, copied into CoxUI's `Brand.xcassets` as a vector by `just brand-icons`), `size.appIconHero` square, e2; decorative (Figma frame 22) | `.appicon` |
 | `KeyCap` | glass; inverted (an outline in `surface.window`, on StopButton's `text.primary` face) | `.kbd` |
 | `Badge` | neutral, user, project (`role.project`), env, default, warning, danger; `radius.badge` | `.badge .b-*` |
@@ -390,8 +416,9 @@ component.
 | `SessionRow(item, isSelected:)` | StatusDot, title, subtitle, cost; selected with InspectorRow's `rowSelection` on `accent.selected` at e1 (A115) | `.row` |
 | `SessionFilter(text:, prompt:, shortcut:)` | search field in an `insetWell`, the prompt and magnifier in `text.placeholder` (§8, A112), KeyCap | `.filter` |
 | `Breadcrumb(title, project:, branch:)` | title, project, branch | `.crumb` |
-| `ModelCapsule(model, isOpen:)`, `CostCapsule(cost:, context:, fraction:, isOpen:)` | CapsuleStyle (active while open), ProgressRing; the model's sparkle in `role.project` (the mockup's `--purple`) | `.cap` |
-| `ModeSegmented(selection:)` | CoxSegmented; ask, plan, auto, bypass (offered only while on) | `.seg` |
+| `CostCapsule(cost:, context:, fraction:, isOpen:)` | CapsuleStyle (active while open), ProgressRing | `.cap` |
+| `ModeSegmented(selection:)` | CoxSegmented; ask, plan, auto, bypass (offered only while on); Settings' default mode, no longer the toolbar (T60.6) | `.seg` |
+| `ModeMenu(mode:, pick:)` | the composer's mode chip as a `Menu` of ask, plan, auto, bypass, the one in force checked (`Picker`, inline); choosing Bypass raises a confirmation dialog first, every other mode is picked at once | `.chip` |
 | `StopButton` | inverted KeyCap; inverted `text.primary` capsule answering ⌘. | `.stop` |
 | `ToolHeader(item, isExpanded:)` | IconTile, summary (subject bold, monospaced for a command), DiffStat, RiskChip, Spinner / check / cross and duration, disclosure chevron; expanded on `fill.primary` over a hairline | `.tool .h` |
 | `DiffLineView(line, widestNumber:)`, `DiffHunkView(header:, lines:)` | gutter number (`text.secondary`, `text.primary` on a `diff.*Gutter`), sign, `CodeRun` syntax runs on `diff.add` / `diff.del` (coloured by the session theme's light or dark variant, as the view's appearance picks, A95), a replaced pair's changed words (the core's word diff) on `diff.*Gutter`; the hunk: header on `fill.primary`, one gutter width, `surface.code`; in Review (`revert:`) the header's trailing "Revert hunk" (caption, `text.secondary`) is laid out always and shown while the hunk is hovered (T51.21) | `.diff .ln`, `.hh` |
@@ -401,8 +428,8 @@ component.
 | `TurnGutter(turn:isMarked:open:)` | a prompt's turn number `size.turnGutter` wide, right-aligned, `size.turnGutterOffset` left of its bubble, `font.detail` tabular in `text.secondary`; marked (the turn a rewind goes back to before), semibold `accent` with `arrow.uturn.backward`, and with `open` a button that opens `RewindMenu` (Figma frames 01, 14). In the transcript CoxTranscriptText draws the number itself beside each prompt's bubble from `TranscriptStyle.gutter`, mapped to the same tokens (T37.47) | `.gutter` |
 | `ThinkingDisclosure(summary, text:, isExpanded:)` | chevron and caption summary; open, the reasoning in italic caption beside a hairline; open state is the view's own. Its row is public as `ThinkingHeader(summary, isExpanded:, action:)`, which the transcript shows above reasoning it draws as text (T37.23.4) | `.think`, `.think-body` |
 | `NoticeRow(text, kind:, symbol:)`, `TurnDivider(label)`, `TurnMeta(facts)` | symbol in the kind's colour (info, warning, error) + caption in a readable colour / Hairline, caption, Hairline / model, tokens, cache, cost, duration, stop reason in tabular footnote | `.notice`, `.divider`, `.meta` |
-| `ComposerChip(label, kind:, shortcut:, onRemove:)` | mention, attachment, command, shell, queued, model, `think(Bool)`, `mode(SessionMode)`: symbol (none for a mode or the queue, as the mockup draws them), caption label (empty for the paperclip's icon-only chip), optional KeyCap and `xmark` remove button on a readable capsule at e1; mention, command and queued tinted `accent`; a mode in its DS§3.1 colour (Ask plain, Plan `status.plan`, Auto `accent`, Bypass `status.danger`), as `ModeSegmented` shows it; think (`brain`) plain while off, tinted `accent` while on. `ThinkChip(isOn:, toggle:)` is the think chip as a button with its tooltip (A103) | `.chip`, `.chip.blue` |
-| `CompletionList(state:, pick:)` | SectionHeader over the rows the core ranked for `@` or `/` (title, detail in footnote), the selected one in `text.onAccent` on an `accent` face (the mockup's `.it.on`; ModelPopover's rows too); readable `surface.popover` glass at e4, `radius.xxl` | `.pop`, `.pop .it` |
+| `ComposerChip(label, kind:, shortcut:, provider:, hasProblem:, onRemove:)` | mention, attachment, command, shell, queued, model, `think(Bool)`, `mode(SessionMode)`: symbol (none for a mode or the queue, as the mockup draws them), caption label (empty for the paperclip's icon-only chip; the model chip with a `provider` shows its ProviderMonogram in place of the symbol and the provider's name in `text.secondary` before the label, and `hasProblem` ends it with a `status.danger` StatusDot), optional KeyCap and `xmark` remove button on a readable capsule at e1; mention, command and queued tinted `accent`; a mode in its DS§3.1 colour (Ask plain, Plan `status.plan`, Auto `accent`, Bypass `status.danger`), as `ModeSegmented` shows it; think (`brain`) plain while off, tinted `accent` while on. `ThinkChip(isOn:, toggle:)` is the think chip as a button with its tooltip (A103) | `.chip`, `.chip.blue` |
+| `CompletionList(state:, pick:)` | SectionHeader over the rows the core ranked for `@` or `/` (title, detail in footnote), the selected one in `text.onAccent` on an `accent` face (the mockup's `.it.on`; ModelPopover's rows too); a `CompletionRow` with `isEnabled` off is `text.tertiary` and not pickable; readable `surface.popover` glass at e4, `radius.xxl` | `.pop`, `.pop .it` |
 | `TokenMeter(state:, isOpen:, action:)` | ↑ sent, ↓ received, then behind a hairline StatusDot (running while a turn runs), tok/s and Sparkline, on a CapsuleStyle capsule, active while the popover is open; every figure and the VoiceOver line come formatted from `cox_app::MeterText` | `.meter` |
 | `KeyValueGrid(columns:, rows:)` | rows of label / values under optional column headers; detail rows indented in `text.secondary` | `.tokpop .grid` |
 | `PluginWidgetView(widget)` | a plugin's PL§8 widget tree (T52.16) drawn natively in `font.monoCode`, one view per variant: lines of spans; a list with its selected row on `accent.soft` at `radius.xs`; a Grid table under a semibold header; key–value Grid rows; a linear ProgressView tinted `accent` after its label; a VStack or HStack of child trees; a block stroked in `separator` on `radius.s` under a semibold title. Each span's role maps to a DS§3.1 token (`text`/`agent` → `text.primary`, `dim`/`border` → `text.secondary`, `accent`/`selection` → `accent`, `user` → `role.project`, `tool` → `syntax.function`, `diff_hunk` → `syntax.keyword`, `ok`/`diff_add` → `status.success`, `warn` → `status.warning`, `error`/`diff_del` → `status.danger`), never a raw colour and never plan mode's `status.plan`; the terminal's cell widths and stack sizes are not applied | — |
@@ -421,7 +448,7 @@ component.
 | --- | --- | --- |
 | `ShellPane(.window/.sidebar/.column/.inspector)` | glassPane, hairline, elevation: e5 window, e2 side panes, flat column | `.window`, `.sidebar`, `.col`, `.insp` |
 | `Sidebar` | ShellPane, SessionFilter, SectionHeader + CountBadge, project disclosure, SessionRow, footer (New session, provider StatusDot); an expired "Needs you" item's row is not a button and shows its title in `text.secondary`, not a faded label (§8); a remote host's group (T52.21) heads its rows with a host badge — `server.rack` and the ssh alias in `font.control`, `text.secondary`, in a `fill.primary` well at `radius.s` — and, once disconnected, a `status.danger` StatusDot, "Disconnected" in `font.caption` and a plain small Reconnect button; its rows are then read-only | `.sidebar` |
-| `SessionToolbar` | Breadcrumb, then the plugins' `status.left`/`status.right` segments (PluginWidgetView, one line each, at most 24 code-face cells wide, truncated; a `ViewThatFits` drops them first when the bar is narrow; T52.17), ModelCapsule, ModeSegmented, CostCapsule, StopButton, icon CapsuleStyle buttons (Appearance ⌘⌥A, inspector ⌃⌘I, sidebar ⌃⌘S while hidden; tooltips name the keys), the Bypass strip under the bar | `.toolbar` |
+| `SessionToolbar` | Breadcrumb, then the plugins' `status.left`/`status.right` segments (PluginWidgetView, one line each, at most 24 code-face cells wide, truncated; a `ViewThatFits` drops them first when the bar is narrow; T52.17), CostCapsule, StopButton, icon CapsuleStyle buttons (Appearance ⌘⌥A, inspector ⌃⌘I, sidebar ⌃⌘S while hidden; tooltips name the keys), the Bypass strip under the bar. The model and the mode moved to the composer's chips (T60.6, A139); the bar keeps the mode in its state only for the strip | `.toolbar` |
 | `ToolCard(content, isExpanded:)` | ToolHeader + one detail: the edit's DiffHunkViews or a TerminalTail. A running call shows its tail under a flat header; a finished one folds the detail behind the chevron (open state is the card's own); opened, a readable face at e2 with a hairline rim, `radius.l`. Public with the value types it takes (T37.23) | `.tool`, `.tool.exp` |
 | `ApprovalCard(content, act:)`, `ApprovalCard(content, act:, edit:)` | header (warning symbol, title, RiskChip), the command in a `surface.code` well, the reasons (why, which subagent) in caption, then Allow / Allow for session / Edit… (when given `edit` and an input) / Deny as regular-height CoxButtonStyle and "Session grant: …" in footnote at the trailing end (under the buttons when it does not fit), on `fill.primary` under a hairline; Edit… puts the input as JSON in the well with Run edited (only while it parses) and Cancel (T37.27.6); a readable face at e1 with a `status.warning` leading edge, `radius.xxl`. Decided, it shrinks to a NoticeRow: "Allowed by you · for session". CoxTranscript's `DecisionCard` fills it from the block and sends the choice as an `Intent` (T37.27) | `.appr` |
 | `QuestionCard(content, answer:)` | the same frame with an `accent` edge: who asks, the question in `font.transcript`, one CoxButtonStyle button per option, then a field and Answer on the action row; answered, a NoticeRow "You answered: …" (T37.27) | `.appr` (question) |
@@ -429,9 +456,10 @@ component.
 | `AssistantMessage` | markdown runs, InlineCode, CodeBlockView | `.asst` |
 | `TurnView` | UserBubble, ThinkingDisclosure, ToolCard, AssistantMessage, TurnMeta. Not a view of its own under A87: a turn is the run of blocks it owns in `TranscriptView`'s one text, the user message and the thought styled text ranges, the tool calls ToolCards (T37.23) | `.turn` |
 | `TranscriptView(store:crossBlockSelection:approval:)` | one TextKit 2 text (`CoxTranscriptText`) of the store's blocks, kept in step by the patches the store applies; tool, tool-group and task blocks are ToolCards hosted as one character each, approvals and questions the `approval` slot; prose in `font.transcript`, code in `font.mono.code`, readable text colours only. Package `CoxTranscript`, where CoxUI, the text view and the store meet (T37.23) | `.scroll` |
-| `Composer(state:, send:)` | text editor (`font.transcript`, `font.mono.code` in shell mode) with its hint, CompletionList floating above, a row of attachment Thumbnails with an `xmark.circle.fill` remove badge, a row of the paperclip as an icon-only ComposerChip and ComposerChip (the permission mode with its ⇧⇥ KeyCap, which cycles it; the model and effort; the think toggle beside it, which sends the next turn to the think tier with `confirm_think` and turns itself off once that turn is sent (A103, `toggleThink`); shell with the "share output" CoxToggleStyle, mentions, queued) and a round `accent` send button (`fill.secondary` while disabled); the hint in `text.placeholder` (A112); readable `surface.window` glass at e3, `radius.pane`. ⏎ sends or picks, ⇧⏎ breaks the line, ⌘⏎ sends now, ↑ ↓ ⇥ ⎋ drive the rows, ⌫ on an empty shell line leaves shell mode, ⇧⇥ or a click on the mode chip asks for the next mode (`cycleMode`; the core names it and moves the chip), dropped files attach; every key and click is a `Composer.Intent`. TokenMeter sits before Send and opens TokenPopover standing on the composer's top edge (`toggleTokens`) | `.composer` |
+| `Composer(state:, send:)` | text editor (`font.transcript`, `font.mono.code` in shell mode) with its hint, CompletionList floating above, a row of attachment Thumbnails with an `xmark.circle.fill` remove badge, a row of the paperclip as an icon-only ComposerChip and ComposerChip (the permission mode as a `ModeMenu` with its ⇧⇥ KeyCap, which cycles it; the model and effort as a button that opens the ModelPopover over the chip, anchored to it and opening upwards, and which names an external agent's session's agent (`Claude Agent · ACP`); the think toggle beside it, which sends the next turn to the think tier with `confirm_think` and turns itself off once that turn is sent (A103, `toggleThink`); shell with the "share output" CoxToggleStyle, mentions, queued) and a round `accent` send button (`fill.secondary` while disabled, and while the provider cannot answer: ⏎ and ⌘⏎ then do nothing, DT§5.3, T60.5); while it cannot, a `status.warning` NoticeRow on readable `surface.window` glass stands under the pane with the core's reason and a small secondary button ("Add key" or "Open Settings", `noticeAction`), and the "Best of n" capsule is disabled with the same reason as its hint; the hint in `text.placeholder` (A112); readable `surface.window` glass at e3, `radius.pane`. ⏎ sends or picks, ⇧⏎ breaks the line, ⌘⏎ sends now, ↑ ↓ ⇥ ⎋ drive the rows, ⌫ on an empty shell line leaves shell mode, ⇧⇥ asks for the next mode (`cycleMode`; the core names it and moves the chip), a row of the mode chip's menu asks for that mode (`setMode`), a click on the model chip, whose tooltip is the readiness message while the provider cannot answer, opens the model popover (`openModel`), dropped files attach; every key and click is a `Composer.Intent`. TokenMeter sits before Send and opens TokenPopover standing on the composer's top edge (`toggleTokens`) | `.composer` |
 | `TokenPopover(state:)` | heading and phase (`accent` while streaming), `font.metric` tok/s beside a Sparkline, the rate line (avg, first token, peak), a turn / session KeyValueGrid, the context heading over a StackedBar and its `font.legend` legend with `radius.swatch` swatches (shown once the core sends the parts), a note in `font.detail`; readable `surface.popover` glass at e4, `size.tokenPopoverWidth` | `.tokpop` |
-| `AppearancePopover(state:, send:)` | title and KeyCap, MaterialPicker, LabeledSlider ×3 (transparency; blur, or reflection for Glossy; Depth), LabeledToggle (tint), a note in footnote; readable `surface.popover` glass at e4. Solid disables transparency and blur; Reduce Transparency disables all but Depth and the note says why. Reports one intent per `[desktop.appearance]` key; the window draws from the same state | `.appear` |
+| `ModelPopover(state:, pick:, addKey:)` | the composer's model chip's popover (T37.22.6, T60.6, T60.7): a SectionHeader per provider group (a tier's own models under the tier's title, any other provider under its name) over `CompletionRow`s (id, efforts at the trailing edge), the running model on `accent.soft`; a provider that cannot answer has its rows greyed and not pickable and a small plain "Add key" button at its header's trailing edge (`addKey`, which opens Settings at Providers); a section that cannot be picked for another reason (a remote session cannot change provider) carries its reason as a `text.tertiary` footnote under the header; readable `surface.popover` glass at e4, `radius.popover`, `Size.popoverWidth` wide. `MainScreen` hangs it over the chip through the `ModelChipAnchor` preference: leading edges aligned, kept inside the window, opening upwards | `.popover` |
+| `AppearancePopover(state:, send:)` | title and KeyCap, MaterialPicker, LabeledSlider ×4 (transparency; blur, or reflection for Glossy; Depth; Glare, None…Full, below Depth), LabeledToggle (tint), a note in footnote; readable `surface.popover` glass at e4. Solid disables transparency and blur, and with Increase Contrast, Glare; Reduce Transparency disables all but Depth and the note says why. Reports one intent per `[desktop.appearance]` key; the window draws from the same state | `.appear` |
 | `Inspector` | ShellPane, title, tab strip (the selected tab lifted on `surface.window` on glass, a `fill.secondary` well on Solid); each tab's content (ChangedFileRow, CheckpointRow, KeyValueGrid) is a slot, scrolling in one inset body | `.insp` |
 | `ChangesTab(state:, send:)` | the Changes tab (DT§5.1): `InspectorSection`s (SectionHeader over flush rows, shared by every tab) of ChangedFileRow under a `Review` link with its KeyCap (⌘⇧R, which the app's menu answers), CheckpointRow, and the worktree's KeyValueGrid; an empty section is left out, an empty tab says so. A row click opens Review at the file; the rows' actions report review, revert and rewind (code only, A101) | `.ib`, `.ih`, `.fr` |
 | `RewindTimeline(state:, send:)` | the rewind timeline (DT§3, DT§5.4): one `InspectorSection` `Rewind` of CheckpointRows oldest first, the selected one (a gutter mark's) lifted; each row's actions are the scopes — Restore code (`doc.text`), Restore conversation (`text.bubble`), Restore code and conversation (`arrow.uturn.backward`) — reported as one `rewind(checkpoint:code:conversation:)`; empty, it says so. CoxModel's `SessionStore.rewind(checkpoint:code:conversation:)` sends it as `Intent.rewind` (T37.28.1) | `.ih`, `.fr` |
@@ -454,7 +482,7 @@ component.
 ### 6.5 The glass main screen, decomposed
 
 `MainScreen` = `ShellPane(.window)` holding `Sidebar` + `SessionToolbar` + `ShellPane(.column)`
-(`TranscriptView` + `Composer`) + `Inspector`, with `AppearancePopover` or `TokenPopover` as popovers.
+(`TranscriptView` + `Composer`) + `Inspector`, with `AppearancePopover`, `TokenPopover` or `ModelPopover` (over the composer's model chip) as popovers.
 It holds no styling of its own; it takes `MainScreenState` and reports `MainScreenIntent`.
 
 `SettingsScreen` = `ShellPane(.window)` holding `SettingsSidebar` + `ShellPane(.column)` with the page's

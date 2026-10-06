@@ -17,6 +17,10 @@ public enum Intent: Equatable, Sendable {
   case compact(focus: String?)
   case setMode(mode: PermissionMode)
   case switchModel(tier: Tier, model: String?)
+  /// The code tier on another provider's `model`, before the first turn (T60.3): the session is
+  /// reopened under the same id, and `send` hands back the reopened one to put in its window.
+  /// `makeDefault` also writes the pick to the user config.
+  case switchProvider(provider: String, model: String, makeDefault: Bool)
   case setEffort(effort: Effort?)
   case rewind(toTurn: UInt32, code: Bool, conversation: Bool)
   case redo
@@ -31,6 +35,15 @@ public enum Intent: Equatable, Sendable {
   case command(line: String)
   /// The person's title for the session (A113), as `/rename` sets it.
   case rename(title: String)
+}
+
+/// The core refused a provider switch because the session already ran a turn (`AppError::
+/// ProviderLocked`, T60.3); `message` is Rust's text, and the window offers a new session.
+public struct ProviderLocked: Error, Equatable, CustomStringConvertible {
+  public let message: String
+  public var description: String { message }
+
+  public init(_ message: String) { self.message = message }
 }
 
 public struct Attachment: Equatable, Sendable {

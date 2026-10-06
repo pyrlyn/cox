@@ -30,14 +30,21 @@ public struct BestOfControl: View {
     public var isLaunching: Bool
     /// Why the last launch failed.
     public var failure: String?
+    /// Why nothing can launch now: the session's provider cannot answer (T60.5, A139). The
+    /// capsule is disabled and says it.
+    public var unavailable: String?
 
-    public init(options: [Option] = [], isLaunching: Bool = false, failure: String? = nil) {
+    public init(
+      options: [Option] = [], isLaunching: Bool = false, failure: String? = nil,
+      unavailable: String? = nil
+    ) {
       (self.options, self.isLaunching, self.failure) = (options, isLaunching, failure)
+      self.unavailable = unavailable
     }
 
     /// The session's own agent is one of the n.
     public var count: Int { 1 + options.filter(\.isPicked).count }
-    public var canLaunch: Bool { count > 1 && !isLaunching }
+    public var canLaunch: Bool { count > 1 && !isLaunching && unavailable == nil }
   }
 
   public enum Intent: Equatable, Sendable {
@@ -66,6 +73,7 @@ public struct BestOfControl: View {
           }
           .buttonStyle(CapsuleStyle(state.canLaunch ? .active : .plain))
           .disabled(!state.canLaunch)
+          .help(state.unavailable ?? "")
           ForEach(state.options) { option in
             Button {
               send(.toggle(option.id))
@@ -93,6 +101,10 @@ public struct BestOfControl: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .insetWell(Color(.fillPrimary), cornerRadius: Radius.m)
   }
+}
+
+#Preview("best of, not ready") {
+  PreviewMatrix { BestOfControl(state: PreviewState.bestOfNotReady) { _ in } }
 }
 
 #Preview("best of") {

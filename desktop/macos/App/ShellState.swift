@@ -39,7 +39,26 @@ struct OpenedSession {
   let terminals = TerminalSurfaces()
 
   /// The toolbar's model menu for what the session runs on now.
-  var menu: ModelMenu { ModelMenu(sections: modelSections, status: store.status) }
+  var menu: ModelMenu {
+    ModelMenu(
+      sections: modelSections, status: store.status,
+      canSwitchProvider: store.session.canSwitchProvider)
+  }
+
+  /// A view id that changes when a provider switch swaps the stores under the same session id,
+  /// so the transcript and the inspector are rebuilt from the new ones.
+  var viewID: String { "\(store.session.id)/\(ObjectIdentifier(store).hashValue)" }
+
+  /// This session after a provider switch reopened it under the same id (T60.7): the new stores,
+  /// with what the window already read about it kept; the old terminal views detach.
+  func reopened(as shared: AppStore.Shared) -> OpenedSession {
+    terminals.endAll()
+    var next = OpenedSession(shared)
+    (next.info, next.models, next.modelSections, next.agents) = (
+      info, models, modelSections, agents
+    )
+    return next
+  }
 
   init(_ shared: AppStore.Shared) {
     (store, composer) = (shared.store, shared.composer)
@@ -59,16 +78,25 @@ enum ShellState {
     _ open: OpenedSession?, sidebar: SidebarStore, popover: SessionToolbar.Popover?
   ) -> SessionToolbar.State {
     guard let open else { return SessionToolbar.State(popover: popover) }
-    let figures = ToolbarState(
-      usage: open.store.usage, entry: sidebar.entry(open.store.session.id), info: open.info,
-      agents: open.agents)
+    let figures = toolbarFigures(open, sidebar: sidebar)
     return SessionToolbar.State(
       title: figures.title, project: figures.project, branch: figures.branch,
-      model: figures.model ?? open.composer.model ?? "",
       mode: open.store.status.mode.map(SessionMode.init) ?? .ask,
       cost: figures.cost, context: figures.context, contextFraction: figures.contextFraction,
       isRunning: open.store.isTurnRunning, popover: popover,
       pluginStatus: PluginWidgets.status(open.store))
+  }
+
+  /// What the model chip names for an external agent's session (`Claude Agent · ACP`), which has
+  /// no model of cox's own; `nil` for cox's own sessions, whose chip shows the core's model.
+  static func agentModel(_ open: OpenedSession, sidebar: SidebarStore) -> String? {
+    toolbarFigures(open, sidebar: sidebar).model
+  }
+
+  private static func toolbarFigures(_ open: OpenedSession, sidebar: SidebarStore) -> ToolbarState {
+    ToolbarState(
+      usage: open.store.usage, entry: sidebar.entry(open.store.session.id), info: open.info,
+      agents: open.agents)
   }
 
   static func models(_ menu: ModelMenu?) -> ModelPopover.State {
@@ -79,7 +107,8 @@ enum ShellState {
           rows: section.rows.map {
             CompletionList.Row(id: $0.id, title: $0.name, detail: $0.detail)
           },
-          selected: section.rows.first(where: \.isSelected)?.id)
+          selected: section.rows.first(where: \.isSelected)?.id, provider: section.provider,
+          isEnabled: section.isEnabled, offersKey: !section.usable, note: section.unavailable)
       })
   }
 
@@ -125,5 +154,14 @@ enum ShellState {
     case .idle: .idle
     case .error: .error
     }
+  }
+}
+
+extension ModelsClient {
+  /// The model popover's sections for a session in `cwd`, each marked by the providers a turn
+  /// could run on: the list the footer already read, else one probe now (T60.4).
+  func modelSections(cwd: String, usable known: [String]?) async -> [ModelSection] {
+    let usable = if let known { known } else { (try? await usableProviders(cwd: cwd)) ?? [] }
+    return (try? modelMenu(cwd: cwd, usable: usable)) ?? []
   }
 }

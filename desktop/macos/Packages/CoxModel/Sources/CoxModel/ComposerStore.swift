@@ -40,6 +40,10 @@ public final class ComposerStore {
   /// The next turn goes to the think tier, as `/think` sends it (A103); off again once the core
   /// took that turn, so the costly tier never stays on by accident.
   public private(set) var think = false
+  /// Whether a turn may start, as the core last said (DT§5.3, T60.5). Ready until the first
+  /// read: the core refuses a turn on a provider it cannot use anyway, so a send that beats the
+  /// read fails with the core's reason instead of being held back by a guess.
+  public private(set) var readiness = Readiness.ready
   @ObservationIgnored public let session: SessionStore
   /// The session's earlier prompts, newest first, and which one the draft shows, while ↑ ↓ walk
   /// them; `nil` once the draft is typed, sent or walked back to empty.
@@ -54,8 +58,31 @@ public final class ComposerStore {
     self.session = session
   }
 
-  /// Something to send.
-  public var canSend: Bool { draft(.queue).canSend }
+  /// Takes over what `old` was about to send, for the composer of a session reopened under the
+  /// same id (`AppStore.replace`, T60.7): the text, its shell mode, mentions, attachments,
+  /// caret and the think toggle live here, not in the core, so they would be lost otherwise.
+  func carryDraft(from old: ComposerStore) {
+    (text, isShell, shareOutput) = (old.text, old.isShell, old.shareOutput)
+    (mentions, attachments, selectedRange, think) = (
+      old.mentions, old.attachments, old.selectedRange, old.think
+    )
+    readiness = old.readiness
+  }
+
+  /// Something to send, and a provider that can answer it when it is a turn: a shell line or a
+  /// `/` command starts no turn, so `/model` and `!` still work with no key.
+  public var canSend: Bool { permits(draft(.queue)) }
+
+  /// Asks the core whether the session's provider is usable now. The window calls it when it
+  /// opens, becomes key, after a provider key is stored and after a provider switch; a read that
+  /// fails keeps the last answer.
+  public func refreshReadiness() async {
+    if let read = try? await client.readiness() { readiness = read }
+  }
+
+  private func permits(_ draft: DraftIntent) -> Bool {
+    draft.canSend && (draft.kind != .turn || readiness.isReady)
+  }
 
   /// The draft as typed. A `!` typed into an empty draft enters shell mode instead.
   public func edit(_ new: String) {
@@ -211,8 +238,13 @@ public final class ComposerStore {
   /// reports the change, never before.
   public func cycleMode() async {
     guard let next = session.status.nextMode else { return }
+    await setMode(next)
+  }
+
+  /// The mode chip's menu: asks for `mode`, which the chip shows once the core reports it.
+  public func setMode(_ mode: PermissionMode) async {
     do {
-      _ = try await session.send(.setMode(mode: next))
+      _ = try await session.send(.setMode(mode: mode))
     } catch {
       report(error)
     }
@@ -248,7 +280,7 @@ public final class ComposerStore {
   }
 
   private func send(_ draft: DraftIntent) async {
-    guard draft.canSend else { return }
+    guard permits(draft) else { return }
     let intent: Intent =
       switch draft.kind {
       case .shell: .shell(command: text, share: shareOutput)

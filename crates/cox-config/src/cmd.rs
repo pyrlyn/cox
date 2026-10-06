@@ -384,11 +384,27 @@ mod tests {
         assert!(set_then_load("desktop.appearance.dark_highlight_scope", "e2").is_err());
     }
 
+    /// T60.8: full glare unless the user turns it down; the bounds load, beyond them is refused.
+    #[test]
+    fn config_set_desktop_specular_round_trips() {
+        assert_eq!(
+            cox_protocol::Config::default().desktop.appearance.specular,
+            cox_protocol::config::DESKTOP_DEFAULT_SPECULAR
+        );
+        let loaded = set_then_load("desktop.appearance.specular", "0.5").expect("load succeeds");
+        assert_eq!(loaded.config.desktop.appearance.specular, 0.5);
+        assert_eq!(loaded.source_of("desktop.appearance.specular"), "user");
+        for bound in ["0", "1"] {
+            set_then_load("desktop.appearance.specular", bound).expect("the bound loads");
+        }
+    }
+
     #[test]
     fn config_rejects_out_of_range_desktop_values() {
         for (key, value) in [
             ("desktop.appearance.opacity", "1.5"),
             ("desktop.appearance.depth", "-0.1"),
+            ("desktop.appearance.specular", "1.5"),
             ("desktop.appearance.blur", "61"),
             ("desktop.transcript.text_size", "9.5"),
             ("desktop.transcript.line_height", "2.6"),

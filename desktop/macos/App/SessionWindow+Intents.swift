@@ -8,10 +8,26 @@
 
 import CoxClient
 import CoxModel
+import CoxTranscript
 import CoxUI
 import SwiftUI
 
 extension SessionWindow {
+  var isLocked: Binding<Bool> {
+    Binding(get: { lockedMessage != nil }, set: { if !$0 { lockedMessage = nil } })
+  }
+
+  func readSettings() async {
+    appearanceWrites.onIdle = { readAppearance() }
+    await model.settings?.load()
+    readAppearance()
+  }
+
+  func readAppearance() {
+    guard let settings = model.settings else { return }
+    screen.appearance = AppearancePopover.State(settings)
+  }
+
   /// What the shell reports: the panes fold here, and an appearance change shows at once and is
   /// written once the control rests.
   func handle(_ intent: MainScreenIntent) {
@@ -23,6 +39,9 @@ extension SessionWindow {
     case .model(let row):
       screen.popover = nil
       if let intent = showing?.menu.pick(row) { send(intent) }
+    case .addKey:
+      screen.popover = nil
+      openProviders()
     case .appearance(let change):
       screen.appearance.apply(change)
       screen.appearance.fillTexts()
@@ -32,12 +51,21 @@ extension SessionWindow {
     }
   }
 
+  /// The composer under the transcript: its model chip names an external agent's session's agent
+  /// and opens the model popover over itself (T60.6); its notice's button opens Settings at Providers
+  /// (T60.5).
+  func composer(for showing: OpenedSession) -> SessionComposer {
+    SessionComposer(
+      store: showing.composer, modelLabel: ShellState.agentModel(showing, sidebar: model.sidebar),
+      openModel: { screen.popover = screen.popover == .model ? nil : .model },
+      openProviders: { openProviders() })
+  }
+
   func handle(_ intent: SessionToolbar.Intent) {
     switch intent {
     case .showSidebar: toggleSidebar()
     case .toggleInspector: screen.isInspectorVisible.toggle()
     case .open(.appearance): screen.popover = screen.popover == .appearance ? nil : .appearance
-    case .mode(let mode): send(.setMode(mode: PermissionMode(mode)))
     case .stop: send(.interrupt)
     case .open(.cost):
       // DT§5.1: the cost pill opens Context & Cost.
@@ -104,14 +132,32 @@ extension SessionWindow {
     send(intent, to: store)
   }
 
-  /// A refusal shows until dismissed.
+  /// A refusal shows until dismissed; a provider switch puts the session it reopened in the
+  /// window's place, and one the core locked offers a new session.
   func send(_ intent: Intent, to store: SessionStore) {
     Task {
       do {
-        _ = try await store.send(intent)
+        if let shared = try await model.registry.send(intent, to: store) {
+          await swap(store.session.id, to: shared)
+        }
+      } catch let locked as ProviderLocked {
+        lockedMessage = locked.message
       } catch {
         refused = String(describing: error)
       }
     }
+  }
+
+  /// A provider switch reopened `session` under the same id (DT§5.3): `AppStore` already gave
+  /// its windows the new stores, their slot and the draft; this window's `OpenedSession` is
+  /// rebuilt over them, and the registry entry that notifications and the menu bar answer through
+  /// points at them.
+  private func swap(_ session: String, to shared: AppStore.Shared) async {
+    model.register(shared.store, as: session)
+    guard let old = opened[session] else { return }
+    opened[session] = old.reopened(as: shared)
+    // The new composer reads its own readiness as it shows; the popover's marks and the footer
+    // follow the same probe.
+    await refreshProviders()
   }
 }

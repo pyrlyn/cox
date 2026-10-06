@@ -17,6 +17,7 @@ use cox_core::permission::next_mode;
 use cox_protocol::Config;
 use cox_protocol::types::{Effort, Event, Job, ModelId, PermissionMode, Tier};
 
+use crate::models::provider_name;
 use crate::patch::Status;
 
 /// One catalog name plus the shortened form the toolbar chip shows (A111,
@@ -90,6 +91,10 @@ pub struct StatusFold {
     tier_effort: Option<Effort>,
     /// Model id → catalog name, for every catalog row that has one.
     names: ModelNames,
+    /// Each tier's provider section, because `TurnStarted` and
+    /// `ModelSwitched` carry a tier but no provider: a switch changes the
+    /// model within the tier's section, never the section.
+    providers: Vec<(Tier, String)>,
 }
 
 impl StatusFold {
@@ -101,8 +106,11 @@ impl StatusFold {
             status: Status::default(),
             tier_effort: Some(code.effort),
             names,
+            providers: [Tier::Code, Tier::Think, Tier::Cheap]
+                .map(|t| (t, config.tiers.get(t).provider.clone()))
+                .to_vec(),
         };
-        fold.name(ModelId(code.model.clone()));
+        fold.name(ModelId(code.model.clone()), Tier::Code);
         fold.set(config.permissions.mode, None);
         fold
     }
@@ -124,23 +132,31 @@ impl StatusFold {
             // A subagent's or compaction's turn is not the one the chip names.
             Event::TurnStarted {
                 job: Job::Main,
+                tier,
                 model,
                 ..
-            } => self.name(model.clone()),
+            } => self.name(model.clone(), *tier),
             Event::ModelSwitched {
                 tier: Tier::Code,
                 to,
                 ..
-            } => self.name(to.clone()),
+            } => self.name(to.clone(), Tier::Code),
             _ => {}
         }
         self.status != before
     }
 
-    fn name(&mut self, model: ModelId) {
+    fn name(&mut self, model: ModelId, tier: Tier) {
         self.status.model_name = self.names.get(&model.0).cloned();
         self.status.short_name = self.names.short(&model.0).cloned();
         self.status.model = Some(model);
+        let provider = self
+            .providers
+            .iter()
+            .find(|(t, p)| *t == tier && !p.is_empty())
+            .map(|(_, p)| p.clone());
+        self.status.provider_name = provider.as_deref().map(provider_name);
+        self.status.provider = provider;
     }
 
     fn set(&mut self, mode: PermissionMode, effort: Option<Effort>) {
@@ -213,6 +229,37 @@ mod tests {
         assert!(!fold.apply(&switch(Tier::Cheap)));
         assert!(fold.apply(&switch(Tier::Code)));
         assert_eq!(fold.status().model, Some(ModelId("gpt-6".into())));
+    }
+
+    #[test]
+    fn the_status_names_the_code_tiers_provider_on_open_and_after_a_switch() {
+        let mut fold = opened();
+        assert_eq!(fold.status().provider.as_deref(), Some("anthropic"));
+        assert_eq!(fold.status().provider_name.as_deref(), Some("Anthropic"));
+        let switch = Event::ModelSwitched {
+            tier: Tier::Code,
+            from: ModelId("claude-sonnet-5".into()),
+            to: ModelId("claude-opus-5".into()),
+        };
+        fold.apply(&switch);
+        assert_eq!(fold.status().provider.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn a_main_turn_on_another_tier_names_that_tiers_provider() {
+        let mut config = Config::default();
+        config.tiers.think.provider = "openai".into();
+        let mut fold = StatusFold::open(&config);
+        let think = Event::TurnStarted {
+            turn: TurnId::new(),
+            seq: 1,
+            job: Job::Main,
+            tier: Tier::Think,
+            model: ModelId("gpt-6".into()),
+        };
+        assert!(fold.apply(&think));
+        assert_eq!(fold.status().provider.as_deref(), Some("openai"));
+        assert_eq!(fold.status().provider_name.as_deref(), Some("OpenAI"));
     }
 
     #[test]

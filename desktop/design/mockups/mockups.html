@@ -483,6 +483,8 @@ function sidebar(active='jitter',o={}){
 }
 
 // ---------- toolbar ----------
+// Superseded (T60.6, A139): the model capsule and the Ask/Plan/Auto control drawn below now live in the
+// composer as its model chip and mode menu (DT§5.3); the app's toolbar keeps neither.
 function toolbar(o={}){
   const mode=o.mode||'ask';
   const seg=`<div class="seg"><span class="${mode==='ask'?'on':''}">Ask</span><span class="plan ${mode==='plan'?'on':''}">Plan</span><span class="${mode==='auto'?'on':''}">Auto</span>${mode==='bypass'?'<span class="byp on">Bypass</span>':''}</div>`;

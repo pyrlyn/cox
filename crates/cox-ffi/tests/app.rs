@@ -183,3 +183,45 @@ async fn output_of_an_unknown_archive_is_a_session_error() {
     let err = session.output(cox_protocol::ids::ArchiveId::new()).err();
     assert!(matches!(err, Some(AppError::Session { .. })), "{err:?}");
 }
+
+#[tokio::test]
+async fn readiness_asks_the_host_keychain_and_words_the_answer() {
+    let dir = scratch(None);
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let blocked = ffi_app(dir.path(), Arc::default())
+        .readiness(cwd.clone())
+        .await
+        .expect("readiness");
+    assert!(
+        matches!(&blocked, cox_app::Readiness::NoKey { provider } if provider == "anthropic"),
+        "{blocked:?}"
+    );
+    assert!(
+        cox_ffi::readiness_message(blocked)
+            .expect("a message")
+            .contains("anthropic")
+    );
+    let mut keyed = MemoryHost::default();
+    keyed.secrets.insert("anthropic".into(), "sk-test".into());
+    let ready = ffi_app(dir.path(), Arc::new(keyed))
+        .readiness(cwd)
+        .await
+        .expect("readiness");
+    assert_eq!(ready, cox_app::Readiness::Ready);
+    assert_eq!(cox_ffi::readiness_message(ready), None);
+}
+
+#[test]
+fn a_blocked_send_and_a_locked_provider_cross_as_their_own_errors() {
+    use cox_app::app::AppError as Owner;
+    let blocked = AppError::from(Owner::NotReady(cox_app::Readiness::NoProvider));
+    assert!(
+        matches!(&blocked, AppError::NotReady { readiness: cox_app::Readiness::NoProvider, message } if message.contains("provider")),
+        "{blocked:?}"
+    );
+    let locked = AppError::from(Owner::ProviderLocked);
+    assert!(
+        matches!(&locked, AppError::ProviderLocked { message } if message.contains("new session")),
+        "{locked:?}"
+    );
+}

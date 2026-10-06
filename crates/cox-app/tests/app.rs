@@ -427,6 +427,134 @@ async fn resume_reopens_the_session_with_its_blocks() {
     assert_eq!(texts(&resumed), before);
 }
 
+/// A second provider section; the Scripted double stands in for its wire.
+const SECOND_SECTION: &str =
+    "[providers.second]\napi = \"chat\"\nbase_url = \"https://second.invalid/v1\"\n";
+
+fn pick_second(make_default: bool) -> Intent {
+    Intent::SwitchProvider {
+        provider: "second".into(),
+        model: cox_protocol::types::ModelId("second-coder".into()),
+        make_default,
+    }
+}
+
+/// The model the first status patch of `session` names.
+async fn status_model(session: &LiveSession) -> Option<String> {
+    let batch = session.next_patches().await.expect("open stream");
+    batch.into_iter().find_map(|p| match p {
+        TimelinePatch::Status { status } => status.model.map(|m| m.0),
+        _ => None,
+    })
+}
+
+/// T60.3: an empty session reopens on the picked provider under the same
+/// id, the old handle closes, and the reopened one runs a turn.
+#[tokio::test]
+async fn an_empty_session_reopens_on_the_picked_provider_in_place() {
+    let dir = scratch(Some(TWO_REPLIES));
+    let user = dir.path().join("user/.cox/config.toml");
+    std::fs::create_dir_all(dir.path().join("user/.cox")).expect("home");
+    std::fs::write(&user, SECOND_SECTION).expect("config");
+    let session = open(dir.path(), Arc::default()).await.expect("open");
+    assert_eq!(session.provider(), Some("anthropic"));
+    let next = session.send(pick_second(false)).await.expect("switch");
+    let next = next.expect("a provider switch returns the reopened session");
+    assert_eq!(next.id(), session.id(), "the window's slot keeps its id");
+    assert_eq!(next.provider(), Some("second"));
+    assert_eq!(status_model(&next).await.as_deref(), Some("second-coder"));
+    // What was queued before the close still drains; then the stream ends.
+    let drained = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while session.next_patches().await.is_some() {}
+    });
+    assert!(drained.await.is_ok(), "the old one's stream closed");
+    let store = cox_store::Store::open(&dir.path().join("user/.cox")).expect("store");
+    let rows = store.sessions_tree(10).expect("rows");
+    assert_eq!(rows.len(), 1, "no orphan row");
+    let config = std::fs::read_to_string(&user).expect("config");
+    assert!(!config.contains("second-coder"), "not made the default");
+
+    next.send(send("hi")).await.expect("send");
+    finish(&next).await;
+    assert_eq!(texts(&next), ["hi", "One."]);
+}
+
+/// T60.3 with T60.2's gate: the default provider has no key and the
+/// picked one has, so the reopened session may send.
+#[tokio::test]
+async fn a_session_reopened_on_a_usable_provider_may_send() {
+    let dir = scratch(Some(TWO_REPLIES));
+    let user = dir.path().join("user/.cox/config.toml");
+    std::fs::create_dir_all(dir.path().join("user/.cox")).expect("home");
+    std::fs::write(&user, SECOND_SECTION).expect("config");
+    let mut keyed = MemoryHost::default();
+    keyed.secrets.insert("second".into(), "sk-test".into());
+    let session = open(dir.path(), Arc::new(keyed)).await.expect("open");
+    let next = session.send(pick_second(false)).await.expect("switch");
+    let next = next.expect("reopened");
+    // The double built both providers; without it the gate reads the
+    // config, whose default is anthropic with no key.
+    // SAFETY: this test's own process (nextest).
+    unsafe { std::env::remove_var("COX_PROVIDER") };
+    let default = app(dir.path(), Arc::default())
+        .readiness(&dir.path().join("project"))
+        .await
+        .expect("readiness");
+    assert!(
+        matches!(&default, cox_app::Readiness::NoKey { provider } if provider == "anthropic"),
+        "{default:?}"
+    );
+    let own = next.readiness().await.expect("readiness");
+    assert_eq!(own, cox_app::Readiness::Ready, "the session's own provider");
+    next.send(send("hi"))
+        .await
+        .expect("the picked provider is ready");
+    finish(&next).await;
+    assert_eq!(texts(&next), ["hi", "One."]);
+}
+
+/// T60.3: `make_default` writes both keys to the user config.
+#[tokio::test]
+async fn a_provider_pick_made_default_lands_in_the_user_config() {
+    let dir = scratch(Some(TWO_REPLIES));
+    let user = dir.path().join("user/.cox/config.toml");
+    std::fs::create_dir_all(dir.path().join("user/.cox")).expect("home");
+    std::fs::write(&user, SECOND_SECTION).expect("config");
+    let session = open(dir.path(), Arc::default()).await.expect("open");
+    let next = session.send(pick_second(true)).await.expect("switch");
+    assert_eq!(next.expect("reopened").provider(), Some("second"));
+    let config = std::fs::read_to_string(&user).expect("config");
+    let doc: toml_edit::DocumentMut = config.parse().expect("toml");
+    assert_eq!(doc["tiers"]["code"]["provider"].as_str(), Some("second"));
+    assert_eq!(doc["tiers"]["code"]["model"].as_str(), Some("second-coder"));
+    assert!(
+        doc["providers"]["second"].is_table_like(),
+        "the section is kept"
+    );
+}
+
+/// T60.3: once a turn ran, the pick is refused and the session goes on.
+#[tokio::test]
+async fn a_session_with_a_turn_refuses_another_provider() {
+    let dir = scratch(Some(TWO_REPLIES));
+    let user = dir.path().join("user/.cox/config.toml");
+    std::fs::create_dir_all(dir.path().join("user/.cox")).expect("home");
+    std::fs::write(&user, SECOND_SECTION).expect("config");
+    let session = open(dir.path(), Arc::default()).await.expect("open");
+    session.send(send("hi")).await.expect("send");
+    finish(&session).await;
+    let err = session.send(pick_second(false)).await.err();
+    assert!(matches!(err, Some(AppError::ProviderLocked)), "{err:?}");
+    assert_eq!(
+        err.map(|e| e.to_string()).as_deref(),
+        Some("start a new session to change provider")
+    );
+    assert_eq!(session.provider(), Some("anthropic"));
+    session.send(send("again")).await.expect("still running");
+    finish(&session).await;
+    assert_eq!(texts(&session), ["hi", "One.", "again", "Two."]);
+}
+
 /// A113 (T37.22.9): the open session renames through its core; a closed
 /// one through `App::rename`; both land in the list the sidebar reads.
 #[tokio::test]
@@ -1212,4 +1340,52 @@ async fn app_server_stalled_client_does_not_delay_the_turn() {
         waiting.is_ok(),
         "the turn waited on a client that stopped reading"
     );
+}
+
+#[tokio::test]
+async fn readiness_is_no_key_for_the_default_provider_and_ready_with_an_injected_key() {
+    let dir = scratch(None);
+    let project = dir.path().join("project");
+    let blocked = app(dir.path(), Arc::default())
+        .readiness(&project)
+        .await
+        .expect("readiness");
+    assert_eq!(
+        blocked,
+        cox_app::Readiness::NoKey {
+            provider: "anthropic".into()
+        }
+    );
+    let mut keyed = MemoryHost::default();
+    keyed.secrets.insert("anthropic".into(), "sk-test".into());
+    let ready = app(dir.path(), Arc::new(keyed))
+        .readiness(&project)
+        .await
+        .expect("readiness");
+    assert_eq!(ready, cox_app::Readiness::Ready);
+}
+
+#[tokio::test]
+async fn a_turn_intent_is_refused_while_the_provider_is_not_ready() {
+    let dir = scratch(Some(TWO_REPLIES));
+    let session = open(dir.path(), Arc::default()).await.expect("open");
+    // The test double built the session's provider; without it the gate sees
+    // the config's anthropic section and no key, as a real launch would.
+    // SAFETY: this test's own process (nextest).
+    unsafe { std::env::remove_var("COX_PROVIDER") };
+    for intent in [
+        send("hello"),
+        Intent::Queue {
+            text: "hello".into(),
+            attachments: vec![],
+            confirm_think: false,
+        },
+    ] {
+        let err = session.send(intent).await.err();
+        assert!(
+            matches!(&err, Some(AppError::NotReady(cox_app::Readiness::NoKey { provider })) if provider == "anthropic"),
+            "{err:?}"
+        );
+    }
+    assert!(texts(&session).is_empty(), "no turn started");
 }

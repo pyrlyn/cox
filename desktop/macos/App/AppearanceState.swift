@@ -20,7 +20,7 @@ extension AppearancePopover.State {
     guard let stored = settings.appearance else { return }
     material = GlassMaterial(rawValue: stored.material.rawValue) ?? .frosted
     (opacity, blur, blurRange) = (stored.opacity, stored.blur, stored.blurRange)
-    (depth, tint) = (stored.depth, stored.tint)
+    (depth, specular, tint) = (stored.depth, stored.specular, stored.tint)
     fillTexts()
     let appearance = settings.view?.settings.filter { $0.key.hasPrefix("desktop.appearance.") }
     for setting in appearance ?? [] where !setting.editable {
@@ -37,6 +37,7 @@ extension AppearancePopover.State {
       material == .glossy
       ? Self.percent(Self.fraction(blur, in: blurRange)) : "\(Int(blur.rounded())) pt"
     depthText = Self.percent(depth)
+    specularText = Self.percent(specular)
   }
 
   /// How much of the system's behind-window blur the window draws, 0…1. AppKit blurs at one
@@ -81,6 +82,7 @@ extension AppearanceEdit {
     case .opacity(let value): self = .opacity(value)
     case .blur(let value): self = .blur(value)
     case .depth(let value): self = .depth(value)
+    case .specular(let value): self = .specular(value)
     case .tint(let isOn): self = .tint(isOn)
     }
   }

@@ -84,6 +84,25 @@ private let everyMaterial = [ColorScheme.light, .dark].flatMap { scheme in
     #expect(forced.specular == MaterialToken.solidSpecular)
   }
 
+  @Test func glareScalesTheMaterialsSpecularToken() {
+    #expect(Appearance(material: .glossy).specular == MaterialToken.glossySpecular)
+    #expect(
+      Appearance(material: .glossy, specularScale: 0.5).specular
+        == MaterialToken.glossySpecular * 0.5)
+    #expect(Appearance(material: .frosted, specularScale: 0).specular == 0)
+    #expect(Appearance(material: .glossy, specularScale: 4).specular <= 1)
+    #expect(Appearance(material: .glossy, specularScale: -1).specular == 0)
+  }
+
+  @Test func glareNeverBringsTheSweepBackInSolidOrUnderIncreaseContrast() {
+    #expect(Appearance(material: .solid, specularScale: 1).specular == MaterialToken.solidSpecular)
+    let contrast = Appearance(material: .glossy, specularScale: 1)
+      .effective(reduceTransparency: false, increaseContrast: true)
+    #expect(contrast.specular == MaterialToken.solidSpecular)
+    let forced = Appearance(material: .glossy, specularScale: 1).effective(reduceTransparency: true)
+    #expect(forced.specular == MaterialToken.solidSpecular)
+  }
+
   @Test func readableSurfacesNeverDropBelowTheFloor() {
     let clear = Appearance(material: .frosted, windowOpacity: 0)
     #expect(clear.backgroundOpacity(.chrome) == 0)

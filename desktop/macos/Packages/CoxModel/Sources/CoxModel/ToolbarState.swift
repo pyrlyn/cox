@@ -56,4 +56,8 @@ public struct ToolbarState: Equatable, Sendable {
 }
 
 /// `$0.42`, as cox-app's meter and the TUI write a cost.
-func usd(_ amount: Double) -> String { String(format: "$%.2f", amount) }
+/// "$0.42". An amount that rounds to zero prints "$0.00", never "$-0.00": a sum over no ledger
+/// rows is -0.0 on some toolchains, and `%.2f` keeps that sign.
+public func usd(_ amount: Double) -> String {
+  String(format: "$%.2f", abs(amount) < 0.005 ? 0 : amount)
+}

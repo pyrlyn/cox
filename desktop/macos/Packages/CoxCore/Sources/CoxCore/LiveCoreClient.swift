@@ -48,7 +48,11 @@ final class LiveSession: SessionClient {
   }
 
   func send(_ intent: CoxClient.Intent) async throws -> (any SessionClient)? {
-    try await handle.send(intent: CoxFFIBindings.Intent(intent)).map { LiveSession($0) }
+    do {
+      return try await handle.send(intent: CoxFFIBindings.Intent(intent)).map { LiveSession($0) }
+    } catch AppError.ProviderLocked(let message) {
+      throw ProviderLocked(message)
+    }
   }
 
   func complete(_ token: String, limit: UInt32) -> [CoxClient.Completion] {
@@ -112,6 +116,12 @@ final class LiveSession: SessionClient {
 
   func openTerminal(cols: UInt16, rows: UInt16) throws -> any TerminalClient {
     LiveTerminal(try handle.openTerminal(cols: cols, rows: rows))
+  }
+
+  func provider() -> String? { handle.provider() }
+
+  func readiness() async throws -> CoxClient.Readiness {
+    CoxClient.Readiness(try await handle.readiness())
   }
 
   func close() { handle.close() }

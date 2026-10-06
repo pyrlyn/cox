@@ -98,10 +98,12 @@ import Testing
   let live = CoxFFIBindings.TimelinePatch.status(
     status: .init(
       queued: 2, mode: .plan, nextMode: .auto, model: "claude-sonnet-5",
-      modelName: "Claude Sonnet 5", shortName: "Sonnet 5", effort: .high))
+      modelName: "Claude Sonnet 5", shortName: "Sonnet 5", effort: .high, provider: "anthropic",
+      providerName: "Anthropic"))
   let status = CoxClient.Status(
     queued: 2, mode: .plan, nextMode: .auto, model: "claude-sonnet-5", effort: .high,
-    modelName: "Claude Sonnet 5", shortName: "Sonnet 5")
+    modelName: "Claude Sonnet 5", shortName: "Sonnet 5", provider: "anthropic",
+    providerName: "Anthropic")
   #expect(CoxClient.TimelinePatch(live) == .status(status: status))
 }
 
@@ -186,12 +188,44 @@ import Testing
 @Test func theModelMenuConvertsTheCoresSections() throws {
   let (home, client) = try scratch()
   defer { try? FileManager.default.removeItem(at: home) }
-  let sections = try client.modelMenu(cwd: home.path())
+  let sections = try client.modelMenu(cwd: home.path(), usable: ["anthropic"])
   #expect(sections.first?.tier == .code)
   #expect(sections.first?.title == "Code")
   let ids = sections.flatMap { $0.models.map(\.id) }
   #expect(!ids.isEmpty)
   #expect(Set(ids).count == ids.count)
+}
+
+/// T60.4: a section is usable exactly when its provider is in the list the caller passed, and
+/// the provider the section carries is the core's.
+@Test func theModelMenuMarksSectionsByTheUsableList() throws {
+  let (home, client) = try scratch()
+  defer { try? FileManager.default.removeItem(at: home) }
+  let none = try client.modelMenu(cwd: home.path(), usable: [])
+  #expect(!none.isEmpty && none.allSatisfy { !$0.usable && !$0.provider.isEmpty })
+  let providers = none.map(\.provider)
+  let all = try client.modelMenu(cwd: home.path(), usable: providers)
+  let marked = all.allSatisfy { $0.usable }
+  #expect(marked)
+}
+
+/// T60.4: the core's readiness crosses with its own wording, and a provider switch is the
+/// intent the core defined.
+@Test func aReadinessConvertsWithTheCoresMessageAndASwitchKeepsItsFields() {
+  func convert(_ live: CoxFFIBindings.Readiness) -> CoxClient.Readiness {
+    CoxClient.Readiness(live)
+  }
+  #expect(convert(.ready) == .ready)
+  let noKey = convert(.noKey(provider: "anthropic"))
+  #expect(noKey.reason == .noKey(provider: "anthropic"))
+  #expect(noKey.message?.contains("anthropic") == true)
+  #expect(convert(.noProvider).reason == .noProvider)
+  #expect(convert(.unreachable(provider: "ollama")).reason == .unreachable(provider: "ollama"))
+  let switched = CoxClient.Intent.switchProvider(
+    provider: "openai", model: "gpt-5", makeDefault: true)
+  #expect(
+    CoxFFIBindings.Intent(switched)
+      == .switchProvider(provider: "openai", model: "gpt-5", makeDefault: true))
 }
 
 /// T58.4.24: a task block's state crosses as the core decided it.

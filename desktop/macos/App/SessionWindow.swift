@@ -49,7 +49,7 @@ struct SessionWindow: View {
   /// The checklist's provider-key row, for the sidebar's footer dot.
   @State private var providerCheck: CheckRow?
   /// The providers a turn could run on now, for the footer's count (A110); nil until probed.
-  @State private var usable: [String]?
+  @State var usable: [String]?
   /// Review shows in the column instead of the transcript, at this file or the first changed one.
   @State var reviewing: Reviewing?
   /// Why the first session did not open.
@@ -71,6 +71,9 @@ struct SessionWindow: View {
   @State private var bestOf = BestOfLauncher()
   @Environment(\.coxAppearance) private var base
   @Environment(\.openWindow) private var openWindow
+  @Environment(\.openSettings) var openSettings
+  /// Why the core refused a provider switch after the first turn (T60.3); offers a new session.
+  @State var lockedMessage: String?
 
   init(model: AppModel, popOut: PopOut? = nil) {
     self.model = model
@@ -129,8 +132,15 @@ struct SessionWindow: View {
           palette: showing.map { _ in togglePalette })
       )
       .commandPalette(palette?.state, send: handle)
+      .alert("Change the provider in a new session", isPresented: isLocked) {
+        Button("New session") { Task { await newSession() } }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text(lockedMessage ?? "")
+      }
       .task { if current == nil { await open(resume: popOut?.session) } }
       .task { await watch() }
+      .refreshingProviders(onKeysOf: model.settings) { await refreshProviders() }
       .task { if popOut == nil { await model.remotes.watch() } }
       .onDisappear {
         for session in opened.values { session.close(in: model.registry, window: windowID) }
@@ -206,13 +216,13 @@ struct SessionWindow: View {
             }
           let panels = PluginWidgets.panels(showing.store)
           if !panels.isEmpty { PluginPanel(panels).fixedSize(horizontal: false, vertical: true) }
-          BestOfBar(launcher: bestOf, open: showing, model: model) { sessions in
+          BestOfBar(launcher: bestOf, open: showing, model: model, usable: usable) { sessions in
             for session in sessions where opened[session.id] == nil {
               opened[session.id] = OpenedSession(model.registry.adopt(session, window: windowID))
             }
           }
           // At its own height, so the transcript takes the rest of the column.
-          SessionComposer(store: showing.composer).fixedSize(horizontal: false, vertical: true)
+          composer(for: showing).fixedSize(horizontal: false, vertical: true)
           if isTerminalShown {
             SessionTerminal(
               store: showing.store, surfaces: showing.terminals,
@@ -232,8 +242,9 @@ struct SessionWindow: View {
             .frame(maxWidth: SessionBrowser.paneWidth)
         }
       }
-      // A new view per session, so the transcript's text is rebuilt from the one it shows.
-      .id(current)
+      // A new view per session, so the transcript's text is rebuilt from the one it shows; and
+      // per provider switch, which swaps the stores under one session id (T60.7).
+      .id(showing.viewID)
       .pluginOverlaySheet(showing.store)
     } else if let failure {
       Text(failure).textSelection(.enabled)
@@ -256,7 +267,7 @@ struct SessionWindow: View {
         case .refused(let why): refused = why
         }
       }
-      .id(current)
+      .id(showing.viewID)
     }
   }
 
@@ -269,17 +280,6 @@ struct SessionWindow: View {
       usable = try? await live.usableProviders(cwd: cwd)
     }
     await model.sidebar.watch()
-  }
-
-  private func readSettings() async {
-    appearanceWrites.onIdle = { readAppearance() }
-    await model.settings?.load()
-    readAppearance()
-  }
-
-  private func readAppearance() {
-    guard let settings = model.settings else { return }
-    screen.appearance = AppearancePopover.State(settings)
   }
 
   /// New session: asks who drives it first when an external agent is configured (T52.8).
@@ -321,7 +321,7 @@ struct SessionWindow: View {
       // The local config's models; a remote session's cwd is not a path here.
       if remote == nil, let live = try? model.launch.live.get() {
         opened[client.id]?.models = (try? live.models(cwd: cwd)) ?? []
-        opened[client.id]?.modelSections = (try? live.modelMenu(cwd: cwd)) ?? []
+        opened[client.id]?.modelSections = await live.modelSections(cwd: cwd, usable: usable)
       }
       model.sidebar.refresh()
       // Loads the granted plugins, so after it shows; a remote cwd is not a path here either.

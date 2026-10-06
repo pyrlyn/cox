@@ -16,6 +16,17 @@ extension PreviewState {
     .init(id: "agent:gemini", label: "Gemini CLI", unavailable: "gemini is not on PATH"),
   ])
 
+  /// The session's provider has no key: the capsule is disabled and the model on a provider with
+  /// no key cannot be added (T60.5). Codex does not need one and stays added, so the capsule is
+  /// disabled with two candidates, not for want of a second.
+  static let bestOfNotReady = BestOfControl.State(
+    options: [
+      .init(id: "agent:codex", label: "Codex", isPicked: true),
+      .init(
+        id: "cox:claude-sonnet-5", label: "cox · Sonnet 5",
+        unavailable: "No key for anthropic, or it is not running."),
+    ], unavailable: "No API key for anthropic.")
+
   private static let prompt = "Split CheckoutForm into address, payment and summary components."
 
   private static let claudeColumn = BestOfCompare.Column(
@@ -45,6 +56,23 @@ extension PreviewState {
   /// Three candidates: one done, one running, one that did not start.
   static let bestOfThree = BestOfCompare.State(
     prompt: prompt, total: "$0.38", columns: [claudeColumn, coxColumn, codexColumn])
+
+  /// A candidate whose turn failed after it started, as Best of reads it back: the provider's
+  /// own error, no files, nothing to review or keep (T60.10).
+  private static let failedTurnColumn = BestOfCompare.Column(
+    id: 2, label: "cox · Opus 5", status: .failed("provider error: provider auth failed"),
+    branch: "best-01k6x-3", cost: "$0.00", duration: "0s")
+
+  /// Every candidate's turn failed on the provider: both columns show the error, and neither
+  /// offers an action.
+  static let bestOfFailedTurns = BestOfCompare.State(
+    prompt: prompt, total: "$0.00",
+    columns: [
+      BestOfCompare.Column(
+        id: 1, label: "cox · Sonnet 5", status: .failed("provider error: provider auth failed"),
+        branch: "best-01k6x-2", cost: "$0.00", duration: "0s"),
+      failedTurnColumn,
+    ])
 
   /// "Keep this one" on Claude Agent: the worktree it prunes.
   static let bestOfConfirm = BestOfCompare.State(

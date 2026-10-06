@@ -8,7 +8,8 @@
 // brings back the session's earlier prompts, which the fixture client serves without Rust.
 // T37.24.5's: ⌘V of a PNG from a private pasteboard attaches it, and ⌘V of text is left to
 // the Edit menu's Paste. T37.24.9's: `@` typed mid-text is completed in place, the caret after
-// the insert. T37.24.7's: ⇧⇥ sends the mode the core's status names next.
+// the insert. T37.24.7's: ⇧⇥ sends the mode the core's status names next. T60.6's: a click on the
+// model chip asks the window to open the model popover.
 
 import AppKit
 import CoxClient
@@ -110,6 +111,31 @@ import Testing
     #expect(session.sent.suffix(2) == [.interrupt, .send(text: "now", attachments: [])])
   }
 
+  /// T60.5: with no usable provider ⏎ and ⌘⏎ do nothing and the draft stays; once the core says the
+  /// provider is usable the same key sends it.
+  @Test func returnAndCommandReturnAreIgnoredWhileTheProviderIsNotReady() async throws {
+    let session = FixtureSession(
+      fixture: Fixture(batches: [], snapshot: []), readiness: .noKey(provider: "anthropic"))
+    let store = ComposerStore(session: SessionStore(session: session))
+    let host = ComposerHost(SessionComposer(store: store))
+    defer { host.close() }
+    // The composer reads the provider as it appears.
+    await host.settle(until: { !store.readiness.isReady })
+
+    host.type("fix the bug")
+    host.press(.return)
+    host.press(.commandReturn)
+    await host.settle(until: { false }, limit: .milliseconds(300))
+    #expect(session.sent.isEmpty)
+    #expect(store.text == "fix the bug")
+
+    session.setReadiness(.ready)
+    await store.refreshReadiness()
+    host.press(.return)
+    await host.settle(until: { !session.sent.isEmpty })
+    #expect(session.sent == [.send(text: "fix the bug", attachments: [])])
+  }
+
   @Test func upInTheEmptyComposerBringsBackTheEarlierPromptsNewestFirst() {
     let session = FixtureSession(
       fixture: Fixture(batches: [], snapshot: []), prompts: ["run the tests", "add a cache"])
@@ -139,6 +165,24 @@ import Testing
     await host.settle(until: { !session.sent.isEmpty })
     #expect(session.sent == [.setMode(mode: .auto)])
     #expect(host.editor.string.isEmpty)
+  }
+
+  @Test(.enabled(if: syntheticMouse, "synthesized mouse events need macOS 27"))
+  func clickingTheModelChipAsksTheWindowToOpenTheModelPopover() throws {
+    let session = FixtureSession(fixture: Fixture(batches: [], snapshot: []))
+    let transcript = SessionStore(session: session)
+    transcript.apply([
+      .status(status: Status(mode: .plan, nextMode: .auto, model: "claude-sonnet-5", effort: .high))
+    ])
+    var opened = 0
+    let host = ComposerHost(
+      SessionComposer(store: ComposerStore(session: transcript), openModel: { opened += 1 }))
+    defer { host.close() }
+
+    // The chip row, leading first: attach, mode, model, think.
+    try host.clickChip(2)
+    #expect(opened == 1)
+    #expect(session.sent.isEmpty)
   }
 
   @Test func pastingAPNGAttachesItAndSendCarriesIt() async throws {
@@ -267,6 +311,37 @@ private final class ComposerHost {
     if let event { NSApp.sendEvent(event) }
     settle()
     return menu.pasted
+  }
+
+  /// Clicks the `index`th button of the chip row, counted from the leading edge. SwiftUI builds
+  /// no accessibility tree for a window nothing inspects, so a button is found by the focus ring
+  /// AppKit keeps over it; the editor's own ring is the tallest, and is left out.
+  func clickChip(_ index: Int) throws {
+    let rings = Self.descendants(of: window.contentView)
+      .filter { String(describing: Swift.type(of: $0)).contains("FocusRing") }
+      .map { $0.convert($0.bounds, to: nil) }
+      .filter { $0.height < Size.chipHeight * 2 }
+      .sorted { $0.minX < $1.minX }
+    let frame = try #require(rings.indices.contains(index) ? rings[index] : nil)
+    let point = NSPoint(x: frame.midX, y: frame.midY)
+    for (number, type) in [NSEvent.EventType.leftMouseDown, .leftMouseUp].enumerated() {
+      let event = NSEvent.mouseEvent(
+        with: type, location: point, modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+        context: nil, eventNumber: number, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)
+      if let event { window.sendEvent(event) }
+    }
+    settle()
+  }
+
+  private static func descendants(of view: NSView?) -> [NSView] {
+    var found: [NSView] = []
+    var stack = view.map { [$0] } ?? []
+    while let next = stack.popLast() {
+      found.append(next)
+      stack.append(contentsOf: next.subviews)
+    }
+    return found
   }
 
   /// A few turns of the run loop, so SwiftUI applies what the store changed.

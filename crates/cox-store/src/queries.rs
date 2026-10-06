@@ -335,7 +335,8 @@ impl Store {
             .into_iter()
             .filter(|(cwd, _)| under(Path::new(cwd)))
             .filter_map(|(_, cost)| cost)
-            .sum())
+            // Seeded with `0.0`: `Iterator::sum` of nothing is `-0.0`.
+            .fold(0.0, |total, cost| total + cost))
     }
 
     /// What the whole ledger spent since `since` (RFC 3339 UTC, as

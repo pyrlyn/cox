@@ -10,6 +10,22 @@
 import CoxClient
 import Observation
 
+extension CandidateView {
+  /// "Open in Review" needs a session to open and something to review: a candidate that failed
+  /// and changed no file has nothing in its worktree worth a diff.
+  public var canReview: Bool {
+    guard session != nil, state != .pruned else { return false }
+    if case .failed = state { return !files.isEmpty }
+    return true
+  }
+
+  /// "Keep this one": only a finished candidate that still has its worktree, while no other has
+  /// been kept.
+  public func canKeep(anotherKept: Bool) -> Bool {
+    !anotherKept && state == .done && worktree != nil
+  }
+}
+
 @MainActor
 @Observable
 public final class BestOfStore {

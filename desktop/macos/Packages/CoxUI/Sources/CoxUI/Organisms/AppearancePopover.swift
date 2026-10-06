@@ -26,11 +26,14 @@ public struct AppearancePopover: View {
     public var blurRange: ClosedRange<Double> = MaterialToken.solidBlur...MaterialToken.frostedBlur
     /// Depth, 0 (Flat) … 1 (3D).
     public var depth = 1.0
+    /// Glare, 0 (none) … 1 (the material's own sweep).
+    public var specular = 1.0
     public var tint = true
     /// `58%`, `34 pt`, `High`.
     public var transparencyText = ""
     public var blurText = ""
     public var depthText = ""
+    public var specularText = ""
     /// The controls a layer above the user file sets, each with that layer's name (`project`):
     /// an edit would not take effect, so they are disabled.
     public var locked: [Control: String] = [:]
@@ -45,6 +48,7 @@ public struct AppearancePopover: View {
       window.material = material
       window.windowOpacity = opacity
       window.depth = depth
+      window.specularScale = specular
       return window
     }
 
@@ -56,6 +60,7 @@ public struct AppearancePopover: View {
       case .opacity(let value): opacity = value
       case .blur(let value): blur = value
       case .depth(let value): depth = value
+      case .specular(let value): specular = value
       case .tint(let value): tint = value
       }
     }
@@ -67,17 +72,19 @@ public struct AppearancePopover: View {
     case opacity(Double)
     case blur(Double)
     case depth(Double)
+    case specular(Double)
     case tint(Bool)
   }
 
   /// The popover's controls, by the `[desktop.appearance]` key each one sets.
   public enum Control: String, CaseIterable, Sendable {
-    case material, opacity, blur, depth, tint
+    case material, opacity, blur, depth, specular, tint
   }
 
   let state: State
   let send: (Intent) -> Void
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.colorSchemeContrast) private var contrast
 
   public var body: some View {
     let shape = RoundedRectangle(cornerRadius: Radius.popover, style: .continuous)
@@ -110,6 +117,12 @@ public struct AppearancePopover: View {
         ends: (low: "Flat", high: "3D")
       )
       .disabled(isLocked(.depth))
+      LabeledSlider(
+        "Glare", value: bind(\.specular, Intent.specular), valueText: state.specularText,
+        ends: (low: "None", high: "Full")
+      )
+      // Solid and Increase Contrast draw no sweep, so the slider would move nothing.
+      .disabled(isLocked(.specular) || reduceTransparency || !isGlass || increaseContrast)
       LabeledToggle("Tint from wallpaper", isOn: bind(\.tint, Intent.tint))
         .disabled(reduceTransparency || isLocked(.tint))
       Text(note)
@@ -139,11 +152,17 @@ public struct AppearancePopover: View {
       ends: isGlossy ? (low: "Matte", high: "Mirror") : (low: "Light", high: "Heavy"))
   }
 
+  private var increaseContrast: Bool { contrast == .increased }
+
   private var note: String {
     if reduceTransparency { return "Reduce transparency is on, so the window stays Solid." }
     // One sentence per layer, its controls in the popover's order.
     let layers = Set(state.locked.values).sorted()
-    guard !layers.isEmpty else { return "Text panels stay readable at every setting." }
+    guard !layers.isEmpty else {
+      return increaseContrast
+        ? "Increase contrast is on, so the glass draws no glare."
+        : "Text panels stay readable at every setting."
+    }
     return layers.map { layer in
       let names = Control.allCases.filter { state.locked[$0] == layer }.map(\.title)
       return "Set by the \(layer) layer: \(names.formatted(.list(type: .and)))."
@@ -173,6 +192,7 @@ extension AppearancePopover.Control {
     case .opacity: "Transparency"
     case .blur: "Blur"
     case .depth: "Depth"
+    case .specular: "Glare"
     case .tint: "Tint"
     }
   }

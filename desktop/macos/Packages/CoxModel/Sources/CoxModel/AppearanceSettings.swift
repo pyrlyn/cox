@@ -24,6 +24,8 @@ public enum AppearanceEdit: Equatable, Sendable {
   case blur(Double)
   /// 0 (Flat) … 1 (3D).
   case depth(Double)
+  /// Glare: the scale on the material's specular sweep, 0 (none) … 1 (the material's own).
+  case specular(Double)
   case tint(Bool)
 
   public var key: String {
@@ -33,6 +35,7 @@ public enum AppearanceEdit: Equatable, Sendable {
       case .opacity: "opacity"
       case .blur: "blur"
       case .depth: "depth"
+      case .specular: "specular"
       case .tint: "tint"
       }
     return DesktopAppearance.key(field)
@@ -41,7 +44,8 @@ public enum AppearanceEdit: Equatable, Sendable {
   var value: SettingValue {
     switch self {
     case .material(let material): .text(material.rawValue)
-    case .opacity(let number), .blur(let number), .depth(let number): .number(number)
+    case .opacity(let number), .blur(let number), .depth(let number), .specular(let number):
+      .number(number)
     case .tint(let isOn): .bool(isOn)
     }
   }
@@ -55,6 +59,8 @@ public struct DesktopAppearance: Equatable, Sendable {
   /// The blur the schema allows: the slider's range.
   public var blurRange: ClosedRange<Double>
   public var depth: Double
+  /// The scale on the material's specular sweep; 1 when the core predates the key.
+  public var specular: Double
   public var tint: Bool
 
   static func key(_ field: String) -> String { "desktop.appearance.\(field)" }
@@ -72,6 +78,8 @@ extension DesktopAppearance {
     else { return nil }
     (self.material, self.opacity, self.blur, self.depth, self.tint) =
       (material, opacity, blur, depth, tint)
+    // Optional so a core without the key still decodes the rest of the section (T60.8).
+    specular = rows.decode("specular") ?? 1
     blurRange = low...high
   }
 }

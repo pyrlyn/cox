@@ -20,7 +20,7 @@ public struct MainScreenState: Equatable, Sendable {
   public var inspectorTab = InspectorTab.changes
   /// Shown while the toolbar's `popover` is `.appearance`.
   public var appearance = AppearancePopover.State()
-  /// Shown while the toolbar's `popover` is `.model`.
+  /// Shown over the composer's model chip while the toolbar's `popover` is `.model`.
   public var model = ModelPopover.State()
 
   public init() {}
@@ -50,6 +50,8 @@ public enum MainScreenIntent: Equatable, Sendable {
   case appearance(AppearancePopover.Intent)
   /// A model popover row's id.
   case model(String)
+  /// A model popover header's "Add key": the provider's section name; opens Settings.
+  case addKey(provider: String)
   /// A click outside the open popover, or Esc.
   case dismissPopover
 }
@@ -102,15 +104,20 @@ public struct MainScreen<Transcript: View, InspectorContent: View>: View {
           .padding(.trailing, Space.l + Size.capsuleHeight)
       }
     }
-    .overlayPreferenceValue(ModelCapsuleAnchor.self) { anchor in
+    .overlayPreferenceValue(ModelChipAnchor.self) { anchor in
       if state.toolbar.popover == .model, let anchor {
         GeometryReader { window in
-          // Under the capsule, its leading edges aligned, kept inside the window.
-          let capsule = window[anchor]
-          ModelPopover(state: state.model) { send(.model($0)) }
-            .offset(
-              x: min(capsule.minX, window.size.width - Size.popoverWidth - Space.l),
-              y: capsule.maxY + Space.xs)
+          // Over the composer's chip, their leading edges aligned and the popover kept inside
+          // the window: the composer is the column's bottom edge, so the rows open upwards.
+          let chip = window[anchor]
+          let leading = min(chip.minX, window.size.width - Size.popoverWidth - Space.l)
+          ModelPopover(
+            state: state.model, pick: { send(.model($0)) },
+            addKey: { send(.addKey(provider: $0)) }
+          )
+          .padding(.leading, max(0, leading))
+          .padding(.bottom, window.size.height - chip.minY + Space.xs)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
       }
     }

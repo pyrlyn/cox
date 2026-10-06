@@ -37,23 +37,32 @@ final class BestOfLauncher {
   }
 
   /// Every other agent this cwd can run, cox if an agent drives the session, and cox on each
-  /// code-tier model; `driver` is the session's own agent, `nil` for cox.
-  func state(_ open: OpenedSession, driver: String?) -> BestOfControl.State {
+  /// code-tier model; `driver` is the session's own agent, `nil` for cox. While the session's
+  /// provider cannot answer nothing launches, and a cox candidate on a provider outside `usable`
+  /// cannot be added (T60.5, A139).
+  func state(_ open: OpenedSession, driver: String?, usable: [String]?) -> BestOfControl.State {
+    let readiness = open.composer.readiness
     let agents = open.agents.compactMap { agent -> BestOfControl.Option? in
       guard let name = agent.name, name != driver else { return nil }
       return BestOfControl.Option(
         id: "agent:\(name)", label: agent.label, unavailable: agent.unavailable)
     }
-    let cox = driver == nil ? [] : [BestOfControl.Option(id: "cox", label: "cox")]
+    let cox =
+      driver == nil
+      ? [] : [BestOfControl.Option(id: "cox", label: "cox", unavailable: readiness.blockedReason)]
     let models = open.models.filter { $0.tier == .code }.map {
-      BestOfControl.Option(id: "cox:\($0.id)", label: "cox · \($0.displayName ?? $0.id)")
+      BestOfControl.Option(
+        id: "cox:\($0.id)", label: "cox · \($0.displayName ?? $0.id)",
+        unavailable: Readiness.unavailableReason(provider: $0.provider, usable: usable))
     }
     let options = (agents + cox + models).map { option in
       var option = option
-      option.isPicked = picked.contains(option.id)
+      option.isPicked = option.unavailable == nil && picked.contains(option.id)
       return option
     }
-    return BestOfControl.State(options: options, isLaunching: isLaunching, failure: failure)
+    return BestOfControl.State(
+      options: options, isLaunching: isLaunching, failure: failure,
+      unavailable: readiness.blockedReason)
   }
 
   /// Sends `prompt` to the session's own agent and the candidates added; the launch's sessions,
@@ -92,12 +101,14 @@ struct BestOfBar: View {
   let launcher: BestOfLauncher
   let open: OpenedSession
   let model: AppModel
+  /// The providers a turn could run on now (A110); `nil` until probed.
+  let usable: [String]?
   let adopt: ([any SessionClient]) -> Void
 
   var body: some View {
     let id = open.store.session.id
     let driver = model.sidebar.entry(id)?.session.agent
-    let state = launcher.state(open, driver: driver)
+    let state = launcher.state(open, driver: driver, usable: usable)
     if !state.options.isEmpty, let live = client(for: id) {
       BestOfControl(state: state) { intent in
         switch intent {
@@ -175,8 +186,7 @@ struct BestOfSheet: View {
           BestOfCompare.File(path: $0.path, added: Int($0.added), removed: Int($0.removed))
         },
         cost: cost(view), duration: duration(view.durationMs),
-        canReview: view.session != nil && view.state != .pruned,
-        canKeep: !isKept && view.state == .done && view.worktree != nil)
+        canReview: view.canReview, canKeep: view.canKeep(anotherKept: isKept))
     }
     var confirm: BestOfCompare.Confirm?
     if let pending = store.pending {
@@ -191,7 +201,7 @@ struct BestOfSheet: View {
     }
     let total = store.columns.reduce(0) { $0 + $1.costUsd }
     return BestOfCompare.State(
-      prompt: prompt, total: String(format: "$%.2f", total), columns: columns, confirm: confirm,
+      prompt: prompt, total: usd(total), columns: columns, confirm: confirm,
       notes: [store.failure].compactMap(\.self) + store.refused)
   }
 
@@ -213,7 +223,7 @@ struct BestOfSheet: View {
   /// An external agent bills itself: no cox ledger cost to show.
   private static func cost(_ view: CandidateView) -> String {
     if case .agent = view.candidate { return "—" }
-    return String(format: "$%.2f", view.costUsd)
+    return usd(view.costUsd)
   }
 
   private static func duration(_ milliseconds: UInt64) -> String {

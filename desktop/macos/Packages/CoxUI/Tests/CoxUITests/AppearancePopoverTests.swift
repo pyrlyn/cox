@@ -73,8 +73,13 @@ import Testing
     popover.bind(\.material, AppearancePopover.Intent.material).wrappedValue = .glossy
     popover.bind(\.blur, AppearancePopover.Intent.blur).wrappedValue = 12
     popover.bind(\.depth, AppearancePopover.Intent.depth).wrappedValue = 0.25
+    popover.bind(\.specular, AppearancePopover.Intent.specular).wrappedValue = 0.4
     popover.bind(\.tint, AppearancePopover.Intent.tint).wrappedValue = false
-    #expect(sent == [.opacity(1 - 0.7), .material(.glossy), .blur(12), .depth(0.25), .tint(false)])
+    #expect(
+      sent == [
+        .opacity(1 - 0.7), .material(.glossy), .blur(12), .depth(0.25), .specular(0.4),
+        .tint(false),
+      ])
     #expect(popover.transparency.wrappedValue == 1 - MaterialToken.frostedWindowOpacity)
   }
 
@@ -83,12 +88,14 @@ import Testing
     state.apply(.material(.glossy))
     state.apply(.opacity(0.7))
     state.apply(.depth(0.25))
+    state.apply(.specular(0.3))
     state.apply(.blur(12))
     state.apply(.tint(false))
     let base = Appearance(material: .solid, textScale: 1.2)
     #expect(
       state.applied(to: base)
-        == Appearance(material: .glossy, windowOpacity: 0.7, depth: 0.25, textScale: 1.2))
+        == Appearance(
+          material: .glossy, windowOpacity: 0.7, depth: 0.25, specularScale: 0.3, textScale: 1.2))
     #expect(state.blur == 12)
     #expect(!state.tint)
     #expect(state.transparencyText == PreviewState.appearance(.frosted).transparencyText)

@@ -86,6 +86,17 @@ public protocol SessionClient: AnyObject, Sendable {
   /// A terminal pane's login shell in the session's cwd, under its sandbox, `cols` × `rows`
   /// cells (`cox_app::live::LiveSession::open_terminal`, T51.3).
   func openTerminal(cols: UInt16, rows: UInt16) throws -> any TerminalClient
+  /// The provider section the code tier runs on; `nil` in an external agent's session
+  /// (`cox_app::live::LiveSession::provider`, T60.3).
+  func provider() -> String?
+  /// Whether `Intent.switchProvider` can reopen this session on another provider: a local one
+  /// can, a remote one (the ssh app-server has no such message) cannot, so its popover lists the
+  /// other providers' models disabled.
+  var canSwitchProvider: Bool { get }
+  /// Whether a turn may start now on this session's own provider (`LiveSession::readiness`,
+  /// T60.3): one picked before the first turn counts, not the config's default. The core refuses
+  /// a send that ignores it.
+  func readiness() async throws -> Readiness
   /// Stops the pull; the session keeps running (DT§4.5).
   func close()
   /// Hides the plugin overlay shown, as Esc does
@@ -97,6 +108,11 @@ public protocol SessionClient: AnyObject, Sendable {
 }
 
 extension SessionClient {
+  /// A session whose host gates its own sends (a remote one) has no provider to name here and
+  /// reports ready.
+  public func provider() -> String? { nil }
+  public var canSwitchProvider: Bool { true }
+  public func readiness() async throws -> Readiness { .ready }
   /// A client with no plugins has no overlay to hide.
   public func closePluginOverlay() {}
   /// Nor an area to lay a plugin out in.
@@ -201,6 +217,7 @@ public final class FixtureSession: SessionClient {
   private let fixedInfo: Info
   private let fixedCosts: TurnCosts
   private let inbox: FixtureInbox
+  private let fixedProvider: String?
   private let state = Mutex(State())
 
   private struct State {
@@ -212,6 +229,9 @@ public final class FixtureSession: SessionClient {
     var waiting: Set<String> = []
     /// The pull parked until they are answered.
     var parked: CheckedContinuation<Void, Never>?
+    /// The session a `switchProvider` hands back, as the core reopens one (T60.7).
+    var reopened: (any SessionClient)?
+    var readiness = Readiness.ready
   }
 
   public convenience init(
@@ -219,12 +239,13 @@ public final class FixtureSession: SessionClient {
     waitsForYou: Bool = false, prompts: [String] = [], changes: Changes = Changes(),
     plan: [TodoItem] = [], tasks: [String: TaskTarget] = [:], info: Info = Info(),
     reviews: [String: DiffModel] = [:], costs: TurnCosts = TurnCosts(),
-    outputs: [String: String] = [:]
+    outputs: [String: String] = [:], provider: String? = nil, readiness: Readiness = .ready
   ) {
     self.init(
       fixture: fixture, completions: completions, host: host, waitsForYou: waitsForYou,
       prompts: prompts, changes: changes, plan: plan, tasks: tasks, info: info,
-      reviews: reviews, costs: costs, outputs: outputs, inbox: FixtureInbox())
+      reviews: reviews, costs: costs, outputs: outputs, provider: provider, readiness: readiness,
+      inbox: FixtureInbox())
   }
 
   init(
@@ -232,13 +253,16 @@ public final class FixtureSession: SessionClient {
     prompts: [String] = [], changes: Changes = Changes(), plan: [TodoItem] = [],
     tasks: [String: TaskTarget] = [:], info: Info = Info(),
     reviews: [String: DiffModel] = [:], costs: TurnCosts = TurnCosts(),
-    outputs: [String: String] = [:], inbox: FixtureInbox
+    outputs: [String: String] = [:], provider: String? = nil, readiness: Readiness = .ready,
+    inbox: FixtureInbox
   ) {
     (self.fixture, self.completions, self.host, self.waitsForYou) =
       (fixture, completions, host, waitsForYou)
     (self.prompts, fixedChanges, fixedPlan, self.tasks, fixedInfo, self.inbox) =
       (prompts, changes, plan, tasks, info, inbox)
     (self.reviews, fixedCosts, self.outputs) = (reviews, costs, outputs)
+    fixedProvider = provider
+    state.withLock { $0.readiness = readiness }
   }
 
   public var sent: [Intent] { state.withLock { $0.sent } }
@@ -276,7 +300,14 @@ public final class FixtureSession: SessionClient {
       return state.waiting.isEmpty ? state.parked.take() : nil
     }
     resume?.resume()
+    if case .switchProvider = intent { return state.withLock { $0.reopened } }
     return nil
+  }
+
+  /// A `switchProvider` hands back `session` as the reopened one, as the core does before a
+  /// first turn.
+  public func reopens(as session: any SessionClient) {
+    state.withLock { $0.reopened = session }
   }
 
   /// The rows of the token's sigil whose insert holds the rest of the token in order, in list
@@ -318,10 +349,19 @@ public final class FixtureSession: SessionClient {
 
   public func info() async throws -> Info { fixedInfo }
 
+  public func provider() -> String? { fixedProvider }
+
+  public func readiness() async throws -> Readiness { state.withLock { $0.readiness } }
+
+  public func setReadiness(_ new: Readiness) { state.withLock { $0.readiness = new } }
+
   public func turnCosts() async throws -> TurnCosts { fixedCosts }
 
   /// A shell with no process: it prints nothing until a test says so.
   public func openTerminal(cols: UInt16, rows: UInt16) -> any TerminalClient { FixtureTerminal() }
+
+  /// `close` was called: the window that held it let it go.
+  public var isClosed: Bool { state.withLock { $0.closed } }
 
   public func close() {
     let resume = state.withLock { state in
@@ -346,32 +386,4 @@ public final class FixtureSession: SessionClient {
 /// A fixture session has no output under this archive id.
 public struct FixtureMissing: Error, Equatable {
   public let archive: String
-}
-
-extension [TimelinePatch] {
-  /// The approvals and questions this batch leaves pending.
-  var waiting: Set<String> {
-    var calls: Set<String> = []
-    for case .upsert(let block, _) in self {
-      switch block.kind {
-      case .approval(let call, _, _, _, _, _, _, let decision, _):
-        if decision == nil { calls.insert(call) } else { calls.remove(call) }
-      case .question(let call, _, _, let answer):
-        if answer == nil { calls.insert(call) } else { calls.remove(call) }
-      default: break
-      }
-    }
-    return calls
-  }
-}
-
-extension Intent {
-  /// The approval or question this intent answers.
-  var answers: String? {
-    switch self {
-    case .approve(let call, _): call
-    case .answer(let question, _): question
-    default: nil
-    }
-  }
 }

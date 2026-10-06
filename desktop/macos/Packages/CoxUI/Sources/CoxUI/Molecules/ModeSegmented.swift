@@ -3,8 +3,9 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 // `ModeSegmented` (DS§6.3 row `ModeSegmented`, the mockup's toolbar `.seg`): the session's
-// permission mode — Ask, Plan, Auto, Bypass — each marked in its DS§3.1 colour. Separate so the
-// toolbar and Settings' default mode pick a mode with the same control and colours.
+// permission mode — Ask, Plan, Auto, Bypass — each marked in its DS§3.1 colour. Separate so
+// Settings' default mode picks a mode with the same control and colours; `ModeMenu`, here beside
+// it, is the same choice as the composer's mode chip (T60.6, DT§5.3).
 
 import SwiftUI
 
@@ -57,6 +58,60 @@ extension ModeSegmented.Mode {
     case .auto: .tinted(Color(.accent))
     case .bypass: .filled(Color(.statusDanger))
     }
+  }
+}
+
+/// The composer's mode chip as a menu of all four modes, the one in force checked. Choosing Bypass
+/// asks first: it was never one click away on the old segmented control (it was offered only
+/// while on), and it lets tools run without asking.
+struct ModeMenu: View {
+  /// What choosing a mode does.
+  enum Request: Equatable {
+    case none, pick, confirm
+  }
+
+  let mode: SessionMode
+  let pick: (SessionMode) -> Void
+  @State private var isConfirmingBypass = false
+
+  var body: some View {
+    Menu {
+      Picker("Mode", selection: Binding(get: { mode }, set: choose)) {
+        ForEach(SessionMode.allCases, id: \.self) { Text($0.title) }
+      }
+      .pickerStyle(.inline)
+    } label: {
+      ComposerChip(mode.title, kind: .mode(mode), shortcut: "⇧⇥")
+    }
+    .menuStyle(.button)
+    .menuIndicator(.hidden)
+    .buttonStyle(.plain)
+    .fixedSize()
+    .help("Permission mode (⇧⇥ for the next)")
+    .accessibilityLabel("Permission mode")
+    .accessibilityValue(mode.title)
+    .confirmationDialog(
+      "Turn on Bypass mode?", isPresented: $isConfirmingBypass, titleVisibility: .visible
+    ) {
+      Button("Turn on Bypass", role: .destructive) { pick(.bypass) }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("Tools run without asking. The shell still runs inside the sandbox.")
+    }
+  }
+
+  private func choose(_ next: SessionMode) {
+    switch Self.request(next, from: mode) {
+    case .none: break
+    case .pick: pick(next)
+    case .confirm: isConfirmingBypass = true
+    }
+  }
+
+  /// A mode already in force asks for nothing; Bypass asks for a confirmation first.
+  static func request(_ next: SessionMode, from current: SessionMode) -> Request {
+    if next == current { return .none }
+    return next == .bypass ? .confirm : .pick
   }
 }
 

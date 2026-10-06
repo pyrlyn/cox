@@ -343,6 +343,7 @@
           "opacity": 0.42,
           "blur": 34.0,
           "depth": 1.0,
+          "specular": 1.0,
           "tint": true,
           "dark_highlight": "none",
           "dark_highlight_scope": "controls"
@@ -1996,6 +1997,7 @@
             "opacity": 0.42,
             "blur": 34.0,
             "depth": 1.0,
+            "specular": 1.0,
             "tint": true,
             "dark_highlight": "none",
             "dark_highlight_scope": "controls"
@@ -2062,6 +2064,14 @@
         },
         "depth": {
           "description": "Elevation scale, 0 (flat) to 1 (full shadows and highlights).",
+          "type": "number",
+          "format": "double",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 1.0
+        },
+        "specular": {
+          "description": "Glare: the specular sweep's strength, 0 (none) to 1 (the material's\nfull sweep). A client draws `material.*Specular × specular`; Solid and\nIncrease Contrast stay at 0 whatever this is (DS§3.5).",
           "type": "number",
           "format": "double",
           "minimum": 0.0,

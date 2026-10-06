@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Activity;
 use crate::Intent;
+use crate::Need;
 use crate::app::{App, AppError};
 use crate::live::LiveSession;
 use crate::workspace::WorkspaceError;
@@ -230,6 +231,17 @@ pub(crate) async fn launch(
         candidates: Vec::new(),
         kept: None,
     };
+    // Once for the group: every cox candidate runs on the same provider, and
+    // one that cannot answer would only fail inside its session, after its
+    // worktree exists (T60.2). An agent candidate brings its own.
+    let blocked = match request
+        .candidates
+        .iter()
+        .any(|c| matches!(c, Candidate::Cox { .. }))
+    {
+        true => app.readiness(&request.project).await?.message(),
+        false => None,
+    };
     let mut sessions = Vec::new();
     for (n, candidate) in request.candidates.into_iter().enumerate() {
         let mut launched = Launched {
@@ -240,6 +252,11 @@ pub(crate) async fn launch(
             started_ms: now_ms(),
             pruned: false,
         };
+        if let (Candidate::Cox { .. }, Some(why)) = (&launched.candidate, &blocked) {
+            launched.failed = Some(why.clone());
+            group.candidates.push(launched);
+            continue;
+        }
         let name = format!("best-{id}-{}", n + 1);
         match app
             .workspace()
@@ -329,10 +346,24 @@ fn state_of(app: &App, group: &BestOf, n: usize, launched: &Launched) -> Candida
         Some(Activity::Running) => CandidateState::Running,
         Some(Activity::WaitingOnYou) => CandidateState::WaitingOnYou,
         Some(Activity::Failed) => CandidateState::Failed {
-            why: "its turn failed".into(),
+            why: failure_text(app, launched.session),
         },
         Some(Activity::Idle) | None => CandidateState::Done,
     }
+}
+
+/// The error the failed turn of `session` stopped on, as the sidebar shows
+/// it; a generic line only when the inbox no longer holds it (dismissed).
+fn failure_text(app: &App, session: Option<SessionId>) -> String {
+    app.inbox()
+        .into_iter()
+        .find_map(|item| match item.need {
+            Need::Failed { text } if Some(item.session) == session && !text.is_empty() => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| "its turn failed".into())
 }
 
 /// When `session` last wrote to `cox.db`, in milliseconds since the epoch.

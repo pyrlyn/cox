@@ -80,12 +80,34 @@ pub fn choices(config: &Config) -> Vec<ModelChoice> {
     out
 }
 
-/// One section of the model popover: a tier's models not listed earlier.
+/// What a person calls a `[providers.<name>]` section (A139). The native
+/// sections have a brand; a custom one has only the name its owner gave it.
+pub fn provider_name(section: &str) -> String {
+    match section {
+        "anthropic" => "Anthropic",
+        "openai" => "OpenAI",
+        "local" => "Local",
+        "lmstudio" => "LM Studio",
+        "typesafe" => "Jev System One",
+        other => return other.to_owned(),
+    }
+    .to_owned()
+}
+
+/// One section of the model popover: the models of one provider, listed
+/// under the tier that calls it or, for a provider no tier calls, under
+/// `Code` (a pick there switches the `code` tier).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelSection {
     pub tier: Tier,
-    /// `Code`, `Think`, `Cheap`.
+    /// `Code`, `Think`, `Cheap` for a tier's own provider; the provider's
+    /// name (`OpenAI`) for one only configured.
     pub title: String,
+    /// The `[providers.<name>]` section the rows belong to (A139).
+    pub provider: String,
+    /// Whether a turn could run on that provider now (`usable`, A110); the
+    /// rows stay listed when it cannot, so a client can show them disabled.
+    pub usable: bool,
     pub models: Vec<MenuModel>,
 }
 
@@ -103,14 +125,38 @@ pub struct MenuModel {
     pub efforts: String,
 }
 
-/// The popover's sections: one per tier in first-listed order, a model a
-/// tier already lists left out of a later one's, so with every tier on one
-/// provider the menu is one list.
-pub fn menu(choices: Vec<ModelChoice>) -> Vec<ModelSection> {
+/// The popover's sections: each tier's provider in first-listed order, then
+/// every other configured provider that lists models, by name. A model a
+/// provider already lists is left out of a later section of that provider,
+/// so with every tier on one provider the menu is one list; `usable` is the
+/// providers a turn could run on now.
+pub fn menu(config: &Config, choices: Vec<ModelChoice>, usable: &[String]) -> Vec<ModelSection> {
     let mut listed = std::collections::HashSet::new();
     let mut out: Vec<ModelSection> = Vec::new();
-    for choice in choices {
-        if !listed.insert(choice.id.clone()) {
+    let names = crate::status::model_names(config);
+    let others = sections(config)
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| !choices.iter().any(|c| &c.provider == name))
+        .flat_map(|name| {
+            let names = &names;
+            config
+                .providers
+                .models_for(&name)
+                .iter()
+                .map(|m| ModelChoice {
+                    tier: Tier::Code,
+                    provider: name.clone(),
+                    id: m.id.clone(),
+                    display_name: names.get(&m.id).cloned(),
+                    short_name: names.short(&m.id).cloned(),
+                    efforts: m.efforts.clone(),
+                    context_window: Some(m.context_window),
+                })
+                .collect::<Vec<_>>()
+        });
+    for choice in choices.iter().cloned().chain(others) {
+        if !listed.insert((choice.provider.clone(), choice.id.clone())) {
             continue;
         }
         let model = MenuModel {
@@ -124,11 +170,21 @@ pub fn menu(choices: Vec<ModelChoice>) -> Vec<ModelSection> {
             display_name: choice.display_name,
             short_name: choice.short_name,
         };
-        match out.iter_mut().find(|s| s.tier == choice.tier) {
+        let own = choices.iter().any(|c| c.provider == choice.provider);
+        match out
+            .iter_mut()
+            .find(|s| s.tier == choice.tier && s.provider == choice.provider)
+        {
             Some(section) => section.models.push(model),
             None => out.push(ModelSection {
                 tier: choice.tier,
-                title: title(choice.tier).to_owned(),
+                title: if own {
+                    title(choice.tier).to_owned()
+                } else {
+                    provider_name(&choice.provider)
+                },
+                usable: usable.contains(&choice.provider),
+                provider: choice.provider,
                 models: vec![model],
             }),
         }
@@ -145,7 +201,7 @@ fn title(tier: Tier) -> &'static str {
 }
 
 /// Every `[providers.<name>]` section with its transport, by name.
-fn sections(config: &Config) -> Vec<(String, Transport)> {
+pub(crate) fn sections(config: &Config) -> Vec<(String, Transport)> {
     let p = &config.providers;
     let mut out = vec![
         ("anthropic".to_owned(), p.anthropic.transport()),
@@ -185,7 +241,7 @@ fn reach(
 
 /// `http://localhost:11434/v1` → `("localhost", 11434)`; `None` for a host
 /// that is not this machine.
-fn loopback(url: &str) -> Option<(String, u16)> {
+pub(crate) fn loopback(url: &str) -> Option<(String, u16)> {
     let (scheme, rest) = url.split_once("://")?;
     let authority = rest.split(['/', '?', '#']).next()?;
     let authority = authority.rsplit('@').next()?;
@@ -254,9 +310,12 @@ impl App {
         Ok(choices(&self.config(cwd)?))
     }
 
-    /// The model popover's sections for a session in `cwd` (T58.4.7).
-    pub fn model_menu(&self, cwd: &Path) -> Result<Vec<ModelSection>, AppError> {
-        Ok(menu(choices(&self.config(cwd)?)))
+    /// The model popover's sections for a session in `cwd` (T58.4.7);
+    /// `usable` is what `usable_providers` answered, so the menu itself
+    /// never probes a server.
+    pub fn model_menu(&self, cwd: &Path, usable: &[String]) -> Result<Vec<ModelSection>, AppError> {
+        let config = self.config(cwd)?;
+        Ok(menu(&config, choices(&config), usable))
     }
 
     /// The providers a turn in `cwd` could run on now (A110), each key
@@ -305,7 +364,7 @@ mod tests {
         );
         let tiers: Vec<Tier> = choices(&config).iter().map(|c| c.tier).collect();
         assert_eq!(tiers.first(), Some(&Tier::Code));
-        let rows = &menu(choices(&config))[0].models;
+        let rows = &menu(&config, choices(&config), &[])[0].models;
         let shown: Vec<_> = rows.iter().map(|m| m.short_name.as_deref()).collect();
         assert_eq!(shown, [None, Some("Sonnet 5")], "a menu row's short name");
     }
@@ -336,13 +395,17 @@ mod tests {
 
     #[test]
     fn a_model_is_listed_once_across_tiers() {
-        let sections = menu(vec![
-            choice(Tier::Code, "sonnet", vec![Effort::Low, Effort::High]),
-            choice(Tier::Code, "opus", vec![]),
-            choice(Tier::Think, "opus", vec![]),
-            choice(Tier::Think, "fable", vec![]),
-            choice(Tier::Cheap, "sonnet", vec![]),
-        ]);
+        let sections = menu(
+            &Config::default(),
+            vec![
+                choice(Tier::Code, "sonnet", vec![Effort::Low, Effort::High]),
+                choice(Tier::Code, "opus", vec![]),
+                choice(Tier::Think, "opus", vec![]),
+                choice(Tier::Think, "fable", vec![]),
+                choice(Tier::Cheap, "sonnet", vec![]),
+            ],
+            &[],
+        );
         assert_eq!(
             ids(&sections),
             [
@@ -356,12 +419,62 @@ mod tests {
     }
 
     #[test]
+    fn the_menu_lists_every_configured_provider_and_marks_the_unusable_one() {
+        let model = |id: &str| cox_protocol::config::ProviderModel {
+            id: id.into(),
+            context_window: 128_000,
+            ..Default::default()
+        };
+        let mut config = Config::default();
+        config.tiers.code.provider = "anthropic".into();
+        config.tiers.code.model = "claude-sonnet-5".into();
+        // One model on every tier, so the tiers share one section.
+        for tier in [&mut config.tiers.think, &mut config.tiers.cheap] {
+            tier.provider = "anthropic".into();
+            tier.model = "claude-sonnet-5".into();
+        }
+        config.providers.anthropic.models = vec![model("claude-sonnet-5")];
+        config.providers.openai.models = vec![model("gpt-6"), model("gpt-6-mini")];
+        let usable = ["anthropic".to_owned()];
+        let sections = menu(&config, choices(&config), &usable);
+        insta::assert_debug_snapshot!(sections);
+        let unusable: Vec<_> = sections.iter().filter(|s| !s.usable).collect();
+        assert_eq!(unusable.len(), 1);
+        assert_eq!(unusable[0].provider, "openai");
+        assert_eq!(
+            unusable[0].models.len(),
+            2,
+            "an unusable section keeps its rows"
+        );
+    }
+
+    #[test]
+    fn a_provider_without_models_and_one_a_tier_calls_add_no_extra_section() {
+        let mut config = Config::default();
+        config.tiers.code.provider = "anthropic".into();
+        config.tiers.code.model = "claude-sonnet-5".into();
+        let sections = menu(&config, choices(&config), &[]);
+        let providers: Vec<_> = sections.iter().map(|s| s.provider.as_str()).collect();
+        assert!(providers.iter().all(|p| *p == "anthropic"), "{providers:?}");
+    }
+
+    #[test]
+    fn a_provider_name_is_the_brand_or_the_custom_section_name() {
+        assert_eq!(provider_name("lmstudio"), "LM Studio");
+        assert_eq!(provider_name("deepseek"), "deepseek");
+    }
+
+    #[test]
     fn tiers_keep_their_first_listed_order() {
-        let sections = menu(vec![
-            choice(Tier::Cheap, "haiku", vec![]),
-            choice(Tier::Code, "sonnet", vec![]),
-            choice(Tier::Cheap, "mini", vec![]),
-        ]);
+        let sections = menu(
+            &Config::default(),
+            vec![
+                choice(Tier::Cheap, "haiku", vec![]),
+                choice(Tier::Code, "sonnet", vec![]),
+                choice(Tier::Cheap, "mini", vec![]),
+            ],
+            &[],
+        );
         assert_eq!(
             ids(&sections),
             [

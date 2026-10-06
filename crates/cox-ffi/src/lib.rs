@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use cox_app::ModelSection;
+use cox_app::Readiness;
 use cox_app::WorkspaceError;
 use cox_app::app::{App as Owner, AppError as OwnerError};
 use cox_app::best_of::{BestOfId, BestOfRequest, CandidateView, Picked};
@@ -54,6 +55,16 @@ pub enum AppError {
     /// T37.34: another process drives it; follow it read-only or fork it.
     #[error("session {id} is open in {holder}")]
     Busy { id: SessionId, holder: Holder },
+    /// T60.2 (DT§5.3): a turn was refused because its provider cannot answer;
+    /// `readiness` says why, `message` is the text to show.
+    #[error("{message}")]
+    NotReady {
+        readiness: Readiness,
+        message: String,
+    },
+    /// T60.3: the provider cannot change once the session holds a turn.
+    #[error("{message}")]
+    ProviderLocked { message: String },
     #[error("{message}")]
     Session { message: String },
     #[error("{message}")]
@@ -71,6 +82,8 @@ impl From<OwnerError> for AppError {
         let message = e.to_string();
         match e {
             OwnerError::Busy { id, holder } => Self::Busy { id, holder },
+            OwnerError::NotReady(readiness) => Self::NotReady { readiness, message },
+            OwnerError::ProviderLocked => Self::ProviderLocked { message },
             OwnerError::Intent(_) => Self::Intent { message },
             OwnerError::Workspace(_) => Self::Workspace { message },
             OwnerError::Settings(_) | OwnerError::McpLogin(_) => Self::Settings { message },
@@ -144,6 +157,13 @@ pub async fn load_login_env() -> Result<Option<String>, AppError> {
 #[uniffi::export]
 pub fn review_message(comments: Vec<cox_app::review::LineComment>) -> Option<String> {
     cox_app::review::message(&comments)
+}
+
+/// The text a client shows where it disables sending (DT§5.3); `None` when
+/// the provider is ready. A remote type has no methods in the bindings.
+#[uniffi::export]
+pub fn readiness_message(readiness: Readiness) -> Option<String> {
+    readiness.message()
 }
 
 /// The composer's token at `caret` that asks for rows, in UTF-16 units
@@ -384,15 +404,27 @@ impl App {
         Ok(self.owner.models(Path::new(&cwd))?)
     }
 
-    /// The model popover's sections for a session in `cwd` (T58.4.7).
-    pub fn model_menu(&self, cwd: String) -> Result<Vec<ModelSection>, AppError> {
-        Ok(self.owner.model_menu(Path::new(&cwd))?)
+    /// The model popover's sections for a session in `cwd` (T58.4.7);
+    /// `usable` is `usable_providers`' answer, which marks each section.
+    pub fn model_menu(
+        &self,
+        cwd: String,
+        usable: Vec<String>,
+    ) -> Result<Vec<ModelSection>, AppError> {
+        Ok(self.owner.model_menu(Path::new(&cwd), &usable)?)
     }
 
     /// The providers a turn in `cwd` could run on now (A110); it probes
     /// local servers, so it runs off the caller's thread.
     pub async fn usable_providers(self: Arc<Self>, cwd: String) -> Result<Vec<String>, AppError> {
         Ok(on_runtime(async move { self.owner.usable_providers(Path::new(&cwd)).await }).await??)
+    }
+
+    /// Whether a turn in `cwd` may start on the configured code-tier provider
+    /// (T60.2, DT§5.3); probes, so it runs off the caller's thread. A client
+    /// with a session open asks `SessionHandle::readiness` instead.
+    pub async fn readiness(self: Arc<Self>, cwd: String) -> Result<Readiness, AppError> {
+        Ok(on_runtime(async move { self.owner.readiness(Path::new(&cwd)).await }).await??)
     }
 
     /// Returns once the session list may read differently (T37.22.6): the

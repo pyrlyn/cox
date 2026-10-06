@@ -71,7 +71,7 @@ impl Controller {
     /// composer's chips show before the first turn.
     pub fn open(timeline: Timeline, status: StatusFold, events: mpsc::Receiver<Event>) -> Self {
         let first = TimelinePatch::Status {
-            status: status.status().clone(),
+            status: Box::new(status.status().clone()),
         };
         Self::start(timeline, status, vec![first], events)
     }
@@ -106,7 +106,7 @@ impl Controller {
                         patches.push(TimelinePatch::Usage { usage });
                     }
                     if state.status.apply(&event) {
-                        let status = state.status.status().clone();
+                        let status = Box::new(state.status.status().clone());
                         patches.push(TimelinePatch::Status { status });
                     }
                     let queued = !patches.is_empty();
@@ -154,7 +154,7 @@ impl Controller {
         {
             let mut state = self.shared.lock();
             state.status.queue(change);
-            let status = state.status.status().clone();
+            let status = Box::new(state.status.status().clone());
             coalesce::push(&mut state.queue, TimelinePatch::Status { status });
         }
         self.shared.ready.notify_one();
@@ -275,10 +275,10 @@ mod tests {
         let (_tx, rx) = mpsc::channel(1);
         let controller = Controller::spawn(Timeline::default(), rx);
         let status = |queued| TimelinePatch::Status {
-            status: crate::Status {
+            status: Box::new(crate::Status {
                 queued,
                 ..Default::default()
-            },
+            }),
         };
         controller.enqueue();
         controller.enqueue();
@@ -295,7 +295,7 @@ mod tests {
         let opened = fold.status().clone();
         let controller = Controller::open(Timeline::default(), fold, rx);
         let first = TimelinePatch::Status {
-            status: opened.clone(),
+            status: Box::new(opened.clone()),
         };
         assert_eq!(controller.next_patches().await, Some(vec![first]));
         let mode = cox_protocol::types::PermissionMode::Auto;

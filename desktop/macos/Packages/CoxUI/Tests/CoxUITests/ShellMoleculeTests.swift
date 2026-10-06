@@ -35,11 +35,6 @@ import Testing
     try check(BreadcrumbSample(branch: nil), variant, "project")
   }
 
-  @Test(arguments: Variant.all) func modelCapsule(_ variant: Variant) throws {
-    try check(ModelCapsule(PreviewState.model) {}, variant, "plain")
-    try check(ModelCapsule(PreviewState.model, isOpen: true) {}, variant, "open")
-  }
-
   @Test(arguments: Variant.all) func costCapsule(_ variant: Variant) throws {
     try check(CostCapsuleSample(isOpen: false), variant, "plain")
     try check(CostCapsuleSample(isOpen: true), variant, "open")

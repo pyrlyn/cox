@@ -55,6 +55,15 @@ pub enum Intent {
         tier: Tier,
         model: Option<ModelId>,
     },
+    /// A model of another provider section, picked before the first turn
+    /// (T60.3, DT§5.3): the session reopens on `provider`. `make_default`
+    /// also writes both to the user config.
+    SwitchProvider {
+        provider: String,
+        model: ModelId,
+        #[serde(default)]
+        make_default: bool,
+    },
     SetEffort {
         effort: Option<Effort>,
     },
@@ -115,6 +124,12 @@ pub enum Dispatch {
     Fork { turn: Option<u32> },
     /// `cox_session::handoff` with a summary, then open the child.
     Handoff { objective: String },
+    /// Reopen the session on another provider section (T60.3).
+    SwitchProvider {
+        provider: String,
+        model: ModelId,
+        make_default: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -159,6 +174,18 @@ pub fn dispatch(intent: Intent) -> Result<Dispatch, IntentError> {
         Intent::Compact { focus } => now(Submission::Compact { focus }),
         Intent::SetMode { mode } => now(Submission::SetPermissionMode { mode }),
         Intent::SwitchModel { tier, model } => now(Submission::SwitchModel { tier, model }),
+        Intent::SwitchProvider { provider, .. } if provider.trim().is_empty() => {
+            Err(IntentError::Empty)
+        }
+        Intent::SwitchProvider {
+            provider,
+            model,
+            make_default,
+        } => Ok(Dispatch::SwitchProvider {
+            provider,
+            model,
+            make_default,
+        }),
         Intent::SetEffort { effort } => now(Submission::SetEffort { effort }),
         Intent::Rewind {
             to_turn,
@@ -243,6 +270,7 @@ pub fn agent_dispatch(intent: Intent) -> Result<AgentDispatch, IntentError> {
         Intent::Compact { .. } => AgentDispatch::Refused("Compact"),
         Intent::SetMode { .. } => AgentDispatch::Refused("SetMode"),
         Intent::SwitchModel { .. } => AgentDispatch::Refused("SwitchModel"),
+        Intent::SwitchProvider { .. } => AgentDispatch::Refused("SwitchProvider"),
         Intent::SetEffort { .. } => AgentDispatch::Refused("SetEffort"),
         Intent::Rewind { .. } => AgentDispatch::Refused("Rewind"),
         Intent::Redo => AgentDispatch::Refused("Redo"),
@@ -390,6 +418,28 @@ fn command(line: &str) -> Result<Dispatch, IntentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switch_provider_is_a_reopen_and_needs_a_provider() {
+        let pick = |provider: &str| Intent::SwitchProvider {
+            provider: provider.into(),
+            model: ModelId("gpt-5".into()),
+            make_default: true,
+        };
+        assert_eq!(
+            dispatch(pick("openai")),
+            Ok(Dispatch::SwitchProvider {
+                provider: "openai".into(),
+                model: ModelId("gpt-5".into()),
+                make_default: true,
+            })
+        );
+        assert_eq!(dispatch(pick(" ")), Err(IntentError::Empty));
+        assert_eq!(
+            agent_dispatch(pick("openai")),
+            Ok(AgentDispatch::Refused("SwitchProvider"))
+        );
+    }
 
     #[test]
     fn revert_hunk_intent_maps_to_the_submission() {
