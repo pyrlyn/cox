@@ -789,13 +789,39 @@ as the text shown: a prompt without its tiles, a folded thought as nothing.
   confirmation first ("Tools run without asking. The shell still runs inside
   the sandbox."): it was never one click away, since the old toolbar control
   offered it only while it was already on.
-- **Model chip.** Shows the model and effort (`Status`, the core's short name).
-  A click opens the model popover — each tier's models, the running one
-  marked, from the core's catalog — over the chip and aligned to its leading
-  edge, opening upwards because the composer is the column's bottom edge; a
-  row sends the switch and closes it, and a click outside or ⎋ closes it
-  too. An external agent's session (§4, mockup 27) shows the agent's name
-  (`Claude Agent · ACP`) in this chip, which the toolbar used to carry.
+- **Model chip.** Reads "[monogram] Anthropic · Sonnet 5 · high": the provider's
+  monogram, its name in secondary text (`Status.provider_name`), then the model
+  and effort (`Status`, the core's short name). While the session's readiness is
+  not `Ready` (T60.5) a `status.danger` dot ends the chip and its tooltip is
+  `readiness.message`. A click opens the model popover over the chip and aligned
+  to its leading edge, opening upwards because the composer is the column's
+  bottom edge; a row sends its pick and closes it, and a click outside or ⎋
+  closes it too. An external agent's session (§4, mockup 27) shows the agent's
+  name (`Claude Agent · ACP`) in this chip, which the toolbar used to carry, and
+  no monogram or badge.
+- **Model popover (T60.7).** One section per tier's provider from the core's
+  catalog, then one per other configured provider section, the running model
+  marked. A section of a provider that is not usable (`usable_providers`, the
+  same list as Best of's) has its rows greyed and not pickable, and its header
+  shows "Add key", which opens Settings at Models & Providers. The list is
+  re-read when the readiness is, so a key stored in Settings ungreys the rows
+  at once.
+- **Client pick rule (T60.7).** The client's rule for a pick, which the
+  platform's model layer holds and the view only renders: a model of the
+  session's own provider, or of the think or cheap tier, sends the model switch;
+  a code-tier model of another provider sends `Intent::SwitchProvider`
+  (`make_default` off); a row of an unusable provider sends nothing. A session
+  that cannot switch provider (a remote host's, whose protocol has no such
+  intent) shows other providers' rows disabled with the note "A remote
+  session cannot change provider". The swap: `send` returns the
+  reopened session; the client replaces the window's session in its slot (same
+  id, so the window, its place in the list and its draft stay), rebuilds what it
+  derived from the old handle, registers the new one where the app's other
+  windows look sessions up, closes the old one, and re-reads the readiness and
+  the usable list for it. A window that showed the same session in another place
+  keeps the old handle until it is reopened; the switch is only possible before
+  the first turn, so this is rare. `AppError::ProviderLocked` is shown with the
+  core's message and a "New session" button instead of the swap.
 - Provider pick (T60.3, A138): the model menu also lists the models of the
   other configured provider sections. Picking one sends
   `Intent::SwitchProvider { provider, model, make_default }` through
@@ -820,7 +846,7 @@ as the text shown: a prompt without its tiles, a folded thought as nothing.
   `LiveSession::readiness()`, which is `App::readiness(cwd)` with the
   session's picked provider in place of the configured one, so a reopened
   session may send on its pick while `App::readiness(cwd)` still reports the
-  default. Switching provider mid-session is not offered (`roadmap.md`).
+  default. Switching provider after the first turn is not offered (`roadmap.md`).
 
 ### 5.4 Review
 

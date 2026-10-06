@@ -90,4 +90,3 @@
 - T58.28. Packaging
 - T58.29. UI automation smoke test
 - T58.30. Snapshot spike: WinUI controls to PNG
-- T60.7. Provider in the model chip and a grouped model popover

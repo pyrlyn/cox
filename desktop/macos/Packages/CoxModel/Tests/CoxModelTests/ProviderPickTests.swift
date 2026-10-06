@@ -115,7 +115,8 @@ private let running = Status(model: "claude-sonnet-5", provider: "anthropic")
 @MainActor
 @Test func aModelSwitchLeavesTheStoresAlone() async throws {
   let app = AppStore()
-  let before = app.adopt(FixtureSession(fixture: Fixture(batches: [], snapshot: [])), window: UUID())
+  let before = app.adopt(
+    FixtureSession(fixture: Fixture(batches: [], snapshot: [])), window: UUID())
   let after = try await app.send(
     .switchModel(tier: .code, model: "claude-haiku-4-5"), to: before.store)
   #expect(after == nil)

@@ -186,10 +186,6 @@ struct SessionWindow: View {
     Binding(get: { refused != nil }, set: { if !$0 { refused = nil } })
   }
 
-  private var isLocked: Binding<Bool> {
-    Binding(get: { lockedMessage != nil }, set: { if !$0 { lockedMessage = nil } })
-  }
-
   @ViewBuilder private var column: some View {
     if let showing, let reviewing {
       SessionReview(
@@ -284,17 +280,6 @@ struct SessionWindow: View {
       usable = try? await live.usableProviders(cwd: cwd)
     }
     await model.sidebar.watch()
-  }
-
-  private func readSettings() async {
-    appearanceWrites.onIdle = { readAppearance() }
-    await model.settings?.load()
-    readAppearance()
-  }
-
-  private func readAppearance() {
-    guard let settings = model.settings else { return }
-    screen.appearance = AppearancePopover.State(settings)
   }
 
   /// New session: asks who drives it first when an external agent is configured (T52.8).

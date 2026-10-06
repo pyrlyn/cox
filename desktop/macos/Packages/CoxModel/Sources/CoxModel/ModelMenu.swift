@@ -72,7 +72,9 @@ public struct ModelMenu: Equatable, Sendable {
             tier: section.tier, model: model.id,
             name: model.shortName ?? model.id, detail: model.efforts,
             isSelected: model.id == status.model
-              && (section.provider.isEmpty || status.provider.map { $0 == section.provider } ?? true))
+              && (section.provider.isEmpty
+                || status.provider.map { $0 == section.provider } ?? true)
+          )
         })
     }
   }

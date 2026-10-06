@@ -387,31 +387,3 @@ public final class FixtureSession: SessionClient {
 public struct FixtureMissing: Error, Equatable {
   public let archive: String
 }
-
-extension [TimelinePatch] {
-  /// The approvals and questions this batch leaves pending.
-  var waiting: Set<String> {
-    var calls: Set<String> = []
-    for case .upsert(let block, _) in self {
-      switch block.kind {
-      case .approval(let call, _, _, _, _, _, _, let decision, _):
-        if decision == nil { calls.insert(call) } else { calls.remove(call) }
-      case .question(let call, _, _, let answer):
-        if answer == nil { calls.insert(call) } else { calls.remove(call) }
-      default: break
-      }
-    }
-    return calls
-  }
-}
-
-extension Intent {
-  /// The approval or question this intent answers.
-  var answers: String? {
-    switch self {
-    case .approve(let call, _): call
-    case .answer(let question, _): question
-    default: nil
-    }
-  }
-}

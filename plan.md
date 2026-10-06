@@ -2216,24 +2216,6 @@ Every card in this phase:
 - leaves a test that fails without it (`insta` or a unit test in Rust, swift-snapshot-testing or Swift Testing in Swift).
 
 
-#### T60.7 Provider in the model chip and a grouped model popover
-
-Model: Claude Code / sonnet · Status: in progress · Depends: T60.4, T60.6 · Size: ~200 · Priority: P1 · Complexity: 3
-
-Goal: the composer's model chip reads "[icon] Anthropic · Sonnet 5 · high" — the provider's monogram, its name in secondary text, the model and effort — with a `status.danger` badge when readiness is not `Ready`; the popover groups models by provider, an unusable provider's rows greyed with "Add key".
-
-Files:
-- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Molecules/ModelCapsule.swift` (or the composer's model chip) and `ModelPopover`
-- `desktop/macos/Packages/CoxModel/Sources/CoxModel/ModelMenu.swift` (sections by provider; a pick on another provider sends `switchProvider`)
-- `scripts/` provider monogram generator and `desktop/design/tokens/` provider entries (A136: icons come from a script, never hand-copied; vendor trademarks are not used, so each provider gets a generated monogram)
-
-Steps:
-1. Docs: DS§3.7 icons (provider monograms and how they are generated), DS§6.3 the chip, DT§5.3 the pick.
-
-Check: `swift test` in `CoxUI` and `CoxModel`; the generator's own test.
-
-Done when: snapshots show the chip ready and with the badge, and the popover with two providers, one greyed.
-
 
 ---
 

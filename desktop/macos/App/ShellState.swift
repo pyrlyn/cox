@@ -54,7 +54,9 @@ struct OpenedSession {
   func reopened(as shared: AppStore.Shared) -> OpenedSession {
     terminals.endAll()
     var next = OpenedSession(shared)
-    (next.info, next.models, next.modelSections, next.agents) = (info, models, modelSections, agents)
+    (next.info, next.models, next.modelSections, next.agents) = (
+      info, models, modelSections, agents
+    )
     return next
   }
 

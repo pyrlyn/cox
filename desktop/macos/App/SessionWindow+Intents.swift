@@ -13,6 +13,21 @@ import CoxUI
 import SwiftUI
 
 extension SessionWindow {
+  var isLocked: Binding<Bool> {
+    Binding(get: { lockedMessage != nil }, set: { if !$0 { lockedMessage = nil } })
+  }
+
+  func readSettings() async {
+    appearanceWrites.onIdle = { readAppearance() }
+    await model.settings?.load()
+    readAppearance()
+  }
+
+  func readAppearance() {
+    guard let settings = model.settings else { return }
+    screen.appearance = AppearancePopover.State(settings)
+  }
+
   /// What the shell reports: the panes fold here, and an appearance change shows at once and is
   /// written once the control rests.
   func handle(_ intent: MainScreenIntent) {

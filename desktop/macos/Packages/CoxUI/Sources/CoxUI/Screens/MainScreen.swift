@@ -113,10 +113,11 @@ public struct MainScreen<Transcript: View, InspectorContent: View>: View {
           let leading = min(chip.minX, window.size.width - Size.popoverWidth - Space.l)
           ModelPopover(
             state: state.model, pick: { send(.model($0)) },
-            addKey: { send(.addKey(provider: $0)) })
-            .padding(.leading, max(0, leading))
-            .padding(.bottom, window.size.height - chip.minY + Space.xs)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            addKey: { send(.addKey(provider: $0)) }
+          )
+          .padding(.leading, max(0, leading))
+          .padding(.bottom, window.size.height - chip.minY + Space.xs)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
       }
     }
