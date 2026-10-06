@@ -2237,7 +2237,7 @@ Done when: `ComposerStoreTests` show submit refused without a usable provider, `
 
 #### T60.7 Provider in the model chip and a grouped model popover
 
-Model: sonnet · Status: open · Depends: T60.4, T60.6 · Size: ~200 · Priority: P1 · Complexity: 3
+Model: Claude Code / sonnet · Status: in progress · Depends: T60.4, T60.6 · Size: ~200 · Priority: P1 · Complexity: 3
 
 Goal: the composer's model chip reads "[icon] Anthropic · Sonnet 5 · high" — the provider's monogram, its name in secondary text, the model and effort — with a `status.danger` badge when readiness is not `Ready`; the popover groups models by provider, an unusable provider's rows greyed with "Add key".
 
