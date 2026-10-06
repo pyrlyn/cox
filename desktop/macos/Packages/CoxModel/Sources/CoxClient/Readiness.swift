@@ -39,3 +39,30 @@ public struct Readiness: Equatable, Sendable {
     Readiness(.unreachable(provider: provider), message: "\(provider) is not running.")
   }
 }
+
+extension Readiness {
+  /// Why a turn waits, `nil` when it need not: the core's message, with a stand-in for a client
+  /// that decoded none.
+  public var blockedReason: String? {
+    isReady ? nil : message ?? "No provider can answer."
+  }
+
+  /// The notice's action under the composer: a missing key is added in Settings › Providers; a
+  /// session with no provider or a local server that is not running is fixed in Settings too,
+  /// without a key to add. `nil` when ready (DT§5.3, T60.5).
+  public var actionTitle: String? {
+    switch reason {
+    case .ready: nil
+    case .noKey: "Add key"
+    case .noProvider, .unreachable: "Open Settings"
+    }
+  }
+
+  /// Why Best of cannot add a candidate on `provider`: it is not among the `usable` providers the
+  /// core probed (`usableProviders`). `nil` while the probe has not answered, or when the
+  /// provider is usable or unnamed — a fixture's, which omits it.
+  public static func unavailableReason(provider: String, usable: [String]?) -> String? {
+    guard let usable, !provider.isEmpty, !usable.contains(provider) else { return nil }
+    return "No key for \(provider), or it is not running."
+  }
+}

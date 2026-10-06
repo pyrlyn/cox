@@ -751,6 +751,33 @@ as the text shown: a prompt without its tiles, a folded thought as nothing.
   without starting a turn, so a client that forgets it still cannot send. A
   key the server rejects counts as usable until a turn fails. Under a test
   double (`COX_PROVIDER`) the answer is always `Ready`.
+
+  Client behaviour (T60.5; the same on every platform):
+  - **What waits.** A *turn* (`DraftKind::Turn`, queued or at once) waits for
+    `Ready`: Send, ⏎ and ⌘⏎ do nothing, the draft and its attachments stay, and
+    the rule lives in the composer's state, not only in the button, so a key
+    press is refused too. A shell line (`!`) and a `/` command start no turn
+    (the core's gate is on `Intent::Send` and `Intent::Queue` alone), so they
+    still go, and `/model` still works with no key.
+  - **The notice.** While not `Ready`, a warning row under the composer pane
+    shows the core's message and one button: "Add key" for `NoKey`, "Open
+    Settings" for `NoProvider` and `Unreachable`. It opens Settings at Models
+    & Providers, where the key field and the tiers are. The client words the
+    button; the message is the core's (`readiness_message`).
+  - **When to read.** Ask `SessionHandle.readiness()` (the session's own: it
+    honours a provider picked in the window, T60.3) when the session opens,
+    when its window becomes the key window, after a provider key is stored in
+    Settings, and after the session's provider changes (a pick, T60.7). Until
+    the first answer the composer counts as ready; the core's refusal is the
+    backstop and its `AppError::NotReady` reason is shown like any failed send.
+    A read that fails keeps the last answer.
+  - **Best of.** The "Best of n" button is disabled while the session is not
+    `Ready`, with the reason as its hint. Beside it, a cox candidate on a
+    model whose provider is not in `usableProviders(cwd)` is `unavailable` with
+    "No key for `<provider>`, or it is not running." and cannot be added; one
+    already picked is dropped from the group. The usable list is re-read at the
+    same moments as the readiness. An agent candidate brings its own provider
+    and is never marked.
 - ↑ in an empty composer walks the prompt history (`user_prompts`).
 - The chips row below: attachment button, permission mode, model and effort,
   "think" toggle.

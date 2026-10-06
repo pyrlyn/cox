@@ -23,11 +23,6 @@ struct OpenedSession {
   let composer: ComposerStore
   /// What it reported after it showed; nil until then.
   var info: Info?
-  /// Whether the session's own provider can answer a turn (`SessionClient.readiness`), read when
-  /// it opens and again after a provider switch reopened it (T60.7); the model chip's badge.
-  var readiness = Readiness.ready
-  /// The chip's badge tooltip: the core's message while it is not ready.
-  var problem: String? { readiness.isReady ? nil : readiness.message ?? "No provider can answer" }
   /// The models its cwd's config offers, for best-of's options; empty until read.
   var models: [ModelChoice] = []
   /// The model popover's sections the core built for its cwd (T58.4.13); empty until read.

@@ -19,6 +19,12 @@ import Testing
         .frame(width: Size.readingWidth), variant, named: variant.name)
   }
 
+  @Test(arguments: Variant.all) func bestOfNotReady(_ variant: Variant) throws {
+    try assertCoxSnapshot(
+      PreviewPane { BestOfControl(state: PreviewState.bestOfNotReady) { _ in } }
+        .frame(width: Size.readingWidth), variant, named: "not-ready.\(variant.name)")
+  }
+
   @Test(arguments: Variant.all) func bestOfCompare(_ variant: Variant) throws {
     try assertCoxSnapshot(
       PreviewPane { BestOfCompare(state: PreviewState.bestOfTwo) { _ in } }, variant,
@@ -49,6 +55,16 @@ import Testing
     #expect(PreviewState.bestOfControl.count == 2)
     #expect(PreviewState.bestOfControl.canLaunch)
     #expect(!BestOfControl.State(options: [.init(id: "agent:codex", label: "Codex")]).canLaunch)
+  }
+
+  @Test func bestOfCannotLaunchWhileTheProviderIsNotReadyHoweverManyAreAdded() {
+    let state = PreviewState.bestOfNotReady
+    #expect(state.count == 2)
+    #expect(!state.canLaunch)
+    #expect(state.options.map(\.unavailable).map { $0 != nil } == [false, true])
+    var ready = state
+    ready.unavailable = nil
+    #expect(ready.canLaunch)
   }
 
   @Test func bestOfFailedCandidateCannotBeKept() {

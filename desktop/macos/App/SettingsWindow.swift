@@ -15,9 +15,7 @@ import SwiftUI
 
 struct SettingsWindow: View {
   let model: AppModel
-  /// The page shown; kept in `UserDefaults` so the session window's "Add key" can open Settings on
-  /// Models & Providers (T60.7).
-  @AppStorage(SettingsPage.storageKey) private var storedPage = SettingsPage.general.rawValue
+  @State private var page = SettingsPage.general
   @State private var sliderWrites = Coalescer()
   /// Slider values sent but not yet stored, by key.
   @State private var dragged: [String: Double] = [:]
@@ -34,6 +32,12 @@ struct SettingsWindow: View {
         .task {
           sliderWrites.onIdle = { dragged = [:] }
           await settings.load()
+        }
+        // Asked for by another window; `initial` covers a window the ask itself opened.
+        .onChange(of: settings.requestedGroup, initial: true) {
+          guard let group = settings.requestedGroup else { return }
+          page = SettingsPage(rawValue: group.rawValue) ?? page
+          settings.requestedGroup = nil
         }
       } else if case .failure(let error) = model.launch.live {
         Text(String(describing: error)).textSelection(.enabled).padding(Space.xxl)
@@ -52,11 +56,6 @@ struct SettingsWindow: View {
   /// `[desktop.appearance]` as the session window draws it; the defaults until settings load.
   private var appearance: AppearancePopover.State {
     model.settings.map { AppearancePopover.State($0) } ?? AppearancePopover.State()
-  }
-
-  private var page: SettingsPage {
-    get { SettingsPage(rawValue: storedPage) ?? .general }
-    nonmutating set { storedPage = newValue.rawValue }
   }
 
   private var isRefused: Binding<Bool> {

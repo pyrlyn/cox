@@ -46,7 +46,7 @@ public struct ProviderMonogram: View {
 
   /// One letter for a one-word name, the first letters of the first two words for more:
   /// `Anthropic` is `A`, `LM Studio` is `LS`. A name with no letter or digit shows `?`.
-  static func letters(of name: String) -> String {
+  nonisolated static func letters(of name: String) -> String {
     let initials = name.split { !$0.isLetter && !$0.isNumber }.prefix(2).compactMap(\.first)
     return initials.isEmpty ? "?" : String(initials).uppercased()
   }
@@ -54,7 +54,7 @@ public struct ProviderMonogram: View {
   /// The tile colour of a slug: FNV-1a over its UTF-8 bytes, modulo the five tile kinds in their
   /// declared order. `hashValue` would change from launch to launch; this is the rule DS§3.7
   /// gives, so another client draws the same colours.
-  static func kind(of slug: String) -> IconTile.Kind {
+  nonisolated static func kind(of slug: String) -> IconTile.Kind {
     var hash: UInt32 = 2_166_136_261
     for byte in slug.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
     let kinds = IconTile.Kind.allCases

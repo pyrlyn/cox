@@ -218,7 +218,6 @@ public final class FixtureSession: SessionClient {
   private let fixedCosts: TurnCosts
   private let inbox: FixtureInbox
   private let fixedProvider: String?
-  private let fixedReadiness: Readiness
   private let state = Mutex(State())
 
   private struct State {
@@ -232,6 +231,7 @@ public final class FixtureSession: SessionClient {
     var parked: CheckedContinuation<Void, Never>?
     /// The session a `switchProvider` hands back, as the core reopens one (T60.7).
     var reopened: (any SessionClient)?
+    var readiness = Readiness.ready
   }
 
   public convenience init(
@@ -261,7 +261,8 @@ public final class FixtureSession: SessionClient {
     (self.prompts, fixedChanges, fixedPlan, self.tasks, fixedInfo, self.inbox) =
       (prompts, changes, plan, tasks, info, inbox)
     (self.reviews, fixedCosts, self.outputs) = (reviews, costs, outputs)
-    (fixedProvider, fixedReadiness) = (provider, readiness)
+    fixedProvider = provider
+    state.withLock { $0.readiness = readiness }
   }
 
   public var sent: [Intent] { state.withLock { $0.sent } }
@@ -350,7 +351,9 @@ public final class FixtureSession: SessionClient {
 
   public func provider() -> String? { fixedProvider }
 
-  public func readiness() async throws -> Readiness { fixedReadiness }
+  public func readiness() async throws -> Readiness { state.withLock { $0.readiness } }
+
+  public func setReadiness(_ new: Readiness) { state.withLock { $0.readiness = new } }
 
   public func turnCosts() async throws -> TurnCosts { fixedCosts }
 

@@ -21,22 +21,21 @@ public struct SessionComposer: View {
   /// What the model chip names instead of the core's model: an external agent's session has
   /// none of cox's own, and the toolbar that used to name its agent no longer shows the model.
   let modelLabel: String?
-  /// Why the session's provider cannot answer, the core's `Readiness` message: the model chip
-  /// wears a badge with it as its tooltip (T60.7). `nil` while it can.
-  let modelProblem: String?
   /// The model chip was clicked: the window opens or closes the model popover over it.
   let openModel: () -> Void
+  /// The notice's button: the window opens Settings at Providers (T60.5).
+  let openProviders: () -> Void
   @State private var isPicking = false
   @State private var isTokensOpen = false
 
   public init(
-    store: ComposerStore, modelLabel: String? = nil, modelProblem: String? = nil,
-    openModel: @escaping () -> Void = {}
+    store: ComposerStore, modelLabel: String? = nil, openModel: @escaping () -> Void = {},
+    openProviders: @escaping () -> Void = {}
   ) {
     self.store = store
     self.modelLabel = modelLabel
-    self.modelProblem = modelProblem
     self.openModel = openModel
+    self.openProviders = openProviders
   }
 
   public var body: some View {
@@ -48,6 +47,10 @@ public struct SessionComposer: View {
       }
       composer
     }
+    // The provider is read as the session opens, and again when a pick changes it; the window
+    // reads it on becoming key and after a key is stored (DT§5.3).
+    .task { await store.refreshReadiness() }
+    .onChange(of: store.session.status.provider) { Task { await store.refreshReadiness() } }
     // Off the column's edges, as the mockup's `.composer` margin keeps it.
     .padding(.horizontal, Space.xl)
     .padding(.bottom, Space.composerBottom)
@@ -101,6 +104,7 @@ public struct SessionComposer: View {
       return Composer.Attachment(id: String(index), name: file.name, image: image)
     }
     state.canSend = store.canSend
+    state.notice = notice
     state.isRunning = store.isRunning
     state.queued = store.queued
     state.isRecalling = store.isRecalling
@@ -110,7 +114,7 @@ public struct SessionComposer: View {
     if modelLabel == nil, let provider = store.session.status.provider {
       state.provider = ProviderMark(
         slug: provider, name: store.session.status.providerName ?? provider)
-      state.modelProblem = modelProblem
+      state.modelProblem = store.readiness.blockedReason
     }
     state.think = store.think
     if let usage = store.session.usage {
@@ -118,6 +122,13 @@ public struct SessionComposer: View {
       state.tokens = isTokensOpen ? TokenPopover.State(usage, isRunning: store.isRunning) : nil
     }
     return state
+  }
+
+  /// Why a turn waits, with the Settings step that fixes it (DT§5.3).
+  private var notice: Composer.Notice? {
+    store.readiness.blockedReason.map {
+      Composer.Notice(message: $0, action: store.readiness.actionTitle)
+    }
   }
 
   private func handle(_ intent: Composer.Intent) {
@@ -129,18 +140,20 @@ public struct SessionComposer: View {
     case .removeAttachment(let id): if let index = Int(id) { store.removeAttachment(at: index) }
     case .recall(let step): store.recall(step)
     case .select(let range): store.select(range)
-    case .cycleMode, .setMode, .toggleThink, .openModel: chip(intent)
+    case .cycleMode, .setMode, .toggleThink, .openModel, .noticeAction: chip(intent)
     default: draft(intent)
     }
   }
 
-  /// The chips that ask for something: a mode, the model popover, or think for the next turn.
+  /// The chips that ask for something: a mode, the model popover, or think for the next turn; and
+  /// the notice's button, which opens Settings.
   private func chip(_ intent: Composer.Intent) {
     switch intent {
     case .cycleMode: Task { await store.cycleMode() }
     case .setMode(let mode): Task { await store.setMode(PermissionMode(mode)) }
     case .toggleThink: store.toggleThink()
     case .openModel: openModel()
+    case .noticeAction: openProviders()
     default: break
     }
   }

@@ -307,3 +307,59 @@ private func usage(done: Bool) -> UsageView {
     ])
   #expect(!store.think)
 }
+
+/// T60.5 (A138): while the provider cannot answer, a turn is not sent — by ⏎ or by ⌘⏎ — however the
+/// view asks; a shell line and a `/` command start no turn, so they still go.
+@MainActor
+@Test func aTurnIsRefusedWhileTheProviderIsNotReadyButShellAndCommandsStillGo() async {
+  let (store, session) = composer()
+  session.setReadiness(.noKey(provider: "anthropic"))
+  await store.refreshReadiness()
+  #expect(store.readiness.reason == .noKey(provider: "anthropic"))
+
+  store.edit("fix the bug")
+  #expect(!store.canSend)
+  await store.submit()
+  await store.submitNow()
+  #expect(session.sent.isEmpty)
+  #expect(store.text == "fix the bug", "the draft stays for when a key is added")
+
+  store.edit("/compact")
+  #expect(store.canSend)
+  await store.submit()
+  store.edit("!")
+  store.edit("git status")
+  await store.submit()
+  #expect(session.sent == [.command(line: "/compact"), .shell(command: "git status", share: true)])
+}
+
+@MainActor
+@Test func aKeyStoredLaterLetsTheKeptDraftGoOnTheNextRead() async {
+  let (store, session) = composer()
+  session.setReadiness(.noProvider)
+  await store.refreshReadiness()
+  store.edit("fix the bug")
+  await store.submit()
+  #expect(session.sent.isEmpty)
+
+  session.setReadiness(.ready)
+  await store.refreshReadiness()
+  #expect(store.canSend && store.readiness.isReady)
+  await store.submit()
+  #expect(session.sent == [.send(text: "fix the bug", attachments: [])])
+}
+
+@Test func theNoticeActionNamesTheSettingsStepTheReasonNeeds() {
+  #expect(Readiness.ready.actionTitle == nil)
+  #expect(Readiness.noKey(provider: "openai").actionTitle == "Add key")
+  #expect(Readiness.noProvider.actionTitle == "Open Settings")
+  #expect(Readiness.unreachable(provider: "ollama").actionTitle == "Open Settings")
+}
+
+@Test func aBestOfCandidateOnAProviderNobodyCanUseIsUnavailableWithTheReason() {
+  let usable = ["anthropic"]
+  #expect(Readiness.unavailableReason(provider: "anthropic", usable: usable) == nil)
+  #expect(Readiness.unavailableReason(provider: "openai", usable: usable) != nil)
+  #expect(Readiness.unavailableReason(provider: "openai", usable: nil) == nil, "not probed yet")
+  #expect(Readiness.unavailableReason(provider: "", usable: usable) == nil, "a fixture's")
+}

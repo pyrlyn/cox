@@ -2216,25 +2216,6 @@ Every card in this phase:
 - leaves a test that fails without it (`insta` or a unit test in Rust, swift-snapshot-testing or Swift Testing in Swift).
 
 
-#### T60.5 Composer: Send, ⏎ and Best of wait for a usable provider
-
-Model: sonnet · Status: open · Depends: T60.4 · Size: ~180 · Priority: P0 · Complexity: 3
-
-Goal: while `readiness` is not `Ready`, Send is disabled, ⏎ and ⌘⏎ do nothing, the "Best of n" capsule is disabled, and a notice under the composer gives the reason with "Add key", which opens Settings › Providers; Best of options on an unusable provider are `unavailable` with the reason.
-
-Files:
-- `desktop/macos/Packages/CoxModel/Sources/CoxModel/ComposerStore.swift` (`canSend` and the `submit`/`submitNow` guards read readiness)
-- `desktop/macos/App/SessionWindow.swift` (reads `readiness` on open, on window focus and after a Settings key change)
-- `desktop/macos/App/BestOf.swift` (`unavailable` per option, `canLaunch` false when not `Ready`)
-
-Steps:
-1. The notice uses the existing `NoticeRow`; no new component.
-2. Docs: DT§5.3 and DS§6.4 (Composer row) describe the disabled state and the notice.
-
-Check: `swift test` in `CoxModel`, `CoxTranscript` and `CoxUI`.
-
-Done when: `ComposerStoreTests` show submit refused without a usable provider, `ComposerFlowTests` show ⏎ ignored, and `BestOfTests` snapshot the disabled capsule.
-
 #### T60.7 Provider in the model chip and a grouped model popover
 
 Model: Claude Code / sonnet · Status: in progress · Depends: T60.4, T60.6 · Size: ~200 · Priority: P1 · Complexity: 3

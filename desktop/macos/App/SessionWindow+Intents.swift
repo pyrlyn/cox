@@ -26,7 +26,7 @@ extension SessionWindow {
       if let intent = showing?.menu.pick(row) { send(intent) }
     case .addKey:
       screen.popover = nil
-      showProviderSettings()
+      openProviders()
     case .appearance(let change):
       screen.appearance.apply(change)
       screen.appearance.fillTexts()
@@ -37,19 +37,13 @@ extension SessionWindow {
   }
 
   /// The composer under the transcript: its model chip names an external agent's session's agent
-  /// and opens the model popover over itself (T60.6), and wears a badge while the session's
-  /// provider cannot answer (T60.7).
+  /// and opens the model popover over itself (T60.6); its notice's button opens Settings at Providers
+  /// (T60.5).
   func composer(for showing: OpenedSession) -> SessionComposer {
     SessionComposer(
       store: showing.composer, modelLabel: ShellState.agentModel(showing, sidebar: model.sidebar),
-      modelProblem: showing.problem,
-      openModel: { screen.popover = screen.popover == .model ? nil : .model })
-  }
-
-  /// Settings on Models & Providers, where a key is added.
-  func showProviderSettings() {
-    UserDefaults.standard.set(SettingsPage.models.rawValue, forKey: SettingsPage.storageKey)
-    openSettings()
+      openModel: { screen.popover = screen.popover == .model ? nil : .model },
+      openProviders: { openProviders() })
   }
 
   func handle(_ intent: SessionToolbar.Intent) {
@@ -147,6 +141,8 @@ extension SessionWindow {
     model.register(shared.store, as: session)
     guard let old = opened[session] else { return }
     opened[session] = old.reopened(as: shared)
-    opened[session]?.readiness = (try? await shared.store.session.readiness()) ?? .ready
+    // The new composer reads its own readiness as it shows; the popover's marks and the footer
+    // follow the same probe.
+    await refreshProviders()
   }
 }
