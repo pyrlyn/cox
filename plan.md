@@ -2394,7 +2394,7 @@ Done when: `FoundationsTests` show specular = token × setting and 0 in Solid; `
 
 #### T60.10 Best of: the real failure reason, no negative zero, no actions on a failed candidate
 
-Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
+Model: Claude Code / sonnet · Status: in progress · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
 
 Goal: a failed candidate shows its turn's error text (e.g. "provider auth failed") instead of "its turn failed"; a cost of −0.00 prints as $0.00 everywhere; "Open in Review" and "Keep this one" are disabled on a failed candidate with no changes.
 
