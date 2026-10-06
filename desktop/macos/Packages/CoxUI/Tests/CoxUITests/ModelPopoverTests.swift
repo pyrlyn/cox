@@ -3,7 +3,8 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 // The model popover's check (T37.22.6, DT§5.1): its tiers in every light/dark × Solid/Frosted
-// cell, the empty state, and the main screen with it hung under the toolbar's model capsule.
+// cell, the empty state, and the main screen with it hung over the composer's model chip (T60.6),
+// and a click on that chip reporting the intent that opens it.
 
 import SwiftUI
 import Testing
@@ -23,10 +24,16 @@ import Testing
       Variant(scheme: .light, material: .solid), named: "light")
   }
 
-  @Test func mainScreenHangsItUnderTheCapsule() throws {
+  @Test func mainScreenHangsItOverTheComposersChip() throws {
     try assertCoxWindowSnapshot(
       MainScreen(
-        state: PreviewState.modelOpen, send: { _ in }, transcript: { EmptyView() },
+        state: PreviewState.modelOpen, send: { _ in },
+        transcript: {
+          VStack {
+            Spacer()
+            Composer(state: PreviewState.composerStatus) { _ in }.padding(Space.xl)
+          }
+        },
         inspector: { _ in }),
       Variant(scheme: .light, material: .solid))
   }

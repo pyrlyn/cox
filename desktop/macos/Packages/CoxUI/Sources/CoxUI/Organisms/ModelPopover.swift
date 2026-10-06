@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// `ModelPopover` (DS§6.4 row `SessionToolbar`, its model capsule's popover, the mockup's
+// `ModelPopover` (DS§6.4 row `Composer`, its model chip's popover, the mockup's
 // `.popover`; DT§5.1; T37.22.6): each tier's models under the tier's name, the one the session
-// runs on marked, a click switching to another. Separate so the toolbar only opens it and the
-// screen hangs it under the capsule; the rows, their ids and efforts all come from the core's
+// runs on marked, a click switching to another. Separate so the composer only opens it and the
+// screen hangs it over the chip; the rows, their ids and efforts all come from the core's
 // catalog through CoxModel's `ModelMenu`.
 
 import SwiftUI
@@ -69,8 +69,8 @@ public struct ModelPopover: View {
   }
 }
 
-/// Where the toolbar's model capsule sits, so the screen hangs the popover under it.
-struct ModelCapsuleAnchor: PreferenceKey {
+/// Where the composer's model chip sits, so the screen hangs the popover over it.
+struct ModelChipAnchor: PreferenceKey {
   static var defaultValue: Anchor<CGRect>? { nil }
 
   static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {

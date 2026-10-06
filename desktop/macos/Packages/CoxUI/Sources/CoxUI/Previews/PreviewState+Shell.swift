@@ -28,7 +28,6 @@ extension PreviewState {
 
   static let project = "cox"
   static let branch = "wt/retry-jitter"
-  static let model = "Sonnet 5 · high"
   static let cost = "$0.42"
   static let context = "38%"
 }

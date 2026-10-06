@@ -9721,3 +9721,29 @@ Out of scope: switching provider mid-session (roadmap, A138).
 - Result: `Intent::SwitchProvider { provider, model, make_default }` dispatches to `Dispatch::SwitchProvider`; an external agent's session refuses it by name. `LiveSession::send` runs it: the session's own provider is a plain `SwitchModel { Code }`; another one, only while no turn was spawned and the core's history is empty, reopens the session in place — `open_with` resumes the same id through `cox_session::open_with_keys` with `tiers.code.provider`/`model` overridden — so the window's slot, the `sessions` row and the rollout stay one session (no orphan row, no store change); the old session is ended only after the new one opened, so a provider that cannot open leaves it running. After a turn: `AppError::ProviderLocked`, "start a new session to change provider". `make_default` writes both keys through the Settings setter (`App::make_default`, both or neither). The inbox tee no longer expires items of an id a reopened session still runs (`App::is_open`). After merging T60.2: the send gate reads the session's own provider (`LiveSession::readiness()`, `App::readiness_of`), so a session reopened on a usable pick may send while the default has no key. `cox-ffi` mirrors the variant; the Swift side and a `readiness()` export are T60.4. DT§5.3 documents the pick, its first-turn limit and the calls.
 - Tests: `intent::tests::switch_provider_is_a_reopen_and_needs_a_provider`; `tests/app.rs` `an_empty_session_reopens_on_the_picked_provider_in_place` (same id, provider `second`, status model, old stream closes, one row, a turn runs), `a_provider_pick_made_default_lands_in_the_user_config`, `a_session_with_a_turn_refuses_another_provider`, `a_session_reopened_on_a_usable_provider_may_send`.
 - Check output summary: `cargo nextest run -p cox-app -p cox-ffi -p cox-session` 305 passed; `cargo clippy -p cox-app -p cox-ffi -p cox-session --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+### T60.6 Model and mode move from the toolbar to the composer
+
+Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: — · Size: ~200 · Priority: P1 · Complexity: 3
+
+Goal: the session toolbar no longer shows the model capsule or the Ask/Plan/Auto segmented control; the composer's model chip opens the model popover anchored to the chip, and its mode chip opens a menu of Ask, Plan, Auto and Bypass (Bypass with its warning), with ⇧⇥ still cycling. The Bypass danger strip under the toolbar stays.
+
+Files:
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/SessionToolbar.swift`
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/Composer.swift`
+- `desktop/macos/App/ShellState.swift` and the popover anchoring in `App/SessionWindow.swift`
+
+Steps:
+1. Reuse `ModelPopover` and `ModeSegmented`'s options; no new component.
+2. Docs: DT§5.1 window anatomy and DT§5.3 composer; DS§6.4/§6.5 toolbar and composer rows; the mockup note that the toolbar's model and mode moved (A138).
+
+Check: `swift test` in `CoxUI`; the toolbar and composer snapshots re-recorded in the package's record mode.
+
+Done when: `MainScreenTests` and `ComposerTests` snapshots show the new layout, and a test opens the model popover and the mode menu from the chips.
+
+Result: the toolbar shows no model capsule and no Ask/Plan/Auto control; `SessionToolbar.State` keeps `mode` only for the Bypass strip and drops `model` and `Intent.mode`. The composer's model chip is a button (`Composer.Intent.openModel`) that opens `ModelPopover` over the chip: `MainScreen` reads the new `ModelChipAnchor` preference and opens the popover upwards from the chip, leading edges aligned. The mode chip is a `ModeMenu` (in `ModeSegmented.swift`) of Ask, Plan, Auto and Bypass (`Composer.Intent.setMode` → `ComposerStore.setMode` → `Intent::SetMode`); Bypass asks for a confirmation first, since the old control offered it only while it was already on. ⇧⇥ still cycles. An external agent's session names its agent in the model chip (`SessionComposer(modelLabel:)`), as the toolbar did (mockup 27). `ModelCapsule` is deleted (no user left); `ComposerChipRow` moved to its own file for SwiftLint's file length. Docs: DT§5.1, DT§5.3, DS§4, §6.3, §6.4, §6.5 and the mockups' README and `toolbar()` note.
+
+Check output:
+- CoxUI `swift test --filter` over the touched suites: `ModeMenuTests` 3 passed; the re-recorded snapshots `composer-status`/`composer-think` (8), `mainScreen*` (11), `sessionToolbar` (4), `agentToolbar` (4), `AppearancePopoverTests/mainScreenDrawsThePopoversMaterial` (3) and `reduceTransparencyWindowIsSolid`, and the new `ModelPopoverTests/mainScreenHangsItOverTheComposersChip`, pass. Other CoxUI snapshots (Foundations, sidebar, composer's other states, …) already differ from their references on this machine's macOS 27 rendering, before and after this change; they were not re-recorded.
+- CoxTranscript `ComposerFlowTests` 9 passed, including `clickingTheModelChipAsksTheWindowToOpenTheModelPopover` (a synthesized click) and `shiftTabAsksForTheModeTheCoreNamesNext`; CoxModel `swift test` 131 passed (`theModeMenuAsksForTheModePickedNotTheNextOne`).
+- `scripts/desktop/app.sh` builds `Cox.app`; `swiftlint lint --strict` and `xcrun swift-format lint --strict` clean on the changed files.

@@ -211,8 +211,13 @@ public final class ComposerStore {
   /// reports the change, never before.
   public func cycleMode() async {
     guard let next = session.status.nextMode else { return }
+    await setMode(next)
+  }
+
+  /// The mode chip's menu: asks for `mode`, which the chip shows once the core reports it.
+  public func setMode(_ mode: PermissionMode) async {
     do {
-      _ = try await session.send(.setMode(mode: next))
+      _ = try await session.send(.setMode(mode: mode))
     } catch {
       report(error)
     }

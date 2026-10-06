@@ -85,7 +85,7 @@ piece it stands on; "new" means a gap closed in DT§4.7.
 | Composer | Multi-line; `@file` mentions with fuzzy match; `/commands` with completion; `!` shell mode; paste/drag images and files; queue while busy | `commands::parse`, `nucleo` matcher, `UserShell`, attachments (new) |
 | Approvals | Inline card + pinned copy above the composer; allow once, allow for session (shows the grant), deny with reason, edit then run | `ApprovalRequired`, `Decision` |
 | Questions (`ask_user`) | Card with the options as buttons and a free-text field | `QuestionAsked` (new) |
-| Permission mode and model | Toolbar controls; the change is echoed as typed state, not a notice | `SetPermissionMode`, `SwitchModel`, `SetEffort`, `StateChanged` (new) |
+| Permission mode and model | Composer chips (the toolbar no longer has them, T60.6); the change is echoed as typed state, not a notice | `SetPermissionMode`, `SwitchModel`, `SetEffort`, `StateChanged` (new) |
 | Review | Changed files for the session, unified or side-by-side diff, revert a file to any checkpoint, comment on a line to send it to the agent | `ToolResult.diff`, `Checkpoint`, `Rewind` |
 | Rewind timeline | Gutter marks per turn; "restore code", "restore conversation", or both; edit-and-resend a past prompt | `Rewind`, `Redo` |
 | Inspector | Tabs: Changes, Plan (live todo), Context & Cost, Tasks (subagents/background), Info | `ToolResult.structured` (new), `Usage`, `TaskCreated/Completed` |
@@ -617,7 +617,7 @@ Default window 1 440 × 900, minimum 900 × 600. A three-column
 
 ```
 ┌ toolbar ─────────────────────────────────────────────────────────────────────┐
-│ ◧  cox › main ⎇ wt/fix-login     [Sonnet 5 · high ▾] [Ask|Plan|Auto]  $0.42 · ctx 38% ■ ◨ │
+│ ◧  cox › main ⎇ wt/fix-login                                      $0.42 · ctx 38% ■ ◨ │
 ├──────────────┬──────────────────────────────────────────────┬─────────────────┤
 │ SIDEBAR 250  │ TRANSCRIPT  (reading column ≤ 760 pt)        │ INSPECTOR 320   │
 │ ⌕ Filter     │  12 │ You: fix the login redirect …          │ Changes · Plan  │
@@ -633,11 +633,13 @@ Default window 1 440 × 900, minimum 900 × 600. A three-column
 ```
 
 - **Toolbar** (Liquid Glass): sidebar toggle (⌃⌘S); breadcrumb *project › branch ›
-  worktree* (click: switch branch/worktree); model chip (tier · model · effort,
-  menu); permission-mode segmented control; cost pill (`$` for the session and
+  worktree* (click: switch branch/worktree); cost pill (`$` for the session and
   context-window fill; click opens Context & Cost); Stop button while a turn
   runs (⌘.); Appearance (⌘⌥A); inspector toggle (⌃⌘I). **Bypass mode** paints
-  a thin red strip under the whole toolbar for as long as it is on.
+  a thin red strip under the whole toolbar for as long as it is on. The model
+  and the permission mode are not here: they are the composer's chips (§5.3),
+  so a client places them beside the text they apply to, and the toolbar keeps
+  only the mode it needs for the strip (T60.6, A138).
 - **Sidebar**: filter field; "Needs you" (sessions with a pending approval or
   question, orange count); "Running"; then projects as disclosure groups.
   A row: status glyph (● running, ◐ waiting for you, ○ idle, ✕ error),
@@ -750,8 +752,23 @@ as the text shown: a prompt without its tiles, a folded thought as nothing.
   key the server rejects counts as usable until a turn fails. Under a test
   double (`COX_PROVIDER`) the answer is always `Ready`.
 - ↑ in an empty composer walks the prompt history (`user_prompts`).
-- The chips row below: attachment button, permission mode (⇧⇥ cycles), model
-  and effort, "think" toggle.
+- The chips row below: attachment button, permission mode, model and effort,
+  "think" toggle.
+- **Permission mode chip.** Shows the mode in force (`Status.mode`). A click
+  opens a menu of Ask, Plan, Auto and Bypass with the current one checked;
+  picking one sends `Intent::SetMode { mode }` (Ask is the core's `default`).
+  ⇧⇥ sends the mode `Status.next_mode` names, as before; the chip moves only
+  when the core reports the change, never before. Bypass asks for a
+  confirmation first ("Tools run without asking. The shell still runs inside
+  the sandbox."): it was never one click away, since the old toolbar control
+  offered it only while it was already on.
+- **Model chip.** Shows the model and effort (`Status`, the core's short name).
+  A click opens the model popover — each tier's models, the running one
+  marked, from the core's catalog — over the chip and aligned to its leading
+  edge, opening upwards because the composer is the column's bottom edge; a
+  row sends the switch and closes it, and a click outside or ⎋ closes it
+  too. An external agent's session (§4, mockup 27) shows the agent's name
+  (`Claude Agent · ACP`) in this chip, which the toolbar used to carry.
 - Provider pick (T60.3, A138): the model menu also lists the models of the
   other configured provider sections. Picking one sends
   `Intent::SwitchProvider { provider, model, make_default }` through

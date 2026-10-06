@@ -252,6 +252,18 @@ private func usage(done: Bool) -> UsageView {
   #expect(store.mode == .default)
 }
 
+/// T60.6: the mode chip's menu asks for the mode picked, whatever the cycle would name next, and
+/// leaves the chip to the core's answer.
+@MainActor
+@Test func theModeMenuAsksForTheModePickedNotTheNextOne() async {
+  let (store, session) = composer()
+  let status = Status(mode: .default, nextMode: .plan, model: "claude-sonnet-5", effort: .high)
+  store.session.apply([.status(status: status)])
+  await store.setMode(.bypass)
+  #expect(session.sent == [.setMode(mode: .bypass)])
+  #expect(store.mode == .default)
+}
+
 /// T58.4.14 (A129): the chip is the core's `shortName`, else the id; `modelName` is not shortened.
 @MainActor
 @Test func theModelChipUsesTheCoresShortNameElseTheId() {
