@@ -9644,3 +9644,25 @@ Check: `mise exec -- cargo nextest run -p cox-app --test best_of`; `swift test` 
 Done when: the Rust test shows the provider error as the reason, a formatter test prints `$0.00` for −0.0, and the `BestOfTests` snapshot shows the failed column with disabled actions.
 Result: `best_of::state_of` takes a failed candidate's reason from the inbox's `Need::Failed` item for its session (the text the sidebar shows), the old line only when the item was dismissed. Root cause of `$-0.00`: `Iterator::sum` of zero `f64` rows is `-0.0` since Rust 1.83 (rustc 1.98.1 here), so a turn that failed before any usage row gave `session_cost` = `-0.0`, which `String(format: "%.2f")` prints as `-0.00`; the header total was `0 + -0.0`, which is `+0.0`. `workspace::session_cost` and `queries::project_spend` now fold from `0.0`, and `usd` (CoxModel, now public, used by `App/BestOf.swift`) clamps amounts that round to zero. `canReview` / `canKeep(anotherKept:)` moved out of the untested `App/BestOf.swift` onto `CandidateView` in CoxModel: a failed candidate with no files offers neither action. DT§3.3.3 documents it.
 - Check output summary: `cargo nextest run -p cox-app -p cox-ffi -p cox-store` 271 passed (incl. `best_of_failed_candidate_shows_the_provider_error`); `cargo clippy -p cox-app -p cox-store -p cox-ffi --all-targets -- -D warnings` and `cargo fmt --check` clean; CoxModel `swift test` 133 passed (formatter, canReview/canKeep); CoxUI `BestOfTests` logic tests pass and the new `bestOfFailedTurns` snapshots are recorded; the existing BestOf snapshots do not match on this machine before or after this change (font rendering), so they were not re-recorded.
+
+#### T60.9 Glare slider in Appearance
+
+Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: T60.8 · Size: ~150 · Priority: P2 · Complexity: 2
+
+Goal: a "Glare" slider in the Appearance popover and Settings › Appearance; the drawn specular is the material's token times the setting; disabled in Solid and under Increase Contrast, where the sweep is already off.
+
+Files:
+- `desktop/macos/Packages/CoxModel/Sources/CoxModel/AppearanceSettings.swift` (`AppearanceEdit.specular`, `DesktopAppearance.specular`)
+- `desktop/macos/Packages/CoxUI/Sources/CoxUI/Foundations/Appearance.swift` and `Organisms/AppearancePopover.swift`
+- `desktop/macos/App/AppearanceState.swift`
+
+Steps:
+1. Docs: DS§3.5 Materials — the glare scale and its formula, so other clients draw the same strength.
+
+Check: `swift test` in `CoxModel` and `CoxUI`.
+
+Done when: `FoundationsTests` show specular = token × setting and 0 in Solid; `AppearanceSettingsTests` decode the key; a popover snapshot shows the slider.
+
+- Result: `AppearanceEdit.specular` writes `desktop.appearance.specular`; `DesktopAppearance.specular` reads it as optional and defaults to 1, so a core without the key (before T60.8) still decodes the section. `Appearance.specularScale` (init parameter, default 1) scales the material's specular token and clamps to 0…1; Solid, Reduce Transparency and Increase Contrast stay at 0. The Appearance popover has a "Glare" slider (None…Full) below Depth, disabled in Solid, under Reduce Transparency, under Increase Contrast and when a layer above the user file sets the key; its note says why under Increase Contrast. `AppearanceState` maps stored, state and edit like Depth, and `applied(to:)` and the material swatches carry the scale. Settings › Appearance rows are generated from Rust's settings view, so the Glare row appears with T60.8's key. DS§3.5 gives the formula (`clamp(material.*Specular × specularScale, 0, 1)`), DS§6 the popover row, in platform-neutral words.
+- Tests: `FoundationsTests` `glareScalesTheMaterialsSpecularToken` and `glareNeverBringsTheSweepBackInSolidOrUnderIncreaseContrast`; `AppearanceSettingsTests` read the key, write it, and `aMissingSpecularKeyReadsAsFullGlare`; `AppearancePopoverTests` report the intent and redraw with the scale; the twelve `appearancePopover` snapshots re-recorded with the slider.
+- Check output summary: CoxModel `swift test` 131 passed; CoxUI `swift test`: every non-snapshot test passes, and the `appearancePopover` snapshots pass against the new references; the other snapshots in the suite mismatch on this machine (macOS 27.0.1) with or without this change, and the other popover-bearing references (locked, Reduce Transparency, main screen with the popover open) still need re-recording where the references were made; SwiftLint `--strict` on `App` and the touched sources and `swift-format lint --strict` clean.

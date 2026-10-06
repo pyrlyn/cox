@@ -50,6 +50,8 @@ public struct Appearance: Sendable, Equatable {
   public var windowOpacity: Double
   /// Depth, 0 (Flat) … 1 (3D): scales every elevation but `e5` (DS§3.4).
   public var depth: Double
+  /// Glare, 0…1: the share of the material's specular sweep to draw (DS§3.5).
+  public var specularScale: Double
   /// Text size, 1 = 100 % (DS§3.2).
   public var textScale: Double
   /// The highlight dark mode draws, and on which levels (A109).
@@ -63,12 +65,13 @@ public struct Appearance: Sendable, Equatable {
   /// `windowOpacity` defaults to the material's token.
   public init(
     material: GlassMaterial = .frosted, windowOpacity: Double? = nil, depth: Double = 1,
-    textScale: Double = 1, darkHighlight: DarkHighlight = .none,
+    specularScale: Double = 1, textScale: Double = 1, darkHighlight: DarkHighlight = .none,
     highlightScope: HighlightScope = .controls
   ) {
     self.material = material
     self.windowOpacity = windowOpacity ?? Self.defaultOpacity(material)
     self.depth = depth
+    self.specularScale = specularScale
     self.textScale = textScale
     self.darkHighlight = darkHighlight
     self.highlightScope = highlightScope
@@ -103,14 +106,17 @@ public struct Appearance: Sendable, Equatable {
     return 1 - (1 - opacity) * MaterialToken.highContrastGlassKeep
   }
 
-  /// Strength of the diagonal highlight for the material (DS§3.5); none under Increase Contrast.
+  /// Strength of the diagonal highlight: the material's token times `specularScale`, clamped to
+  /// 0…1 (DS§3.5); none in Solid and under Increase Contrast, whatever the scale.
   var specular: Double {
     if increaseContrast { return MaterialToken.solidSpecular }
-    return switch material {
-    case .solid: MaterialToken.solidSpecular
-    case .frosted: MaterialToken.frostedSpecular
-    case .glossy: MaterialToken.glossySpecular
-    }
+    let token =
+      switch material {
+      case .solid: MaterialToken.solidSpecular
+      case .frosted: MaterialToken.frostedSpecular
+      case .glossy: MaterialToken.glossySpecular
+      }
+    return min(max(token * specularScale, 0), 1)
   }
 
   /// The share of `level`'s inset highlight to draw: all of it in light, and in dark the
