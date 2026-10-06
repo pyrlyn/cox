@@ -9579,3 +9579,29 @@ Check: cox-app tests for a Cargo workspace, a single crate, a Node workspace and
 - Result: `crates/cox-app/src/welcome.rs`: `App::welcome(cwd)` loads the instruction chain as a session would (`cox_session::instruction_roots`, the config's `instruction_budget_tokens`) and `facts(cwd, files, in_git)` builds the line — `Rust workspace · N crates` from `[workspace] members` (paths and `dir/*` globs, less `exclude`), `Rust crate`, `Node workspace · N packages` / `Node project` from `package.json` `workspaces`, `Go module`, `Python project` — then `<files> loaded` by file name; the suggestions name the project folder and the kind's test command (`cargo nextest` with `.config/nextest.toml`, `cargo test`, `npm test`, `go test ./...`, `pytest`), and the diff review only under a git root (`cox_config::load::find_git_root`, no `git` run). `cox-ffi`: `App.welcome(cwd)` forwards on the runtime; `Welcome` and `Suggestion` cross as remote records. Swift: `WelcomeFacts`, `WelcomeSuggestion` and `WelcomeService` move to CoxClient with a `FixtureWelcome`; CoxCore's `LiveCoreClient` conforms (`WelcomeConvert.swift`); `MockWelcomeService` and `SessionWindow.welcome` are deleted, and the window passes the live client (a fixture without a core shows the question alone). cox-app depends on `toml_edit` directly (already in its tree through cox-config).
 - Tests: cox-app `welcome::tests` — a Cargo workspace (3 crates with a glob, a path and an exclude; nextest; two instruction files), a single crate (`cargo test`, no diff suggestion outside git), a Node workspace (2 packages) and an empty folder (no summary, generic test prompt). CoxCore `thisRepositoryReadsAsARustWorkspaceWithItsInstructions`: through the real core this repository reads `Rust workspace · … · AGENTS.md …` with the diff suggestion. The CoxModel and CoxTranscript welcome tests use `FixtureWelcome`.
 - Check output summary: `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo nextest run -p cox-ffi -p cox-app` 231 passed (forward-only included); `cargo nextest run -p cox --test deps` 10 passed; `just desktop-xcframework` built; CoxCore `swift test` 25 passed; CoxModel 130 passed; CoxTranscript welcome and rewind tests pass; `cargo fmt --check`, `xcrun swift-format lint --strict` clean.
+
+#### T60.2 Launch readiness: no turn without a usable provider
+
+Model: Claude Code / sonnet · Status: done 2026-10-07 · Depends: T60.1 · Size: ~180 · Priority: P0 · Complexity: 3
+
+Goal: one Rust rule decides whether a prompt may be sent: the session's code-tier provider is set and is in `usable_providers` (A110); Best of refuses a candidate whose provider is not usable before it creates a worktree, with the reason.
+
+Files:
+- `crates/cox-app/src/models.rs` (`Readiness { Ready, NoProvider, NoKey { provider }, Unreachable { provider } }` and `readiness(config, usable)`; a loopback section that does not listen is `Unreachable`, a keyed one without a key `NoKey`)
+- `crates/cox-app/src/app.rs` (`App::readiness(cwd)`; `usable_providers` re-probes on every call, so a key added in Settings counts at once)
+- `crates/cox-app/src/best_of.rs` (`launch` marks such a candidate `failed: "no key for <provider>"` without starting it)
+
+Steps:
+1. The rule and its four outcomes, each with a short user text (`cox-i18n` message ids).
+2. `LiveSession::send` of a turn intent while not `Ready` returns an error rather than starting a turn, so a client that forgets the gate still cannot start one.
+3. Docs: DT§5.3 "Sending is disabled until …" with the four texts; DT§3.3 Best of names the refusal.
+
+Check: as T60.1, plus `mise exec -- cargo nextest run -p cox-app --test best_of`.
+
+Done when: tests show `NoKey` for the default `anthropic` tier with no key, `Ready` with an injected key (never the real keychain, A49), a refused `send`, and a Best of candidate refused with the reason.
+
+Out of scope: a key the server rejects (counts as usable until a turn fails; T60.10 shows that turn's reason).
+
+- Result: `crates/cox-app/src/readiness.rs` (new module, kept out of `models.rs` while T60.1 edits it) holds `Readiness { Ready, NoProvider, NoKey { provider }, Unreachable { provider } }`, the pure `readiness(config, usable)` rule and `Readiness::message()` (the four user texts, English: `cox-app` has no `cox-i18n` dependency, a client localizes by the variant). `App::readiness(cwd)` re-probes on every call; under a test double (`COX_PROVIDER`, as `cox-session`'s LM Studio probe) it is `Ready`. `LiveSession::send` of `Intent::Send` and `Intent::Queue`, and a plugin's prompt, return `AppError::NotReady` before any turn starts. `best_of::launch` asks once per group and marks every cox candidate `failed: <message>` before its worktree exists; agent candidates are not gated. `models::sections` and `models::loopback` became `pub(crate)`. Docs: DT§3.3.2 (new) and DT§5.3.
+- Tests: `readiness::tests` (no key, loopback not listening, no provider, texts), `tests/app.rs` `readiness_is_no_key_for_the_default_provider_and_ready_with_an_injected_key` (injected host key, never the keychain) and `a_turn_intent_is_refused_while_the_provider_is_not_ready`, `tests/best_of.rs` `best_of_refuses_a_cox_candidate_without_a_usable_provider_before_its_worktree`.
+- Check output summary: `cargo nextest run -p cox-app -p cox-ffi` 243 passed; `cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo fmt --check` clean.

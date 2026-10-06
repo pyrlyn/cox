@@ -38,7 +38,7 @@ use crate::status::StatusFold;
 use crate::tasks::{self, TaskTarget};
 use crate::terminal::{self, TerminalHandle, TerminalSpec};
 use crate::{Block, Completer, Completion, Controller, Dispatch, Intent, SessionGrant, Timeline};
-use crate::{TimelinePatch, dispatch};
+use crate::{Readiness, TimelinePatch, dispatch};
 
 /// The core's own bound (DT§4.5).
 const EVENTS: usize = 256;
@@ -292,6 +292,9 @@ impl LiveSession {
                 return Ok(None);
             }
         }
+        if matches!(intent, Intent::Send { .. } | Intent::Queue { .. }) {
+            self.ensure_ready().await?;
+        }
         let parent = session.id();
         let home = &self.app.home;
         let child = match dispatch(intent)? {
@@ -320,6 +323,16 @@ impl LiveSession {
         Self::open(app, cwd, Some(child), self.theme.clone())
             .await
             .map(Some)
+    }
+
+    /// A turn needs a provider that can answer (T60.2, DT§5.3); checked here
+    /// as well as by the client's disabled Send, so a client that forgets the
+    /// gate cannot start one.
+    async fn ensure_ready(&self) -> Result<(), AppError> {
+        match self.app.readiness(&self.cwd).await? {
+            Readiness::Ready => Ok(()),
+            blocked => Err(AppError::NotReady(blocked)),
+        }
     }
 
     /// What the inspector's Changes tab lists (T37.29.1): the blocks, the
@@ -581,6 +594,15 @@ impl LiveSession {
             }
             Some(CommandOut::Nothing) | None => return,
         };
+        if matches!(intent, Intent::Send { .. })
+            && let Err(e) = self.ensure_ready().await
+        {
+            // A plugin's prompt has no caller to return the refusal to.
+            if let Ok(session) = self.core("Notice") {
+                let _ = session.notice(Level::Warn, e.to_string()).await;
+            }
+            return;
+        }
         match dispatch(intent) {
             Ok(Dispatch::Submit {
                 submission,

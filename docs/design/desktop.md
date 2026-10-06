@@ -281,6 +281,17 @@ the table uses the `@agentclientprotocol/*` names.
 8. cox's own slash commands are off in external sessions; `/…` goes to the
    agent verbatim.
 
+#### 3.3.2 Best of: a cox candidate needs a usable provider (T60.2, A138)
+
+`App::best_of` asks `App::readiness(project)` once for the group. When it is
+not `Ready`, every cox candidate is refused before its worktree is made:
+`Launched.failed` carries `Readiness::message()` (for example "No API key for
+anthropic. Add one in Settings, or pick another provider."), `worktree` and
+`session` stay `None`, and nothing is created for the compare view to clean
+up. An agent candidate (`Candidate::Agent`) brings its own provider and is not
+gated. The rule is the composer's (DT§5.3), so a client shows the same text
+in the launch sheet and may disable Best of with it.
+
 ## 4. Architecture
 
 ### 4.1 Layers
@@ -660,6 +671,26 @@ as the text shown: a prompt without its tiles, a folded thought as nothing.
 - Paste or drop images and files; they show as removable chips.
 - While a turn runs, ⏎ queues the message (the send button shows "Queued ·
   1"); ⌘⏎ interrupts and sends now; ⌘. interrupts.
+- Sending is disabled until the session can answer (T60.2, A138). A client
+  asks `App::readiness(cwd)` (async: it re-probes, so a key added in Settings
+  or a server just started counts at once) and, unless it returns `Ready`,
+  disables Send, ⏎ and Best of and shows `Readiness::message()` beside the
+  composer. The four outcomes and their texts:
+
+  | `Readiness` | Meaning | Text |
+  | --- | --- | --- |
+  | `Ready` | `tiers.code.provider` is a configured section and is in `usable_providers` (A110) | none |
+  | `NoProvider` | the provider is empty or names no `[providers.<name>]` section | "No provider is set for the code tier. Choose one in Settings." |
+  | `NoKey { provider }` | a keyed provider whose key is in neither its env var nor the host's store | "No API key for `<provider>`. Add one in Settings, or pick another provider." |
+  | `Unreachable { provider }` | a provider on loopback whose server does not accept connections | "`<provider>` is not running on this machine. Start its server, or pick another provider." |
+
+  The texts are English in `cox-app` for now (it has no `cox-i18n`
+  dependency); a client localizes by matching the variant. The gate is also
+  enforced in the core: `LiveSession::send` of `Intent::Send` or
+  `Intent::Queue` (and a plugin's prompt) returns `AppError::NotReady`
+  without starting a turn, so a client that forgets it still cannot send. A
+  key the server rejects counts as usable until a turn fails. Under a test
+  double (`COX_PROVIDER`) the answer is always `Ready`.
 - ↑ in an empty composer walks the prompt history (`user_prompts`).
 - The chips row below: attachment button, permission mode (⇧⇥ cycles), model
   and effort, "think" toggle.

@@ -1213,3 +1213,51 @@ async fn app_server_stalled_client_does_not_delay_the_turn() {
         "the turn waited on a client that stopped reading"
     );
 }
+
+#[tokio::test]
+async fn readiness_is_no_key_for_the_default_provider_and_ready_with_an_injected_key() {
+    let dir = scratch(None);
+    let project = dir.path().join("project");
+    let blocked = app(dir.path(), Arc::default())
+        .readiness(&project)
+        .await
+        .expect("readiness");
+    assert_eq!(
+        blocked,
+        cox_app::Readiness::NoKey {
+            provider: "anthropic".into()
+        }
+    );
+    let mut keyed = MemoryHost::default();
+    keyed.secrets.insert("anthropic".into(), "sk-test".into());
+    let ready = app(dir.path(), Arc::new(keyed))
+        .readiness(&project)
+        .await
+        .expect("readiness");
+    assert_eq!(ready, cox_app::Readiness::Ready);
+}
+
+#[tokio::test]
+async fn a_turn_intent_is_refused_while_the_provider_is_not_ready() {
+    let dir = scratch(Some(TWO_REPLIES));
+    let session = open(dir.path(), Arc::default()).await.expect("open");
+    // The test double built the session's provider; without it the gate sees
+    // the config's anthropic section and no key, as a real launch would.
+    // SAFETY: this test's own process (nextest).
+    unsafe { std::env::remove_var("COX_PROVIDER") };
+    for intent in [
+        send("hello"),
+        Intent::Queue {
+            text: "hello".into(),
+            attachments: vec![],
+            confirm_think: false,
+        },
+    ] {
+        let err = session.send(intent).await.err();
+        assert!(
+            matches!(&err, Some(AppError::NotReady(cox_app::Readiness::NoKey { provider })) if provider == "anthropic"),
+            "{err:?}"
+        );
+    }
+    assert!(texts(&session).is_empty(), "no turn started");
+}

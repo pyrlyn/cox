@@ -145,7 +145,7 @@ fn title(tier: Tier) -> &'static str {
 }
 
 /// Every `[providers.<name>]` section with its transport, by name.
-fn sections(config: &Config) -> Vec<(String, Transport)> {
+pub(crate) fn sections(config: &Config) -> Vec<(String, Transport)> {
     let p = &config.providers;
     let mut out = vec![
         ("anthropic".to_owned(), p.anthropic.transport()),
@@ -185,7 +185,7 @@ fn reach(
 
 /// `http://localhost:11434/v1` → `("localhost", 11434)`; `None` for a host
 /// that is not this machine.
-fn loopback(url: &str) -> Option<(String, u16)> {
+pub(crate) fn loopback(url: &str) -> Option<(String, u16)> {
     let (scheme, rest) = url.split_once("://")?;
     let authority = rest.split(['/', '?', '#']).next()?;
     let authority = authority.rsplit('@').next()?;

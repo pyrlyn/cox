@@ -110,6 +110,9 @@ pub enum AppError {
     /// T52.9: a best-of-n launch had nothing to launch, or names no group.
     #[error(transparent)]
     BestOf(#[from] crate::best_of::BestOfError),
+    /// T60.2 (DT§5.3): a turn was refused because its provider cannot answer.
+    #[error("{}", .0.message().unwrap_or_default())]
+    NotReady(crate::readiness::Readiness),
 }
 
 impl From<SessionError> for AppError {

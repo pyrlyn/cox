@@ -359,3 +359,18 @@ async fn best_of_pick_refuses_dirty_without_second_confirmation() {
     assert_eq!(second.pruned, std::slice::from_ref(&other));
     assert!(!other.exists());
 }
+
+#[tokio::test]
+async fn best_of_refuses_a_cox_candidate_without_a_usable_provider_before_its_worktree() {
+    let (dir, trees) = scratch();
+    // SAFETY: this test's own process (nextest).
+    unsafe { std::env::remove_var("COX_PROVIDER") };
+    let app = app(dir.path(), &trees);
+    let launch = launch(&app, dir.path(), vec![cox()]).await;
+    let candidate = &launch.group.candidates[0];
+    let why = candidate.failed.as_deref().expect("refused");
+    assert!(why.contains("anthropic") && why.contains("key"), "{why}");
+    assert!(candidate.worktree.is_none() && candidate.session.is_none());
+    assert!(trees.asked.lock().expect("asked").is_empty());
+    assert!(launch.sessions.is_empty());
+}

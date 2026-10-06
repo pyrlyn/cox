@@ -91,7 +91,6 @@
 - T58.29. UI automation smoke test
 - T58.30. Snapshot spike: WinUI controls to PNG
 - T60.1. Provider in the session status and the model menu
-- T60.2. Launch readiness: no turn without a usable provider
 - T60.3. Choose the provider before the first turn
 - T60.4. FFI and Swift client for readiness, provider and provider switch
 - T60.5. Composer: Send, ⏎ and Best of wait for a usable provider
