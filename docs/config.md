@@ -231,6 +231,15 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `command` = `"gopls"`
 - `args` = `[]`
 - `extensions` = `["go"]`
+## `[tools]`
+
+- `project` = `false` — offer the `project` tool: one call runs the project's own check, test, lint or format-check command (detected from justfile, Cargo.toml, package.json, go.mod or pyproject.toml) through the same sandbox and approval path as `bash`, so it asks exactly as `bash` does for that command (T59.5)
+## `[project]`
+
+- `check` = `""` — command for `project` action check; empty detects it from the manifests. Runs under `bash`'s sandbox and permission rules, so a project config may set it
+- `test` = `""` — command for `project` action test; empty detects it
+- `lint` = `""` — command for `project` action lint; empty detects it
+- `fmt` = `""` — command for `project` action fmt, a format check that must not rewrite files; empty detects it
 ## `[voice]`
 
 - `enabled` = `false` — push-to-talk dictation in the TUI (P54), transcribed on this machine with whisper; only in a cox built with the `voice` feature. User config only: a project config cannot set any voice.* key (a repository must not switch the microphone on or choose the model file)

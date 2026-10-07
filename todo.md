@@ -89,3 +89,16 @@
 - T58.28. Packaging
 - T58.29. UI automation smoke test
 - T58.30. Snapshot spike: WinUI controls to PNG
+- T61.1. Build-time baseline
+- T61.2. Fast profile for the XCFramework outside a release
+- T61.3. Bindings generator on the host dev profile, skipped when the library did not change
+- T61.4. CI: cache the XCFramework and SwiftPM
+- T61.5.1. One integration-test binary for `cox-core`
+- T61.5.2. One integration-test binary for `cox`
+- T61.5.3. One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
+- T61.6. CI: one feature set per target
+- T61.7. sccache for local builds and the in-repository CI jobs
+- T61.8. Optimized build scripts and proc macros in dev
+- T61.9. One build graph for the Swift package tests
+- T61.10. SwiftLint plugin off during builds, on in the lint job
+- T61.11. No feature-unification rebuilds between `just test` and `just check-all`
