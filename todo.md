@@ -109,6 +109,7 @@
 - T62.9. Small fixes: `confine` colon ban and retry jitter
 - T63.1. Property-based tests for `SessionStore`
 - T63.2. CI: re-run only the Swift packages a change can affect
+- T63.3. Lint: no AppKit or SwiftUI in `CoxModel` and `CoxCore`
 - T63.4. Dependency injection through swift-dependencies
 - T63.4.1. Keys and values (`CoxClient`, `CoxPlatform`)
 - T63.4.2. The stores read `@Dependency` (`CoxModel`)
