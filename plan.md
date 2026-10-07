@@ -101,6 +101,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T59.4 | todo | P2 | 4 | 0% | |
 | T59.6 | todo | P3 | 3 | 0% | |
 | T59.7 | todo | P3 | 4 | 0% | |
+| T59.8 | todo | P3 | 2 | 0% | |
 | T59.9 | todo | P3 | 2 | 0% | |
 | T59.10 | todo | P3 | 2 | 0% | |
 | T61.1 | todo | P1 | 1 | 0% | |
@@ -2100,6 +2101,31 @@ mise exec -- cargo fmt --check
 Done when: fake-server test renames across two files, one approval, both archived; refusal without a server; a stale-version edit is refused.
 
 Out of scope: rename without a server, file moves.
+
+#### T59.8 `read` by symbol name
+
+Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
+
+Goal: `read(path, symbol = "Foo::bar")` returns only that definition's lines from the `cox-syntax` outline, so the model stops reading a whole file to see one function.
+
+Files:
+- `crates/cox-tools/src/read.rs`
+- `crates/cox-syntax/src/outline.rs`
+
+Steps:
+1. Optional `symbol` input in `read`'s spec (`read.rs:48`) and handling in its call path (`read.rs:81`); resolve via `outline` spans; on several matches list them with lines, on none fall back to the existing "closest" message (Empryo idea: `read-file.ts`).
+2. The line range then goes through the existing ranged-read path, so caps and archives are unchanged.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: tests for a unique, an ambiguous and a missing symbol in Rust and TypeScript fixtures.
+
+Out of scope: symbol-addressed edit (separate card after this one shows use in the bench).
 
 #### T59.9 Investigate: file claims for parallel subagents
 

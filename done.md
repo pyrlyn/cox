@@ -9927,31 +9927,3 @@ Check: `cargo test -p cox-tools --test edit` — 6 passed (new: `edit_replace_al
 `web_fetch` is `Risk::ReadOnly` with a scheme check only, and `cox-web::fetch` followed five redirects with no address filtering: the model could read `169.254.169.254`, an internal `localhost` service or an RFC1918 host without any approval and see the body. Found by the 2026-10-07 audit. Fix, three layers: every connection resolves through a `PublicOnly` resolver (getaddrinfo on the blocking pool) that refuses loopback, link-local, RFC1918-private, unspecified and broadcast addresses, mapped IPv4 included, and strips refused addresses when the name has public ones; a custom redirect policy re-checks IP-literal redirect targets (literals skip DNS) and carries the old five-hop limit; and `WebFetchTool` checks the first URL's literal host (`refused_literal`), because the first request meets neither the resolver nor the policy. `fetch_error` surfaces the guard's words from reqwest's source chain. The tool spec now tells the model the refusal exists.
 Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`, `crates/cox-tools/src/web_fetch.rs`, `crates/cox-tools/tests/web_fetch.rs`
 Check: `cargo test -p cox-web` — 4 passed (address table + resolver refusal); `cargo test -p cox-tools --test web_fetch` — 3 passed (fixture tests now use `client_for_tests()`, the unguarded loopback client); `cargo clippy -p cox-web -p cox-tools --all-targets -- -D warnings` clean.
-
-#### T59.8 `read` by symbol name
-
-Model: sonnet · Status: done 2026-10-08 · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
-
-Goal: `read(path, symbol = "Foo::bar")` returns only that definition's lines from the `cox-syntax` outline, so the model stops reading a whole file to see one function.
-
-Files:
-- `crates/cox-tools/src/read.rs`
-- `crates/cox-syntax/src/outline.rs`
-
-Steps:
-1. Optional `symbol` input in `read`'s spec (`read.rs:48`) and handling in its call path (`read.rs:81`); resolve via `outline` spans; on several matches list them with lines, on none fall back to the existing "closest" message (Empryo idea: `read-file.ts`).
-2. The line range then goes through the existing ranged-read path, so caps and archives are unchanged.
-
-Check:
-```bash
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: tests for a unique, an ambiguous and a missing symbol in Rust and TypeScript fixtures.
-
-Out of scope: symbol-addressed edit (separate card after this one shows use in the bench).
-
-Execution plan: (1) `cox-syntax` `outline.rs` walks definitions once into `Def { name, start, end, signature }` (name qualified by the enclosing impl/trait/class, e.g. `Foo::bar`), the outline rows derive from it, and `symbols()` plus `Def::matches` serve lookup. (2) `read.rs` gets `symbol`, resolves it (`.` and `::` both accepted; a unique hit becomes the `lines` range for the existing ranged-read path; several hits and no hit are `Denied` with the candidates or the closest names). (3) Tests in both files for unique, ambiguous and missing in Rust and TypeScript; `docs/tools.md` row updated.
-Check: `cargo nextest run -p cox-syntax -p cox-tools` - 198 passed, 1 skipped (new: `read_symbol_*` for unique, ambiguous and missing symbols in Rust and TypeScript fixtures, plus a no-grammar file; `definitions_*` and `find_symbol_*` in `cox-syntax`); `cargo clippy -p cox-syntax -p cox-tools --all-targets -- -D warnings` clean; `cargo fmt --check` clean. The workspace-wide run is left to CI. `todo.md` never listed T59.8, so it needed no edit.
