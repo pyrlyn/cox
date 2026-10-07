@@ -6,8 +6,19 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+# T56.2: ProviderError is the error taxonomy cox-provider-http maps statuses to.
+cox-protocol = { path = "../cox-protocol", version = "0.1.2" }
+# T56.2: Bearer header, status mapping, SSE framing and backoff policy.
+cox-provider-http = { path = "../cox-provider-http", version = "0.1.2" }
+futures = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
 
 [lints]
 workspace = true

@@ -40,6 +40,24 @@ where
     bytes.eventsource().map(|frame| frame.map(to_frame))
 }
 
+/// [`sse_stream`] plus each frame's `id:` (`None` when the stream never sent
+/// one). A reconnecting client needs it for `Last-Event-ID`, which the plain
+/// [`SseFrame`] drops. `eventsource-stream` repeats the last id on frames that
+/// carry none, which is what a resume wants: the newest id seen.
+pub fn sse_stream_with_id<S, E>(
+    bytes: S,
+) -> impl Stream<Item = Result<(Option<String>, SseFrame), EventStreamError<E>>>
+where
+    S: Stream<Item = Result<Bytes, E>>,
+{
+    bytes.eventsource().map(|frame| {
+        frame.map(|e| {
+            let id = (!e.id.is_empty()).then(|| e.id.clone());
+            (id, to_frame(e))
+        })
+    })
+}
+
 /// Parses a whole SSE body already in memory: fixtures and tests, no
 /// network. Runs the same parser as [`sse_stream`] (one in-memory chunk fed
 /// through the identical `eventsource-stream` state machine), so a fixture
@@ -81,6 +99,18 @@ mod tests {
             frames,
             vec![(Some("x".into()), "line one\nline two".into())]
         );
+    }
+
+    #[test]
+    fn sse_stream_with_id_reports_the_id_line() {
+        let body = "event: a\nid: 7-0\ndata: x\n\nevent: b\ndata: y\n\n";
+        let chunk: Result<Bytes, std::convert::Infallible> = Ok(Bytes::from(body));
+        let frames: Vec<_> = futures::executor::block_on(
+            sse_stream_with_id(futures::stream::iter(vec![chunk])).collect::<Vec<_>>(),
+        );
+        let first = frames[0].as_ref().expect("frame");
+        assert_eq!(first.0.as_deref(), Some("7-0"));
+        assert_eq!(first.1, (Some("a".into()), "x".into()));
     }
 
     #[test]
