@@ -102,7 +102,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T59.6 | todo | P3 | 3 | 0% | |
 | T59.7 | todo | P3 | 4 | 0% | |
 | T59.8 | todo | P3 | 2 | 0% | |
-| T59.9 | todo | P3 | 2 | 0% | |
+| T59.9 | in progress | P3 | 2 | 0% | Claude Code / sonnet |
 | T59.10 | todo | P3 | 2 | 0% | |
 | T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
@@ -2122,7 +2122,7 @@ Out of scope: symbol-addressed edit (separate card after this one shows use in t
 
 #### T59.9 Investigate: file claims for parallel subagents
 
-Model: sonnet · Status: open · Depends: — · Size: ~0 (research) · Priority: P3 · Complexity: 2
+Model: sonnet · Status: in progress · Depends: — · Size: ~0 (research) · Priority: P3 · Complexity: 2
 
 Goal: decide with evidence whether parallel subagents (`Concurrency::Parallel`, `crates/cox-core/src/subagent.rs:395`) need per-file write claims (Empryo idea: `WorkspaceCoordinator.ts`, a claim table that makes the second writer wait or fail), or whether worktrees (P44) already cover it.
 
@@ -2141,6 +2141,8 @@ just bench
 Done when: the `research.md` row exists and this card is closed or followed by a sized card.
 
 Out of scope: implementing claims.
+
+Plan: (1) read how `agent` runs children (`subagent.rs`: `isolation`, `tools_for`, `spawn`) and what `just bench` exercises (`bench.rs`, `evals/token/sessions`); (2) read Empryo's `WorkspaceCoordinator.ts` through the GitHub API for what a claim does; (3) write the numbers and the recommendation as a `research.md` section; (4) run the Check.
 
 #### T59.10 Memory entries linked to files boost recall
 
