@@ -50,7 +50,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
 | T56.2 | todo | P3 | 3 | 0% | |
-| T56.4 | todo | P3 | 3 | 0% | |
+| T56.4 | in progress | P3 | 3 | 0% | Claude Code / sonnet |
 | T56.6 | todo | P3 | 4 | 0% | |
 | T56.7 | todo | P3 | 4 | 0% | |
 | T56.8 | todo | P3 | 3 | 0% | |
@@ -1625,6 +1625,7 @@ Depends: the creator's terms go-ahead (A123 (5)) · Size: ~140 · Files: `crates
 Goal: a new permission subject `CloudAgent(<github owner>/<repo>)` in the rule grammar. It asks in every permission mode, `auto` and `bypass` included, unless the user's own config holds an allow rule for that repository; `plan` mode denies it. A project config's `allow` for it is reverted by the existing A122 rule (tested, not re-implemented). The approval text says the repository, the remote, the starting ref, and that the code is read and edited off this machine. The check lives in `Engine` only, never in the plugin or the driver.
 Check: `mise exec -- cargo nextest run -p cox-permission cloud_agent_asks_in_auto_and_bypass cloud_agent_is_denied_in_plan_mode cloud_agent_user_allow_rule_matches_one_repo cloud_agent_project_allow_is_reverted cloud_agent_approval_text_names_repo_ref_and_off_machine`.
 Done when: the tests pass; the rule grammar docs list the subject.
+Plan: `rules.rs` gets the `cloud_agent` tool name (alias `CloudAgent`), a strict `owner/repo` check, rule parsing that accepts only a bare or exact-repo subject, and a case-insensitive exact match for it; `lib.rs` `Engine::decide` routes the tool to one function (deny rules first, then plan denies, then only an exact user allow rule allows, else ask; `never` denies) and gains `cloud_agent_approval_text`; the A122 test loads a real project config through `cox-config` (dev-dependency) and decides with the reverted result; `docs/how-it-works.md` and §1.8 list the subject.
 Out of scope: any other remote-execution subject.
 
 #### T56.6 Host driver: a background task becomes a Cursor Cloud run
