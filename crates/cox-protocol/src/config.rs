@@ -63,6 +63,10 @@ pub struct Config {
     pub mcp: McpConfig,
     /// `[lsp]`
     pub lsp: LspConfig,
+    /// `[tools]`
+    pub tools: ToolsConfig,
+    /// `[project]`
+    pub project: ProjectConfig,
     /// `[voice]`
     pub voice: VoiceConfig,
     /// `[plugins]`
@@ -1271,6 +1275,33 @@ impl Default for VoiceConfig {
             max_seconds: 120,
         }
     }
+}
+
+/// `[tools]` (T59.5): built-in tools that stay out of the tool list until
+/// switched on, because each one adds a schema to the cache-stable prefix.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct ToolsConfig {
+    /// Whether the `project` tool (run the project's own check, test, lint
+    /// or format-check command) is offered.
+    pub project: bool,
+}
+
+/// `[project]` (T59.5): the commands the `project` tool runs. An empty
+/// string means "detect it from the manifests"; a command set here runs
+/// through the same sandbox and permission path as `bash`, so a project
+/// config may set it without a guard.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct ProjectConfig {
+    /// Command for `action = check` (type-check or build).
+    pub check: String,
+    /// Command for `action = test`.
+    pub test: String,
+    /// Command for `action = lint`.
+    pub lint: String,
+    /// Command for `action = fmt` (a format check; it must not rewrite files).
+    pub fmt: String,
 }
 
 /// `[plugins]` (PL§1, T33.6): the global switch for WASM plugins. Even

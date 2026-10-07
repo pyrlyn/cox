@@ -98,7 +98,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.3 | todo | P1 | 4 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T59.5 | todo | P2 | 3 | 0% | |
 | T59.6 | todo | P3 | 3 | 0% | |
 | T59.7 | todo | P3 | 4 | 0% | |
 | T59.8 | todo | P3 | 2 | 0% | |
@@ -2008,34 +2007,6 @@ mise exec -- cargo fmt --check
 Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
 
 Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
-
-#### T59.5 `project` tool: run the project's own check command
-
-Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
-
-Goal: one `project` tool call with `action = check | test | lint | fmt` runs the detected command (`just check`, `cargo test`, `npm test`, `go test ./...`, …) through the normal `bash` sandbox and approval path and returns the folded result, replacing the model's guess of the command; bench mean tool calls per task −5 %.
-
-Files:
-- `crates/cox-tools/src/project.rs` (new)
-- `crates/cox-session/src/tools.rs`
-- `crates/cox-protocol/src/config.rs`
-
-Steps:
-1. Detection in order: `[project]` config, `justfile` recipes, `Cargo.toml`, `package.json` scripts, `go.mod`, `pyproject.toml` (Empryo idea: `src/core/tools/project.ts`, `toolchain.ts`).
-2. Run through the existing `bash` tool's executor so `Engine` approval and the sandbox are unchanged; output passes T59.2's folding.
-3. Register behind `tools.project = false`.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: detection table tests for each manifest; an approval test shows `project` asks exactly like `bash` for the same command; bench row in `research.md`.
-
-Out of scope: installing toolchains, parsing test output into structures.
 
 #### T59.6 LSP `definition` and `references` tools on the running servers
 
