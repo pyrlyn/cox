@@ -21,7 +21,6 @@
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
 - T33.43. Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
-- T33.45.1. Manifest and grant: surfaces and surface tables
 - T33.45.2. ABI: surface payloads
 - T33.45.3. Host: load filter, granted filter, `cox:desktop/v1`
 - T33.45.4. TUI: links, image `alt`, surfaces in listings

@@ -27,7 +27,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.43 | todo | P1 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
-| T33.45.1 | todo | P2 | 3 | 0% | |
 | T33.45.2 | todo | P2 | 3 | 0% | |
 | T33.45.3 | todo | P2 | 4 | 0% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
@@ -1098,12 +1097,6 @@ Steps:
 Check: the API structure section is in `docs/design/plugins.md` with its §6 amendment; manifest and ABI drift tests (`docs/plugin.schema.json`, `docs/plugin-abi.schema.json`) pass with the new fields; a `cox-plugin` test loads the example in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice (or `NotOnThisSurface`) on the other; `docs/plugins.md`, `docs/ru/` and `docs/uk/` cover all three parts; `just test` green.
 
 Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and amendment A134, approved by the creator; the build is T33.45.1–T33.45.10 below. This card closes when they are done.
-
-#### T33.45.1 Manifest and grant: surfaces and surface tables
-
-Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/plugin.schema.json` · Design: `docs/design/plugins.md` §15, A134
-
-Check: `surfaces_default_to_every_surface`, `surface_table_outside_its_surfaces_is_rejected`, `ui_keys_is_an_alias_of_terminal_keys`, `stored_ui_keys_grant_covers_terminal_keys` and the manifest schema drift test pass.
 
 #### T33.45.2 ABI: surface payloads
 

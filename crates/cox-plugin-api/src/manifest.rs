@@ -19,6 +19,11 @@ pub const API_MAJOR: u32 = 1;
 pub struct PluginManifest {
     /// ABI major the package was built against.
     pub api: u32,
+    /// Where the plugin loads (PL§15.5). Absent means every surface, so a
+    /// manifest written before surfaces existed keeps loading everywhere;
+    /// an empty list is an error, not "nowhere".
+    #[serde(default)]
+    pub surfaces: Option<Vec<Surface>>,
     /// Package id, `^[a-z][a-z0-9-]{1,23}$`.
     pub id: String,
     /// Package version as the author writes it.
@@ -113,9 +118,53 @@ pub struct Capabilities {
     /// Decision points (PL§6b) the plugin can answer.
     #[serde(default)]
     pub decide: Vec<String>,
-    /// TUI contributions (PL§8).
+    /// Contributions both surfaces draw (PL§8, PL§15.2); `ui.keys` is the
+    /// pre-surface spelling of [`TerminalCaps::keys`].
     #[serde(default)]
     pub ui: UiCaps,
+    /// Terminal-only contributions (PL§15.3).
+    #[serde(default)]
+    pub terminal: TerminalCaps,
+    /// Desktop-only contributions (PL§15.4).
+    #[serde(default)]
+    pub desktop: DesktopCaps,
+}
+
+/// A place a plugin can run: who drives the session (PL§15.1).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Surface {
+    /// The TUI and `cox --plain`.
+    Terminal,
+    /// The macOS app, local or over `cox app-server`.
+    Desktop,
+    /// `cox run -p`.
+    Headless,
+    /// `cox acp`.
+    Acp,
+}
+
+impl Surface {
+    /// The manifest and approval-line spelling.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Desktop => "desktop",
+            Self::Headless => "headless",
+            Self::Acp => "acp",
+        }
+    }
+}
+
+impl PluginManifest {
+    /// Whether the plugin loads on `surface`; an absent `surfaces` is all.
+    pub fn runs_on(&self, surface: Surface) -> bool {
+        self.surfaces
+            .as_ref()
+            .is_none_or(|list| list.contains(&surface))
+    }
 }
 
 /// The highest tier a plugin may ask the router for. `think` is not a
@@ -130,6 +179,13 @@ pub enum ModelTier {
 }
 
 impl Capabilities {
+    /// Whether leader keys are requested, under either spelling: `ui.keys`
+    /// stays an alias of `terminal.keys` under `api = 1` (PL§15.5), so every
+    /// consumer asks this instead of reading one field.
+    pub fn terminal_keys(&self) -> bool {
+        self.terminal.keys || self.ui.keys
+    }
+
     /// Whether `host` is in `net`: an exact name, or a strict subdomain of
     /// a `*.` pattern (`*.github.com` does not cover `github.com`). The one
     /// matcher for every `net` check — an `[[mcp]]` url (PL§7c) and `cox_http`.
@@ -175,12 +231,40 @@ pub struct UiCaps {
     /// Slash commands.
     #[serde(default)]
     pub commands: bool,
-    /// Keys under the plugin leader.
+    /// Alias of [`TerminalCaps::keys`]; read it through
+    /// [`Capabilities::terminal_keys`].
     #[serde(default)]
     pub keys: bool,
     /// Render targets: `tool:<name>` or `item:assistant_message`.
     #[serde(default)]
     pub render: Vec<String>,
+}
+
+/// `capabilities.terminal`: what only a terminal has (PL§15.3).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalCaps {
+    /// Keys under the plugin leader.
+    #[serde(default)]
+    pub keys: bool,
+}
+
+/// `capabilities.desktop`: what only the app has (PL§15.4).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DesktopCaps {
+    /// An inspector tab.
+    #[serde(default)]
+    pub inspector: bool,
+    /// Toolbar items.
+    #[serde(default)]
+    pub toolbar: bool,
+    /// Command-palette actions.
+    #[serde(default)]
+    pub palette: bool,
+    /// Actionable notifications.
+    #[serde(default)]
+    pub notify: bool,
 }
 
 /// A `[[provider]]` section (PL§7a).
@@ -405,6 +489,13 @@ pub enum ManifestError {
     /// Two `[[agents]]` entries share a name.
     #[error("[[agents]] name {0:?} is declared twice")]
     DuplicateAgent(String),
+    /// `surfaces = []`: a plugin that loads nowhere is a mistake, not a choice.
+    #[error("surfaces must name at least one of terminal, desktop, headless, acp")]
+    NoSurfaces,
+    /// A surface part is requested, but `surfaces` leaves that surface out,
+    /// so it could never run.
+    #[error("{0} capabilities need {0} in surfaces")]
+    SurfaceTable(&'static str),
 }
 
 impl PluginManifest {
@@ -427,7 +518,22 @@ impl PluginManifest {
                 return Err(ManifestError::MissingWasm);
             }
         }
+        if self.surfaces.as_ref().is_some_and(Vec::is_empty) {
+            return Err(ManifestError::NoSurfaces);
+        }
         let caps = &self.capabilities;
+        let asks = [
+            (
+                Surface::Terminal,
+                caps.terminal != TerminalCaps::default() || caps.ui.keys,
+            ),
+            (Surface::Desktop, caps.desktop != DesktopCaps::default()),
+        ];
+        for (surface, asked) in asks {
+            if asked && !self.runs_on(surface) {
+                return Err(ManifestError::SurfaceTable(surface.name()));
+            }
+        }
         for tool in &caps.tools {
             if !is_tool_name(&format!("wasm__{}__{tool}", self.id)) {
                 return Err(ManifestError::ToolName(tool.clone()));
@@ -648,6 +754,71 @@ args = ["--stdio"]
         let nested = EXAMPLE.replace("kv = true", "kv = true\nshell = true");
         for toml in [top, nested] {
             let err = parse(&toml).expect_err("an unknown key is refused");
+            assert!(err.contains("unknown field"), "{err}");
+        }
+    }
+
+    #[test]
+    fn surfaces_default_to_every_surface() {
+        let m = example();
+        assert_eq!(m.surfaces, None);
+        for surface in [
+            Surface::Terminal,
+            Surface::Desktop,
+            Surface::Headless,
+            Surface::Acp,
+        ] {
+            assert!(m.runs_on(surface), "{surface:?}");
+        }
+        let narrowed = parse(&EXAMPLE.replace("api = 1", "api = 1\nsurfaces = [\"desktop\"]"))
+            .expect("surfaces parses");
+        assert!(narrowed.runs_on(Surface::Desktop) && !narrowed.runs_on(Surface::Headless));
+    }
+
+    #[test]
+    fn empty_surfaces_list_is_rejected() {
+        let mut m = example();
+        m.surfaces = Some(Vec::new());
+        assert_eq!(m.validate(), Err(ManifestError::NoSurfaces));
+    }
+
+    #[test]
+    fn surface_table_outside_its_surfaces_is_rejected() {
+        let mut m = example();
+        m.surfaces = Some(vec![Surface::Headless]);
+        // The example's `ui.keys` is a terminal part too.
+        assert_eq!(m.validate(), Err(ManifestError::SurfaceTable("terminal")));
+        m.capabilities.ui.keys = false;
+        assert_eq!(m.validate(), Ok(()));
+        m.capabilities.desktop.notify = true;
+        assert_eq!(m.validate(), Err(ManifestError::SurfaceTable("desktop")));
+        m.surfaces = Some(vec![Surface::Desktop, Surface::Headless]);
+        assert_eq!(m.validate(), Ok(()));
+    }
+
+    #[test]
+    fn ui_keys_is_an_alias_of_terminal_keys() {
+        let old = example();
+        assert!(old.capabilities.ui.keys && !old.capabilities.terminal.keys);
+        assert!(old.capabilities.terminal_keys());
+        let new = parse(&EXAMPLE.replace("keys = true, ", "").replace(
+            "[limits]",
+            "[capabilities.terminal]\nkeys = true\n\n[limits]",
+        ));
+        // A `[capabilities.terminal]` table placed before `[capabilities]`
+        // is still the same table, so the new spelling parses and ORs in.
+        let new = new.expect("the new spelling parses");
+        assert!(!new.capabilities.ui.keys && new.capabilities.terminal_keys());
+    }
+
+    #[test]
+    fn surface_tables_deny_unknown_keys() {
+        for table in ["terminal", "desktop"] {
+            let toml = EXAMPLE.replace(
+                "[limits]",
+                &format!("[capabilities.{table}]\nsidebar = true\n\n[limits]"),
+            );
+            let err = parse(&toml).expect_err("an unknown surface key is refused");
             assert!(err.contains("unknown field"), "{err}");
         }
     }
