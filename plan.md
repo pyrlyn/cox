@@ -117,7 +117,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
-| T62.5 | todo | P1 | 2 | 0% | |
 | T62.6 | todo | P3 | 1 | 0% | |
 | T62.7 | todo | P3 | 1 | 0% | |
 | T62.8 | todo | P3 | 1 | 0% | |
@@ -2724,10 +2723,6 @@ unless Docker e2e is required.
 ### T62. Audit fixes (2026-10-07)
 
 Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-test `unwrap/expect/panic!` across ~150k LOC, parameterized SQL, hardened plugin install path (https-only, sha256-gated, tar ToC refusal), correct flock session lock. T62.1 (self-update 404) is closed in `done.md`.
-
-### T62.5. `web_fetch` has no SSRF guard
-
-`cox-tools/src/web_fetch.rs:55,70` is `Risk::ReadOnly` with only a scheme check, and `cox-web::fetch` (`cox-web/src/lib.rs:60-109`) follows up to 5 redirects with no private-address filtering — the model reads `169.254.169.254`, internal localhost services or RFC1918 hosts without approval and sees the bodies. Done means: link-local/loopback/private ranges are denied (or ask) by default.
 
 ### T62.6. pid-reuse race in the bash kill path
 
