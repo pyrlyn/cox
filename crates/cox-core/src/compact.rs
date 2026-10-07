@@ -9,22 +9,36 @@
 //! it is sent (T28.3). Separate from `session.rs` because it is the only
 //! place history is ever rewritten in memory.
 
+use std::collections::HashMap;
+
+use cox_protocol::config::CompactionStrategy;
 use cox_protocol::errors::CoreError;
-use cox_protocol::ids::ItemId;
+use cox_protocol::ids::{CallId, ItemId};
 use cox_protocol::types::{
     CompactReason, Content, Event, HookEvent, HookOutcome, ItemKind, Job, Level, Message,
     ProviderEvent, RepoMapReason, Request, Role, SystemBlock,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::budget;
 use crate::hooks;
 use crate::session::{Session, State};
+use crate::subagent::first_line;
 
+/// The summariser prompt and, after its `---` line, the note `state+llm`
+/// appends: one file so the two texts are reviewed together.
 const PROMPT: &str = include_str!("prompts/compact.md");
 /// §1.10 step 3: the summary itself is capped.
 const MAX_SUMMARY_TOKENS: u32 = 2048;
+/// How `compact` opens the summary message; a later compaction finds the
+/// earlier state block by it.
+const SUMMARY_HEAD: &str = "[Compacted summary of ";
+const FILES: &str = "## Files touched";
+const ERRORS: &str = "## Errors seen";
+const REQUEST: &str = "## Last request";
+/// A pasted log as the request would crowd out the rest of the state.
+const REQUEST_CHARS: usize = 500;
 
 /// Why compaction ran; reaches `PreCompact` hooks as `trigger`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,6 +178,209 @@ pub(crate) fn transcript(messages: &[Message]) -> String {
     out
 }
 
+/// What a successful tool call did to a path (T59.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Action {
+    Read,
+    Edited,
+    Created,
+    Deleted,
+}
+
+impl Action {
+    const ALL: [Self; 4] = [Self::Read, Self::Edited, Self::Created, Self::Deleted];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Edited => "edited",
+            Self::Created => "created",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
+/// The facts a summary states from the transcript instead of the model's
+/// recall (T59.1), each list in order of first appearance so the same
+/// transcript always renders the same block.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct WorkingState {
+    pub files: Vec<(String, Vec<Action>)>,
+    /// One rendered line per distinct failing command.
+    pub errors: Vec<String>,
+    pub request: Option<String>,
+}
+
+impl WorkingState {
+    fn touch(&mut self, path: &str, action: Action) {
+        if path.is_empty() {
+            return;
+        }
+        match self.files.iter_mut().find(|(p, _)| p == path) {
+            Some((_, actions)) if !actions.contains(&action) => actions.push(action),
+            Some(_) => {}
+            None => self.files.push((path.to_string(), vec![action])),
+        }
+    }
+
+    fn error(&mut self, line: String) {
+        if !self.errors.contains(&line) {
+            self.errors.push(line);
+        }
+    }
+
+    fn result(&mut self, name: &str, input: &Value, content: &str, is_error: bool) {
+        let path = input
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        match (name, is_error) {
+            ("bash", true) => self.failure(input, content),
+            (_, true) => {}
+            ("read" | "outline", _) => self.touch(path, Action::Read),
+            ("edit", _) => self.touch(path, Action::Edited),
+            // `write` says nothing about whether the file existed; a path
+            // the session already saw was there before.
+            ("write", _) if self.files.iter().any(|(p, _)| p == path) => {
+                self.touch(path, Action::Edited);
+            }
+            ("write", _) => self.touch(path, Action::Created),
+            // The tool's own `A`/`M`/`D`/`R` lines, so a patch is not parsed
+            // a second time here.
+            ("apply_patch", _) => content.lines().for_each(|l| self.patched(l)),
+            _ => {}
+        }
+    }
+
+    fn patched(&mut self, line: &str) {
+        match line.split_once(' ') {
+            Some(("A", path)) => self.touch(path, Action::Created),
+            Some(("M", path)) => self.touch(path, Action::Edited),
+            Some(("D", path)) => self.touch(path, Action::Deleted),
+            Some(("R", moved)) => {
+                if let Some((from, to)) = moved.split_once(" -> ") {
+                    self.touch(from, Action::Deleted);
+                    self.touch(to, Action::Created);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `bash` ends its output with `[exit N in Tms]` or `[why after Tms;
+    /// killed]`; the timing is dropped so a rerun of the same failure is
+    /// one line.
+    fn failure(&mut self, input: &Value, content: &str) {
+        let command = first_line(input.get("command").and_then(Value::as_str).unwrap_or("?"));
+        let mut lines = content
+            .lines()
+            .rev()
+            .map(str::trim)
+            .filter(|l| !l.is_empty());
+        let status = lines.next().unwrap_or("failed");
+        let status = status.trim_start_matches('[').trim_end_matches(']');
+        let status = status.split_once(" in ").map_or(status, |(s, _)| s);
+        self.error(match lines.next() {
+            Some(last) => format!("`{command}` → {status}: {}", first_line(last)),
+            None => format!("`{command}` → {status}"),
+        });
+    }
+
+    /// An earlier compaction's state block, so a second compaction keeps
+    /// the paths only the first summary still names.
+    fn carry(&mut self, summary: &str) {
+        for line in section(summary, FILES).filter_map(|l| l.strip_prefix("- ")) {
+            if let Some((path, actions)) = line.rsplit_once(": ") {
+                for name in actions.split(", ") {
+                    if let Some(a) = Action::ALL.into_iter().find(|a| a.name() == name) {
+                        self.touch(path, a);
+                    }
+                }
+            }
+        }
+        for line in section(summary, ERRORS).filter_map(|l| l.strip_prefix("- ")) {
+            self.error(line.to_string());
+        }
+        if let Some(request) = section(summary, REQUEST).next().filter(|r| *r != "none") {
+            self.request = Some(request.to_string());
+        }
+    }
+
+    pub(crate) fn render(&self) -> String {
+        let files = self.files.iter().map(|(path, actions)| {
+            let names: Vec<&str> = actions.iter().map(|a| a.name()).collect();
+            format!("{path}: {}", names.join(", "))
+        });
+        format!(
+            "{FILES}\n{}{ERRORS}\n{}{REQUEST}\n{}\n",
+            bullets(files),
+            bullets(self.errors.iter().cloned()),
+            self.request.as_deref().unwrap_or("none")
+        )
+    }
+}
+
+/// `none` rather than an empty section, so the model never reads a
+/// missing list as one it should fill in.
+fn bullets(items: impl Iterator<Item = String>) -> String {
+    let out: String = items.map(|i| format!("- {i}\n")).collect();
+    if out.is_empty() {
+        "none\n".to_string()
+    } else {
+        out
+    }
+}
+
+/// The lines under `heading`, up to the next `##` heading.
+fn section<'a>(text: &'a str, heading: &'static str) -> impl Iterator<Item = &'a str> {
+    text.lines()
+        .skip_while(move |l| *l != heading)
+        .skip(1)
+        .take_while(|l| !l.starts_with("## "))
+}
+
+/// T59.1: every path the session read, edited or created, every failing
+/// `bash` command and the last user request, read off `messages` alone.
+/// Only calls that succeeded touch a path; a failed `read` read nothing.
+pub(crate) fn working_state(messages: &[Message]) -> WorkingState {
+    let mut state = WorkingState::default();
+    let mut calls: HashMap<CallId, (&str, &Value)> = HashMap::new();
+    for m in messages {
+        // A user message's first text is what was typed; hook context and
+        // attached files follow it as further text blocks.
+        let typed = m.content.iter().find_map(|c| match c {
+            Content::Text { text } if m.role == Role::User => Some(text),
+            _ => None,
+        });
+        match typed {
+            Some(text) if text.starts_with(SUMMARY_HEAD) => state.carry(text),
+            Some(text) => {
+                let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                state.request = Some(flat.chars().take(REQUEST_CHARS).collect());
+            }
+            None => {}
+        }
+        for c in &m.content {
+            match c {
+                Content::ToolUse { id, name, input } => {
+                    calls.insert(*id, (name, input));
+                }
+                Content::ToolResult {
+                    call_id,
+                    content,
+                    is_error,
+                } => {
+                    if let Some((name, input)) = calls.get(call_id) {
+                        state.result(name, input, content, *is_error);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    state
+}
+
 impl Session {
     /// §1.10 steps 1–5. `Ok(true)` when history changed; every failure is a
     /// notice and `Ok(false)`, since a session that cannot compact still runs.
@@ -203,7 +420,7 @@ impl Session {
         };
         let item = ItemId::new();
         let text = format!(
-            "[Compacted summary of {} earlier turn(s)]\n\n{summary}",
+            "{SUMMARY_HEAD}{} earlier turn(s)]\n\n{summary}",
             dropped.len()
         );
         self.emit(Event::ItemStarted {
@@ -347,7 +564,13 @@ impl Session {
         // of the cheap tier applies here too.
         let route = self.route_for(Job::Compact, true).await.ok()?;
         let model = route.model.clone();
-        let mut system = PROMPT.to_string();
+        let state = (self.config.compaction.strategy == CompactionStrategy::StateLlm)
+            .then(|| working_state(messages).render());
+        let (base, note) = PROMPT.split_once("\n---\n").unwrap_or((PROMPT, ""));
+        let mut system = format!("{base}\n");
+        if state.is_some() {
+            system.push_str(note);
+        }
         if let Some(focus) = focus {
             system.push_str(&format!("\nFocus on: {focus}\n"));
         }
@@ -398,8 +621,14 @@ impl Session {
         if budget::counts(route.tier, self.config.budget.cheap_counts) {
             self.add_spend(usage.cost_usd).await;
         }
-        let out = out.trim().to_string();
-        (!out.is_empty()).then_some(out)
+        let out = out.trim();
+        if out.is_empty() {
+            return None;
+        }
+        Some(match state {
+            Some(state) => format!("{state}\n{out}"),
+            None => out.to_string(),
+        })
     }
 }
 
@@ -431,6 +660,151 @@ mod tests {
         assert!(needs_compaction(750, 1000, 0.75));
         assert!(!needs_compaction(749, 1000, 0.75));
         assert!(!needs_compaction(1, 0, 0.75));
+    }
+
+    fn user(text: &str) -> Message {
+        Message {
+            role: Role::User,
+            content: vec![Content::Text { text: text.into() }],
+        }
+    }
+
+    /// One assistant message with the calls, one user message with their
+    /// results: `(tool, input, result, is_error)`.
+    fn round(calls: &[(&str, Value, &str, bool)]) -> [Message; 2] {
+        let ids: Vec<CallId> = calls.iter().map(|_| CallId::new()).collect();
+        let uses = calls
+            .iter()
+            .zip(&ids)
+            .map(|((name, input, ..), id)| Content::ToolUse {
+                id: *id,
+                name: (*name).into(),
+                input: input.clone(),
+            });
+        let results = calls
+            .iter()
+            .zip(&ids)
+            .map(|((_, _, out, err), id)| Content::ToolResult {
+                call_id: *id,
+                content: (*out).into(),
+                is_error: *err,
+            });
+        [
+            Message {
+                role: Role::Assistant,
+                content: uses.collect(),
+            },
+            Message {
+                role: Role::User,
+                content: results.collect(),
+            },
+        ]
+    }
+
+    fn scripted() -> Vec<Message> {
+        let mut m = vec![user("fix the parser")];
+        m.extend(round(&[
+            ("read", json!({"path": "src/lib.rs"}), "1 fn parse()", false),
+            ("read", json!({"path": "missing.rs"}), "no such file", true),
+            ("grep", json!({"pattern": "parse"}), "src/lib.rs:1", false),
+        ]));
+        m.extend(round(&[
+            ("edit", json!({"path": "src/lib.rs"}), "edited", false),
+            ("write", json!({"path": "tests/parse.rs"}), "wrote", false),
+            ("write", json!({"path": "src/lib.rs"}), "wrote", false),
+            (
+                "bash",
+                json!({"command": "cargo test\n  --all"}),
+                "running 3 tests\nerror: test parse failed\n[exit 101 in 2300ms]",
+                true,
+            ),
+            (
+                "bash",
+                json!({"command": "ls"}),
+                "a\n[exit 0 in 1ms]",
+                false,
+            ),
+        ]));
+        m.extend(round(&[(
+            "apply_patch",
+            json!({"patch": "*** Begin Patch"}),
+            "A docs/a.md\nM src/lib.rs\nR old.rs -> new.rs\nD gone.rs",
+            false,
+        )]));
+        m.push(user("now  run\nclippy"));
+        m
+    }
+
+    #[test]
+    fn working_state_lists_every_touched_path_failing_command_and_request() {
+        use Action::*;
+        let state = working_state(&scripted());
+        let files: Vec<(&str, &[Action])> = state
+            .files
+            .iter()
+            .map(|(p, a)| (p.as_str(), a.as_slice()))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("src/lib.rs", &[Read, Edited][..]),
+                ("tests/parse.rs", &[Created][..]),
+                ("docs/a.md", &[Created][..]),
+                ("old.rs", &[Deleted][..]),
+                ("new.rs", &[Created][..]),
+                ("gone.rs", &[Deleted][..]),
+            ]
+        );
+        assert_eq!(
+            state.errors,
+            ["`cargo test` → exit 101: error: test parse failed"]
+        );
+        assert_eq!(state.request.as_deref(), Some("now run clippy"));
+    }
+
+    #[test]
+    fn working_state_renders_the_same_block_for_the_same_transcript() {
+        let block = working_state(&scripted()).render();
+        assert_eq!(block, working_state(&scripted()).render());
+        assert!(block.starts_with("## Files touched\n- src/lib.rs: read, edited\n"));
+        assert!(block.contains("## Errors seen\n- `cargo test` → exit 101"));
+        assert!(block.ends_with("## Last request\nnow run clippy\n"));
+        assert_eq!(
+            WorkingState::default().render(),
+            "## Files touched\nnone\n## Errors seen\nnone\n## Last request\nnone\n"
+        );
+    }
+
+    #[test]
+    fn second_compaction_keeps_the_paths_only_the_first_summary_names() {
+        let first = working_state(&scripted());
+        let summary = format!(
+            "{SUMMARY_HEAD}3 earlier turn(s)]\n\n{}## Goal\nship it\n",
+            first.render()
+        );
+        let mut later = vec![user(&summary)];
+        later.extend(round(&[(
+            "edit",
+            json!({"path": "src/main.rs"}),
+            "edited",
+            false,
+        )]));
+        let state = working_state(&later);
+        assert_eq!(state.files[..first.files.len()], first.files[..]);
+        assert_eq!(
+            state.files.last().map(|(p, _)| p.as_str()),
+            Some("src/main.rs")
+        );
+        assert_eq!(state.errors, first.errors);
+        assert_eq!(state.request, first.request, "no newer request typed");
+    }
+
+    #[test]
+    fn llm_prompt_is_unchanged_and_the_state_note_is_separate() {
+        let (base, note) = PROMPT.split_once("\n---\n").expect("note after ---");
+        assert!(base.ends_with("## Next step"));
+        assert!(!base.contains("do not write"));
+        assert!(note.contains("do not write") && note.contains("## Goal"));
     }
 
     #[test]

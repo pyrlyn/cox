@@ -47,6 +47,8 @@ pub struct Config {
     pub providers: ProvidersConfig,
     /// `[context]`
     pub context: ContextConfig,
+    /// `[compaction]`
+    pub compaction: CompactionConfig,
     /// `[permissions]`
     pub permissions: PermissionsConfig,
     /// `[sandbox]`
@@ -816,6 +818,29 @@ impl Default for ContextConfig {
             repomap_budget_tokens: 0,
         }
     }
+}
+
+/// `[compaction]` (T59.1).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct CompactionConfig {
+    /// `compaction.strategy`: who writes the summary's file and error
+    /// sections.
+    pub strategy: CompactionStrategy,
+}
+
+/// `compaction.strategy` (T59.1). `llm` stays the default until the
+/// `state+llm` numbers are in `research.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub enum CompactionStrategy {
+    /// The model writes every section from the transcript.
+    #[default]
+    #[serde(rename = "llm")]
+    Llm,
+    /// Files touched, errors seen and the last request are read off the
+    /// transcript; the model writes only the narrative sections.
+    #[serde(rename = "state+llm")]
+    StateLlm,
 }
 
 /// `[permissions]` (plan.md §1.6/§1.8).

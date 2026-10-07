@@ -153,6 +153,9 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `deferred_tools` = `true`
 - `system_prompt` = `"default"` — default | minimal (T30.1); `core.profile = "minimal"` implies it
 - `repomap_budget_tokens` = `0` — repo map in system[2] (P43); 0 = off until the T43.6 bench
+## `[compaction]`
+
+- `strategy` = `"llm"` — llm | state+llm (T59.1): state+llm writes files touched and errors seen from the transcript
 ## `[permissions]`
 
 - `mode` = `"default"` — default | plan | auto | bypass (bypass only via flag)
