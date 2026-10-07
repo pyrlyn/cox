@@ -117,7 +117,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T62.2 | todo | P1 | 2 | 0% | |
-| T62.3 | todo | P0 | 2 | 0% | |
 | T62.4 | todo | P1 | 2 | 0% | |
 | T62.5 | todo | P1 | 2 | 0% | |
 | T62.6 | todo | P3 | 1 | 0% | |
@@ -2702,10 +2701,6 @@ Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-
 ### T62.2. Known panic path in `edit`'s whitespace fallback with `replace_all`
 
 `crates/cox-tools/src/edit.rs:206-221`: fallback windows are not de-overlapped and byte offsets are computed against the original content while splicing an already-mutated string — overlapping normalized windows with a shorter `new` panic on `replace_range` ("range end out of bounds"). The comment at `edit.rs:210-215` admits it, against the project's no-panic rule. Done means: the result is rebuilt from segments (or overlapping starts dropped), with a regression test.
-
-### T62.3. The default `~/.ssh` deny is bypassable through `bash`
-
-`cox-protocol/src/config.rs:849-850` denies only `Read(~/.ssh/**)`/`Read(~/.aws/**)`, but `bash/classify.rs:26-27` classifies `cat` as `Risk::ReadOnly` (auto-allowed) and the sandbox grants global file-read (`seatbelt.rs:17` `allow file-read*`; bwrap equivalent `--ro-bind / /`, `bwrap.rs:22-24`). `bash: cat ~/.ssh/id_rsa` runs with no approval and the key text enters the model's context — exactly what the deny exists to prevent. Done means: the default rules cover read-style bash commands into denied paths (or the classifier treats arguments outside the workspace as `Exec`).
 
 ### T62.4. Build/test commands classified read-only execute project-controlled code without approval
 

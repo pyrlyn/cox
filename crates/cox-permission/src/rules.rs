@@ -96,6 +96,23 @@ impl Rule {
         })
     }
 
+    /// Whether this rule is a `read` path rule. The cross-tool guard in
+    /// `Engine::decide` matches these against the paths a read-only bash
+    /// command names, so `Read(~/.ssh/**)` also stops `cat ~/.ssh/id_rsa`
+    /// (T62.3).
+    pub fn read_path_rule(&self) -> bool {
+        self.tool == "read" && matches!(self.subject, Subject::Path(_))
+    }
+
+    /// Whether the rule's path globs cover `path` (already `~`-expanded,
+    /// absolute). Only path rules can answer.
+    pub fn covers_file(&self, path: &str) -> bool {
+        match &self.subject {
+            Subject::Path(globs) => globs.iter().any(|g| g.is_match(path)),
+            _ => false,
+        }
+    }
+
     /// Whether this rule covers `(tool, subject)`.
     pub fn matches(&self, tool: &str, subject: &str) -> bool {
         if !tool_matches(&self.tool, tool) {
