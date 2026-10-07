@@ -11,10 +11,12 @@ pub mod client;
 pub mod diag;
 pub mod server;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
+
+use tokio_util::sync::CancellationToken;
 
 use async_trait::async_trait;
 use cox_protocol::config::{LspConfig, LspServerConfig};
@@ -38,15 +40,32 @@ pub type Launcher = Arc<dyn Fn(&[String], &Path) -> Result<Pipes, LspError> + Se
 /// which JSON escaping can grow, under the client's 16 MiB cap.
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
+/// `[lsp] after_edit` until that key exists. Off, so an edit's text does
+/// not change for users; tests opt in with [`crate::edit::LspEdit::reporting`].
+pub const AFTER_EDIT: bool = false;
+/// `lsp.after_edit_ms` until that key exists.
+pub const AFTER_EDIT_MS: u64 = 1500;
+/// Lines of new diagnostics an edit may append. Errors sort first.
+const MAX_NEW_LINES: usize = 10;
+
+/// Servers `diagnostics` has already started, shared with `edit`.
+/// There is no launcher here: [`LspPool::running_for`] cannot start a process.
+pub struct LspPool {
+    cfg: LspConfig,
+    /// Running servers by `[lsp.servers]` name.
+    servers: Mutex<HashMap<String, Arc<Server>>>,
+    /// Last settled diagnostics per file. `Server` keeps the same map
+    /// private, so an edit diffs against this copy from before the write.
+    seen: Mutex<HashMap<PathBuf, Vec<diag::Diagnostic>>>,
+}
+
 /// `diagnostics` (T41.6): a file's compiler and linter diagnostics from a
 /// language server, one per language, started on first use and kept for
 /// the session.
 pub struct DiagnosticsTool {
-    cfg: LspConfig,
+    pool: Arc<LspPool>,
     spawner: Spawner,
     launcher: Launcher,
-    /// Running servers by `[lsp.servers]` name.
-    pool: Mutex<HashMap<String, Arc<Server>>>,
     /// One start at a time, so two parallel calls never start two servers
     /// for one language.
     starting: tokio::sync::Mutex<()>,
@@ -61,18 +80,12 @@ struct DiagnosticsInput {
     wait_ms: Option<u64>,
 }
 
-impl DiagnosticsTool {
-    pub fn new(cfg: LspConfig, spawner: Spawner) -> Self {
-        Self::with_launcher(cfg, spawner, Arc::new(server::spawn))
-    }
-
-    pub fn with_launcher(cfg: LspConfig, spawner: Spawner, launcher: Launcher) -> Self {
+impl LspPool {
+    pub fn new(cfg: LspConfig) -> Self {
         Self {
             cfg,
-            spawner,
-            launcher,
-            pool: Mutex::new(HashMap::new()),
-            starting: tokio::sync::Mutex::new(()),
+            servers: Mutex::new(HashMap::new()),
+            seen: Mutex::new(HashMap::new()),
         }
     }
 
@@ -85,8 +98,109 @@ impl DiagnosticsTool {
             .find(|(_, s)| s.extensions.iter().any(|e| e.eq_ignore_ascii_case(&ext)))
     }
 
+    /// A server already running for `path`. Never starts one: an edit must
+    /// not be the call that launches a language server.
+    pub fn running_for(&self, path: &Path) -> Option<Arc<Server>> {
+        let name = self.server_for(&path.to_string_lossy())?.0.clone();
+        let server = lock(&self.servers).get(&name).cloned()?;
+        server.running().then_some(server)
+    }
+
+    pub(crate) fn cached(&self, path: &Path) -> Vec<diag::Diagnostic> {
+        lock(&self.seen).get(path).cloned().unwrap_or_default()
+    }
+
+    fn remember(&self, path: &Path, diags: &[diag::Diagnostic]) {
+        lock(&self.seen).insert(path.to_path_buf(), diags.to_vec());
+    }
+
+    /// Diagnostics in the post-edit result that `before` did not have.
+    /// `None` when no server is running, it has died, or it misses the
+    /// deadline: the edit already landed, and a language server must not
+    /// turn that into an error or a retry.
+    pub(crate) async fn introduced(
+        &self,
+        path: &Path,
+        text: &str,
+        before: &[diag::Diagnostic],
+        roots: &[PathBuf],
+        cwd: &Path,
+        cancel: &CancellationToken,
+    ) -> Option<String> {
+        let server = self.running_for(path)?;
+        let report = tokio::select! {
+            r = server.diagnostics(path, text, Duration::from_millis(AFTER_EDIT_MS)) => r.ok(),
+            () = cancel.cancelled() => return None,
+        }?;
+        // A note means the deadline won. A partial list is not the edit's
+        // delta, and it must not replace the snapshot.
+        if report.note.is_some() {
+            return None;
+        }
+        self.remember(path, &report.diagnostics);
+        let fresh = only_new(&report.diagnostics, before);
+        if fresh.is_empty() {
+            return None;
+        }
+        let formatted = diag::format(&root_for(path, roots, cwd), path, &fresh);
+        let lines: Vec<&str> = formatted.lines().take(MAX_NEW_LINES).collect();
+        (!lines.is_empty()).then(|| lines.join("\n"))
+    }
+}
+
+fn only_new(after: &[diag::Diagnostic], before: &[diag::Diagnostic]) -> Vec<diag::Diagnostic> {
+    let seen: HashSet<(u32, String, String)> = before.iter().map(diag_key).collect();
+    let mut fresh: Vec<diag::Diagnostic> = after
+        .iter()
+        .filter(|d| !seen.contains(&diag_key(d)))
+        .cloned()
+        .collect();
+    fresh.sort_by_key(|d| (d.severity(), d.range.start));
+    fresh.truncate(MAX_NEW_LINES);
+    fresh
+}
+
+/// Set difference for an edit: start line, code and message. Column and
+/// severity can move without the diagnostic being a new one.
+fn diag_key(d: &diag::Diagnostic) -> (u32, String, String) {
+    let code = match &d.code {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    };
+    (d.range.start.line, code, d.message.clone())
+}
+
+impl DiagnosticsTool {
+    pub fn new(cfg: LspConfig, spawner: Spawner) -> Self {
+        Self::with_launcher(cfg, spawner, Arc::new(server::spawn))
+    }
+
+    pub fn with_launcher(cfg: LspConfig, spawner: Spawner, launcher: Launcher) -> Self {
+        Self::from_pool(Arc::new(LspPool::new(cfg)), spawner, launcher)
+    }
+
+    fn from_pool(pool: Arc<LspPool>, spawner: Spawner, launcher: Launcher) -> Self {
+        Self {
+            pool,
+            spawner,
+            launcher,
+            starting: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    /// The session's `diagnostics` tool, on the pool `edit` also holds.
+    pub fn on_pool(pool: Arc<LspPool>, spawner: Spawner) -> Self {
+        Self::from_pool(pool, spawner, Arc::new(server::spawn))
+    }
+
+    #[cfg(test)]
+    fn pool(&self) -> Arc<LspPool> {
+        self.pool.clone()
+    }
+
     fn running(&self, name: &str) -> bool {
-        let pooled = lock(&self.pool).get(name).cloned();
+        let pooled = lock(&self.pool.servers).get(name).cloned();
         pooled.is_some_and(|s| s.running())
     }
 
@@ -99,7 +213,7 @@ impl DiagnosticsTool {
         root: &Path,
     ) -> Result<Arc<Server>, String> {
         let _one = self.starting.lock().await;
-        let pooled = lock(&self.pool).get(name).cloned();
+        let pooled = lock(&self.pool.servers).get(name).cloned();
         if let Some(s) = pooled {
             if s.running() {
                 return Ok(s);
@@ -117,13 +231,13 @@ impl DiagnosticsTool {
         let process = pipes.process.clone();
         let opts = Options {
             root: root.to_path_buf(),
-            timeout: Duration::from_secs(u64::from(self.cfg.timeout_s)),
-            quiet: Duration::from_millis(u64::from(self.cfg.quiet_ms)),
+            timeout: Duration::from_secs(u64::from(self.pool.cfg.timeout_s)),
+            quiet: Duration::from_millis(u64::from(self.pool.cfg.quiet_ms)),
         };
         match Server::start(pipes, opts).await {
             Ok(s) => {
                 let s = Arc::new(s);
-                lock(&self.pool).insert(name.to_string(), s.clone());
+                lock(&self.pool.servers).insert(name.to_string(), s.clone());
                 Ok(s)
             }
             Err(e) => Err(with_tail(
@@ -138,7 +252,7 @@ impl DiagnosticsTool {
 
     /// Drops `server` from the pool if it is still the pooled one, and kills it.
     fn evict(&self, name: &str, server: &Arc<Server>) {
-        let mut pool = lock(&self.pool);
+        let mut pool = lock(&self.pool.servers);
         if pool.get(name).is_some_and(|s| Arc::ptr_eq(s, server)) {
             pool.remove(name);
         }
@@ -153,6 +267,7 @@ impl Tool for DiagnosticsTool {
         let input_schema =
             serde_json::to_value(schema_for!(DiagnosticsInput)).unwrap_or(Value::Null);
         let languages: Vec<String> = self
+            .pool
             .cfg
             .servers
             .iter()
@@ -193,7 +308,7 @@ impl Tool for DiagnosticsTool {
             .get("path")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        match self.server_for(path) {
+        match self.pool.server_for(path) {
             Some((name, _)) if !self.running(name) => Risk::Exec,
             _ => Risk::ReadOnly,
         }
@@ -205,7 +320,7 @@ impl Tool for DiagnosticsTool {
                 why: format!("invalid input: {e}"),
             })?;
         let path = confine(&cx.roots, &cx.cwd, &input.path)?;
-        let Some((name, cfg)) = self.server_for(&path.to_string_lossy()) else {
+        let Some((name, cfg)) = self.pool.server_for(&path.to_string_lossy()) else {
             return Ok(failure(format!(
                 "no language server is configured for {}. {}",
                 input.path,
@@ -232,7 +347,7 @@ impl Tool for DiagnosticsTool {
         let bytes = std::fs::read(&path).map_err(|_| ToolError::Io)?;
         let text = String::from_utf8(bytes).map_err(|_| ToolError::Binary)?;
         let root = root_for(&path, &cx.roots, &cx.cwd);
-        let timeout = Duration::from_secs(u64::from(self.cfg.timeout_s));
+        let timeout = Duration::from_secs(u64::from(self.pool.cfg.timeout_s));
         let wait = input.wait_ms.map_or(timeout, Duration::from_millis);
 
         let mut restarted = false;
@@ -247,6 +362,7 @@ impl Tool for DiagnosticsTool {
             };
             match result {
                 Ok(report) => {
+                    self.pool.remember(&path, &report.diagnostics);
                     let mut out = diag::format(&root, &path, &report.diagnostics);
                     if let Some(note) = report.note {
                         out.push_str("\n(");
@@ -284,7 +400,7 @@ impl Tool for DiagnosticsTool {
 
     /// Kills every server; the next call starts a fresh one.
     fn shutdown(&self) {
-        let servers: Vec<Arc<Server>> = lock(&self.pool).drain().map(|(_, s)| s).collect();
+        let servers: Vec<Arc<Server>> = lock(&self.pool.servers).drain().map(|(_, s)| s).collect();
         for server in servers {
             server.kill();
         }
@@ -404,18 +520,41 @@ mod tests {
         }
     }
 
-    /// Opens a file, and answers every save with `fake: first line`.
+    /// Answers a save with one error per `ERR ` line of the text just sent,
+    /// or `fake: first line` when the file has none (the older tests).
     async fn fake_server(mut r: FakeRead, mut w: FakeWrite) {
         handshake(&mut r, &mut w, json!({"textDocumentSync": 1})).await;
         let mut uri = Value::Null;
+        let mut text = String::new();
         while let Ok(Some(msg)) = read_message(&mut r).await {
             match msg["method"].as_str() {
                 Some("textDocument/didOpen") => {
                     uri = msg["params"]["textDocument"]["uri"].clone();
+                    text = msg["params"]["textDocument"]["text"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+                }
+                Some("textDocument/didChange") => {
+                    text = msg["params"]["contentChanges"][0]["text"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
                 }
                 Some("textDocument/didSave") => {
-                    let params = json!({"uri": uri, "diagnostics": [diag("fake: first line")]});
-                    push(&mut w, "textDocument/publishDiagnostics", params).await;
+                    let mut diagnostics: Vec<Value> = text
+                        .lines()
+                        .filter_map(|line| line.strip_prefix("ERR ").map(diag))
+                        .collect();
+                    if diagnostics.is_empty() {
+                        diagnostics.push(diag("fake: first line"));
+                    }
+                    push(
+                        &mut w,
+                        "textDocument/publishDiagnostics",
+                        json!({"uri": uri, "diagnostics": diagnostics}),
+                    )
+                    .await;
                 }
                 Some("shutdown") => reply(&mut w, &msg, Value::Null).await,
                 _ => {}
@@ -539,6 +678,78 @@ mod tests {
         assert!(flags.iter().all(|k| k.load(Ordering::SeqCst)));
         // The next call starts a fresh server, so it asks again.
         assert_eq!(tool.risk(&json!({"path": "src/a.rs"})), Risk::Exec);
+    }
+
+    fn seeded(body: &str) -> (tempfile::TempDir, PathBuf) {
+        let (dir, root) = workspace(&["src/a.rs"]);
+        std::fs::write(root.join("src/a.rs"), body).unwrap();
+        (dir, root)
+    }
+
+    /// Diagnostics first, so the server is running and the pre-edit errors
+    /// are in the pool, then one opted-in or quiet edit.
+    async fn edit_after_check(report: bool, new: &str) -> String {
+        let (_dir, root) = seeded("fn main() {}\nERR existed\n");
+        let (diag_tool, started) = tool(&[("rust", "/bin/sh", "rs")]);
+        let saw = diag_tool
+            .call(json!({"path": "src/a.rs"}), &cx(&root))
+            .await
+            .unwrap();
+        assert!(saw.text.contains("existed"), "{}", saw.text);
+        let edit = if report {
+            crate::edit::LspEdit::reporting(diag_tool.pool())
+        } else {
+            crate::edit::LspEdit::sharing(diag_tool.pool())
+        };
+        let out = edit
+            .call(
+                json!({"path": "src/a.rs", "old": "fn main() {}", "new": new}),
+                &cx(&root),
+            )
+            .await
+            .unwrap();
+        assert_eq!(lock(&started).len(), 1, "edit must not start a server");
+        out.text
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn edit_appends_a_diagnostic_the_change_introduced() {
+        let text = edit_after_check(true, "fn main() {}\nERR introduced").await;
+        assert!(text.contains("error: introduced"), "{text}");
+        assert!(!text.contains("existed"), "{text}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn edit_omits_diagnostics_that_existed_before_the_change() {
+        let text = edit_after_check(true, "fn ready() {}").await;
+        assert!(!text.contains("existed"), "{text}");
+        assert!(!text.contains("error:"), "{text}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn edit_adds_nothing_when_no_language_server_is_running() {
+        let (_dir, root) = seeded("fn main() {}\n");
+        let (diag_tool, started) = tool(&[("rust", "/bin/sh", "rs")]);
+        let edit = crate::edit::LspEdit::reporting(diag_tool.pool());
+        let out = edit
+            .call(
+                json!({"path": "src/a.rs", "old": "fn main() {}", "new": "fn ready() {}"}),
+                &cx(&root),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            out.text,
+            format!("edited {}", root.join("src/a.rs").display())
+        );
+        assert!(lock(&started).is_empty(), "edit must not spawn");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn edit_sharing_the_pool_does_not_append_diagnostics() {
+        let text = edit_after_check(false, "fn main() {}\nERR introduced").await;
+        assert!(!text.contains("introduced"), "{text}");
+        assert!(!text.contains("error:"), "{text}");
     }
 
     #[test]

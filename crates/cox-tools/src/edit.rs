@@ -8,7 +8,11 @@
 //! content is archived before the file is touched so `cox expand` can
 //! restore it without git; the write itself goes through
 //! `write::atomic_write` (temp file + rename in the same directory) so a
-//! crash never leaves a half-written file.
+//! crash never leaves a half-written file. `LspEdit` is the same tool
+//! when a language-server pool is in the session: it appends diagnostics
+//! the edit introduced only if a server is already running and the caller
+//! opted in (`reporting`). The session installs `sharing`, which stays
+//! quiet until `[lsp] after_edit` exists.
 //!
 //! `ToolError` deviation (documented once here, reused by `write.rs` and
 //! `todo.rs`): plan.md's algorithm asks for a `NotFound` error carrying
@@ -24,6 +28,8 @@
 //! holding the 1-based line numbers, matching plan.md §1.11's "ambiguity is
 //! an error listing match lines".
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use cox_protocol::{
     ArchivePut, Concurrency, Diff, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolSpec,
@@ -31,6 +37,8 @@ use cox_protocol::{
 use serde_json::{Value, json};
 use similar::TextDiff;
 
+use crate::lsp::diag::Diagnostic;
+use crate::lsp::{AFTER_EDIT, LspPool};
 use crate::path::confine;
 use crate::write::{atomic_write, str_field};
 
@@ -154,6 +162,76 @@ impl Tool for EditTool {
             }),
             structured: None,
         })
+    }
+}
+
+/// `edit` with a shared language-server pool. `sharing` is what the session
+/// builds; the delta stays off (`AFTER_EDIT`) until config has the key.
+/// `reporting` is the test opt-in. Neither starts a server.
+pub struct LspEdit {
+    pool: Arc<LspPool>,
+    after_edit: bool,
+}
+
+impl LspEdit {
+    pub fn sharing(pool: Arc<LspPool>) -> Self {
+        Self {
+            pool,
+            after_edit: AFTER_EDIT,
+        }
+    }
+
+    /// Tests opt in. Production uses [`sharing`].
+    pub fn reporting(pool: Arc<LspPool>) -> Self {
+        Self {
+            pool,
+            after_edit: true,
+        }
+    }
+
+    /// The file and the server's last diagnostics, taken before the write.
+    /// `None` when the feature is off or no server is running for the file.
+    fn prior(&self, input: &Value, cx: &ToolCx) -> Option<(std::path::PathBuf, Vec<Diagnostic>)> {
+        if !self.after_edit {
+            return None;
+        }
+        let arg = input.get("path")?.as_str()?;
+        let path = confine(&cx.writable_roots, &cx.cwd, arg).ok()?;
+        // Never starts a language server.
+        self.pool.running_for(&path)?;
+        let cached = self.pool.cached(&path);
+        Some((path, cached))
+    }
+}
+
+#[async_trait]
+impl Tool for LspEdit {
+    fn spec(&self) -> ToolSpec {
+        EditTool.spec()
+    }
+
+    fn touches(&self, input: &Value) -> Option<Vec<String>> {
+        EditTool.touches(input)
+    }
+
+    fn subject(&self, input: &Value) -> String {
+        EditTool.subject(input)
+    }
+
+    async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+        let prior = self.prior(&input, cx);
+        let mut out = EditTool.call(input, cx).await?;
+        if let Some((path, before)) = prior.filter(|_| out.diff.is_some())
+            && let Ok(text) = std::fs::read_to_string(&path)
+            && let Some(extra) = self
+                .pool
+                .introduced(&path, &text, &before, &cx.roots, &cx.cwd, &cx.cancel)
+                .await
+        {
+            out.text.push('\n');
+            out.text.push_str(&extra);
+        }
+        Ok(out)
     }
 }
 

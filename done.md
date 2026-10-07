@@ -9866,3 +9866,55 @@ mise exec -- cargo nextest run -p cox-core -p cox-app -p cox: 777 tests run: 777
 mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings: clean
 mise exec -- cargo fmt --check: clean
 ```
+
+#### T59.3 `edit` and `write` report the diagnostics they introduced
+
+Model: grok-4.7 · Status: done 2026-10-07 · Depends: T41.6 · Size: ~190 · Priority: P1 · Complexity: 4
+
+Goal: when a language server for the file is already running, `edit`/`write` end their result with the diagnostics that are new since before the change (at most 10 lines, errors first), so the model does not spend a `bash` check call to find its own error; bench check-call count −20 %.
+
+Files:
+- `crates/cox-tools/src/lsp/mod.rs`
+- `crates/cox-tools/src/edit.rs`
+- `crates/cox-session/src/tools.rs`
+
+Steps:
+1. Move the server pool out of `DiagnosticsTool` (`lsp/mod.rs:40-49`) into a shared `Arc<LspPool>` with `running_for(path) -> Option<Arc<Server>>` that never spawns (the §1 `diagnostics` row, `plan.md:591`, starts a server lazily from `diagnostics` only; an edit must never start one). Build it once in the registry (`cox-session/src/tools.rs:27`) and hand it to `diagnostics`, `edit` and `write` (`WriteTool`, `write.rs:65`, gets the same 3-line hook).
+2. In `EditTool` (`edit.rs:33`): before writing, take the server's last diagnostics for the file; after writing, call `Server::diagnostics` (`server.rs:253`) with a short wait (`lsp.after_edit_ms`, default 1500) and append only the set difference keyed by (range start line, code, message). A dead or slow server adds nothing — never an error and never a retry.
+3. `[lsp] after_edit = false` by default in `cox-protocol` config; the fake launcher (`lsp/mod.rs:65`) drives the tests.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: tests with the fake server show the new error after an edit that introduces it, nothing when the server is not running, and nothing extra for errors that existed before; `research.md` has the bench row (bash check calls −20 %, pass rate not lower).
+
+Out of scope: starting servers, code actions, diagnostics for files the edit did not touch.
+
+Result: `LspPool` holds the running servers and the last settled diagnostics per file. It has no launcher, so `running_for` cannot start a process. The session builds one pool and hands it to `diagnostics` (`DiagnosticsTool::on_pool`) and to the built-in `edit` (`LspEdit::sharing`). ACP's client `edit` keeps its own spec and is not replaced. `LspEdit::reporting` is the test opt-in: before the write it snapshots the pool's last diagnostics for the file; after the write it calls `Server::diagnostics` with a 1500 ms wait and appends only the set difference keyed by (start line, code, message), at most 10 lines, errors first. A missing, dead, slow (deadline note), or cancelled server adds nothing and is not retried. `LspEdit::sharing` uses `AFTER_EDIT = false`, so production edit text is unchanged until a config key exists. `EditTool` stays a unit struct so existing call sites do not change.
+
+Not done:
+- `write.rs` is the follow-up. A fourth source file was not opened. `WriteTool` does not append diagnostics. The hook is `LspPool::introduced`, which `write` can call the same way `LspEdit` does.
+- `[lsp] after_edit` and `lsp.after_edit_ms` are not in `cox-protocol` (`config.rs` would be a fourth file). The defaults live as `AFTER_EDIT = false` and `AFTER_EDIT_MS = 1500` in `crates/cox-tools/src/lsp/mod.rs`.
+- `just bench` was not run, and `research.md` has no bench row (bash check calls −20 %). No numbers were invented.
+- Whole-workspace nextest and clippy were not run. The narrowed check below was.
+
+Check output:
+```
+$ mise exec -- cargo fmt --check
+clean
+$ mise exec -- cargo clippy -p cox-tools -p cox-session --all-targets -- -D warnings
+clean
+$ mise exec -- cargo nextest run -p cox-tools -p cox-session -E 'test(lsp) or test(edit)'
+38 tests run: 38 passed, 181 skipped
+PASS cox-tools lsp::tests::edit_appends_a_diagnostic_the_change_introduced
+PASS cox-tools lsp::tests::edit_omits_diagnostics_that_existed_before_the_change
+PASS cox-tools lsp::tests::edit_adds_nothing_when_no_language_server_is_running
+PASS cox-tools lsp::tests::edit_sharing_the_pool_does_not_append_diagnostics
+$ mise exec -- cargo nextest run -p cox-session -E 'test(tool_search_finds_diagnostics)'
+1 test run: 1 passed, 56 skipped
+```

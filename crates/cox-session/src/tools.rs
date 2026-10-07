@@ -75,32 +75,50 @@ pub fn with_client_tools(
         .collect()
 }
 
-/// Adds the deferred `diagnostics` tool (T41.7) when `lsp.enabled`. Its
-/// servers start under `sandboxed_argv`, the wrap every stdio MCP server
-/// gets, with the same `writable` roots; `danger-full-access` runs them bare
-/// because `sandboxed_argv` does. Before `with_tool_search_index`, so
-/// `tool_search` can find it.
+/// Adds the deferred `diagnostics` tool (T41.7) when `lsp.enabled`, and
+/// hands the same server pool to `edit`. Servers start under
+/// `sandboxed_argv`, the wrap every stdio MCP server gets, with the same
+/// `writable` roots; `danger-full-access` runs them bare because
+/// `sandboxed_argv` does. The edit delta stays off until `[lsp] after_edit`
+/// exists (`LspEdit::sharing`). Before `with_tool_search_index`, so
+/// `tool_search` can find `diagnostics`. ACP's client `edit` keeps its
+/// name and is left in place: it writes the editor buffer, not the file
+/// this pool's servers are watching.
 pub(crate) fn with_lsp(
-    mut tools: Vec<Arc<dyn Tool>>,
+    tools: Vec<Arc<dyn Tool>>,
     config: &cox_protocol::Config,
     writable: &[PathBuf],
 ) -> Vec<Arc<dyn Tool>> {
-    if config.lsp.enabled {
-        let (wrap_config, writable) = (config.clone(), writable.to_vec());
-        let spawner: cox_tools::lsp::Spawner =
-            Arc::new(move |server: &cox_protocol::config::LspServerConfig| {
-                crate::sandbox::sandboxed_argv(
-                    std::path::Path::new(&server.command),
-                    &server.args,
-                    &wrap_config,
-                    &writable,
-                )
-            });
-        tools.push(Arc::new(cox_tools::lsp::DiagnosticsTool::new(
-            config.lsp.clone(),
-            spawner,
-        )));
+    if !config.lsp.enabled {
+        return tools;
     }
+    let (wrap_config, writable) = (config.clone(), writable.to_vec());
+    let spawner: cox_tools::lsp::Spawner =
+        Arc::new(move |server: &cox_protocol::config::LspServerConfig| {
+            crate::sandbox::sandboxed_argv(
+                std::path::Path::new(&server.command),
+                &server.args,
+                &wrap_config,
+                &writable,
+            )
+        });
+    let pool = Arc::new(cox_tools::lsp::LspPool::new(config.lsp.clone()));
+    let shared = pool.clone();
+    let builtin = EditTool.spec().description;
+    let mut tools: Vec<Arc<dyn Tool>> = tools
+        .into_iter()
+        .map(|t| {
+            let spec = t.spec();
+            if spec.name == "edit" && spec.description == builtin {
+                Arc::new(cox_tools::edit::LspEdit::sharing(shared.clone())) as Arc<dyn Tool>
+            } else {
+                t
+            }
+        })
+        .collect();
+    tools.push(Arc::new(cox_tools::lsp::DiagnosticsTool::on_pool(
+        pool, spawner,
+    )));
     tools
 }
 
