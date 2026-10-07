@@ -120,7 +120,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T62.2 | todo | P1 | 2 | 0% | |
 | T62.5 | todo | P1 | 2 | 0% | |
 | T62.6 | todo | P3 | 1 | 0% | |
-| T62.7 | in progress | P3 | 1 | 0% | Claude Code / haiku |
 | T62.8 | todo | P3 | 1 | 0% | |
 | T62.9 | todo | P3 | 1 | 0% | |
 
@@ -2737,15 +2736,6 @@ Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-
 ### T62.6. pid-reuse race in the bash kill path
 
 `cox-tools/src/bash/mod.rs:649-651`: after the child is reaped, the code still `killpg`s the group to catch grandchildren; a reused pid in that window signals an unrelated process group. Done means: a held group id (or pidfd-style reaping) removes the race.
-
-### T62.7. Duplicated repo-root resolution
-
-`crates/cox-tools/src/git.rs:518` (`--show-toplevel`) duplicates what `main_checkout` in the same file already resolves (`git.rs:367-384`, `--git-common-dir`), and `scripts/changed_tests.py:93` resolves it a third time. Done means: one root helper in `git.rs`, reused everywhere.
-
-Plan:
-1. `git.rs`: add `worktree_root` (`--show-toplevel`, the current checkout) next to `main_checkout` (the main checkout); `linked` calls it; no behaviour change.
-2. Test in a temp repo with a linked worktree: `worktree_root` is the linked path, `project_root` is the main path; `scripts/changed_tests.py` stays as is (Python, no Rust helper it can reuse).
-3. Scoped cargo test, clippy, fmt; move the card to `done.md`.
 
 ### T62.8. `checkpoint changes()` silently truncates on root-count mismatch
 
