@@ -101,7 +101,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T59.4 | todo | P2 | 4 | 0% | |
 | T59.6 | todo | P3 | 3 | 0% | |
 | T59.7 | todo | P3 | 4 | 0% | |
-| T59.8 | todo | P3 | 2 | 0% | |
+| T59.8 | in progress | P3 | 2 | 0% | Claude Code / sonnet |
 | T59.9 | todo | P3 | 2 | 0% | |
 | T59.10 | todo | P3 | 2 | 0% | |
 | T61.1 | todo | P1 | 1 | 0% | |
@@ -2097,7 +2097,7 @@ Out of scope: rename without a server, file moves.
 
 #### T59.8 `read` by symbol name
 
-Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
+Model: sonnet · Status: in progress · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
 
 Goal: `read(path, symbol = "Foo::bar")` returns only that definition's lines from the `cox-syntax` outline, so the model stops reading a whole file to see one function.
 
@@ -2119,6 +2119,8 @@ mise exec -- cargo fmt --check
 Done when: tests for a unique, an ambiguous and a missing symbol in Rust and TypeScript fixtures.
 
 Out of scope: symbol-addressed edit (separate card after this one shows use in the bench).
+
+Execution plan: (1) `cox-syntax` `outline.rs` walks definitions once into `Def { name, start, end, signature }` (name qualified by the enclosing impl/trait/class, e.g. `Foo::bar`), the outline rows derive from it, and `symbols()` plus `Def::matches` serve lookup. (2) `read.rs` gets `symbol`, resolves it (`.` and `::` both accepted; a unique hit becomes the `lines` range for the existing ranged-read path; several hits and no hit are `Denied` with the candidates or the closest names). (3) Tests in both files for unique, ambiguous and missing in Rust and TypeScript; `docs/tools.md` row updated.
 
 #### T59.9 Investigate: file claims for parallel subagents
 
