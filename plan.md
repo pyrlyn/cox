@@ -49,6 +49,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
+| T56.2 | todo | P3 | 3 | 0% | |
 | T56.4 | todo | P3 | 3 | 0% | |
 | T56.6 | todo | P3 | 4 | 0% | |
 | T56.7 | todo | P3 | 4 | 0% | |
@@ -1609,6 +1610,14 @@ Every card in this phase:
 - reads the key from `CURSOR_API_KEY` through `cox_provider::http::resolve_key` (tests inject `resolve_key_with`; no test touches a real key or keychain) and never writes it to a log, an error or the rollout;
 - runs every string from Cursor (stream text, tool names, artifact names, errors) through `cox_sanitize::sanitize`;
 - makes no network call in tests (wiremock and hand-written fixtures only, D12).
+
+#### T56.2 Cloud Agents client: create, follow up, stream, cancel, usage
+
+Depends: T56.1 · Size: ~190 · Files: `crates/cox-cursor-cloud/src/client.rs` (new), `crates/cox-cursor-cloud/src/lib.rs`
+Goal: a client over `cox-provider-http` (connection setup, Bearer auth, non-2xx mapping, SSE framing, retry): `create_agent`, `create_run`, `get_run`, `stream_run`, `cancel_run`, `usage`. Only GETs are retried; a create is never retried (a retry could start and bill a second run). A dropped stream re-reads the run's status and, when it is not terminal, reopens without delivering an event twice. Errors are a `thiserror` enum whose text never contains the key.
+Check: `mise exec -- cargo nextest run -p cox-cursor-cloud client_sends_the_key_as_bearer_only client_never_retries_create client_stream_reconnects_without_duplicate_events client_error_text_never_contains_the_key client_user_agent_is_cox_version_only` (wiremock).
+Done when: the tests pass.
+Out of scope: webhooks (not in the v1 API); artifacts.
 
 #### T56.4 `Engine` asks before code leaves the machine: `CloudAgent(<repo>)`
 
