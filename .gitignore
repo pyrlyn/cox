@@ -16,3 +16,6 @@ desktop/macos/Packages/*/.build/
 desktop/macos/Packages/*/.swiftpm/
 desktop/design/node_modules/
 desktop/design/diff/out/
+# WinUI / dotnet build output (T58.3).
+desktop/windows/**/bin/
+desktop/windows/**/obj/

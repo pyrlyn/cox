@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <!-- 26100 is the Windows 11 24H2 contract. Min OS stays Windows 10 (A128). -->
+    <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7705" />
+  </ItemGroup>
+</Project>
