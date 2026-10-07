@@ -48,7 +48,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.4 | todo | P3 | 3 | 0% | |
 | T56.6 | todo | P3 | 4 | 0% | |
 | T56.7 | todo | P3 | 4 | 0% | |
 | T56.8 | todo | P3 | 3 | 0% | |
@@ -1593,14 +1592,6 @@ Every card in this phase:
 - reads the key from `CURSOR_API_KEY` through `cox_provider::http::resolve_key` (tests inject `resolve_key_with`; no test touches a real key or keychain) and never writes it to a log, an error or the rollout;
 - runs every string from Cursor (stream text, tool names, artifact names, errors) through `cox_sanitize::sanitize`;
 - makes no network call in tests (wiremock and hand-written fixtures only, D12).
-
-#### T56.4 `Engine` asks before code leaves the machine: `CloudAgent(<repo>)`
-
-Depends: the creator's terms go-ahead (A123 (5)) · Size: ~140 · Files: `crates/cox-permission/src/rules.rs`, `crates/cox-permission/src/policy.rs`, `crates/cox-permission/src/lib.rs`
-Goal: a new permission subject `CloudAgent(<github owner>/<repo>)` in the rule grammar. It asks in every permission mode, `auto` and `bypass` included, unless the user's own config holds an allow rule for that repository; `plan` mode denies it. A project config's `allow` for it is reverted by the existing A122 rule (tested, not re-implemented). The approval text says the repository, the remote, the starting ref, and that the code is read and edited off this machine. The check lives in `Engine` only, never in the plugin or the driver.
-Check: `mise exec -- cargo nextest run -p cox-permission cloud_agent_asks_in_auto_and_bypass cloud_agent_is_denied_in_plan_mode cloud_agent_user_allow_rule_matches_one_repo cloud_agent_project_allow_is_reverted cloud_agent_approval_text_names_repo_ref_and_off_machine`.
-Done when: the tests pass; the rule grammar docs list the subject.
-Out of scope: any other remote-execution subject.
 
 #### T56.6 Host driver: a background task becomes a Cursor Cloud run
 
