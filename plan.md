@@ -123,7 +123,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T62.9 | todo | P3 | 1 | 0% | |
 | T63.1 | todo | P2 | 2 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T63.3 | todo | P1 | 1 | 0% | |
+| T63.3 | in progress | P1 | 1 | 0% | Claude Code / claude-haiku-5-5 |
 | T63.4 | todo | P2 | 4 | 0% | |
 | T63.4.1 | todo | P2 | 2 | 0% | |
 | T63.4.2 | todo | P2 | 3 | 0% | |
@@ -2836,7 +2836,7 @@ Out of scope: caching `.build` and DerivedData (T61.4, T61.9); splitting the job
 
 #### T63.3 Lint: no AppKit or SwiftUI in `CoxModel` and `CoxCore`
 
-Model: haiku · Status: open · Depends: — · Size: ~30 (config, fixtures, one CI line) · Priority: P1 · Complexity: 1
+Model: claude-haiku-5-5 · Status: in progress · Depends: — · Size: ~30 (config, fixtures, one CI line) · Priority: P1 · Complexity: 1
 
 Goal: a UI-framework import or AppKit type in `Packages/CoxModel/Sources` (`CoxClient` and `CoxModel`) or `Packages/CoxCore/Sources` fails the build of that package and the `desktop-macos-lint` job.
 
