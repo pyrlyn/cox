@@ -103,6 +103,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T59.7 | todo | P3 | 4 | 0% | |
 | T59.8 | todo | P3 | 2 | 0% | |
 | T59.9 | todo | P3 | 2 | 0% | |
+| T59.10 | todo | P3 | 2 | 0% | |
 | T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
@@ -2147,6 +2148,32 @@ just bench
 Done when: the `research.md` row exists and this card is closed or followed by a sized card.
 
 Out of scope: implementing claims.
+
+#### T59.10 Memory entries linked to files boost recall
+
+Model: sonnet · Status: open · Depends: — · Size: ~150 · Priority: P3 · Complexity: 2
+
+Goal: a memory entry that names a file is ranked above an equally text-matching entry when that file was read or edited in the session.
+
+Files:
+- `crates/cox-store/migrations/<new>/up.sql` (a `memory_files` table; migrations count as fixtures, not source files)
+- `crates/cox-store/src/lib.rs`
+- `crates/cox-store/src/schema.rs`
+
+Steps:
+1. Fill `memory_files(memory_id, path)` on save from paths in the body that exist under the workspace.
+2. `memory_search` (`lib.rs:483`, FTS from `00000000000001_init/up.sql:36`) takes the session's touched paths and merges a file-linked list with the FTS list by RRF, ties by id. Diesel DSL only, no raw SQL in Rust.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a store test shows the linked entry first and an unchanged order without touched paths.
+
+Out of scope: embeddings, UI.
 
 ---
 
