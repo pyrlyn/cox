@@ -9902,6 +9902,12 @@ Check: `mise exec -- cargo nextest run -p cox-tools -p cox-session -p cox-protoc
 
 Not done: `just bench` and the `research.md` bench row (the mean-tool-calls −5 % claim) were not run, by instruction. No insta snapshot changed. The real binary was not run against a scratch `COX_HOME`. No action-level `call` test runs a command end to end (the executor is `BashTool`'s, covered by its own tests). `package.json` detection assumes `npm`, not pnpm/yarn/bun.
 
+#### T62.1 self-update latest-release URL missed `/repos/`
+
+`crates/cox/src/self_update.rs`: the latest-release API URL lacked GitHub's mandatory `/repos/` segment, so every `cox self update` without `--version` aborted on 404; only explicit `--version` worked. Found by the 2026-10-07 audit (T62). Fix: the URL lives in `latest_url()` with a unit test asserting the endpoint shape, so a regression cannot ship silently again.
+Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 1 · Files: `crates/cox/src/self_update.rs`
+Check: `cargo test -p cox --lib self_update`.
+
 #### T37.50 Pointer rule in Rust, shared by every client
 
 Depends: — · Size: ~120 · Files: `crates/cox-render/src/pointer.rs` (new), `crates/cox-app/src/lib.rs` (re-export), `crates/cox-ffi/src/types.rs` and `lib.rs` (export)
