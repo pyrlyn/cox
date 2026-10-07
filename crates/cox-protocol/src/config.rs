@@ -1956,6 +1956,33 @@ mod tests {
         assert_eq!(from_toml.context, ContextConfig::default());
     }
 
+    /// T59.1: `state+llm` is the default in the hand-written default and in
+    /// `default.toml` alike (the creator's decision), and `llm` still parses
+    /// as the opt-out.
+    #[test]
+    fn compaction_strategy_defaults_to_state_llm_and_llm_opts_out() {
+        use figment::providers::Format as _;
+        let parse = |toml: &str| -> Config {
+            figment::Figment::from(figment::providers::Toml::string(toml))
+                .extract()
+                .expect("parses")
+        };
+        assert_eq!(
+            Config::default().compaction.strategy,
+            CompactionStrategy::StateLlm
+        );
+        assert_eq!(
+            parse(DEFAULT_CONFIG_TOML).compaction,
+            CompactionConfig::default()
+        );
+        assert_eq!(
+            parse("[compaction]\nstrategy = \"llm\"\n")
+                .compaction
+                .strategy,
+            CompactionStrategy::Llm
+        );
+    }
+
     /// T41.1: the hand-written `LspConfig::default()` and the `[lsp]` rows
     /// of `default.toml` carry the same matrix, so a layer that omits a
     /// server table or key falls back to what the docs say.
