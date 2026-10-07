@@ -121,7 +121,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T62.7 | todo | P3 | 1 | 0% | |
 | T62.8 | todo | P3 | 1 | 0% | |
 | T62.9 | todo | P3 | 1 | 0% | |
-| T63.1 | todo | P2 | 2 | 0% | |
+| T63.1 | in progress | P2 | 2 | 0% | Claude Code / sonnet |
 | T63.2 | todo | P2 | 3 | 0% | |
 | T63.3 | todo | P1 | 1 | 0% | |
 | T63.4 | todo | P2 | 4 | 0% | |
@@ -2509,7 +2509,7 @@ Each card is written so an agent can do it from the card alone: what to install,
 
 #### T63.1 Property-based tests for `SessionStore`
 
-Model: sonnet · Status: open · Depends: — · Size: ~10 (manifest) + ~180 tests · Priority: P2 · Complexity: 2
+Model: sonnet · Status: in progress · Depends: — · Size: ~10 (manifest) + ~180 tests · Priority: P2 · Complexity: 2
 
 Goal: `SessionStore`'s patch rules — `upsert` ordering and in-place replace, `remove`, `reset` deduplication, batching, and the `lastLines` tail — hold for hundreds of generated patch sequences per run, compared with a plain-array reference model of `cox_app::coalesce::apply`.
 
