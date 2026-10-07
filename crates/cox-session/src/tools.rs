@@ -136,6 +136,44 @@ pub(crate) fn with_question_surface(tools: Vec<Arc<dyn Tool>>) -> Vec<Arc<dyn To
         .collect()
 }
 
+/// Adds `project` (T59.5) when `tools.project` is on. Detection is rooted at
+/// the session's `cwd`; the command it finds runs through `bash`'s executor,
+/// so the sandbox wrap and the permission engine are the ones `bash` has.
+/// Before `with_tool_search_index`, like `with_lsp`.
+pub(crate) fn with_project(
+    mut tools: Vec<Arc<dyn Tool>>,
+    config: &cox_protocol::Config,
+    cwd: &std::path::Path,
+) -> Vec<Arc<dyn Tool>> {
+    if config.tools.project {
+        tools.push(Arc::new(cox_tools::project::ProjectTool::new(
+            cwd.to_path_buf(),
+            config.project.clone(),
+        )));
+    }
+    tools
+}
+
+#[cfg(test)]
+mod project_tests {
+    use super::*;
+
+    /// T59.5: `tools.project = false` keeps the tool out of the list, so the
+    /// cache-stable prefix does not change for anyone who did not ask for it.
+    #[test]
+    fn project_tool_is_registered_only_behind_its_flag() {
+        let mut config = cox_protocol::Config::default();
+        let cwd = std::path::Path::new("/repo");
+        assert!(with_project(Vec::new(), &config, cwd).is_empty());
+        config.tools.project = true;
+        let names: Vec<_> = with_project(Vec::new(), &config, cwd)
+            .iter()
+            .map(|t| t.spec().name)
+            .collect();
+        assert_eq!(names, ["project"]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
