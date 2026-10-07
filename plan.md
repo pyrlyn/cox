@@ -50,7 +50,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
 | T56.2 | todo | P3 | 3 | 0% | |
-| T56.4 | in progress | P3 | 3 | 0% | Claude Code / sonnet |
 | T56.6 | todo | P3 | 4 | 0% | |
 | T56.7 | todo | P3 | 4 | 0% | |
 | T56.8 | todo | P3 | 3 | 0% | |
@@ -198,7 +197,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-patch` | the V4A patch engine (T32.6; split out of `cox-tools`): `parse` text ↔ AST, `stage` progressive hunk matching. Pure: no filesystem, no `ToolCx`; the `apply_patch` `Tool` impl stays in `cox-tools` (`v4a::tool`) so `path::confine` keeps one call site. `cox-tools` re-exports it as `v4a` | proptest 1.11 (dev) |
 | `cox-syntax` | tree-sitter and its grammars (T32.4; split out of `cox-tools`): `outline` (signature extraction for `read`'s outline mode) and `parse_bash` (the parser behind `bash`'s risk classifier). `cox-tools` re-exports `outline` at its old path | tree-sitter 0.27 + bash/rust/typescript/python/go grammars |
 | `cox-tokens` | token counting (T32.10; split out of `cox-provider`): `estimate`, `count_openai` (tiktoken), `count_anthropic` (the count-tokens endpoint). `cox-provider` re-exports it at the old `tokens` path | tiktoken-rs 0.12, reqwest 0.12 |
-| `cox-permission` | the permission `Engine` (T32.8; split out of `cox-core`): `Outcome`, the rule grammar, path rules. Pure; `cox-core` re-exports it at the old `permission` path | globset (path rules, T2.2) |
+| `cox-permission` | the permission `Engine` (T32.8; split out of `cox-core`): `Outcome`, the rule grammar, path rules. Pure; `cox-core` re-exports it at the old `permission` path | globset (path rules, T2.2); dev only: `cox-config`, `tempfile` (T56.4's A122 test) |
 | `cox-search` | the grep and glob engines (T32.5; split out of `cox-tools`): `grep::search`, `glob::find`, `rank_by_query`, `workspace_files`. Pure; the `GrepTool`/`GlobTool` impls stay in `cox-tools` so `path::confine` keeps one call site | ignore 0.4.33, grep-searcher 0.1.17, grep-regex 0.1.14, globset, nucleo 0.5 |
 | `cox-web` | the `web_fetch` engine (T32.7; split out of `cox-tools`): client, streaming GET with cancellation and a byte cap, HTML → text. `WebFetchTool` stays in `cox-tools` | reqwest 0.12 |
 | `cox-telemetry` | tracing setup and the OpenTelemetry stack behind the `otel` feature (T32.9; split out of `cox`); `init` takes plain values, not `Config` | tracing-subscriber, tracing-appender 0.2, opentelemetry 0.32 (+ sdk, otlp, tracing bridge, appender), thiserror |
@@ -562,7 +561,7 @@ Rollout line format: `{"seq":17,"ts":"2026-09-02T10:11:12.345Z","event":{"type":
 
 ### 1.8 Permission rules and the decision algorithm (`cox_core::permission::Engine`)
 
-Rule grammar (Claude Code's, verbatim): `Tool`, `Tool(subject)`, `Tool(prefix:*)`; file tools take a glob (`Read(~/.ssh/**)`, `Edit(src/**)`), `Bash` takes a command prefix (`Bash(npm run test:*)`, `Bash(git commit:*)`), MCP tools match `mcp__<server>__<tool>` or `mcp__<server>__*`, `WebFetch(domain:example.com)`. Tool names are matched case-insensitively against cox's names and their Claude aliases (`Read`=`read`, `Edit`=`edit`, `Write`=`write`, `Bash`=`bash`, `Grep`=`grep`, `Glob`=`glob`, `WebFetch`=`web_fetch`, `Agent`=`agent`).
+Rule grammar (Claude Code's, verbatim): `Tool`, `Tool(subject)`, `Tool(prefix:*)`; file tools take a glob (`Read(~/.ssh/**)`, `Edit(src/**)`), `Bash` takes a command prefix (`Bash(npm run test:*)`, `Bash(git commit:*)`), MCP tools match `mcp__<server>__<tool>` or `mcp__<server>__*`, `WebFetch(domain:example.com)`, `CloudAgent(<github owner>/<repo>)` (T56.4: asks in every mode including `auto` and `bypass`, denied in `plan`, lifted only by an exact allow rule in the user's own config; a bare `CloudAgent` allow, a session grant and a project `allow` never lift it). Tool names are matched case-insensitively against cox's names and their Claude aliases (`Read`=`read`, `Edit`=`edit`, `Write`=`write`, `Bash`=`bash`, `Grep`=`grep`, `Glob`=`glob`, `WebFetch`=`web_fetch`, `Agent`=`agent`).
 
 Decision order for a `ToolCall` with `risk` and `subject`:
 
@@ -1618,15 +1617,6 @@ Goal: a client over `cox-provider-http` (connection setup, Bearer auth, non-2xx 
 Check: `mise exec -- cargo nextest run -p cox-cursor-cloud client_sends_the_key_as_bearer_only client_never_retries_create client_stream_reconnects_without_duplicate_events client_error_text_never_contains_the_key client_user_agent_is_cox_version_only` (wiremock).
 Done when: the tests pass.
 Out of scope: webhooks (not in the v1 API); artifacts.
-
-#### T56.4 `Engine` asks before code leaves the machine: `CloudAgent(<repo>)`
-
-Depends: the creator's terms go-ahead (A123 (5)) · Size: ~140 · Files: `crates/cox-permission/src/rules.rs`, `crates/cox-permission/src/policy.rs`, `crates/cox-permission/src/lib.rs`
-Goal: a new permission subject `CloudAgent(<github owner>/<repo>)` in the rule grammar. It asks in every permission mode, `auto` and `bypass` included, unless the user's own config holds an allow rule for that repository; `plan` mode denies it. A project config's `allow` for it is reverted by the existing A122 rule (tested, not re-implemented). The approval text says the repository, the remote, the starting ref, and that the code is read and edited off this machine. The check lives in `Engine` only, never in the plugin or the driver.
-Check: `mise exec -- cargo nextest run -p cox-permission cloud_agent_asks_in_auto_and_bypass cloud_agent_is_denied_in_plan_mode cloud_agent_user_allow_rule_matches_one_repo cloud_agent_project_allow_is_reverted cloud_agent_approval_text_names_repo_ref_and_off_machine`.
-Done when: the tests pass; the rule grammar docs list the subject.
-Plan: `rules.rs` gets the `cloud_agent` tool name (alias `CloudAgent`), a strict `owner/repo` check, rule parsing that accepts only a bare or exact-repo subject, and a case-insensitive exact match for it; `lib.rs` `Engine::decide` routes the tool to one function (deny rules first, then plan denies, then only an exact user allow rule allows, else ask; `never` denies) and gains `cloud_agent_approval_text`; the A122 test loads a real project config through `cox-config` (dev-dependency) and decides with the reverted result; `docs/how-it-works.md` and §1.8 list the subject.
-Out of scope: any other remote-execution subject.
 
 #### T56.6 Host driver: a background task becomes a Cursor Cloud run
 

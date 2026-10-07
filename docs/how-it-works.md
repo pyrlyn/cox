@@ -110,6 +110,16 @@ exact subject, `Tool(prefix:*)` a subject that is `prefix` alone or
 `prefix` followed by whitespace, `WebFetch(domain:host)` the host and its
 subdomains, and a path glob for file tools.
 
+`CloudAgent(<owner>/<repo>)` (T56.4) names a GitHub repository whose code a
+cloud agent would read and edit off this machine. It asks in every
+permission mode, `auto` and `bypass` included, and `plan` mode denies it.
+Only an exact `allow = ["CloudAgent(owner/repo)"]` in your own config lifts
+the question, for that one repository (names are matched ignoring case); a
+bare `CloudAgent` allow, a session grant and a repository's own project
+config do not, because a project config's `allow` is reverted. `deny` and
+`ask` rules apply as for any tool. The approval names the repository, the
+remote, the starting ref and that the code leaves the machine.
+
 A `bash` command line is matched **command by command** (T36.1). The
 tool splits it with its tree-sitter parse on `;`, `&&`, `||`, `|`, `&` and
 newlines, including commands nested in a subshell, a `$(…)` or a loop
