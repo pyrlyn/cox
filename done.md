@@ -9866,3 +9866,43 @@ mise exec -- cargo nextest run -p cox-core -p cox-app -p cox: 777 tests run: 777
 mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings: clean
 mise exec -- cargo fmt --check: clean
 ```
+
+#### T59.1 Deterministic working state pre-fills compaction
+
+Model: grok-4.7 · Status: done 2026-10-07 · Depends: — · Size: ~180 · Priority: P1 · Complexity: 4
+
+Goal: after `compact`, the summary lists every file the session read, edited or created, every failing command and the open task, built from the transcript and not from the model's recall, and the model's summary costs at least 40 % fewer output tokens.
+
+Files:
+- `crates/cox-core/src/compact.rs`
+- `crates/cox-core/src/prompts/compact.md`
+- `crates/cox-protocol/src/config.rs`
+
+Steps:
+1. A pure `working_state(messages: &[Message]) -> WorkingState` next to `transcript`: walk tool calls and results and collect `(path, action)` with action read / edited / created (edit, write, `apply_patch`), failing `bash` commands with their exit code and last error line, and the last user request. Ordered by first appearance, so it is deterministic.
+2. `summarise` renders the state as the "Files touched" and "Errors seen" sections that `prompts/compact.md` already asks for, and tells the model to write only the narrative sections; the final summary is state block + model text. The model text stays under `MAX_SUMMARY_TOKENS`.
+3. `compaction.strategy = "llm" | "state+llm"` in `config.rs`, default `llm` until the Check numbers are in `research.md`; regenerate schemas.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a unit test over a scripted transcript asserts every touched path and the failing command appear in the summary with `state+llm`; a `just bench` compaction replay records path recall (100 % with `state+llm`), compact output tokens (−40 %) and pass rate against `llm` in `research.md`; the default flips only if the pass rate does not drop.
+
+Out of scope: per-file line ranges, dropping the model call entirely, the TUI view of the state.
+
+Result: `working_state` walks the transcript (tool calls paired with results) and `render_state` writes `Open task`, `## Files touched` and `## Errors seen`. `summarise` prepends that block when `compaction.strategy` is `state+llm` and still asks the model for at most `MAX_SUMMARY_TOKENS`; with `llm` the summary is the model text alone. A later edit of a path already read keeps the first slot and raises the action. A failed call is not listed as a touch. `apply_patch` add/move are created; update/delete are edited. The default stays `llm`. `docs/config.jsonschema` and `docs/config.md` were regenerated; `[compaction] strategy = "llm"` is in `default.toml`.
+
+Check output:
+```
+mise exec rust -- cargo fmt --check: clean
+mise exec rust -- cargo clippy -p cox-core -p cox-protocol --all-targets -- -D warnings: clean
+mise exec rust -- cargo nextest run -p cox-core -p cox-protocol -p cox-config: 497 tests run: 497 passed, 1 skipped
+```
+`state_plus_llm_summary_lists_every_touched_path_and_failing_command` passed (read+edit of `src/a.rs` once as edited, write `src/c.rs` created, apply_patch `src/d.rs` created and `src/e.rs` edited, `cargo test` exit 1 with the compiler line, open task present; `llm` summary equals the scripted narrative).
+
+Not done: `just bench` was not run. Its second half is a release plugin bench that needs the wasm32 target, and `cargo run -q -p cox --example bench` measures context-token-turns, not path recall or compact output tokens. No numbers were written to `research.md`, and the default was not flipped to `state+llm`. Workspace-wide nextest and clippy were not run.

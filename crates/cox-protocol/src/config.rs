@@ -47,6 +47,8 @@ pub struct Config {
     pub providers: ProvidersConfig,
     /// `[context]`
     pub context: ContextConfig,
+    /// `[compaction]` (T59.1)
+    pub compaction: CompactionConfig,
     /// `[permissions]`
     pub permissions: PermissionsConfig,
     /// `[sandbox]`
@@ -765,6 +767,36 @@ impl Default for CompatibleProviderConfig {
 }
 
 impl_transport!(CompatibleProviderConfig);
+
+/// How compaction builds the summary (T59.1). `llm` until a bench row in
+/// `research.md` shows the savings; the default does not flip in this card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub enum CompactionStrategy {
+    /// The model writes every section.
+    #[default]
+    #[serde(rename = "llm")]
+    Llm,
+    /// Files, failing commands and the open task come from the transcript.
+    /// The model writes only the narrative sections.
+    #[serde(rename = "state+llm")]
+    StatePlusLlm,
+}
+
+/// `[compaction]` (T59.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct CompactionConfig {
+    /// `compaction.strategy`: `llm` or `state+llm`.
+    pub strategy: CompactionStrategy,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            strategy: CompactionStrategy::Llm,
+        }
+    }
+}
 
 /// `[context]` (plan.md §1.6/§1.9/§1.10).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1892,6 +1924,27 @@ mod tests {
                 std::fs::write(&path, &generated).expect("write docs/config.md");
             }
         }
+    }
+
+    /// T59.1: the summary stays model-written until the bench numbers exist.
+    #[test]
+    fn compaction_strategy_defaults_to_llm_until_the_bench() {
+        use figment::providers::Format as _;
+        assert_eq!(
+            Config::default().compaction.strategy,
+            CompactionStrategy::Llm
+        );
+        let from_toml: Config =
+            figment::Figment::from(figment::providers::Toml::string(DEFAULT_CONFIG_TOML))
+                .extract()
+                .expect("default.toml parses");
+        assert_eq!(from_toml.compaction.strategy, CompactionStrategy::Llm);
+        let plus: Config = figment::Figment::from(figment::providers::Toml::string(
+            "[compaction]\nstrategy = \"state+llm\"\n",
+        ))
+        .extract()
+        .expect("state+llm");
+        assert_eq!(plus.compaction.strategy, CompactionStrategy::StatePlusLlm);
     }
 
     #[test]

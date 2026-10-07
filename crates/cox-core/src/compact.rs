@@ -9,13 +9,14 @@
 //! it is sent (T28.3). Separate from `session.rs` because it is the only
 //! place history is ever rewritten in memory.
 
+use cox_protocol::config::CompactionStrategy;
 use cox_protocol::errors::CoreError;
 use cox_protocol::ids::ItemId;
 use cox_protocol::types::{
     CompactReason, Content, Event, HookEvent, HookOutcome, ItemKind, Job, Level, Message,
     ProviderEvent, RepoMapReason, Request, Role, SystemBlock,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::budget;
@@ -162,6 +163,177 @@ pub(crate) fn transcript(messages: &[Message]) -> String {
         }
     }
     out
+}
+
+/// Files, failing commands and the last user request, in transcript order.
+/// Taken from tool calls, so the summary cannot drop a path the model forgot.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct WorkingState {
+    /// `(path, read|edited|created)`. A later edit keeps the first slot.
+    files: Vec<(String, &'static str)>,
+    /// `(command, exit code, last error line)`.
+    errors: Vec<(String, Option<u32>, String)>,
+    last_request: Option<String>,
+}
+
+/// `read` / `edited` / `created`. Created outranks edited, which outranks read.
+fn rank(action: &str) -> u8 {
+    match action {
+        "created" => 2,
+        "edited" => 1,
+        _ => 0,
+    }
+}
+
+pub(crate) fn working_state(messages: &[Message]) -> WorkingState {
+    let mut calls = Vec::new();
+    let mut state = WorkingState::default();
+    for message in messages {
+        for block in &message.content {
+            match block {
+                Content::Text { text } if message.role == Role::User && !text.trim().is_empty() => {
+                    state.last_request = Some(text.trim().to_string());
+                }
+                Content::ToolUse { id, name, input } => calls.push((*id, name.as_str(), input)),
+                Content::ToolResult {
+                    call_id,
+                    content,
+                    is_error,
+                } => {
+                    if let Some((_, name, input)) =
+                        calls.iter().rev().find(|(id, _, _)| id == call_id)
+                    {
+                        record(&mut state, name, input, content, *is_error);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    state
+}
+
+fn record(state: &mut WorkingState, name: &str, input: &Value, content: &str, is_error: bool) {
+    if name == "bash" {
+        // A zero exit is not an error the summary has to keep.
+        if !is_error {
+            return;
+        }
+        let Some(command) = input
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|command| !command.is_empty())
+        else {
+            return;
+        };
+        let last_line = content
+            .lines()
+            .rev()
+            .map(str::trim)
+            .find(|line| !line.is_empty() && !(line.starts_with('[') && line.ends_with(']')))
+            .unwrap_or("")
+            .to_string();
+        let exit_code = content.lines().rev().find_map(|line| {
+            line.trim()
+                .strip_prefix("[exit ")
+                .and_then(|rest| rest.split([' ', ']']).next())
+                .and_then(|token| token.parse().ok())
+        });
+        state
+            .errors
+            .push((command.to_string(), exit_code, last_line));
+        return;
+    }
+    // A denied or failed call never touched the file.
+    if is_error {
+        return;
+    }
+    let mut note = |path: &str, action: &'static str| {
+        let path = path.trim();
+        if path.is_empty() {
+            return;
+        }
+        if let Some(existing) = state.files.iter_mut().find(|(got, _)| got == path) {
+            if rank(action) > rank(existing.1) {
+                existing.1 = action;
+            }
+        } else {
+            state.files.push((path.to_string(), action));
+        }
+    };
+    if let Some(action) = match name {
+        "read" => Some("read"),
+        "edit" => Some("edited"),
+        "write" => Some("created"),
+        _ => None,
+    } {
+        note(
+            input.get("path").and_then(Value::as_str).unwrap_or(""),
+            action,
+        );
+        return;
+    }
+    if name != "apply_patch" {
+        return;
+    }
+    // Delete has no action of its own; the path still has to be listed.
+    for line in input
+        .get("patch")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .lines()
+    {
+        let line = line.trim();
+        let marked = [
+            ("*** Add File: ", "created"),
+            ("*** Move to: ", "created"),
+            ("*** Update File: ", "edited"),
+            ("*** Delete File: ", "edited"),
+        ]
+        .into_iter()
+        .find_map(|(prefix, action)| line.strip_prefix(prefix).map(|path| (path, action)));
+        if let Some((path, action)) = marked {
+            note(path, action);
+        }
+    }
+}
+
+/// `## Files touched` and `## Errors seen`, the sections the prompt names,
+/// plus the open task (the last user request).
+fn render_state(state: &WorkingState) -> String {
+    let files = if state.files.is_empty() {
+        "(none)\n".to_string()
+    } else {
+        state
+            .files
+            .iter()
+            .map(|(path, action)| format!("- `{path}` ({action})\n"))
+            .collect()
+    };
+    let errors = if state.errors.is_empty() {
+        "(none)\n".to_string()
+    } else {
+        state
+            .errors
+            .iter()
+            .map(|(command, code, line)| {
+                let code = code.map(|n| format!(" exit {n}")).unwrap_or_default();
+                let line = if line.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {line}")
+                };
+                format!("- `{command}`{code}{line}\n")
+            })
+            .collect()
+    };
+    let task = state
+        .last_request
+        .as_deref()
+        .map(|task| format!("Open task: {task}\n\n"))
+        .unwrap_or_default();
+    format!("{task}## Files touched\n{files}\n## Errors seen\n{errors}")
 }
 
 impl Session {
@@ -347,10 +519,22 @@ impl Session {
         // of the cheap tier applies here too.
         let route = self.route_for(Job::Compact, true).await.ok()?;
         let model = route.model.clone();
+        // `state+llm` pre-fills files and errors from the transcript. The
+        // model is still capped at `MAX_SUMMARY_TOKENS`; that cap is the
+        // narrative only, so the state block does not spend it.
+        let state = (self.config.compaction.strategy == CompactionStrategy::StatePlusLlm)
+            .then(|| render_state(&working_state(messages)));
         let mut system = PROMPT.to_string();
         if let Some(focus) = focus {
             system.push_str(&format!("\nFocus on: {focus}\n"));
         }
+        let text = match &state {
+            Some(block) => format!(
+                "Working state (already recorded; do not repeat these sections):\n\n{block}\nTranscript:\n{}",
+                transcript(messages)
+            ),
+            None => transcript(messages),
+        };
         let req = Request {
             tier: route.tier,
             job: Job::Compact,
@@ -362,9 +546,7 @@ impl Session {
             tools: vec![],
             messages: vec![Message {
                 role: Role::User,
-                content: vec![Content::Text {
-                    text: transcript(messages),
-                }],
+                content: vec![Content::Text { text }],
             }],
             effort: route.effort,
             max_tokens: MAX_SUMMARY_TOKENS.min(route.max_tokens),
@@ -399,12 +581,18 @@ impl Session {
             self.add_spend(usage.cost_usd).await;
         }
         let out = out.trim().to_string();
-        (!out.is_empty()).then_some(out)
+        match state {
+            Some(block) if out.is_empty() => Some(block),
+            Some(block) => Some(format!("{block}\n{out}")),
+            None => (!out.is_empty()).then_some(out),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     fn marks(n: usize) -> Vec<TurnMark> {
@@ -438,5 +626,126 @@ mod tests {
         assert!(near(900, 1000.0) && near(1100, 1000.0));
         assert!(!near(899, 1000.0) && !near(1101, 1000.0));
         assert_eq!(threshold(0, 0.75), None);
+    }
+
+    fn exchange(name: &str, input: Value, content: &str, is_error: bool) -> [Message; 2] {
+        use cox_protocol::ids::CallId;
+        let id = CallId::new();
+        [
+            Message {
+                role: Role::Assistant,
+                content: vec![Content::ToolUse {
+                    id,
+                    name: name.into(),
+                    input,
+                }],
+            },
+            Message {
+                role: Role::User,
+                content: vec![Content::ToolResult {
+                    call_id: id,
+                    content: content.into(),
+                    is_error,
+                }],
+            },
+        ]
+    }
+
+    fn touched_transcript() -> Vec<Message> {
+        let text = |text: &str| Message {
+            role: Role::User,
+            content: vec![Content::Text { text: text.into() }],
+        };
+        let mut messages = vec![text("rename the parser")];
+        // Read then edit of the same path: one slot, action raised to edited.
+        messages.extend(exchange(
+            "read",
+            json!({"path": "src/a.rs"}),
+            "1|fn main() {}",
+            false,
+        ));
+        messages.extend(exchange(
+            "edit",
+            json!({"path": "src/a.rs", "old": "a", "new": "b"}),
+            "edited",
+            false,
+        ));
+        messages.extend(exchange(
+            "write",
+            json!({"path": "src/c.rs"}),
+            "wrote",
+            false,
+        ));
+        messages.extend(exchange(
+            "apply_patch",
+            json!({"patch": "*** Add File: src/d.rs\n*** Update File: src/e.rs\n"}),
+            "applied",
+            false,
+        ));
+        messages.extend(exchange(
+            "bash",
+            json!({"command": "echo ok"}),
+            "[exit 0 in 3ms]",
+            false,
+        ));
+        messages.extend(exchange(
+            "bash",
+            json!({"command": "cargo test"}),
+            "error: could not compile `cox`\n[exit 1 in 40ms]",
+            true,
+        ));
+        messages.push(text("fix the compile error"));
+        messages
+    }
+
+    async fn summary_for(strategy: CompactionStrategy, narrative: &str) -> String {
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        use cox_provider::scripted::Scripted;
+
+        let mut config = cox_protocol::Config::default();
+        config.compaction.strategy = strategy;
+        let store = Arc::new(crate::session::MemoryStore::new());
+        let provider = Arc::new(
+            Scripted::from_toml(&format!("[[turn]]\ntext = {narrative:?}\n"), "")
+                .expect("scenario"),
+        );
+        crate::session::Session::new(
+            config,
+            provider,
+            vec![],
+            store.clone(),
+            store,
+            PathBuf::from("/tmp/cox-compact"),
+        )
+        .expect("session")
+        .summarise(&touched_transcript(), None)
+        .await
+        .expect("summary")
+    }
+
+    #[tokio::test]
+    async fn state_plus_llm_summary_lists_every_touched_path_and_failing_command() {
+        let narrative = "## Goal\ncontinue\n## Next step\nrerun the suite";
+        let plus = summary_for(CompactionStrategy::StatePlusLlm, narrative).await;
+        assert!(plus.contains("`src/a.rs` (edited)"), "{plus}");
+        assert!(plus.contains("`src/c.rs` (created)"), "{plus}");
+        assert!(plus.contains("`src/d.rs` (created)"), "{plus}");
+        assert!(plus.contains("`src/e.rs` (edited)"), "{plus}");
+        assert_eq!(plus.matches("src/a.rs").count(), 1, "{plus}");
+        assert!(
+            plus.contains("`cargo test` exit 1: error: could not compile `cox`"),
+            "{plus}"
+        );
+        assert!(
+            plus.contains("fix the compile error") && plus.contains(narrative),
+            "{plus}"
+        );
+        assert!(!plus.contains("echo ok"), "{plus}");
+        assert_eq!(
+            summary_for(CompactionStrategy::Llm, narrative).await,
+            narrative
+        );
     }
 }

@@ -9,3 +9,8 @@ anything superseded. Write at most 2048 tokens under exactly these headings:
 ## Open todo
 ## Errors seen
 ## Next step
+
+When a working-state block precedes the transcript, that block already lists
+every file, every failing command and the open task. Do not repeat
+## Files touched or ## Errors seen. Write only ## Goal, ## Decisions,
+## Open todo and ## Next step.

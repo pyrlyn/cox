@@ -133,6 +133,13 @@
         "repomap_budget_tokens": 0
       }
     },
+    "compaction": {
+      "description": "`[compaction]` (T59.1)",
+      "$ref": "#/$defs/CompactionConfig",
+      "default": {
+        "strategy": "llm"
+      }
+    },
     "permissions": {
       "description": "`[permissions]`",
       "$ref": "#/$defs/PermissionsConfig",
@@ -1151,6 +1158,33 @@
         }
       },
       "additionalProperties": false
+    },
+    "CompactionConfig": {
+      "description": "`[compaction]` (T59.1).",
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "description": "`compaction.strategy`: `llm` or `state+llm`.",
+          "$ref": "#/$defs/CompactionStrategy",
+          "default": "llm"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CompactionStrategy": {
+      "description": "How compaction builds the summary (T59.1). `llm` until a bench row in\n`research.md` shows the savings; the default does not flip in this card.",
+      "oneOf": [
+        {
+          "description": "The model writes every section.",
+          "type": "string",
+          "const": "llm"
+        },
+        {
+          "description": "Files, failing commands and the open task come from the transcript.\nThe model writes only the narrative sections.",
+          "type": "string",
+          "const": "state+llm"
+        }
+      ]
     },
     "PermissionsConfig": {
       "description": "`[permissions]` (plan.md §1.6/§1.8).",
