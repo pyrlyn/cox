@@ -117,7 +117,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
-| T62.2 | todo | P1 | 2 | 0% | |
 | T62.5 | todo | P1 | 2 | 0% | |
 | T62.6 | todo | P3 | 1 | 0% | |
 | T62.7 | todo | P3 | 1 | 0% | |
@@ -2725,10 +2724,6 @@ unless Docker e2e is required.
 ### T62. Audit fixes (2026-10-07)
 
 Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-test `unwrap/expect/panic!` across ~150k LOC, parameterized SQL, hardened plugin install path (https-only, sha256-gated, tar ToC refusal), correct flock session lock. T62.1 (self-update 404) is closed in `done.md`.
-
-### T62.2. Known panic path in `edit`'s whitespace fallback with `replace_all`
-
-`crates/cox-tools/src/edit.rs:206-221`: fallback windows are not de-overlapped and byte offsets are computed against the original content while splicing an already-mutated string — overlapping normalized windows with a shorter `new` panic on `replace_range` ("range end out of bounds"). The comment at `edit.rs:210-215` admits it, against the project's no-panic rule. Done means: the result is rebuilt from segments (or overlapping starts dropped), with a regression test.
 
 ### T62.5. `web_fetch` has no SSRF guard
 
