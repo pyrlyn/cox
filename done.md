@@ -9901,3 +9901,9 @@ Result: `cox_tools::project::ProjectTool` detects the command (`[project]` confi
 Check: `mise exec -- cargo nextest run -p cox-tools -p cox-session -p cox-protocol -p cox-config -p cox -p cox-core -p cox-permission`: 927 tests run, 927 passed (4 skipped), including `detection_table_picks_the_manifests_command` (15 rows), `detection_finds_nothing_without_a_matching_manifest_entry`, `project_asks_exactly_like_bash_for_the_same_command` (cox-core `tests/permission.rs`), `project_tool_is_registered_only_behind_its_flag`, and the config.md, config.jsonschema and deps drift tests. `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
 
 Not done: `just bench` and the `research.md` bench row (the mean-tool-calls −5 % claim) were not run, by instruction. No insta snapshot changed. The real binary was not run against a scratch `COX_HOME`. No action-level `call` test runs a command end to end (the executor is `BashTool`'s, covered by its own tests). `package.json` detection assumes `npm`, not pnpm/yarn/bun.
+
+#### T62.1 self-update latest-release URL missed `/repos/`
+
+`crates/cox/src/self_update.rs`: the latest-release API URL lacked GitHub's mandatory `/repos/` segment, so every `cox self update` without `--version` aborted on 404; only explicit `--version` worked. Found by the 2026-10-07 audit (T62). Fix: the URL lives in `latest_url()` with a unit test asserting the endpoint shape, so a regression cannot ship silently again.
+Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 1 · Files: `crates/cox/src/self_update.rs`
+Check: `cargo test -p cox --lib self_update`.

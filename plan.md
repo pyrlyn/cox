@@ -117,6 +117,14 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
+| T62.2 | todo | P1 | 2 | 0% | |
+| T62.3 | todo | P0 | 2 | 0% | |
+| T62.4 | todo | P1 | 2 | 0% | |
+| T62.5 | todo | P1 | 2 | 0% | |
+| T62.6 | todo | P3 | 1 | 0% | |
+| T62.7 | todo | P3 | 1 | 0% | |
+| T62.8 | todo | P3 | 1 | 0% | |
+| T62.9 | todo | P3 | 1 | 0% | |
 
 ## Reference
 
@@ -2715,3 +2723,39 @@ Already covered: `assert_cmd`, `assert_fs`, `insta`, `predicates`, `pretty_asser
 `bolero`/`honggfuzz` unless fuzz gaps beyond libfuzzer; `vfs` optional for
 tools FS unit tests (compare with rtok T56 pattern); `testcontainers` YAGNI
 unless Docker e2e is required.
+
+### T62. Audit fixes (2026-10-07)
+
+Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-test `unwrap/expect/panic!` across ~150k LOC, parameterized SQL, hardened plugin install path (https-only, sha256-gated, tar ToC refusal), correct flock session lock. T62.1 (self-update 404) is closed in `done.md`.
+
+### T62.2. Known panic path in `edit`'s whitespace fallback with `replace_all`
+
+`crates/cox-tools/src/edit.rs:206-221`: fallback windows are not de-overlapped and byte offsets are computed against the original content while splicing an already-mutated string — overlapping normalized windows with a shorter `new` panic on `replace_range` ("range end out of bounds"). The comment at `edit.rs:210-215` admits it, against the project's no-panic rule. Done means: the result is rebuilt from segments (or overlapping starts dropped), with a regression test.
+
+### T62.3. The default `~/.ssh` deny is bypassable through `bash`
+
+`cox-protocol/src/config.rs:849-850` denies only `Read(~/.ssh/**)`/`Read(~/.aws/**)`, but `bash/classify.rs:26-27` classifies `cat` as `Risk::ReadOnly` (auto-allowed) and the sandbox grants global file-read (`seatbelt.rs:17` `allow file-read*`; bwrap equivalent `--ro-bind / /`, `bwrap.rs:22-24`). `bash: cat ~/.ssh/id_rsa` runs with no approval and the key text enters the model's context — exactly what the deny exists to prevent. Done means: the default rules cover read-style bash commands into denied paths (or the classifier treats arguments outside the workspace as `Exec`).
+
+### T62.4. Build/test commands classified read-only execute project-controlled code without approval
+
+`bash/classify.rs:372-378`: `cargo check|test|build|clippy|…` and `npm|pnpm|yarn test` are `Risk::ReadOnly`, so in Default mode they auto-run — the model can first edit `build.rs` / a `pretest` hook and then "run tests", executing its own code with no approval prompt. The sandbox limits the blast radius, but it is code execution approved as read-only. Done means: these classify as `Exec` (or ReadOnly survives only for genuinely non-executing subcommands).
+
+### T62.5. `web_fetch` has no SSRF guard
+
+`cox-tools/src/web_fetch.rs:55,70` is `Risk::ReadOnly` with only a scheme check, and `cox-web::fetch` (`cox-web/src/lib.rs:60-109`) follows up to 5 redirects with no private-address filtering — the model reads `169.254.169.254`, internal localhost services or RFC1918 hosts without approval and sees the bodies. Done means: link-local/loopback/private ranges are denied (or ask) by default.
+
+### T62.6. pid-reuse race in the bash kill path
+
+`cox-tools/src/bash/mod.rs:649-651`: after the child is reaped, the code still `killpg`s the group to catch grandchildren; a reused pid in that window signals an unrelated process group. Done means: a held group id (or pidfd-style reaping) removes the race.
+
+### T62.7. Duplicated repo-root resolution
+
+`crates/cox-tools/src/git.rs:518` (`--show-toplevel`) duplicates what `main_checkout` in the same file already resolves (`git.rs:367-384`, `--git-common-dir`), and `scripts/changed_tests.py:93` resolves it a third time. Done means: one root helper in `git.rs`, reused everywhere.
+
+### T62.8. `checkpoint changes()` silently truncates on root-count mismatch
+
+`crates/cox-tools/src/checkpoint.rs:166`: `before.trees.iter().zip(&after.trees)` drops unpaired roots instead of erroring — a snapshot pair from different root sets reports partial diffs. Done means: mismatched root sets are an error.
+
+### T62.9. Small fixes: `confine` colon ban and retry jitter
+
+`cox-sandbox/src/path.rs:87` rejects every path containing `:` (documented as a Windows-syntax ban, but it also refuses legitimate Unix filenames with colons) — revisit with an allowlist for workspace-local names or a clearer comment. `cox-provider-http/src/retry.rs:48-57` derives jitter from `subsec_nanos` of the wall clock — near-deterministic for aligned callers; mix in a bit more entropy.
