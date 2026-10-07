@@ -29,6 +29,7 @@ Programs the project uses and the direct packages from its manifests.
 | swift-format | Xcode toolchain (`xcrun swift-format`) | Formats the macOS app's Swift (research.md §9.5.5); CI's `desktop-macos-lint` job runs `lint --strict` | https://github.com/swiftlang/swift-format |
 | resvg | mise (`mise.toml`, aqua) | Renders the PNG exports in `brand/logo/png/` from the brand SVGs (`just brand-icons`, `scripts/brand_icons.py`, A136); CI's `desktop-macos-lint` job checks them | https://github.com/linebender/resvg |
 | XcodeGen | mise (`mise.toml`, aqua) | Generates the macOS app's thin `desktop/macos/Cox.xcodeproj` from `desktop/macos/project.yml`, so only the spec is in git and the project never merge-conflicts (`just desktop-app`, T37.32.1); CI's `desktop-macos` job | https://github.com/yonaskolb/XcodeGen |
+| .NET SDK | winget `Microsoft.DotNet.SDK.10` 10.0.401 (runtime 10.0.12) | Builds the Windows app (`desktop/windows/global.json`, T58.3, R10.2.6) | https://github.com/dotnet/sdk |
 | cmake | mise (`mise.toml`) | Builds whisper.cpp for `cox-voice` through `whisper-rs-sys` (T54.2, A123); 3.31.12, the version sibling projects already pin (apps/bindsmith) | https://github.com/Kitware/CMake |
 | GNU gettext (`msgfmt`, `msgmerge`, `msginit`, `msgcmp`) | brew (`brew install gettext`); optional | Maintains and validates the `cox-i18n` catalogs: `just i18n-update` (msgmerge the template into each `.po`), `just i18n-check` (msgfmt --check, msgcmp), `msginit` for a new locale (`docs/i18n.md`). The runtime does not use it; the `cox-i18n` test that runs msgfmt skips when it is absent | https://www.gnu.org/software/gettext/ |
 
@@ -174,3 +175,11 @@ Programs the project uses and the direct packages from its manifests.
 | swift-snapshot-testing | local (`CoxUI` tests) | https://github.com/pointfreeco/swift-snapshot-testing | T37.19: image snapshots of the CoxUI Foundations and components (DS§9, A67) |
 | SwiftTerm | local (`CoxPlatform`) | https://github.com/migueldeicaza/SwiftTerm | T51.5: the terminal pane's VT emulator and renderer, `TerminalView` only — the shell runs in Rust (research.md §9.5.2; 1.20.0, the latest release, 2026-08-18; MIT) |
 | KeyboardShortcuts | local (the `Cox` app target, `desktop/macos/project.yml`) | https://github.com/sindresorhus/KeyboardShortcuts | T51.15: the two global hotkeys' recorder, registration and storage in Settings › General (DT§4.6; 3.1.0, the latest release, 2026-09-11; MIT) |
+
+## NuGet (`desktop/windows`)
+
+| Package | Where | Source | Why here |
+| --- | --- | --- | --- |
+| Microsoft.WindowsAppSDK | local (`App`, `Cox.UI`, `Cox.Transcript`) | https://github.com/microsoft/WindowsAppSDK | T58.3: WinUI 3 (2.5.1, the stable line in R10.2.5) |
+| Microsoft.Windows.SDK.BuildTools | local (the same projects) | https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools | T58.3: Windows SDK targeting pack the WinUI targets require; 10.0.26100.7705, the latest 26100 build, with `TargetPlatformMinVersion` 10.0.17763.0 (A128) |
+| MSTest.Sdk | local (`Cox.Tests`, pinned in `global.json`) | https://github.com/microsoft/testfx | T58.3, A141: MSTest 4.4.1, the creator's C# test runner |

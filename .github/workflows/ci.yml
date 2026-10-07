@@ -125,6 +125,32 @@ jobs:
       - name: windows check
         run: just windows-check
 
+  # The Windows app (T58.3). `global.json` pins the .NET 10 SDK and the
+  # Microsoft.Testing.Platform runner, so the steps run in `desktop/windows`.
+  # Enabled after the layout built and its MSTest passed on a Windows host (A130).
+  desktop-windows:
+    needs: [config, changes]
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (needs.changes.result != 'success'
+      || needs.changes.outputs.swift == 'true')
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop/windows
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: desktop/windows/global.json
+
+      - name: build
+        run: dotnet build Cox.sln -c Debug
+
+      - name: test
+        run: dotnet test --project Cox.Tests -c Debug
+
   # The guest workspace (plugins/, PL§9, T33.40.2): its own `cargo test`
   # target (a separate workspace, so the root `rust` job above never builds
   # it) plus the wasm32-unknown-unknown build every plugin ships as.
@@ -243,14 +269,15 @@ jobs:
   # Which suites this change needs, from the shared pyrlyn/ci classification
   # (changes.yml): per ecosystem, whether anything changed and whether a
   # dependency manifest or lock changed (`*_deps`, which forces that full suite).
-  # Only the macOS jobs below read it. The Rust jobs above always run in full on
+  # `desktop-macos`, `desktop-macos-lint` and `desktop-windows` read it. The Rust jobs above always run in full on
   # every pull request (the `docs` test reads docs/, so no path filter is safe
   # there), which already covers any Cargo.toml or Cargo.lock change.
   # The Swift suite counts desktop/ and scripts/desktop/ as Swift, and the app
   # links CoxFFI.xcframework, so a Rust change (crates/, Cargo manifests or
-  # lock) runs it too. A failed `changes` job runs the macOS jobs rather than
-  # skipping them. A skipped macOS job reports `skipped` under its own name,
-  # which a required check treats as passed.
+  # lock) runs it too. `desktop-windows` reads the same `swift` output, because
+  # `^desktop/` includes `desktop/windows/`. A failed `changes` job runs these
+  # jobs rather than skipping them. A skipped job reports `skipped` under its
+  # own name, which a required check treats as passed.
   changes:
     uses: pyrlyn/ci/.github/workflows/changes.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
     permissions:

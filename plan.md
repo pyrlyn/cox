@@ -69,7 +69,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T57.13 | todo | P2 | 3 | 0% | |
 | T58.1 | todo | P1 | 4 | 0% | |
 | T58.2 | todo | P2 | 2 | 0% | |
-| T58.3 | todo | P1 | 3 | 0% | |
+| T58.3 | in progress | P1 | 3 | 90% | Cursor / grok 4.7 |
 | T58.5 | todo | P2 | 3 | 0% | |
 | T58.6 | todo | P2 | 3 | 0% | |
 | T58.7 | todo | P2 | 4 | 0% | |
@@ -175,7 +175,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
 | `cox-ffi` | the macOS app's UniFFI surface (T37.14): one tokio runtime, `App` and `SessionHandle` objects, the foreign `AppHost` trait, `#[uniffi::remote]` mirrors of cox-app types, a fixture recorder. `staticlib` + `lib`; the only crate that depends on uniffi | uniffi 0.32.2 (proc-macros, no UDL; default features off); dev: syn 3.0.5 (`full`, `parsing`; T37.39.1: `tests/forward_only.rs` parses the FFI sources); async-trait (MIT OR Apache-2.0): the async `AppHost` methods UniFFI exports (P51, P52) |
 | `desktop/` | the macOS app (P37, not a Cargo crate): Swift packages under `desktop/macos/Packages/`, the design tokens and their generator under `desktop/design/` | node 24.21.0 (mise) with npm `style-dictionary` 5.5.5 (T37.17: DTCG tokens → Swift, asset colours, CSS); SwiftLint 0.65.1 (mise, aqua; T37.18: DS§9 no-literal rules) and SwiftLintPlugins at the same version in each package; `swift-format` from the Xcode toolchain; swift-collections 1.7.1 (T37.16: `OrderedDictionary` timeline store); swift-snapshot-testing 1.19.6 (T37.19: `CoxUI` snapshot tests) |
-| `desktop/windows/` | the Windows app (P58, A127; planned, not a Cargo crate): a WinUI 3 + C# solution over `cox-ffi`'s C# bindings, logic in `cox-app` | planned by A127: .NET SDK 10.0 LTS (10.0.12), Windows App SDK 2.5.1, uniffi-bindgen-cs on uniffi 0.32 (blocked, T58.1); candidates CommunityToolkit.Mvvm 8.4.2, xunit.v3 4.0.1, FlaUI.UIA3 5.0.0, Verify.XunitV3 33.1.5 (`research.md` §10) |
+| `desktop/windows/` | the Windows app (P58, A127; planned, not a Cargo crate): a WinUI 3 + C# solution over `cox-ffi`'s C# bindings, logic in `cox-app` | .NET SDK 10.0.401 (runtime 10.0.12, R10.2.6), Windows App SDK 2.5.1, Microsoft.Windows.SDK.BuildTools 10.0.26100.7705, MSTest 4.4.1 (A141). uniffi-bindgen-cs on uniffi 0.32 stays blocked (T58.1). Candidates still: CommunityToolkit.Mvvm 8.4.2, FlaUI.UIA3 5.0.0 (`research.md` §10) |
 | `cox-protocol` | `Submission`, `Event`, `Item`, `ToolCall`, `ToolResult`, `Usage`, `Config`, traits `Provider`, `Tool`, `Store`, `Hook` | serde, serde_json, schemars 1, thiserror 2, base64 0.23 (`image`, T40.1) |
 | `cox-core` | `Session` state machine, turn loop, context assembly, cache breakpoints, `Router` (job → tier → model), compaction, budget, subagent spawning | tokio 1, tracing 0.1, base64 0.23 (T37.6: attached text files) |
 | `cox-models` | the model catalog: id → context window, max output, efforts, capabilities, price; built-in rows < config < user `prices.toml` (T30.24). Pure: parses embedded or caller-supplied strings only | serde, thiserror, figment |
@@ -1748,7 +1748,7 @@ Every card in this phase:
 - uses tokens only in XAML and C#: no literal colour, size, font, radius or duration outside the generated resource dictionary (T58.8), mirroring DS§9;
 - builds each visual from one control catalogue (T58.3), adding a style or template there rather than a copy;
 - gives every interactive element an `AutomationProperties.Name` (Narrator and T58.29 both depend on it);
-- leaves a test that fails without it (`insta` in Rust, xUnit in C#; UI automation or snapshot per T58.29 and T58.30);
+- leaves a test that fails without it (`insta` in Rust, MSTest in C#; UI automation or snapshot per T58.29 and T58.30);
 - is split at claim time when it exceeds 200 LOC or 3 files (manifests, project files, generated bindings, generated XAML, fixtures and snapshots do not count);
 - names any new package in §1.1 and `toolchain.md` in the same change; candidate versions are in §1.1's A127 note (R10.2, R10.7).
 
@@ -1770,7 +1770,8 @@ Check: every R10, DT§ and A-number reference resolves to an existing row or sec
 
 Depends: T58.1 · Size: ~150 · Files: `desktop/windows/Cox.sln` (new), `desktop/windows/Directory.Packages.props` (new), `desktop/windows/global.json` (new); project files per the list below
 Goal: mirror `desktop/macos/Packages` (DT§6): `App` (WinUI 3 entry, window, resources), `Cox.Core` (generated bindings, T58.1), `Cox.Model` (stores, the counterpart of CoxModel), `Cox.UI` (controls catalogue and views), `Cox.Transcript` (the transcript list), `Cox.Platform` (host bridge, notifications, packaging hooks) and `Cox.Tests`. `global.json` pins the .NET SDK (10.0 LTS, R10.2.6); central package versions in `Directory.Packages.props`; `Cox.Model` references no WinUI assembly so its tests run headless. A `desktop-windows` CI job builds the solution and runs `dotnet test`.
-Check: `dotnet build desktop/windows/Cox.sln -c Debug` and `dotnet test desktop/windows/Cox.Tests` in the Windows job; a test asserts `Cox.Model` has no reference to `Microsoft.WindowsAppSDK`.
+Plan: pin SDK 10.0.401 in `global.json`; central versions for Windows App SDK 2.5.1, `Microsoft.Windows.SDK.BuildTools` 10.0.26100.7705 (the 26100 contract already on this host; `TargetPlatformMinVersion` stays 10.0.17763.0, A128) and MSTest 4.4.1 (A141). `Cox.Core` stays free of generated C# until T58.1. Verify with `dotnet build desktop/windows/Cox.sln -c Debug` and `dotnet test desktop/windows/Cox.Tests`.
+Check: from `desktop/windows` (so `global.json` selects the .NET 10 SDK and the Microsoft.Testing.Platform runner), `dotnet build Cox.sln -c Debug` and `dotnet test --project Cox.Tests -c Debug`. The test asserts `Cox.Model` has no reference to `Microsoft.WindowsAppSDK`.
 
 #### T58.5 C# client contract, fixture client and the session store
 
@@ -1782,7 +1783,7 @@ Check: `dotnet test desktop/windows/Cox.Tests --filter SessionStore` passes `Rep
 
 Depends: T58.5, T58.4 · Size: split at claim time, one sub-card per store · Files: `desktop/windows/Cox.Model/*Store.cs`, their tests
 Goal: sidebar, composer, settings, inspector tabs, search, onboarding and inbox stores, each the counterpart of the CoxModel store of the same name, holding view state only and sending intents.
-Check: one xUnit test per store over the fixture client.
+Check: one MSTest test per store over the fixture client.
 
 #### T58.7 Live client: `LiveCoreClient`, dispatcher and host bridge
 
@@ -1812,7 +1813,7 @@ Check: T58.29's smoke test opens the window; its size is clamped on a 1280×720 
 
 Depends: T58.10, T58.6 · Size: ~180 · Files: `desktop/windows/Cox.UI/Sidebar.xaml`, `.xaml.cs`, a test
 Goal: DT§3.1 "Projects and sessions sidebar" and "Several live sessions at once": "Needs you" and "Running" on top, projects with sessions newest first, switching never stops a session.
-Check: xUnit over the sidebar store; the smoke test switches sessions while one runs.
+Check: MSTest over the sidebar store; the smoke test switches sessions while one runs.
 
 #### T58.12 Transcript blocks
 
@@ -1830,7 +1831,7 @@ Check: `dotnet test --filter StyledDoc` maps every span kind of a fixture doc.
 
 Depends: T58.12 · Size: split at claim time · Files: `desktop/windows/Cox.UI/Composer*`
 Goal: DT§3.1 "Composer": multi-line, `@file` and `/command` completion from `cox-app`'s `Completer`, `!` shell mode, paste and drop of images and files, queue while busy.
-Check: xUnit over the composer store; the smoke test sends a prompt.
+Check: MSTest over the composer store; the smoke test sends a prompt.
 
 #### T58.15 Approvals
 
@@ -1842,73 +1843,73 @@ Check: the smoke test approves the `approve-write` fixture's write.
 
 Depends: T58.12 · Size: ~120 · Files: `desktop/windows/Cox.UI/QuestionCard.xaml`, `.xaml.cs`, a test
 Goal: DT§3.1 "Questions": options as buttons plus a free-text field.
-Check: xUnit: choosing an option sends the answer intent.
+Check: MSTest: choosing an option sends the answer intent.
 
 #### T58.17 Permission mode, model and effort controls
 
 Depends: T58.10 · Size: ~150 · Files: `desktop/windows/Cox.UI/SessionToolbar.xaml`, `.xaml.cs`, a test
 Goal: DT§3.1 "Permission mode and model": command-bar controls whose change is echoed as typed state. With no sandbox the mode control shows the forced `on-request` (T57.3) and cannot select a laxer one.
-Check: xUnit: a `StateChanged` patch updates the control; the laxer policy is disabled when the session reports no sandbox.
+Check: MSTest: a `StateChanged` patch updates the control; the laxer policy is disabled when the session reports no sandbox.
 
 #### T58.18 Review
 
 Depends: T58.12 · Size: split at claim time · Files: `desktop/windows/Cox.UI/Review*`
 Goal: DT§3.1 "Review": changed files, unified and side-by-side diff from the `cox-render` diff model, revert a file to a checkpoint, comment on a line to send it to the agent.
-Check: xUnit over the review store; a fixture diff renders both layouts.
+Check: MSTest over the review store; a fixture diff renders both layouts.
 
 #### T58.19 Rewind timeline
 
 Depends: T58.12 · Size: ~150 · Files: `desktop/windows/Cox.UI/RewindGutter.xaml`, `.xaml.cs`, a test
 Goal: DT§3.1 "Rewind timeline": marks per turn; restore code, conversation or both; edit and resend a past prompt.
-Check: xUnit: each choice sends the matching `Rewind` intent.
+Check: MSTest: each choice sends the matching `Rewind` intent.
 
 #### T58.20 Inspector
 
 Depends: T58.10 · Size: split into T58.20.1–T58.20.5 at claim time · Files: `desktop/windows/Cox.UI/Inspector*`
 Goal: DT§3.1 "Inspector" tabs: Changes, Plan, Context & Cost, Tasks, Info, each over the data `cox-app` already exposes for the macOS inspector (T37.29.x).
-Check: per tab, an xUnit test over its store.
+Check: per tab, an MSTest test over its store.
 
 #### T58.21 Search and command palette
 
 Depends: T58.10 · Size: ~180 · Files: `desktop/windows/Cox.UI/CommandPalette.xaml`, `.xaml.cs`, a test
 Goal: DT§3.1 "Search": a palette over actions, sessions and files plus full-text over past sessions (`rollout_search`); shortcuts Ctrl+K, Ctrl+N and Ctrl+Shift+R, the Windows counterparts of A126 (2).
-Check: xUnit over the palette store; the smoke test opens it with Ctrl+K.
+Check: MSTest over the palette store; the smoke test opens it with Ctrl+K.
 
 #### T58.22 Settings and MCP servers
 
 Depends: T58.10, T58.4 · Size: split at claim time · Files: `desktop/windows/Cox.UI/Settings*`
 Goal: DT§3.1 "Settings" and "MCP servers": fields generated from `docs/config.jsonschema` through the same `cox-app` field model the macOS app uses; each field shows its source; API keys are written through `HostBridge` (T58.7); MCP status and OAuth login in the browser.
-Check: xUnit: a field's source label comes from `source_of`; a key write never reaches a file under `COX_HOME`.
+Check: MSTest: a field's source label comes from `source_of`; a key write never reaches a file under `COX_HOME`.
 
 #### T58.23 Onboarding and doctor
 
 Depends: T58.10 · Size: ~150 · Files: `desktop/windows/Cox.UI/Onboarding.xaml`, `.xaml.cs`, a test
 Goal: DT§3.1 "Onboarding and doctor": pick a folder; the `cox doctor` checks as a checklist, including T57.10's "Windows Credential Manager" and "sandbox: none (D7)" and T57.2's shell.
-Check: xUnit: a failed doctor check shows its fix text.
+Check: MSTest: a failed doctor check shows its fix text.
 
 #### T58.24 Notifications and badge
 
 Depends: T58.7, T58.28 · Size: ~180 · Files: `desktop/windows/Cox.Platform/Notifications.cs` (new), a test
 Goal: DT§3.1 "Notifications" through `AppNotificationManager` (R10.3.4, R10.3.5): turn done with cost, budget warning, and the approval notification with Allow once, Deny and Open (A126 (4)), its arguments carrying the session and request ids; the taskbar badge counts items waiting. Not available when the app runs elevated (R10.3.4): the app says so once. Whether a text box for "deny with reason" and the badge work for the packaging model T58.28 picks is unverified (R10.8) and checked here.
-Check: xUnit: the builder output for an approval has the three buttons and the ids; activating Allow once sends the decision intent.
+Check: MSTest: the builder output for an approval has the three buttons and the ids; activating Allow once sends the decision intent.
 
 #### T58.25 D7 no-sandbox banner
 
 Depends: T57.3, T58.10 · Size: ~80 · Files: `desktop/windows/Cox.UI/NoSandboxBanner.xaml`, `.xaml.cs`, a test
 Goal: an `InfoBar` (severity Warning) on every session with no sandbox, driven by T57.3's `Level::Security` notice, not by a C# platform check: "No sandbox on Windows: every command asks first (D7)". It cannot be dismissed for good; it collapses to a toolbar badge after the first turn.
-Check: xUnit: a session whose notice list holds the D7 notice shows the banner; one without does not.
+Check: MSTest: a session whose notice list holds the D7 notice shows the banner; one without does not.
 
 #### T58.26 Resume, fork and hand off
 
 Depends: T58.11, T58.12 · Size: ~150 · Files: `desktop/windows/Cox.UI/SessionActions.cs` (new), a test
 Goal: DT§3.1 "Resume and fork": open any past session, fork at a turn, hand off with an objective.
-Check: xUnit: each action sends its intent; the smoke test resumes a fixture session.
+Check: MSTest: each action sends its intent; the smoke test resumes a fixture session.
 
 #### T58.27 New session: in place or a new worktree
 
 Depends: T58.11 · Size: ~120 · Files: `desktop/windows/Cox.UI/NewSessionDialog.xaml`, `.xaml.cs`, a test
 Goal: DT§3.1 "Worktree per session": the choice in a `ContentDialog`; the title bar shows the branch; worktree creation stays in `cox-app`.
-Check: xUnit: "new worktree" sends the worktree intent and no C# git call exists (a test scans `Cox.*` for `Process.Start`).
+Check: MSTest: "new worktree" sends the worktree intent and no C# git call exists (a test scans `Cox.*` for `Process.Start`).
 
 #### T58.28 Packaging
 
@@ -2681,6 +2682,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A138 §3 P22 (T22.12) — by the creator (2026-10-07): `cox config set` (and the desktop's `set_json_in`, which shares `set_value_in`) checks the edited user file by deserializing `Config` from the `default` layer plus the edited text, through the loader's own figment and error mapping, and writes nothing when that fails. Why: `set` wrote out-of-range and unknown-variant values (`desktop.appearance.depth 1.5`) that every later load rejected, so one command left the user's config unloadable. Effect: `ConfigError` gains `Rejected(CoreError)`; the check leaves out the project, env, flag and Claude layers, so `set` never refuses a valid edit because of another layer, and the desktop's write-then-rollback in `cox_app::settings::set` stays for the full layered view.
 - A139 §3 (new P60: T60.1–T60.10), `roadmap.md` — by the creator (2026-10-07), after a Best of run where every candidate failed with "provider auth failed": (1) the app never starts a turn or a Best of candidate on a provider it cannot use — the provider comes from `tiers.code.provider` and must be in `usable_providers` (A110), and the user can also pick another provider's model in the window before the first turn; (2) the provider is shown in the model chip as an icon, its name and a problem badge; (3) the toolbar's model capsule and Ask/Plan/Auto control move into the composer, whose chips already show them; (4) a glare slider (`desktop.appearance.specular`, a 0–1 scale on the material's sweep) joins Appearance; (5) the Best of compare shows the real failure reason, never `$-0.00`, and no actions on a failed candidate; (6) choosing Bypass from the composer's mode menu asks for a confirmation first, since the menu puts it one click away (the old toolbar control offered it only while it was on); the Bypass strip stays (creator, 2026-10-07: "do what is best"); (7) every desktop improvement updates the shared docs (DT§, DS§, `docs/config.md`) so the Windows and any later Linux client can repeat it. Why: the creator's request. Effect: P60; switching provider mid-session goes to `roadmap.md`. No §0 decision changes.
 - A140 §3 (new P61: T61.1–T61.11), by the creator (2026-10-07): build speed for Rust and Swift — a fast profile for the XCFramework outside a release, the bindings generator on the host dev profile and skipped when the library is unchanged, CI caches for the XCFramework, SwiftPM and DerivedData, one integration-test binary per crate, one feature set per CI target, sccache locally and in the in-repository CI jobs, one Xcode build graph for the Swift package tests, the SwiftLint plugin off during builds (after the creator confirms DS§9), and two measured experiments (`build-override`, feature unification). Why: an analysis of the build configuration (2026-10-07) found the XCFramework always linked with fat LTO, 79 integration-test binaries, workspace members never cached on CI, the workspace compiled twice per CI target and `CoxModel` up to five times per Swift test run. Effect: thirteen cards; A15 still holds — what ships is `dist`; every card records before/after timings in `research.md` §4.3.9 and is reverted if it gains nothing. No decision in §0 changes; sccache and, if T61.11 chooses it, cargo-hakari are tools added by their cards with `toolchain.md` rows.
+- A141 §1.1, §3 P58 — by the creator (2026-10-07): C# tests are MSTest 4.4.1, not the xunit.v3 candidate. Why: the creator asked for MSTest. Effect: P58 checks say MSTest; xunit.v3 and Verify.XunitV3 stay off the solution. CommunityToolkit.Mvvm and FlaUI stay candidates until their cards. T58.1 stays blocked: uniffi-bindgen-cs still has no 0.32 release (PR #176 and the async-callback PR #166 were open on 2026-10-07); the fork date remains 2026-12-31 (A129). The creator asked for the Windows client now, so T58.3 starts while that gate waits: `Cox.Model` tests run without the native library, the same way CoxModel tests run without the XCFramework (DT§8).
 
 ## 7. Risk register
 
