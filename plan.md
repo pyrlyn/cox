@@ -121,6 +121,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T62.7 | todo | P3 | 1 | 0% | |
 | T62.8 | todo | P3 | 1 | 0% | |
 | T62.9 | todo | P3 | 1 | 0% | |
+| T63.1 | todo | P2 | 2 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
 | T63.3 | todo | P1 | 1 | 0% | |
 | T63.4 | todo | P2 | 4 | 0% | |
@@ -184,7 +185,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents; login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell) |
 | `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
 | `cox-ffi` | the macOS app's UniFFI surface (T37.14): one tokio runtime, `App` and `SessionHandle` objects, the foreign `AppHost` trait, `#[uniffi::remote]` mirrors of cox-app types, a fixture recorder. `staticlib` + `lib`; the only crate that depends on uniffi | uniffi 0.32.2 (proc-macros, no UDL; default features off); dev: syn 3.0.5 (`full`, `parsing`; T37.39.1: `tests/forward_only.rs` parses the FFI sources); async-trait (MIT OR Apache-2.0): the async `AppHost` methods UniFFI exports (P51, P52) |
-| `desktop/` | the macOS app (P37, not a Cargo crate): Swift packages under `desktop/macos/Packages/`, the design tokens and their generator under `desktop/design/` | node 24.21.0 (mise) with npm `style-dictionary` 5.5.5 (T37.17: DTCG tokens → Swift, asset colours, CSS); SwiftLint 0.65.1 (mise, aqua; T37.18: DS§9 no-literal rules) and SwiftLintPlugins at the same version in each package; `swift-format` from the Xcode toolchain; swift-collections 1.7.1 (T37.16: `OrderedDictionary` timeline store); swift-snapshot-testing 1.19.6 (T37.19: `CoxUI` snapshot tests); swift-property-based 2.0.1 (T63.1: `CoxModel` property tests) |
+| `desktop/` | the macOS app (P37, not a Cargo crate): Swift packages under `desktop/macos/Packages/`, the design tokens and their generator under `desktop/design/` | node 24.21.0 (mise) with npm `style-dictionary` 5.5.5 (T37.17: DTCG tokens → Swift, asset colours, CSS); SwiftLint 0.65.1 (mise, aqua; T37.18: DS§9 no-literal rules) and SwiftLintPlugins at the same version in each package; `swift-format` from the Xcode toolchain; swift-collections 1.7.1 (T37.16: `OrderedDictionary` timeline store); swift-snapshot-testing 1.19.6 (T37.19: `CoxUI` snapshot tests) |
 | `desktop/windows/` | the Windows app (P58, A127; planned, not a Cargo crate): a WinUI 3 + C# solution over `cox-ffi`'s C# bindings, logic in `cox-app` | planned by A127: .NET SDK 10.0 LTS (10.0.12), Windows App SDK 2.5.1, uniffi-bindgen-cs on uniffi 0.32 (blocked, T58.1); candidates CommunityToolkit.Mvvm 8.4.2, xunit.v3 4.0.1, FlaUI.UIA3 5.0.0, Verify.XunitV3 33.1.5 (`research.md` §10) |
 | `cox-protocol` | `Submission`, `Event`, `Item`, `ToolCall`, `ToolResult`, `Usage`, `Config`, traits `Provider`, `Tool`, `Store`, `Hook` | serde, serde_json, schemars 1, thiserror 2, base64 0.23 (`image`, T40.1) |
 | `cox-core` | `Session` state machine, turn loop, context assembly, cache breakpoints, `Router` (job → tier → model), compaction, budget, subagent spawning | tokio 1, tracing 0.1, base64 0.23 (T37.6: attached text files) |
@@ -2506,6 +2507,205 @@ Each card is written so an agent can do it from the card alone: what to install,
 
 **Order.** T63.3 first (one config change). T63.1 any time. T63.2 after T61.4 if that card is still open, since both edit the `desktop-macos` job; if T61.9 lands first, T63.2 selects scheme test targets instead of packages (step 6). T63.4 is being implemented on branch `feature/swift-dependencies` in its own pull request with tests; that pull request claims and closes the card.
 
+#### T63.1 Property-based tests for `SessionStore`
+
+Model: sonnet · Status: open · Depends: — · Size: ~10 (manifest) + ~180 tests · Priority: P2 · Complexity: 2
+
+Goal: `SessionStore`'s patch rules — `upsert` ordering and in-place replace, `remove`, `reset` deduplication, batching, and the `lastLines` tail — hold for hundreds of generated patch sequences per run, compared with a plain-array reference model of `cox_app::coalesce::apply`.
+
+Why: the rules are mirrored by hand from Rust, and today's tests pin about ten hand-picked sequences. Collisions (an `upsert` to an id that exists, an anchor that was removed, a `remove` of a missing id) multiply quickly; a generator finds the combination nobody wrote down and shrinks it to the shortest failing list. Risk if skipped: a Swift-side ordering drift shows up only as a transcript in the wrong order for a user, not as a test failure.
+
+Install (no global tool; SwiftPM fetches it):
+- `desktop/macos/Packages/CoxModel/Package.swift`: the package dependency `https://github.com/x-sheep/swift-property-based`, `exact: "2.0.1"` (the repository pins test libraries exactly, as swift-snapshot-testing is), on the test target only.
+
+Files:
+- `desktop/macos/Packages/CoxModel/Package.swift`
+- `desktop/macos/Packages/CoxModel/Package.resolved` (regenerated by `swift package resolve`)
+- `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/SessionStorePropertyTests.swift` (new)
+- `toolchain.md` (a row in the SwiftPM table) and `plan.md` §1 (the dependency row `AGENTS.md` asks for)
+
+Steps:
+1. Manifest — the two changed lists in `Packages/CoxModel/Package.swift`:
+
+   ```swift
+   dependencies: [
+     .package(url: "https://github.com/apple/swift-collections", from: "1.7.1"),
+     .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
+     // T63.1: generated inputs and shrinking for the store's patch rules; tests only.
+     .package(url: "https://github.com/x-sheep/swift-property-based", exact: "2.0.1"),
+   ],
+   ```
+
+   ```swift
+   .testTarget(
+     name: "CoxModelTests",
+     dependencies: [
+       "CoxModel",
+       .product(name: "PropertyBased", package: "swift-property-based"),
+     ],
+     plugins: [swiftLint]
+   ),
+   ```
+
+2. `cd desktop/macos/Packages/CoxModel && swift package resolve`, then check whether `Package.resolved` of `CoxCore`, `CoxPlatform`, `CoxTranscriptText` and `CoxTranscript` changed too (a test-only dependency should not reach them; CI's "Swift pins unchanged by the build" step fails if one changed and was not committed).
+3. The test file. `propertyCheck` takes `isolation: isolated (any Actor)? = #isolation`, so in a `@MainActor` test its closure runs on the main actor and may call the store directly. Ids come from a pool of five so upserts collide; anchors include ids that never exist; text is short so failures shrink to something readable:
+
+   ```swift
+   // Copyright (c) 2026 Ivan Tugay
+   // SPDX-License-Identifier: GPL-3.0-or-later
+   // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
+   // SessionStore's patch rules against generated patch lists (T63.1): the store must order
+   // blocks as a plain-array model of `cox_app::coalesce::apply` does, for any mix of upserts
+   // and removes, not only the lists SessionStoreTests spells out.
+
+   import CoxClient
+   import PropertyBased
+   import Testing
+
+   @testable import CoxModel
+
+   /// One timeline edit; `description` keeps a shrunk failure readable.
+   enum Edit: Sendable, CustomStringConvertible {
+     case upsert(BlockID, text: String, after: BlockID?)
+     case remove(BlockID)
+
+     var patch: TimelinePatch {
+       switch self {
+       case .upsert(let id, let text, let after):
+         .upsert(block: Block(id: id, turn: 1, kind: .thinking(text: text)), after: after)
+       case .remove(let id):
+         .remove(id: id)
+       }
+     }
+
+     var description: String {
+       switch self {
+       case .upsert(let id, let text, let after): "upsert(\(id), \(text), after: \(after ?? "nil"))"
+       case .remove(let id): "remove(\(id))"
+       }
+     }
+   }
+
+   /// Five ids so edits collide; anchors b5 and b6 never exist, so those blocks append.
+   func editLists() -> Generator<[Edit], some Sequence> {
+     let id = Gen.int(in: 0...4).map { "b\($0)" }
+     let anchor = Gen.int(in: -1...6).map { n -> BlockID? in n < 0 ? nil : "b\(n)" }
+     let text = Gen.letter.string(of: 0...3)
+     let edit = Gen<Edit>.oneOf(
+       zip(id, text, anchor).map { Edit.upsert($0, text: $1, after: $2) },
+       id.map { Edit.remove($0) })
+     return edit.array(of: 0...40)
+   }
+
+   /// The ordering rule over a plain array: an existing id is replaced in place, `nil` inserts
+   /// first, a known anchor inserts after it, an unknown one appends.
+   func reference(_ edits: [Edit]) -> [(id: BlockID, text: String)] {
+     var rows: [(id: BlockID, text: String)] = []
+     for edit in edits {
+       switch edit {
+       case .upsert(let id, let text, let after):
+         if let at = rows.firstIndex(where: { $0.id == id }) {
+           rows[at].text = text
+           continue
+         }
+         let index =
+           after.map { anchor in rows.firstIndex { $0.id == anchor }.map { $0 + 1 } ?? rows.count }
+           ?? 0
+         rows.insert((id, text), at: index)
+       case .remove(let id):
+         rows.removeAll { $0.id == id }
+       }
+     }
+     return rows
+   }
+
+   @MainActor
+   func emptyStore() -> SessionStore {
+     SessionStore(session: FixtureSession(fixture: Fixture(batches: [], snapshot: [])))
+   }
+
+   @MainActor
+   @Suite struct SessionStoreProperties {
+     @Test func ordersBlocksAsTheReferenceModel() async {
+       await propertyCheck(count: 300, input: editLists()) { edits in
+         let store = emptyStore()
+         store.apply(edits.map(\.patch))
+         let expected = reference(edits)
+         #expect(Array(store.blocks.keys) == expected.map(\.id))
+         #expect(store.blocks.values.map(\.kind) == expected.map { .thinking(text: $0.text) })
+       }
+     }
+
+     @Test func repeatingTheLastEditChangesNothing() async {
+       await propertyCheck(input: editLists(), editLists().filter { !$0.isEmpty }) { edits, tail in
+         let once = emptyStore()
+         once.apply((edits + tail).map(\.patch))
+         let twice = emptyStore()
+         twice.apply((edits + tail + [tail[tail.count - 1]]).map(\.patch))
+         #expect(once.blocks == twice.blocks)
+       }
+     }
+
+     @Test func splittingABatchDoesNotChangeTheResult() async {
+       await propertyCheck(input: editLists(), Gen.int(in: 0...40)) { edits, cut in
+         let whole = emptyStore()
+         whole.apply(edits.map(\.patch))
+         let split = emptyStore()
+         let at = min(cut, edits.count)
+         split.apply(edits[..<at].map(\.patch))
+         split.apply(edits[at...].map(\.patch))
+         #expect(whole.blocks == split.blocks)
+       }
+     }
+
+     @Test func resetKeepsTheFirstPositionAndTheLastValue() async {
+       await propertyCheck(input: editLists()) { edits in
+         let blocks = edits.compactMap { edit -> Block? in
+           guard case .upsert(let id, let text, _) = edit else { return nil }
+           return Block(id: id, turn: 1, kind: .thinking(text: text))
+         }
+         let store = emptyStore()
+         store.apply([.reset(blocks: blocks)])
+         var firstSeen: [BlockID] = []
+         for block in blocks where !firstSeen.contains(block.id) { firstSeen.append(block.id) }
+         #expect(Array(store.blocks.keys) == firstSeen)
+         for id in firstSeen {
+           #expect(store.blocks[id] == blocks.last { $0.id == id })
+         }
+       }
+     }
+
+     @Test func lastLinesKeepsAtMostFiveLinesOfTheEnd() async {
+       let text = Gen.int(in: 0...2).map { ["a", "\n", "\r\n"][$0] }.array(of: 0...60)
+         .map { $0.joined() }
+       await propertyCheck(count: 500, input: text) { text in
+         let tail = lastLines(text)
+         let body = tail.utf8.last == UInt8(ascii: "\n") ? tail.utf8.dropLast() : tail.utf8[...]
+         #expect(text.hasSuffix(tail))
+         #expect(body.filter { $0 == UInt8(ascii: "\n") }.count < tailLines)
+       }
+     }
+   }
+   ```
+
+4. Run it, then make it fail on purpose once to see the shrunk output: change `?? rows.count` to `?? 0` in `reference`, run, read the "shrunk down from" line and the printed `.fixedSeed("…")`, revert.
+5. A failure found later: add the printed `.fixedSeed(...)` trait to that test while fixing, then turn the shrunk input into a plain regression test in `SessionStoreTests.swift` (the `AGENTS.md` rule for bug fixes) and drop the seed.
+6. `toolchain.md`, SwiftPM table: `| swift-property-based | local (CoxModel tests) | https://github.com/x-sheep/swift-property-based | T63.1: generated patch lists and shrinking for SessionStore's rules |`.
+
+Check:
+```bash
+cd desktop/macos/Packages/CoxModel
+swift test --no-parallel --build-system swiftbuild --filter SessionStoreProperties
+swift test --no-parallel --build-system swiftbuild
+```
+
+Done when: the five properties pass with their default counts; the deliberate break in step 4 fails `ordersBlocksAsTheReferenceModel` with a shrunk list of at most a few edits; no other package's `Package.resolved` changed; the `desktop-macos` job stays green.
+
+Risks: a property that is false by design (read the Rust consumer before "fixing" the store to satisfy a test); random seeds make a rare failure appear on an unrelated PR — the failure prints its seed, so it is reproducible, and it is a real bug either way.
+
+Out of scope: properties for the other stores; fuzzing `TimelineDecoding.swift`.
+
 #### T63.2 CI: re-run only the Swift packages a change can affect
 
 Model: sonnet · Status: open · Depends: T61.4 (shared job; not a code dependency) · Size: ~120 (script, workflow) · Priority: P2 · Complexity: 3
@@ -2975,6 +3175,7 @@ Out of scope: `SettingsClient`, `WorkspaceClient` and the `RemoteHosts` connecto
 
 | Card | Accepted when |
 | --- | --- |
+| T63.1 | `swift-property-based` 2.0.1 is a `CoxModelTests`-only dependency with a `toolchain.md` row; `SessionStorePropertyTests.swift` has the five properties (reference ordering, repeated last edit, split batch, reset, `lastLines`) and they pass in `desktop-macos`; a deliberately broken reference model fails with a shrunk input and a printed seed; no other package's pins changed |
 | T63.2 | `scripts/desktop/swift_test.sh` runs every package locally and on non-pull-request runs; on a pull request a Rust-only change skips the five packages that do not link `CoxFFI` and a `CoxUI`-only change runs `CoxUI` and `CoxTranscript` only; pass markers are restored and saved by SHA-pinned `actions/cache` v6.1.0 steps; the job comment states the new rule; §4.3.9 has before/after job times; the app target still builds on every run |
 | T63.3 | `no_ui_import_in_core` and `no_appkit_type_in_core` are error-severity custom rules in `desktop/macos/.swiftlint.yml`, scoped to `CoxModel` and `CoxCore` sources; their `LintFixtures/Rejected` files fail with the right rule; `desktop-macos-lint` lints both packages' sources with `--strict`; a temporary `import AppKit` in `CoxModel` fails `swift build`; DS§9 lists both rules |
 | T63.4 | swift-dependencies 1.17.1 (`Dependencies`, `DependenciesTestSupport`) is pinned in `CoxModel`, `CoxPlatform` and `project.yml`, all `Package.resolved` files committed; `CoreClient`, `InboxClient`, `SecretStore` and `SessionClient` have keys with test and preview values, `SecretStore` a live value in `CoxPlatform`; the stores read them with `@ObservationIgnored @Dependency`; `CoxApp.init` sets the launch's choice through `prepareDependencies` and `LaunchCore` still makes it; the AppIntents `@Dependency` files are unchanged and build; tests override clients with `.dependency`/`.dependencies` traits; DT§4.6 documents it; delivered by the `feature/swift-dependencies` pull request |
