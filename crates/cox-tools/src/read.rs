@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-//! `read`: whole, ranged and outline reads of one confined file (plan.md
-//! T3.2, §1.11), and an image file returned as an image (T40.4). Every path argument goes through `cox_tools::path::confine`
+//! `read`: whole, ranged, outline and by-symbol reads of one confined file
+//! (plan.md T3.2, §1.11, T59.8), and an image file returned as an image (T40.4). Every path argument goes through `cox_tools::path::confine`
 //! first (AGENTS.md trust boundary) — no other constructor for a `Path`
 //! from `input` exists in this file, so the `confine_is_the_only_path_
 //! constructor` grep guard in `tests/confine.rs` stays green.
@@ -13,8 +13,9 @@ use cox_protocol::{Concurrency, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolS
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use serde_json::Value;
+use similar::TextDiff;
 
-use crate::outline;
+use crate::outline::{self, Def};
 use crate::path::confine;
 
 /// Visible-byte backstop when no caller-supplied cap is available.
@@ -45,6 +46,9 @@ struct ReadInput {
     /// `"text"` (default) for line-numbered content, or `"outline"` for a short signature listing.
     #[serde(default)]
     mode: Option<String>,
+    /// Name of one definition to read, e.g. `"Foo::bar"` or `"parse"` (`.` also separates). Returns just that definition's lines; overrides `lines` and `mode`. Needs a .rs/.ts/.tsx/.py/.go file.
+    #[serde(default)]
+    symbol: Option<String>,
 }
 
 #[async_trait]
@@ -63,7 +67,9 @@ impl Tool for ReadTool {
                 .rs/.ts/.tsx/.py/.go; markdown headings or definition-keyword lines for \
                 everything else). Use outline first on any file you have not read yet, \
                 especially a large one, then follow up with `lines=` on the range that actually \
-                matters. A PNG, JPEG, GIF or WebP file (up to 3.75 MB) comes back as the \
+                matters. Pass `symbol: \"Foo::bar\"` (a function, method, type or class name; \
+                a bare `bar` also finds methods) to get just that definition's lines; several \
+                matches are listed with their line ranges instead. A PNG, JPEG, GIF or WebP file (up to 3.75 MB) comes back as the \
                 image itself, which you can see; `lines` and `mode` do not apply to it. Refuses \
                 other binary files."
                 .to_string(),
@@ -119,7 +125,12 @@ impl Tool for ReadTool {
         };
 
         let mode = input.mode.as_deref().unwrap_or("text");
-        let text = if mode == "outline" {
+        let text = if let Some(symbol) = input.symbol.as_deref() {
+            // The resolved span goes through the ordinary ranged read, so
+            // the cap and the footer are the same as for `lines=`.
+            let range = resolve_symbol(&path, &content, symbol)?;
+            render_text(&content, total_lines, Some(&range))
+        } else if mode == "outline" {
             let body = outline::outline(&path, &content);
             cap(format!("{body}\n\n[outline of {total_lines} lines total]"))
         } else {
@@ -137,6 +148,65 @@ impl Tool for ReadTool {
     }
 }
 
+/// The `"a-b"` line range of the one definition `symbol` names. Several or
+/// no matches are `Denied` with the candidates, so the model's next call can
+/// be exact instead of a guess.
+fn resolve_symbol(
+    path: &std::path::Path,
+    content: &str,
+    symbol: &str,
+) -> Result<String, ToolError> {
+    let denied = |why: String| ToolError::Denied { why };
+    let Some(defs) = outline::definitions(path, content) else {
+        return Err(denied(
+            "`symbol` needs a .rs, .ts, .tsx, .py or .go file; use `lines` or `mode: \"outline\"`"
+                .to_string(),
+        ));
+    };
+    let hits = outline::find_symbol(&defs, symbol);
+    match hits.as_slice() {
+        [one] => Ok(format!("{}-{}", one.start, one.end)),
+        [] => Err(denied(format!(
+            "symbol `{symbol}` not found. Closest:\n{}",
+            closest(&defs, symbol)
+        ))),
+        many => Err(denied(format!(
+            "symbol `{symbol}` matches {} definitions; qualify it or use `lines`:\n{}",
+            many.len(),
+            many.iter()
+                .map(|d| format!("{}-{}: {}", d.start, d.end, d.name))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ))),
+    }
+}
+
+/// The three definitions whose names are nearest to `symbol` by `similar`'s
+/// character ratio, the same measure `edit` uses for a missed `old_string`.
+fn closest(defs: &[Def], symbol: &str) -> String {
+    let wanted = symbol.trim().to_lowercase();
+    let mut scored: Vec<(f32, &Def)> = defs
+        .iter()
+        .filter(|d| !d.name.is_empty())
+        .map(|d| {
+            (
+                TextDiff::from_chars(wanted.as_str(), d.name.to_lowercase().as_str()).ratio(),
+                d,
+            )
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    if scored.is_empty() {
+        return "(no named definitions in this file)".to_string();
+    }
+    scored
+        .iter()
+        .take(3)
+        .map(|(_, d)| format!("{}-{}: {}", d.start, d.end, d.name))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// An image comes back as one text line for the transcript plus the bytes
 /// in `structured`, which the core forwards to the model (T40.5). The cap is
 /// checked before encoding, so an oversized file costs no base64 copy.
@@ -148,8 +218,8 @@ fn read_image(media_type: &str, bytes: &[u8], input: &ReadInput) -> Result<ToolO
         });
     }
     let mut text = format!("{media_type}, {}", human_size(bytes.len()));
-    if input.lines.is_some() || input.mode.is_some() {
-        text.push_str(" (`lines` and `mode` do not apply to images)");
+    if input.lines.is_some() || input.mode.is_some() || input.symbol.is_some() {
+        text.push_str(" (`lines`, `mode` and `symbol` do not apply to images)");
     }
     Ok(ToolOutput {
         text,
@@ -439,5 +509,104 @@ mod tests {
                 out.text
             );
         }
+    }
+
+    const RUST_FIXTURE: &str = "struct Foo;\n\nimpl Foo {\n    fn bar(&self) -> u32 {\n        1\n    }\n\n    fn baz(&self) {}\n}\n\nimpl Other {\n    fn baz(&self) {}\n}\n";
+    const TS_FIXTURE: &str = "export class Box {\n  open(): void {\n    go();\n  }\n\n  close(): void {}\n}\n\nfunction helper() {}\n";
+
+    async fn read_symbol(name: &str, src: &str, symbol: &str) -> Result<ToolOutput, ToolError> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(dir.path()).expect("canonicalize");
+        std::fs::write(root.join(name), src).expect("write fixture");
+        let cx = test_cx(vec![root.clone()], root.clone());
+        ReadTool
+            .call(serde_json::json!({"path": name, "symbol": symbol}), &cx)
+            .await
+    }
+
+    #[tokio::test]
+    async fn read_symbol_returns_only_the_unique_rust_method() {
+        let out = read_symbol("f.rs", RUST_FIXTURE, "Foo::bar")
+            .await
+            .expect("read");
+        assert!(
+            out.text.contains("4\t    fn bar(&self) -> u32 {"),
+            "{}",
+            out.text
+        );
+        assert!(out.text.contains("6\t    }"), "{}", out.text);
+        assert!(!out.text.contains("struct Foo"), "{}", out.text);
+        assert!(!out.text.contains("fn baz"), "{}", out.text);
+        assert!(out.text.contains("lines 4-6 of 13 total"), "{}", out.text);
+    }
+
+    #[tokio::test]
+    async fn read_symbol_lists_every_rust_match_when_ambiguous() {
+        let err = read_symbol("f.rs", RUST_FIXTURE, "baz")
+            .await
+            .expect_err("ambiguous");
+        let ToolError::Denied { why } = err else {
+            panic!("expected Denied, got {err:?}");
+        };
+        assert!(why.contains("matches 2 definitions"), "{why}");
+        assert!(why.contains("8-8: Foo::baz"), "{why}");
+        assert!(why.contains("12-12: Other::baz"), "{why}");
+    }
+
+    #[tokio::test]
+    async fn read_symbol_missing_in_rust_names_the_closest_definitions() {
+        let err = read_symbol("f.rs", RUST_FIXTURE, "Foo::bax")
+            .await
+            .expect_err("missing");
+        let ToolError::Denied { why } = err else {
+            panic!("expected Denied, got {err:?}");
+        };
+        assert!(why.contains("not found"), "{why}");
+        assert!(why.contains("Foo::bar"), "{why}");
+    }
+
+    #[tokio::test]
+    async fn read_symbol_returns_the_unique_typescript_method_with_a_dot_path() {
+        let out = read_symbol("f.ts", TS_FIXTURE, "Box.open")
+            .await
+            .expect("read");
+        assert!(out.text.contains("2\t  open(): void {"), "{}", out.text);
+        assert!(out.text.contains("4\t  }"), "{}", out.text);
+        assert!(!out.text.contains("close"), "{}", out.text);
+    }
+
+    #[tokio::test]
+    async fn read_symbol_lists_typescript_matches_when_ambiguous() {
+        let src = format!("{TS_FIXTURE}\nclass Other {{\n  close(): void {{}}\n}}\n");
+        let err = read_symbol("f.ts", &src, "close")
+            .await
+            .expect_err("ambiguous");
+        let ToolError::Denied { why } = err else {
+            panic!("expected Denied, got {err:?}");
+        };
+        assert!(why.contains("Box::close"), "{why}");
+        assert!(why.contains("Other::close"), "{why}");
+    }
+
+    #[tokio::test]
+    async fn read_symbol_missing_in_typescript_is_denied_with_closest() {
+        let err = read_symbol("f.ts", TS_FIXTURE, "helpr")
+            .await
+            .expect_err("missing");
+        let ToolError::Denied { why } = err else {
+            panic!("expected Denied, got {err:?}");
+        };
+        assert!(why.contains("not found") && why.contains("helper"), "{why}");
+    }
+
+    #[tokio::test]
+    async fn read_symbol_on_a_file_without_a_grammar_says_so() {
+        let err = read_symbol("f.txt", "hello\n", "hello")
+            .await
+            .expect_err("no grammar");
+        let ToolError::Denied { why } = err else {
+            panic!("expected Denied, got {err:?}");
+        };
+        assert!(why.contains(".rs, .ts"), "{why}");
     }
 }

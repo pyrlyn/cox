@@ -12,7 +12,7 @@ Core tools are always in context; deferred tools join through `tool_search`
 
 | Tool | Risk | Deferred | Subject | Notes |
 |---|---|---|---|---|
-| `read` | ReadOnly | no | path | whole / `lines="a-b"` / `mode="outline"`; images returned as images, other binaries refused |
+| `read` | ReadOnly | no | path | whole / `lines="a-b"` / `mode="outline"` / `symbol="Foo::bar"` (one definition; .rs/.ts/.tsx/.py/.go); images returned as images, other binaries refused |
 | `grep` | ReadOnly | no | pattern | ripgrep libs, respects `.gitignore` |
 | `glob` | ReadOnly | no | pattern | mtime order, fuzzy with `query` |
 | `edit` | Write | no | path | exact `str_replace`, ambiguity errors |
