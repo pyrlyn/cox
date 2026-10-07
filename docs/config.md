@@ -155,7 +155,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `repomap_budget_tokens` = `0` — repo map in system[2] (P43); 0 = off until the T43.6 bench
 ## `[compaction]`
 
-- `strategy` = `"llm"` — llm | state+llm (T59.1): state+llm writes files touched and errors seen from the transcript
+- `strategy` = `"state+llm"` — state+llm | llm (T59.1): state+llm writes files touched and errors seen from the transcript; llm is the opt-out
 ## `[permissions]`
 
 - `mode` = `"default"` — default | plan | auto | bypass (bypass only via flag)

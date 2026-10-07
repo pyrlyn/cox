@@ -257,6 +257,47 @@ async fn compact_focus_is_passed_to_summarizer() {
     );
 }
 
+/// What the summariser is sent for `config`, after three turns and a compact.
+async fn compact_system_prompt(config: cox_protocol::Config) -> String {
+    let probe = Arc::new(Probe {
+        system: Mutex::new(String::new()),
+    });
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        config,
+        probe.clone(),
+        common::tools(),
+        store.clone(),
+        store.clone(),
+        PathBuf::from("/tmp/cox-turn"),
+    )
+    .expect("session");
+    let mut rx = session.events().expect("events");
+    for t in ["a", "b", "c"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    probe.system.lock().expect("lock").clone()
+}
+
+#[tokio::test]
+async fn compact_default_strategy_is_state_llm_and_adds_the_narrative_only_note() {
+    let system = compact_system_prompt(cox_protocol::Config::default()).await;
+    assert!(system.contains("do not write"), "{system}");
+}
+
+#[tokio::test]
+async fn compact_llm_strategy_still_sends_exactly_the_old_prompt() {
+    let mut config = cox_protocol::Config::default();
+    config.compaction.strategy = cox_protocol::config::CompactionStrategy::Llm;
+    let system = compact_system_prompt(config).await;
+    assert!(!system.contains("do not write"), "{system}");
+    assert!(system.ends_with("## Next step\n"), "{system}");
+}
+
 // (MemoryStore ignores the session key, so tests read with a dummy id.)
 
 /// `Scripted` behind a finite window, recording every request it is sent;

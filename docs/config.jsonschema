@@ -137,7 +137,7 @@
       "description": "`[compaction]`",
       "$ref": "#/$defs/CompactionConfig",
       "default": {
-        "strategy": "llm"
+        "strategy": "state+llm"
       }
     },
     "permissions": {
@@ -1166,13 +1166,13 @@
         "strategy": {
           "description": "`compaction.strategy`: who writes the summary's file and error\nsections.",
           "$ref": "#/$defs/CompactionStrategy",
-          "default": "llm"
+          "default": "state+llm"
         }
       },
       "additionalProperties": false
     },
     "CompactionStrategy": {
-      "description": "`compaction.strategy` (T59.1). `llm` stays the default until the\n`state+llm` numbers are in `research.md`.",
+      "description": "`compaction.strategy` (T59.1). `state+llm` is the default because the\ncreator chose it on 2026-10-07, before the bench; `llm` stays available as\nan opt-out.",
       "oneOf": [
         {
           "description": "The model writes every section from the transcript.",

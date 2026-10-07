@@ -829,16 +829,17 @@ pub struct CompactionConfig {
     pub strategy: CompactionStrategy,
 }
 
-/// `compaction.strategy` (T59.1). `llm` stays the default until the
-/// `state+llm` numbers are in `research.md`.
+/// `compaction.strategy` (T59.1). `state+llm` is the default because the
+/// creator chose it on 2026-10-07, before the bench; `llm` stays available as
+/// an opt-out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub enum CompactionStrategy {
     /// The model writes every section from the transcript.
-    #[default]
     #[serde(rename = "llm")]
     Llm,
     /// Files touched, errors seen and the last request are read off the
     /// transcript; the model writes only the narrative sections.
+    #[default]
     #[serde(rename = "state+llm")]
     StateLlm,
 }
