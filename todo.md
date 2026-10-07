@@ -90,3 +90,4 @@
 - T58.28. Packaging
 - T58.29. UI automation smoke test
 - T58.30. Snapshot spike: WinUI controls to PNG
+- T59.1. Deterministic working state pre-fills compaction
