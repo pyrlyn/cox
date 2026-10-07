@@ -49,7 +49,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.2 | todo | P3 | 3 | 0% | |
+| T56.2 | in progress | P3 | 3 | 0% | Claude Code / sonnet |
 | T56.4 | todo | P3 | 3 | 0% | |
 | T56.6 | todo | P3 | 4 | 0% | |
 | T56.7 | todo | P3 | 4 | 0% | |
@@ -1611,6 +1611,7 @@ Goal: a client over `cox-provider-http` (connection setup, Bearer auth, non-2xx 
 Check: `mise exec -- cargo nextest run -p cox-cursor-cloud client_sends_the_key_as_bearer_only client_never_retries_create client_stream_reconnects_without_duplicate_events client_error_text_never_contains_the_key client_user_agent_is_cox_version_only` (wiremock).
 Done when: the tests pass.
 Out of scope: webhooks (not in the v1 API); artifacts.
+Execution plan: `client.rs` holds `Client` (reqwest client from `client_with_timeout`, Bearer from `bearer`, `cox/<version>` User-Agent, non-2xx through `map_http_error` with the key redacted from any message) and `CloudError` (thiserror). GETs retry with `retry::Policy`/`retryable`; POSTs never. `stream_run` frames the body with `sse::sse_stream_with_id` (new in `cox-provider-http/src/sse.rs`, because the shared framing drops the SSE `id:` that `Last-Event-ID` resume needs); a dropped stream re-reads `get_run` and, when not terminal, reopens with `Last-Event-ID` and skips the status frame Cursor re-sends. Tests in `client.rs` against wiremock with an injected key (`resolve_key_with`). Verify: the Check, clippy, fmt.
 
 #### T56.4 `Engine` asks before code leaves the machine: `CloudAgent(<repo>)`
 
