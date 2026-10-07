@@ -96,7 +96,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.1 | todo | P1 | 4 | 0% | |
-| T59.2 | todo | P1 | 2 | 0% | |
 | T59.3 | todo | P1 | 4 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
 | T59.5 | todo | P2 | 3 | 0% | |
@@ -1962,32 +1961,6 @@ mise exec -- cargo fmt --check
 Done when: a unit test over a scripted transcript asserts every touched path and the failing command appear in the summary with `state+llm`; a `just bench` compaction replay records path recall (100 % with `state+llm`), compact output tokens (−40 %) and pass rate against `llm` in `research.md`; the default flips only if the pass rate does not drop.
 
 Out of scope: per-file line ranges, dropping the model call entirely, the TUI view of the state.
-
-#### T59.2 Fold repeated output lines before the visible cut
-
-Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
-
-Goal: runs of identical or digit-only-different lines in tool output (progress bars, `Compiling …`, repeated warnings) fold to one line plus `(×N)` before `truncate::visible`, cutting context tokens by at least 5 % on the bench with no error line lost.
-
-Files:
-- `crates/cox-core/src/truncate.rs`
-- `crates/cox-core/src/turn.rs`
-
-Steps:
-1. `fold_repeats(text: &str) -> Cow<str>` in `truncate.rs`: compare each line with the previous one after masking digit runs; fold runs of ≥ 3; never fold a line that matches `error|panicked|FAILED|warning:` the first time it appears (a repeat still folds). Rtok's `cmd` rules are the reference behaviour; a shared crate is a later amendment, not a new dependency here.
-2. Call it at the `truncate::visible` call site (`turn.rs:679`) so the archived full output is untouched and `expand` still returns the raw bytes.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: table tests for folding, digit masking and the error-line rule pass; `research.md` has the bench row (context-token-turns −5 %, pass rate unchanged).
-
-Out of scope: per-command rules, ANSI handling beyond what `visible` does today.
 
 #### T59.3 `edit` and `write` report the diagnostics they introduced
 
