@@ -16,6 +16,7 @@
 pub mod cloud_runs;
 pub mod fts;
 pub mod lock;
+mod memory;
 mod models;
 pub mod queries;
 mod rollout;
@@ -46,8 +47,8 @@ use cox_protocol::{
 use cox_protocol::traits::{KV_PLUGIN_LIMIT, KV_VALUE_LIMIT};
 
 use models::{
-    CheckpointDbRow, NewArchive, NewMemory, NewSession, PluginGrantDbRow, PluginKvDbRow,
-    SessionAgentDb, UsageDbRow,
+    CheckpointDbRow, NewArchive, NewMemory, NewMemoryFile, NewSession, PluginGrantDbRow,
+    PluginKvDbRow, SessionAgentDb, UsageDbRow,
 };
 use queries::LedgerRow;
 use rollout::RolloutWriter;
@@ -490,41 +491,74 @@ impl StoreTrait for Store {
     }
 
     fn memory_search(&self, q: &str, limit: usize) -> Result<Vec<MemoryHit>, StoreError> {
-        // Both tables are written together by `memory_upsert` with a shared
-        // rowid, which is what the join below lines up on.
         let q = crate::fts::sanitize_match(q);
         if q.is_empty() {
             return Ok(Vec::new());
         }
-        #[derive(diesel::QueryableByName)]
-        struct Hit {
-            #[diesel(sql_type = diesel::sql_types::Text)]
-            name: String,
-            #[diesel(sql_type = diesel::sql_types::Text)]
-            path: String,
-            #[diesel(sql_type = diesel::sql_types::Text)]
-            snippet: String,
+        let mut conn = self.conn.lock().map_err(|_| StoreError::Io)?;
+        let rows = memory::fts_rows(&mut conn, &q, limit)?;
+        Ok(rows.into_iter().map(memory::into_hit).collect())
+    }
+
+    fn memory_search_touching(
+        &self,
+        q: &str,
+        limit: usize,
+        touched: &[PathBuf],
+    ) -> Result<Vec<MemoryHit>, StoreError> {
+        if touched.is_empty() {
+            return self.memory_search(q, limit);
+        }
+        let q = crate::fts::sanitize_match(q);
+        if q.is_empty() {
+            return Ok(Vec::new());
         }
         let mut conn = self.conn.lock().map_err(|_| StoreError::Io)?;
-        let rows: Vec<Hit> = diesel::sql_query(
-            "SELECT m.name AS name, m.path AS path, \
-             snippet(memory_fts, 1, '', '', '...', 8) AS snippet \
-             FROM memory_fts JOIN memory m ON m.rowid = memory_fts.rowid \
-             WHERE memory_fts MATCH ? LIMIT ?",
-        )
-        .bind::<diesel::sql_types::Text, _>(q)
-        .bind::<diesel::sql_types::BigInt, _>(limit as i64)
-        .load(&mut *conn)
-        .map_err(|_| StoreError::Sqlite)?;
-
-        Ok(rows
+        let rows = memory::fts_rows(&mut conn, &q, limit.max(memory::CANDIDATES))?;
+        let linked = memory::linked_ids(&mut conn, touched)?;
+        Ok(memory::fuse(rows, &linked, limit)
             .into_iter()
-            .map(|h| MemoryHit {
-                name: h.name,
-                path: PathBuf::from(h.path),
-                snippet: h.snippet,
-            })
+            .map(memory::into_hit)
             .collect())
+    }
+
+    fn memory_set_files(
+        &self,
+        project: &str,
+        name: &str,
+        files: &[PathBuf],
+    ) -> Result<(), StoreError> {
+        let mut conn = self.conn.lock().map_err(|_| StoreError::Io)?;
+        write_tx(&mut conn, |conn| {
+            let id: Option<i32> = schema::memory::table
+                .filter(schema::memory::project_slug.eq(project))
+                .filter(schema::memory::name.eq(name))
+                .select(schema::memory::id)
+                .first(&mut *conn)
+                .optional()
+                .map_err(|_| StoreError::Sqlite)?;
+            let Some(id) = id else {
+                return Ok(());
+            };
+            diesel::delete(
+                schema::memory_files::table.filter(schema::memory_files::memory_id.eq(id)),
+            )
+            .execute(&mut *conn)
+            .map_err(|_| StoreError::Sqlite)?;
+            let rows: Vec<NewMemoryFile> = files
+                .iter()
+                .map(|p| NewMemoryFile {
+                    memory_id: id,
+                    path: p.to_string_lossy().into_owned(),
+                })
+                .collect();
+            // OR IGNORE: a body naming one file twice is one link.
+            diesel::insert_or_ignore_into(schema::memory_files::table)
+                .values(&rows)
+                .execute(&mut *conn)
+                .map_err(|_| StoreError::Sqlite)?;
+            Ok(())
+        })
     }
 
     fn memory_upsert(
@@ -1142,7 +1176,7 @@ mod tests {
             err,
             StoreError::SchemaNewer {
                 db: "99991231000000".into(),
-                binary: "00000000000007".into(),
+                binary: "00000000000008".into(),
             }
         );
     }
@@ -1221,6 +1255,80 @@ mod tests {
         let hits = store.memory_search("different words", 5).expect("search");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].name, "auth-flow");
+    }
+
+    fn seed_memory(store: &Store, name: &str, body: &str, files: &[&str]) {
+        store
+            .memory_upsert("proj", name, &format!("{name}.md"), "fact", body)
+            .expect("upsert");
+        let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+        store
+            .memory_set_files("proj", name, &files)
+            .expect("set files");
+    }
+
+    fn hit_names(hits: Vec<MemoryHit>) -> Vec<String> {
+        hits.into_iter().map(|h| h.name).collect()
+    }
+
+    #[test]
+    fn memory_search_ranks_a_fact_linked_to_a_touched_file_first() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        seed_memory(&store, "alpha", "cache invalidation rule", &["/w/a.rs"]);
+        seed_memory(&store, "beta", "cache invalidation rule", &["/w/b.rs"]);
+        let touched = [PathBuf::from("/w/b.rs")];
+
+        let plain = hit_names(store.memory_search("cache invalidation", 5).expect("plain"));
+        assert_eq!(plain, ["alpha", "beta"]);
+        let boosted = store
+            .memory_search_touching("cache invalidation", 5, &touched)
+            .expect("boosted");
+        assert_eq!(hit_names(boosted), ["beta", "alpha"]);
+    }
+
+    #[test]
+    fn memory_search_touching_without_a_matching_touched_path_keeps_text_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        seed_memory(&store, "alpha", "cache invalidation rule", &["/w/a.rs"]);
+        seed_memory(&store, "beta", "cache invalidation rule", &["/w/b.rs"]);
+
+        for touched in [vec![], vec![PathBuf::from("/w/other.rs")]] {
+            let hits = store
+                .memory_search_touching("cache invalidation", 5, &touched)
+                .expect("search");
+            assert_eq!(hit_names(hits), ["alpha", "beta"], "{touched:?}");
+        }
+    }
+
+    #[test]
+    fn memory_link_never_makes_a_non_matching_fact_a_hit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        seed_memory(&store, "alpha", "cache invalidation rule", &["/w/a.rs"]);
+        seed_memory(&store, "beta", "unrelated gotcha", &["/w/b.rs"]);
+
+        let hits = store
+            .memory_search_touching("cache invalidation", 5, &[PathBuf::from("/w/b.rs")])
+            .expect("search");
+        assert_eq!(hit_names(hits), ["alpha"]);
+    }
+
+    #[test]
+    fn memory_set_files_replaces_the_earlier_links() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        seed_memory(&store, "alpha", "cache invalidation rule", &["/w/a.rs"]);
+        seed_memory(&store, "beta", "cache invalidation rule", &["/w/b.rs"]);
+        store
+            .memory_set_files("proj", "beta", &[PathBuf::from("/w/c.rs")])
+            .expect("relink");
+
+        let hits = store
+            .memory_search_touching("cache invalidation", 5, &[PathBuf::from("/w/b.rs")])
+            .expect("search");
+        assert_eq!(hit_names(hits), ["alpha", "beta"], "old link is gone");
     }
 
     #[test]

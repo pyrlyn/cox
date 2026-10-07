@@ -88,6 +88,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    /// `00000000000008_memory_files` (T59.10).
+    memory_files (memory_id, path) {
+        memory_id -> Integer,
+        path -> Text,
+    }
+}
+
+diesel::table! {
     /// `00000000000003_checkpoints` (T26.1).
     checkpoints (id) {
         id -> Integer,

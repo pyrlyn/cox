@@ -6,7 +6,9 @@
 //! writes `<name>.md` plus the `MEMORY.md` index line and upserts the
 //! store's FTS rows (for T10.2's dedup reader); searching reads the FTS
 //! hits first, then fills the rest from the files, top 5 with capped
-//! excerpts. The file format mirrors `cox_ext::memory` (which this crate
+//! excerpts. A fact links the files its body names (T59.10) and a search
+//! ranks a fact above an equal text match when the session read or edited one
+//! of them. The file format mirrors `cox_ext::memory` (which this crate
 //! may not depend on — plan.md dependency direction), kept in sync by the
 //! roundtrip test below.
 
@@ -16,11 +18,21 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cox_protocol::{
-    Concurrency, MemoryHit, Risk, Store, Tool, ToolCx, ToolError, ToolOutput, ToolSpec,
+    Concurrency, Event, MemoryHit, Risk, Store, Tool, ToolCx, ToolError, ToolOutput, ToolSpec,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use serde_json::Value;
+
+use crate::path::confine;
+
+/// Tools whose `subject` is the one file they read or write; their calls in
+/// the rollout are what "touched in the session" means.
+const FILE_TOOLS: [&str; 3] = ["read", "edit", "write"];
+
+/// Most body tokens tried as file links, so a long body costs a bounded
+/// number of filesystem checks.
+const MAX_LINK_CANDIDATES: usize = 64;
 
 /// Cap for one search excerpt.
 const EXCERPT_CHARS: usize = 500;
@@ -102,7 +114,7 @@ impl Tool for MemorySaveTool {
             .to_string()
     }
 
-    async fn call(&self, input: Value, _cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
         let input: SaveInput = serde_json::from_value(input).map_err(|e| ToolError::Denied {
             why: format!("invalid memory_save input: {e}"),
         })?;
@@ -144,6 +156,13 @@ impl Tool for MemorySaveTool {
                 input.body.trim(),
             )
             .map_err(|_| ToolError::Io)?;
+        // Best-effort like the FTS row's neighbours: the fact is saved, and a
+        // failed link only costs the recall boost.
+        let _ = self.store.memory_set_files(
+            &slug_from_dir(&self.dir),
+            &input.name,
+            &linked_files(input.body.trim(), cx),
+        );
         Ok(ToolOutput {
             text: format!("saved memory `{}`", input.name),
             is_error: false,
@@ -178,7 +197,7 @@ impl Tool for MemorySearchTool {
             .to_string()
     }
 
-    async fn call(&self, input: Value, _cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
         let input: SearchInput = serde_json::from_value(input).map_err(|e| ToolError::Denied {
             why: format!("invalid memory_search input: {e}"),
         })?;
@@ -190,7 +209,7 @@ impl Tool for MemorySearchTool {
         let limit = input.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, 10);
         let mut hits: Vec<Hit> = self
             .store
-            .memory_search(&input.query, limit)
+            .memory_search_touching(&input.query, limit, &touched_files(&*self.store, cx))
             .unwrap_or_default()
             .into_iter()
             .map(|h: MemoryHit| Hit {
@@ -234,6 +253,53 @@ impl Tool for MemorySearchTool {
 struct Hit {
     name: String,
     excerpt: String,
+}
+
+/// The files in `body` that exist under the workspace, as canonical paths.
+/// Every token goes through `confine`, so a body cannot link a file outside
+/// the roots by naming it.
+fn linked_files(body: &str, cx: &ToolCx) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    for token in body.split_whitespace().take(MAX_LINK_CANDIDATES) {
+        // `src/a.rs:42` and "`src/a.rs`," both name `src/a.rs`.
+        let token = token
+            .trim_matches(|c: char| "`'\"()[]{}<>,;!?".contains(c))
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches('.');
+        if !(token.contains('/') || token.contains('.')) {
+            continue;
+        }
+        if let Ok(path) = confine(&cx.roots, &cx.cwd, token)
+            && path.is_file()
+            && !files.contains(&path)
+        {
+            files.push(path);
+        }
+    }
+    files
+}
+
+/// The files this session read or edited, from its own rollout. Empty when
+/// the rollout cannot be read: a broken index degrades the ranking, never
+/// the search.
+fn touched_files(store: &dyn Store, cx: &ToolCx) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    for ev in store.rollout_read(&cx.session).unwrap_or_default() {
+        let Event::ToolCallRequested { call } = ev else {
+            continue;
+        };
+        if !FILE_TOOLS.contains(&call.name.as_str()) {
+            continue;
+        }
+        if let Ok(path) = confine(&cx.roots, &cx.cwd, &call.subject)
+            && !files.contains(&path)
+        {
+            files.push(path);
+        }
+    }
+    files
 }
 
 /// Fact slugs double as file stems (mirrors `cox_ext::memory::is_valid_name`;
@@ -387,12 +453,21 @@ mod tests {
     /// In-memory `Store` double: `memory_*` over a map, everything else inert.
     struct FakeStore {
         memory: Mutex<HashMap<(String, String), (String, String)>>,
+        /// `memory_set_files` calls by (project, name).
+        links: Mutex<HashMap<(String, String), Vec<PathBuf>>>,
+        /// What `rollout_read` returns: the session's tool calls.
+        rollout: Mutex<Vec<cox_protocol::Event>>,
+        /// The `touched` argument of the last `memory_search_touching`.
+        touched_seen: Mutex<Option<Vec<PathBuf>>>,
     }
 
     impl FakeStore {
         fn new() -> Arc<Self> {
             Arc::new(Self {
                 memory: Mutex::new(HashMap::new()),
+                links: Mutex::new(HashMap::new()),
+                rollout: Mutex::new(Vec::new()),
+                touched_seen: Mutex::new(None),
             })
         }
 
@@ -411,6 +486,9 @@ mod tests {
         {
             Ok(Self {
                 memory: Mutex::new(HashMap::new()),
+                links: Mutex::new(HashMap::new()),
+                rollout: Mutex::new(Vec::new()),
+                touched_seen: Mutex::new(None),
             })
         }
         fn session_create(&self, _s: &cox_protocol::SessionRow) -> Result<(), StoreError> {
@@ -424,7 +502,7 @@ mod tests {
             Ok(0)
         }
         fn rollout_read(&self, _id: &SessionId) -> Result<Vec<cox_protocol::Event>, StoreError> {
-            Ok(vec![])
+            Ok(self.rollout.lock().unwrap().clone())
         }
         fn usage_insert(&self, _row: &cox_protocol::UsageRow) -> Result<(), StoreError> {
             Ok(())
@@ -451,6 +529,27 @@ mod tests {
                 }
             }
             Ok(hits)
+        }
+        fn memory_set_files(
+            &self,
+            project: &str,
+            name: &str,
+            files: &[PathBuf],
+        ) -> Result<(), StoreError> {
+            self.links
+                .lock()
+                .unwrap()
+                .insert((project.into(), name.into()), files.to_vec());
+            Ok(())
+        }
+        fn memory_search_touching(
+            &self,
+            q: &str,
+            limit: usize,
+            touched: &[PathBuf],
+        ) -> Result<Vec<MemoryHit>, StoreError> {
+            *self.touched_seen.lock().unwrap() = Some(touched.to_vec());
+            self.memory_search(q, limit)
         }
         fn memory_upsert(
             &self,
@@ -595,6 +694,72 @@ mod tests {
         let first = out.text.find("indexed-fact").unwrap_or(usize::MAX);
         let second = out.text.find("file-fact").unwrap_or(usize::MAX);
         assert!(first < second, "store hit first:\n{}", out.text);
+    }
+
+    fn requested(name: &str, subject: &str) -> cox_protocol::Event {
+        cox_protocol::Event::ToolCallRequested {
+            call: cox_protocol::ToolCall {
+                id: cox_protocol::CallId::new(),
+                name: name.into(),
+                input: serde_json::json!({}),
+                risk: Risk::ReadOnly,
+                subject: subject.into(),
+                segments: None,
+            },
+        }
+    }
+
+    fn cx_in(root: &Path) -> ToolCx {
+        let mut cx = cx();
+        cx.roots = vec![root.to_path_buf()];
+        cx.cwd = root.to_path_buf();
+        cx
+    }
+
+    #[tokio::test]
+    async fn memory_save_links_only_files_that_exist_under_the_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("ws/src")).unwrap();
+        let ws = fs::canonicalize(dir.path().join("ws")).unwrap();
+        fs::write(ws.join("src/auth.rs"), "").unwrap();
+        let store = FakeStore::new();
+        let tool = MemorySaveTool::new(store.clone(), dir.path().join("proj").join("memory"));
+        tool.call(
+            serde_json::json!({
+                "name": "auth-flow",
+                "body": "See `src/auth.rs:42`, not missing.rs, /etc/passwd or ../outside.rs.",
+            }),
+            &cx_in(&ws),
+        )
+        .await
+        .expect("save");
+        let links = store.links.lock().unwrap();
+        let linked = links.get(&("proj".to_string(), "auth-flow".to_string()));
+        assert_eq!(linked, Some(&vec![ws.join("src/auth.rs")]));
+    }
+
+    #[tokio::test]
+    async fn memory_search_passes_the_files_the_session_read_or_edited() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("ws")).unwrap();
+        let ws = fs::canonicalize(dir.path().join("ws")).unwrap();
+        let store = FakeStore::new();
+        *store.rollout.lock().unwrap() = vec![
+            requested("read", "a.rs"),
+            requested("edit", "b.rs"),
+            requested("bash", "cat c.rs"),
+            requested("read", "a.rs"),
+            requested("read", "/etc/passwd"),
+        ];
+        let search = MemorySearchTool::new(store.clone(), dir.path().join("memory"));
+        search
+            .call(serde_json::json!({"query": "anything"}), &cx_in(&ws))
+            .await
+            .expect("search");
+        assert_eq!(
+            *store.touched_seen.lock().unwrap(),
+            Some(vec![ws.join("a.rs"), ws.join("b.rs")])
+        );
     }
 
     #[tokio::test]
