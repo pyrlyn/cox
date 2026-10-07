@@ -46,7 +46,7 @@ jobs:
   rust:
     needs: config
     if: ${{ !cancelled() }}
-    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@d55d5927f412944861509eb04ad65ea1760643db # main
+    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@27290ae30105592f683c236fc76dcc2ee4348bdf # main
     # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
     # `actions: write` on the calling job.
     permissions:
