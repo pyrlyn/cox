@@ -37,10 +37,14 @@ pub struct Rule {
 }
 
 /// Claude Code's tool names mapped onto cox's (plan.md §1.8); everything
-/// else is lower-cased as-is.
+/// else is lower-cased as-is. `project` (T59.5) is a shell command run by
+/// `bash`'s executor, so it shares `bash`'s rules and session grants: a deny
+/// rule `Bash(rm:*)` must not be bypassable by the same command arriving
+/// under another tool name.
 pub fn canonical_tool(name: &str) -> String {
     let lower = name.trim().to_ascii_lowercase();
     match lower.as_str() {
+        "project" => "bash".into(),
         "webfetch" => "web_fetch".into(),
         "websearch" => "web_search".into(),
         "multiedit" | "notebookedit" => "edit".into(),

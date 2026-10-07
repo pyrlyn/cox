@@ -9866,3 +9866,38 @@ mise exec -- cargo nextest run -p cox-core -p cox-app -p cox: 777 tests run: 777
 mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings: clean
 mise exec -- cargo fmt --check: clean
 ```
+
+#### T59.5 `project` tool: run the project's own check command
+
+Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: one `project` tool call with `action = check | test | lint | fmt` runs the detected command (`just check`, `cargo test`, `npm test`, `go test ./...`, …) through the normal `bash` sandbox and approval path and returns the folded result, replacing the model's guess of the command; bench mean tool calls per task −5 %.
+
+Files:
+- `crates/cox-tools/src/project.rs` (new)
+- `crates/cox-session/src/tools.rs`
+- `crates/cox-protocol/src/config.rs`
+
+Steps:
+1. Detection in order: `[project]` config, `justfile` recipes, `Cargo.toml`, `package.json` scripts, `go.mod`, `pyproject.toml` (Empryo idea: `src/core/tools/project.ts`, `toolchain.ts`).
+2. Run through the existing `bash` tool's executor so `Engine` approval and the sandbox are unchanged; output passes T59.2's folding.
+3. Register behind `tools.project = false`.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: detection table tests for each manifest; an approval test shows `project` asks exactly like `bash` for the same command; bench row in `research.md`.
+
+Out of scope: installing toolchains, parsing test output into structures.
+
+Status: done 2026-10-07
+Result: `cox_tools::project::ProjectTool` detects the command (`[project]` config, then `justfile` recipes with no required argument, `Cargo.toml`, `package.json` scripts from a fixed candidate list, `go.mod`, `pyproject.toml` `[tool.*]` tables) and hands it to `BashTool::call`, so the sandbox, PTY, timeout, archive and `sandbox_denied` handling are `bash`'s own. `subject`, `segments` and `risk` are `bash`'s for the detected command; `cox_permission::rules::canonical_tool` maps `project` to `bash`, so `Bash(...)` allow/ask/deny rules and session grants cover it and a command cannot dodge a rule by arriving as `project`. `call` re-detects under the session cwd and refuses unless the result equals the detection the call was judged on (a manifest edited in between, or a cwd that is not the session root, cannot swap the command). `fmt` is a format check and never rewrites. Registered by `cox_session::tools::with_project` behind `tools.project = false`; new `[tools]` and `[project]` config tables with `default.toml`, `docs/config.md` and `docs/config.jsonschema` updated. `package.json` script bodies are never copied into the command. Reused: `BashTool`, `bash::{classify, segments}`, the `Engine`. T59.2's output folding does not exist yet, so output takes the existing truncate/archive path.
+
+Check: `mise exec -- cargo nextest run -p cox-tools -p cox-session -p cox-protocol -p cox-config -p cox -p cox-core -p cox-permission`: 927 tests run, 927 passed (4 skipped), including `detection_table_picks_the_manifests_command` (15 rows), `detection_finds_nothing_without_a_matching_manifest_entry`, `project_asks_exactly_like_bash_for_the_same_command` (cox-core `tests/permission.rs`), `project_tool_is_registered_only_behind_its_flag`, and the config.md, config.jsonschema and deps drift tests. `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+Not done: `just bench` and the `research.md` bench row (the mean-tool-calls −5 % claim) were not run, by instruction. No insta snapshot changed. The real binary was not run against a scratch `COX_HOME`. No action-level `call` test runs a command end to end (the executor is `BashTool`'s, covered by its own tests). `package.json` detection assumes `npm`, not pnpm/yarn/bun.

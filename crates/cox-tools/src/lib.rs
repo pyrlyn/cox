@@ -30,6 +30,7 @@ pub mod glob;
 pub mod grep;
 pub mod lsp;
 pub mod memory;
+pub mod project;
 pub mod read;
 pub mod repomap;
 pub mod send_message;
