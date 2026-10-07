@@ -103,3 +103,11 @@
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
 - T61.11. No feature-unification rebuilds between `just test` and `just check-all`
+- T62.2. Known panic path in `edit`'s whitespace fallback with `replace_all`
+- T62.3. The default `~/.ssh` deny is bypassable through `bash`
+- T62.4. Build/test commands classified read-only execute project-controlled code without approval
+- T62.5. `web_fetch` has no SSRF guard
+- T62.6. pid-reuse race in the bash kill path
+- T62.7. Duplicated repo-root resolution
+- T62.8. `checkpoint changes()` silently truncates on root-count mismatch
+- T62.9. Small fixes: `confine` colon ban and retry jitter
