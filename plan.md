@@ -120,6 +120,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T62.6 | todo | P3 | 1 | 0% | |
 | T62.7 | todo | P3 | 1 | 0% | |
 | T62.8 | todo | P3 | 1 | 0% | |
+| T62.9 | todo | P3 | 1 | 0% | |
 | T63.1 | todo | P2 | 2 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
 | T63.3 | todo | P1 | 1 | 0% | |
@@ -3434,3 +3435,7 @@ Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-
 ### T62.8. `checkpoint changes()` silently truncates on root-count mismatch
 
 `crates/cox-tools/src/checkpoint.rs:166`: `before.trees.iter().zip(&after.trees)` drops unpaired roots instead of erroring — a snapshot pair from different root sets reports partial diffs. Done means: mismatched root sets are an error.
+
+### T62.9. Small fixes: `confine` colon ban and retry jitter
+
+`cox-sandbox/src/path.rs:87` rejects every path containing `:` (documented as a Windows-syntax ban, but it also refuses legitimate Unix filenames with colons) — revisit with an allowlist for workspace-local names or a clearer comment. `cox-provider-http/src/retry.rs:48-57` derives jitter from `subsec_nanos` of the wall clock — near-deterministic for aligned callers; mix in a bit more entropy.
