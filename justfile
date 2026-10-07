@@ -1,5 +1,7 @@
 # cox — task runner. Every target runs through `mise exec` so the pinned
 # toolchain (mise.toml) is used, never whatever `cargo` happens to be on PATH.
+# On Windows just has no `sh`; the desktop-windows recipes are PowerShell.
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 check:
     bash scripts/leftovers.sh
@@ -157,6 +159,22 @@ desktop-app: desktop-xcframework
 # same through the `desktop build` workflow.
 desktop-dmg: desktop-app
     bash scripts/desktop/dmg.sh
+
+# The Windows app (T58.3). Visual Studio is the Xcode counterpart: `just desktop-windows-open`
+# opens desktop/windows/Cox.sln. Build and test run from that directory so global.json pins
+# SDK 10 and the Microsoft.Testing.Platform runner. `just desktop-windows-run` builds Debug
+# and starts the unpackaged window.
+desktop-windows-open:
+    powershell -NoProfile -File scripts/desktop/windows.ps1 open
+
+desktop-windows:
+    powershell -NoProfile -File scripts/desktop/windows.ps1 build
+
+desktop-windows-test:
+    powershell -NoProfile -File scripts/desktop/windows.ps1 test
+
+desktop-windows-run:
+    powershell -NoProfile -File scripts/desktop/windows.ps1 run
 
 # The native apps' string resources from crates/cox-i18n/po (docs/i18n.md):
 # Apple .strings/.stringsdict and Windows .resw under target/i18n/ (gitignored).

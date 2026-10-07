@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml;
 namespace Cox.App;
 
 /// <summary>
-/// WinUI 3 entry. The window stays empty until T58.10 builds the shell.
+/// WinUI 3 entry. The window shows the mockup shell; live sessions wait on T58.1.
 /// </summary>
 public partial class App : Application
 {
