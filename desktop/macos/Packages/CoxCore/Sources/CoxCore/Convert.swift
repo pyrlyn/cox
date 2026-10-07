@@ -6,6 +6,10 @@
 // sets have the same shape (both mirror cox-app's serde types); this file
 // keeps the generated ones inside CoxCore, so the stores and views never
 // link Rust. Exhaustive switches: a variant added in Rust fails this build.
+//
+// The mapping is one table of mirrored pairs; splitting it by type would scatter the
+// exhaustive switches that catch a missing case, so the file keeps its length.
+// swiftlint:disable file_length
 
 import CoxClient
 import CoxFFIBindings

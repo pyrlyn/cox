@@ -318,6 +318,12 @@ jobs:
         working-directory: desktop/macos
         run: swiftlint lint --strict --no-cache --quiet App
 
+      # The UI-free packages are linted here too, not only by the build-tool plugin, so the
+      # rules still gate a pull request if a build stops running the plugin (T63.3, DT§4.6).
+      - name: swiftlint UI-free packages
+        working-directory: desktop/macos
+        run: swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources
+
       - name: swift-format
         run: |
           set -euo pipefail
