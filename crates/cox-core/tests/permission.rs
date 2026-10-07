@@ -534,3 +534,83 @@ fn exact_rule_still_matches_whole_command() {
     );
     assert!(matches!(bypass, Outcome::Allow { .. }), "{bypass:?}");
 }
+
+/// A `project` call as the loop builds it, with `command` as the detected
+/// `[project].check` (T59.5): the config override makes the command exact
+/// without a manifest on disk.
+fn project(command: &str) -> ToolCall {
+    use cox_protocol::traits::Tool as _;
+    let tool = cox_tools::project::ProjectTool::new(
+        std::path::PathBuf::from(CWD),
+        cox_protocol::config::ProjectConfig {
+            check: command.into(),
+            ..Default::default()
+        },
+    );
+    let input = serde_json::json!({ "action": "check" });
+    ToolCall {
+        id: CallId::new(),
+        name: "project".into(),
+        risk: tool.risk(&input),
+        subject: tool.subject(&input),
+        segments: tool.segments(&input),
+        input,
+    }
+}
+
+/// T59.5: `project` asks exactly like `bash` for the same command, under
+/// every rule set, mode, policy and session grant a `bash` call is judged
+/// by, so a `Bash(...)` deny, allow or ask rule covers it and a command
+/// cannot dodge a rule by arriving as `project`.
+#[rstest]
+#[case::default_config(&[], &[], &[], &[])]
+#[case::allow_prefix(&["Bash(cargo:*)"], &[], &[], &[])]
+#[case::deny_rule(&["Bash"], &[], &["Bash(rm:*)"], &[])]
+#[case::ask_rule(&["Bash(cargo:*)"], &["Bash(cargo test:*)"], &[], &[])]
+#[case::session_grant(&[], &[], &[], &[("bash", "cargo test")])]
+fn project_asks_exactly_like_bash_for_the_same_command(
+    #[case] allow: &[&str],
+    #[case] ask: &[&str],
+    #[case] deny: &[&str],
+    #[case] grants: &[(&str, &str)],
+) {
+    let e = engine(allow, ask, deny);
+    let grants: Vec<_> = grants
+        .iter()
+        .map(|(t, s)| (t.to_string(), s.to_string()))
+        .collect();
+    for command in ["cargo test", "cargo test && rm -rf x", "git log $(date)"] {
+        let (p, b) = (project(command), bash(command));
+        assert_eq!(
+            (p.risk, &p.subject, &p.segments),
+            (b.risk, &b.subject, &b.segments),
+            "{command}"
+        );
+        for mode in [M::Default, M::Auto, M::Plan] {
+            for policy in [P::OnRequest, P::Untrusted, P::Never] {
+                let decide =
+                    |c: &ToolCall| e.decide(c, mode, policy, SandboxMode::WorkspaceWrite, &grants);
+                assert_eq!(
+                    want(&decide(&p)),
+                    want(&decide(&b)),
+                    "{command} {mode:?} {policy:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn project_approval_is_remembered_as_a_bash_grant() {
+    let e = engine(&[], &[], &[]);
+    let grants = cox_core::permission::grants_for(&project("cargo test"));
+    let outcome = e.decide(
+        &project("cargo test"),
+        M::Default,
+        P::OnRequest,
+        SandboxMode::WorkspaceWrite,
+        &grants,
+    );
+    assert_eq!(want(&outcome), Want::Allow);
+    assert_eq!(judge(&e, "cargo test", &grants), Want::Allow);
+}
