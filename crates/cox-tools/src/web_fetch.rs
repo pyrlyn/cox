@@ -17,6 +17,10 @@ use crate::write::str_field;
 
 pub struct WebFetchTool {
     http: cox_web::Client,
+    /// The tool-level half of the private-address guard: the first URL's
+    /// IP-literal host skips both the resolver and the redirect policy, so
+    /// `new()` checks it here (T62.5). Test clients turn it off.
+    private_guard: bool,
 }
 
 impl Default for WebFetchTool {
@@ -29,6 +33,16 @@ impl WebFetchTool {
     pub fn new() -> Self {
         Self {
             http: cox_web::client(),
+            private_guard: true,
+        }
+    }
+
+    /// A tool over a caller-supplied client — tests serve their fixtures
+    /// from loopback, which the private-address guard refuses.
+    pub fn with_client(http: cox_web::Client) -> Self {
+        Self {
+            http,
+            private_guard: false,
         }
     }
 }
@@ -71,6 +85,11 @@ impl Tool for WebFetchTool {
             return Err(ToolError::Denied {
                 why: format!("only http(s) URLs can be fetched, got {url:?}"),
             });
+        }
+        if self.private_guard
+            && let Some(why) = cox_web::refused_literal(&url)
+        {
+            return Err(ToolError::Denied { why: why.into() });
         }
         let max_bytes = input
             .get("max_bytes")
