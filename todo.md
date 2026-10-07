@@ -103,7 +103,6 @@
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
 - T61.11. No feature-unification rebuilds between `just test` and `just check-all`
-- T62.5. `web_fetch` has no SSRF guard
 - T62.6. pid-reuse race in the bash kill path
 - T62.7. Duplicated repo-root resolution
 - T62.8. `checkpoint changes()` silently truncates on root-count mismatch
