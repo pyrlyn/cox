@@ -51,6 +51,9 @@ pub struct Engine {
     deny: Vec<Rule>,
     allow: Vec<Rule>,
     ask: Vec<Rule>,
+    /// The home the rules were compiled with, to expand `~` in the paths a
+    /// read-only command names (the same expansion `Rule::parse` does).
+    home: Option<std::path::PathBuf>,
 }
 
 impl Engine {
@@ -75,6 +78,7 @@ impl Engine {
             deny: compile("deny", &cfg.deny)?,
             allow: compile("allow", &cfg.allow)?,
             ask: compile("ask", &cfg.ask)?,
+            home: home.map(Path::to_path_buf),
         })
     }
 
@@ -139,6 +143,18 @@ impl Engine {
                 by: DecidedBy::Rule,
             };
         }
+        // A denied read path is denied however it arrives (T62.3). A bash
+        // `cat ~/.ssh/id_rsa` classifies ReadOnly and no Bash command rule
+        // can enumerate every reader, so the read path denies also match the
+        // paths a read-only command names.
+        if call.risk == Risk::ReadOnly {
+            if let Some(rule) = self.denied_read_path(call) {
+                return Outcome::Deny {
+                    reason: format!("denied by rule {rule}"),
+                    by: DecidedBy::Rule,
+                };
+            }
+        }
         if mode == PermissionMode::Bypass {
             return Outcome::Allow {
                 by: DecidedBy::Policy,
@@ -202,6 +218,54 @@ fn covered(call: &ToolCall, line: impl Fn(&str) -> bool, each: impl Fn(&str) -> 
                 || (!s.opaque && !s.commands.is_empty() && s.commands.iter().all(|c| each(c)))
         }
     }
+}
+
+impl Engine {
+    /// The raw text of the first read-path deny rule whose globs cover a
+    /// path the call names, or `None`. Scans the whole subject and every
+    /// simple command of a split line, so `echo hi && cat ~/.ssh/id` is
+    /// caught by its second segment.
+    fn denied_read_path(&self, call: &ToolCall) -> Option<String> {
+        if !self.deny.iter().any(|r| r.read_path_rule()) {
+            return None;
+        }
+        let mut lines = vec![call.subject.as_str()];
+        if let Some(segments) = &call.segments {
+            lines.extend(segments.commands.iter().map(String::as_str));
+        }
+        for line in lines {
+            for token in line.split_whitespace() {
+                let Some(path) = token_path(token, self.home.as_deref()) else {
+                    continue;
+                };
+                if let Some(rule) = self
+                    .deny
+                    .iter()
+                    .find(|r| r.read_path_rule() && r.covers_file(&path))
+                {
+                    return Some(rule.raw.clone());
+                }
+            }
+        }
+        None
+    }
+}
+
+/// The absolute path a command token names, `~` expanded, with surrounding
+/// shell punctuation and quotes trimmed; `None` when the token cannot name
+/// a file (a flag, a bare word, a relative path — read rules anchor
+/// absolutely, so relatives cannot match one anyway).
+fn token_path(token: &str, home: Option<&Path>) -> Option<String> {
+    let trimmed = token.trim_matches(|c: char| {
+        !(c.is_ascii_alphanumeric() || matches!(c, '/' | '~' | '.' | '-' | '_' | '='))
+    });
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        return home.map(|h| h.join(rest).to_string_lossy().into_owned());
+    }
+    if trimmed.starts_with('/') && trimmed.len() > 1 {
+        return Some(trimmed.to_string());
+    }
+    None
 }
 
 /// Step 6: an `AllowForSession` grant. Grants are recorded per command by
@@ -298,6 +362,7 @@ fn rank(mode: PermissionMode) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cox_protocol::{CallId, types::Segments};
 
     const ALL_MODES: [PermissionMode; 4] = [
         PermissionMode::Plan,
@@ -305,6 +370,104 @@ mod tests {
         PermissionMode::Auto,
         PermissionMode::Bypass,
     ];
+
+    fn bash_call(line: &str, commands: &[&str], opaque: bool) -> ToolCall {
+        ToolCall {
+            id: CallId::new(),
+            name: "bash".into(),
+            input: serde_json::json!({ "command": line }),
+            risk: Risk::ReadOnly,
+            subject: line.into(),
+            segments: Some(Segments {
+                commands: commands.iter().map(|c| c.to_string()).collect(),
+                opaque,
+            }),
+        }
+    }
+
+    /// T62.3: the default `Read(~/.ssh/**)` deny must also stop a bash
+    /// command that names the same files, whatever the reader is.
+    #[test]
+    fn a_read_only_bash_command_cannot_read_a_denied_path() {
+        let home = Path::new("/home/alice");
+        let engine = Engine::compile(
+            &PermissionsConfig::default(),
+            Some(home),
+            Path::new("/repo"),
+        )
+        .expect("default config compiles");
+        for line in [
+            "cat ~/.ssh/id_ed25519",
+            "head -n 1 /home/alice/.ssh/config",
+            "grep alice '~/.ssh/known_hosts'",
+            "echo hi && cat ~/.ssh/id_ed25519",
+            "tail -f ~/.aws/credentials",
+        ] {
+            let call = bash_call(line, &[line], false);
+            let outcome = engine.decide(
+                &call,
+                PermissionMode::Default,
+                ApprovalPolicy::OnRequest,
+                SandboxMode::WorkspaceWrite,
+                &[],
+            );
+            assert!(
+                matches!(outcome, Outcome::Deny { .. }),
+                "{line} must be denied, got {outcome:?}"
+            );
+        }
+    }
+
+    /// The guard only answers what a read rule denies: ordinary read-only
+    /// commands, and commands under the workspace, are untouched.
+    #[test]
+    fn a_read_only_bash_command_elsewhere_is_untouched() {
+        let home = Path::new("/home/alice");
+        let engine = Engine::compile(
+            &PermissionsConfig::default(),
+            Some(home),
+            Path::new("/repo"),
+        )
+        .expect("default config compiles");
+        for line in ["cat README.md", "ls -la /repo", "grep foo src/main.rs"] {
+            let call = bash_call(line, &[line], false);
+            let outcome = engine.decide(
+                &call,
+                PermissionMode::Default,
+                ApprovalPolicy::OnRequest,
+                SandboxMode::WorkspaceWrite,
+                &[],
+            );
+            assert!(
+                matches!(outcome, Outcome::Allow { .. }),
+                "{line} must stay allowed, got {outcome:?}"
+            );
+        }
+    }
+
+    /// An opaque line (substitution, `eval`) still cannot smuggle the path
+    /// past the deny: the whole subject is scanned when segments cannot be
+    /// trusted.
+    #[test]
+    fn an_opaque_line_naming_a_denied_path_is_denied() {
+        let home = Path::new("/home/alice");
+        let engine = Engine::compile(
+            &PermissionsConfig::default(),
+            Some(home),
+            Path::new("/repo"),
+        )
+        .expect("default config compiles");
+        let line = "eval \"cat ~/.ssh/id_ed25519\"";
+        let call = bash_call(line, &[line], true);
+        let outcome = engine.decide(
+            &call,
+            PermissionMode::Default,
+            ApprovalPolicy::OnRequest,
+            SandboxMode::WorkspaceWrite,
+            &[],
+        );
+        assert!(matches!(outcome, Outcome::Deny { .. }), "got {outcome:?}");
+    }
 
     #[test]
     fn narrower_never_returns_the_wider_mode() {
