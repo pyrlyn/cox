@@ -25,6 +25,8 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/apple/swift-collections", from: "1.7.1"),
     .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
+    // T63.1: generated inputs and shrinking for the store's patch rules; tests only.
+    .package(url: "https://github.com/x-sheep/swift-property-based", exact: "2.0.1"),
   ],
   targets: [
     .target(name: "CoxClient", plugins: [swiftLint]),
@@ -36,6 +38,13 @@ let package = Package(
       ],
       plugins: [swiftLint]
     ),
-    .testTarget(name: "CoxModelTests", dependencies: ["CoxModel"], plugins: [swiftLint]),
+    .testTarget(
+      name: "CoxModelTests",
+      dependencies: [
+        "CoxModel",
+        .product(name: "PropertyBased", package: "swift-property-based"),
+      ],
+      plugins: [swiftLint]
+    ),
   ]
 )

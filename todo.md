@@ -107,7 +107,6 @@
 - T62.7. Duplicated repo-root resolution
 - T62.8. `checkpoint changes()` silently truncates on root-count mismatch
 - T62.9. Small fixes: `confine` colon ban and retry jitter
-- T63.1. Property-based tests for `SessionStore`
 - T63.2. CI: re-run only the Swift packages a change can affect
 - T63.3. Lint: no AppKit or SwiftUI in `CoxModel` and `CoxCore`
 - T63.4. Dependency injection through swift-dependencies
