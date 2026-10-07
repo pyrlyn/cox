@@ -98,7 +98,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.1 | todo | P1 | 4 | 0% | |
 | T59.2 | todo | P1 | 2 | 0% | |
-| T59.3 | todo | P1 | 4 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
 | T59.5 | todo | P2 | 3 | 0% | |
 | T59.6 | todo | P3 | 3 | 0% | |
@@ -1995,34 +1994,6 @@ mise exec -- cargo fmt --check
 Done when: table tests for folding, digit masking and the error-line rule pass; `research.md` has the bench row (context-token-turns −5 %, pass rate unchanged).
 
 Out of scope: per-command rules, ANSI handling beyond what `visible` does today.
-
-#### T59.3 `edit` and `write` report the diagnostics they introduced
-
-Model: opus · Status: open · Depends: T41.6 · Size: ~190 · Priority: P1 · Complexity: 4
-
-Goal: when a language server for the file is already running, `edit`/`write` end their result with the diagnostics that are new since before the change (at most 10 lines, errors first), so the model does not spend a `bash` check call to find its own error; bench check-call count −20 %.
-
-Files:
-- `crates/cox-tools/src/lsp/mod.rs`
-- `crates/cox-tools/src/edit.rs`
-- `crates/cox-session/src/tools.rs`
-
-Steps:
-1. Move the server pool out of `DiagnosticsTool` (`lsp/mod.rs:40-49`) into a shared `Arc<LspPool>` with `running_for(path) -> Option<Arc<Server>>` that never spawns (the §1 `diagnostics` row, `plan.md:591`, starts a server lazily from `diagnostics` only; an edit must never start one). Build it once in the registry (`cox-session/src/tools.rs:27`) and hand it to `diagnostics`, `edit` and `write` (`WriteTool`, `write.rs:65`, gets the same 3-line hook).
-2. In `EditTool` (`edit.rs:33`): before writing, take the server's last diagnostics for the file; after writing, call `Server::diagnostics` (`server.rs:253`) with a short wait (`lsp.after_edit_ms`, default 1500) and append only the set difference keyed by (range start line, code, message). A dead or slow server adds nothing — never an error and never a retry.
-3. `[lsp] after_edit = false` by default in `cox-protocol` config; the fake launcher (`lsp/mod.rs:65`) drives the tests.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: tests with the fake server show the new error after an edit that introduces it, nothing when the server is not running, and nothing extra for errors that existed before; `research.md` has the bench row (bash check calls −20 %, pass rate not lower).
-
-Out of scope: starting servers, code actions, diagnostics for files the edit did not touch.
 
 #### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
 

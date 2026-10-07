@@ -227,6 +227,8 @@
         "enabled": true,
         "timeout_s": 30,
         "quiet_ms": 500,
+        "after_edit": false,
+        "after_edit_ms": 1500,
         "servers": {
           "go": {
             "command": "gopls",
@@ -1655,6 +1657,18 @@
           "format": "uint32",
           "minimum": 0,
           "default": 500
+        },
+        "after_edit": {
+          "description": "Whether `edit` and `write` end with the diagnostics they introduced,\nasked of a language server only when one already runs (T59.3).",
+          "type": "boolean",
+          "default": false
+        },
+        "after_edit_ms": {
+          "description": "Longest wait, in milliseconds, for those diagnostics after a change.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 1500
         },
         "servers": {
           "description": "`[lsp.servers.<name>]` entries.",

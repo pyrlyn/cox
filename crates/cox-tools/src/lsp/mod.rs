@@ -25,6 +25,7 @@ use serde_json::Value;
 
 use crate::path::confine;
 use client::LspError;
+use diag::Diagnostic;
 use server::{Options, Pipes, Server};
 
 /// Turns a configured server into the argv to run: the sandbox wrap, which
@@ -38,10 +39,10 @@ pub type Launcher = Arc<dyn Fn(&[String], &Path) -> Result<Pipes, LspError> + Se
 /// which JSON escaping can grow, under the client's 16 MiB cap.
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
-/// `diagnostics` (T41.6): a file's compiler and linter diagnostics from a
-/// language server, one per language, started on first use and kept for
-/// the session.
-pub struct DiagnosticsTool {
+/// The session's language servers, one per language. Shared because
+/// `diagnostics` starts them (T41.6) while `edit`/`write` only ask one that
+/// already runs (T59.3): an edit must never run a project's build scripts.
+pub struct LspPool {
     cfg: LspConfig,
     spawner: Spawner,
     launcher: Launcher,
@@ -50,6 +51,13 @@ pub struct DiagnosticsTool {
     /// One start at a time, so two parallel calls never start two servers
     /// for one language.
     starting: tokio::sync::Mutex<()>,
+}
+
+/// `diagnostics` (T41.6): a file's compiler and linter diagnostics from a
+/// language server, one per language, started on first use and kept for
+/// the session.
+pub struct DiagnosticsTool {
+    pool: Arc<LspPool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -63,6 +71,20 @@ struct DiagnosticsInput {
 
 impl DiagnosticsTool {
     pub fn new(cfg: LspConfig, spawner: Spawner) -> Self {
+        Self::from_pool(Arc::new(LspPool::new(cfg, spawner)))
+    }
+
+    pub fn with_launcher(cfg: LspConfig, spawner: Spawner, launcher: Launcher) -> Self {
+        Self::from_pool(Arc::new(LspPool::with_launcher(cfg, spawner, launcher)))
+    }
+
+    pub fn from_pool(pool: Arc<LspPool>) -> Self {
+        Self { pool }
+    }
+}
+
+impl LspPool {
+    pub fn new(cfg: LspConfig, spawner: Spawner) -> Self {
         Self::with_launcher(cfg, spawner, Arc::new(server::spawn))
     }
 
@@ -73,6 +95,21 @@ impl DiagnosticsTool {
             launcher,
             pool: Mutex::new(HashMap::new()),
             starting: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    /// The running server for `path`'s language. Never starts one.
+    pub fn running_for(&self, path: &Path) -> Option<Arc<Server>> {
+        let (name, _) = self.server_for(&path.to_string_lossy())?;
+        let pooled = lock(&self.pool).get(name).cloned();
+        pooled.filter(|s| s.running())
+    }
+
+    /// Kills every server; the next `diagnostics` call starts a fresh one.
+    pub fn shutdown(&self) {
+        let servers: Vec<Arc<Server>> = lock(&self.pool).drain().map(|(_, s)| s).collect();
+        for server in servers {
+            server.kill();
         }
     }
 
@@ -153,6 +190,7 @@ impl Tool for DiagnosticsTool {
         let input_schema =
             serde_json::to_value(schema_for!(DiagnosticsInput)).unwrap_or(Value::Null);
         let languages: Vec<String> = self
+            .pool
             .cfg
             .servers
             .iter()
@@ -193,8 +231,8 @@ impl Tool for DiagnosticsTool {
             .get("path")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        match self.server_for(path) {
-            Some((name, _)) if !self.running(name) => Risk::Exec,
+        match self.pool.server_for(path) {
+            Some((name, _)) if !self.pool.running(name) => Risk::Exec,
             _ => Risk::ReadOnly,
         }
     }
@@ -205,7 +243,7 @@ impl Tool for DiagnosticsTool {
                 why: format!("invalid input: {e}"),
             })?;
         let path = confine(&cx.roots, &cx.cwd, &input.path)?;
-        let Some((name, cfg)) = self.server_for(&path.to_string_lossy()) else {
+        let Some((name, cfg)) = self.pool.server_for(&path.to_string_lossy()) else {
             return Ok(failure(format!(
                 "no language server is configured for {}. {}",
                 input.path,
@@ -232,12 +270,12 @@ impl Tool for DiagnosticsTool {
         let bytes = std::fs::read(&path).map_err(|_| ToolError::Io)?;
         let text = String::from_utf8(bytes).map_err(|_| ToolError::Binary)?;
         let root = root_for(&path, &cx.roots, &cx.cwd);
-        let timeout = Duration::from_secs(u64::from(self.cfg.timeout_s));
+        let timeout = Duration::from_secs(u64::from(self.pool.cfg.timeout_s));
         let wait = input.wait_ms.map_or(timeout, Duration::from_millis);
 
         let mut restarted = false;
         loop {
-            let server = match self.server(name, cfg, &root).await {
+            let server = match self.pool.server(name, cfg, &root).await {
                 Ok(s) => s,
                 Err(text) => return Ok(failure(text)),
             };
@@ -264,7 +302,7 @@ impl Tool for DiagnosticsTool {
                     let dead = matches!(e, LspError::Closed) || !server.running();
                     let tail = server.stderr_tail();
                     if dead {
-                        self.evict(name, &server);
+                        self.pool.evict(name, &server);
                     }
                     if dead && !restarted {
                         restarted = true;
@@ -284,11 +322,157 @@ impl Tool for DiagnosticsTool {
 
     /// Kills every server; the next call starts a fresh one.
     fn shutdown(&self) {
-        let servers: Vec<Arc<Server>> = lock(&self.pool).drain().map(|(_, s)| s).collect();
-        for server in servers {
-            server.kill();
+        self.pool.shutdown();
+    }
+}
+
+/// Most new diagnostics one edit result lists, so a change that breaks a
+/// whole file does not flood the context.
+const MAX_INTRODUCED: usize = 10;
+
+/// Wraps `edit` or `write` (T59.3): when the file's language server already
+/// runs, the result ends with the diagnostics the change introduced, so the
+/// model sees its own error without a `bash` check. A wrapper rather than
+/// code in each tool, so both share one hook. Whatever the server does
+/// wrong — dead, slow, cancelled — adds nothing: never an error, no retry.
+pub struct AfterEdit {
+    inner: Arc<dyn Tool>,
+    pool: Arc<LspPool>,
+    wait: Duration,
+    /// The terminal-text guard (`cox_sanitize::sanitize`), handed in because
+    /// `cox-tools` may not depend on it: a server's text is untrusted.
+    sanitize: fn(&str) -> String,
+}
+
+impl AfterEdit {
+    pub fn new(
+        inner: Arc<dyn Tool>,
+        pool: Arc<LspPool>,
+        wait: Duration,
+        sanitize: fn(&str) -> String,
+    ) -> Self {
+        Self {
+            inner,
+            pool,
+            wait,
+            sanitize,
         }
     }
+
+    /// The file, its running server and what it reported before the change.
+    async fn before(
+        &self,
+        input: &Value,
+        cx: &ToolCx,
+    ) -> Option<(PathBuf, Arc<Server>, Vec<Diagnostic>)> {
+        let arg = input.get("path")?.as_str()?;
+        let path = confine(&cx.writable_roots, &cx.cwd, arg).ok()?;
+        let server = self.pool.running_for(&path)?;
+        let baseline = match server.last(&path).await {
+            Some(known) => known,
+            // A file that does not exist yet has nothing to compare against.
+            None if !path.exists() => Vec::new(),
+            None => {
+                let old = read_text(&path)?;
+                server
+                    .diagnostics(&path, &old, self.wait)
+                    .await
+                    .ok()?
+                    .diagnostics
+            }
+        };
+        Some((path, server, baseline))
+    }
+
+    /// The lines the result gains: diagnostics absent from `baseline`, keyed
+    /// by (start line, code, message), errors first, at most ten.
+    async fn introduced(
+        &self,
+        path: &Path,
+        server: &Server,
+        baseline: &[Diagnostic],
+        root: &Path,
+    ) -> Option<String> {
+        let text = read_text(path)?;
+        let report = server.diagnostics(path, &text, self.wait).await.ok()?;
+        let key = |d: &Diagnostic| (d.range.start.line, d.code.clone(), d.message.clone());
+        let known: Vec<_> = baseline.iter().map(key).collect();
+        let new: Vec<Diagnostic> = report
+            .diagnostics
+            .into_iter()
+            .filter(|d| !known.contains(&key(d)))
+            .collect();
+        if new.is_empty() {
+            return None;
+        }
+        let listed = diag::format(root, path, &new);
+        let mut lines: Vec<&str> = listed.lines().collect();
+        let summary = lines.pop()?;
+        let mut out = format!("\n\nnew diagnostics ({summary}):");
+        for line in lines.iter().take(MAX_INTRODUCED) {
+            out.push('\n');
+            out.push_str(line);
+        }
+        if lines.len() > MAX_INTRODUCED {
+            out.push_str("\n… more: call `diagnostics` for the full list");
+        }
+        Some((self.sanitize)(&out))
+    }
+}
+
+#[async_trait]
+impl Tool for AfterEdit {
+    fn spec(&self) -> ToolSpec {
+        self.inner.spec()
+    }
+
+    fn subject(&self, input: &Value) -> String {
+        self.inner.subject(input)
+    }
+
+    fn risk(&self, input: &Value) -> Risk {
+        self.inner.risk(input)
+    }
+
+    fn touches(&self, input: &Value) -> Option<Vec<String>> {
+        self.inner.touches(input)
+    }
+
+    async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+        // Room for one sync plus the queue behind a `diagnostics` call
+        // holding the server; past it the edit result goes out as is.
+        let grace = self.wait * 2;
+        let before = tokio::select! {
+            b = tokio::time::timeout(grace, self.before(&input, cx)) => b.ok().flatten(),
+            () = cx.cancel.cancelled() => None,
+        };
+        let mut out = self.inner.call(input, cx).await?;
+        let Some((path, server, baseline)) = before.filter(|_| !out.is_error) else {
+            return Ok(out);
+        };
+        let root = root_for(&path, &cx.roots, &cx.cwd);
+        let added = tokio::select! {
+            a = tokio::time::timeout(grace, self.introduced(&path, &server, &baseline, &root)) => a.ok().flatten(),
+            () = cx.cancel.cancelled() => None,
+        };
+        if let Some(added) = added {
+            out.text.push_str(&added);
+        }
+        Ok(out)
+    }
+
+    fn shutdown(&self) {
+        self.inner.shutdown();
+    }
+}
+
+/// `path` as UTF-8 text under the size cap a server is sent.
+fn read_text(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if meta.len() > MAX_FILE_BYTES {
+        return None;
+    }
+    String::from_utf8(std::fs::read(path).ok()?).ok()
 }
 
 /// `program` as the host would find it: a path with a directory as given
@@ -404,17 +588,40 @@ mod tests {
         }
     }
 
-    /// Opens a file, and answers every save with `fake: first line`.
+    /// Tracks each file's text and answers every save with `fake: first
+    /// line`, plus an `E1` error (behind an escape sequence, as untrusted
+    /// text) on each line holding `BAD`. A file holding `HANGUP` makes it
+    /// hang up, the way a crashed server does while its process lingers.
     async fn fake_server(mut r: FakeRead, mut w: FakeWrite) {
         handshake(&mut r, &mut w, json!({"textDocumentSync": 1})).await;
-        let mut uri = Value::Null;
+        let mut docs: HashMap<String, String> = HashMap::new();
         while let Ok(Some(msg)) = read_message(&mut r).await {
+            let params = &msg["params"];
+            let uri = params["textDocument"]["uri"].as_str().unwrap_or_default();
             match msg["method"].as_str() {
                 Some("textDocument/didOpen") => {
-                    uri = msg["params"]["textDocument"]["uri"].clone();
+                    let text = params["textDocument"]["text"].as_str().unwrap_or_default();
+                    docs.insert(uri.to_string(), text.to_string());
+                }
+                Some("textDocument/didChange") => {
+                    let text = params["contentChanges"][0]["text"].as_str();
+                    docs.insert(uri.to_string(), text.unwrap_or_default().to_string());
                 }
                 Some("textDocument/didSave") => {
-                    let params = json!({"uri": uri, "diagnostics": [diag("fake: first line")]});
+                    let text = docs.get(uri).cloned().unwrap_or_default();
+                    if text.contains("HANGUP") {
+                        return;
+                    }
+                    let mut diags = vec![diag("fake: first line")];
+                    for (n, _) in text.lines().enumerate().filter(|(_, l)| l.contains("BAD")) {
+                        diags.push(json!({
+                            "range": {"start": {"line": n, "character": 0}, "end": {"line": n, "character": 3}},
+                            "severity": 1,
+                            "code": "E1",
+                            "message": "\u{1b}[31mbad token",
+                        }));
+                    }
+                    let params = json!({"uri": uri, "diagnostics": diags});
                     push(&mut w, "textDocument/publishDiagnostics", params).await;
                 }
                 Some("shutdown") => reply(&mut w, &msg, Value::Null).await,
@@ -539,6 +746,129 @@ mod tests {
         assert!(flags.iter().all(|k| k.load(Ordering::SeqCst)));
         // The next call starts a fresh server, so it asks again.
         assert_eq!(tool.risk(&json!({"path": "src/a.rs"})), Risk::Exec);
+    }
+
+    /// Stands in for `cox_sanitize::sanitize`, which `cox-tools` may not
+    /// depend on; the session hands in the real one.
+    fn strip_escapes(s: &str) -> String {
+        s.replace('\u{1b}', "")
+    }
+
+    fn after_edit(diags: &DiagnosticsTool, inner: Arc<dyn Tool>) -> AfterEdit {
+        let wait = Duration::from_millis(1500);
+        AfterEdit::new(inner, diags.pool.clone(), wait, strip_escapes)
+    }
+
+    fn edit(old: &str, new: &str) -> Value {
+        json!({"path": "src/a.rs", "old": old, "new": new})
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn edit_reports_the_error_it_introduced() {
+        let (_dir, root) = workspace(&["src/a.rs"]);
+        let (diags, _) = tool(&[("rust", "/bin/sh", "rs")]);
+        diags
+            .call(json!({"path": "src/a.rs"}), &cx(&root))
+            .await
+            .unwrap();
+        let tool = after_edit(&diags, Arc::new(crate::edit::EditTool));
+
+        let out = tool
+            .call(edit("fn main() {}", "fn main() {}\nBAD"), &cx(&root))
+            .await
+            .unwrap();
+        assert!(!out.is_error, "{}", out.text);
+        assert!(out.text.starts_with("edited "), "{}", out.text);
+        assert!(
+            out.text.ends_with(
+                "\n\nnew diagnostics (1 error):\nsrc/a.rs:2:1: error: [31mbad token [E1]"
+            ),
+            "{}",
+            out.text
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn edit_adds_nothing_when_no_server_runs() {
+        let (_dir, root) = workspace(&["src/a.rs"]);
+        let (diags, started) = tool(&[("rust", "/bin/sh", "rs")]);
+        let tool = after_edit(&diags, Arc::new(crate::edit::EditTool));
+
+        let out = tool
+            .call(edit("fn main() {}", "BAD"), &cx(&root))
+            .await
+            .unwrap();
+        assert!(!out.is_error, "{}", out.text);
+        assert!(!out.text.contains("diagnostics"), "{}", out.text);
+        assert!(lock(&started).is_empty(), "an edit never starts a server");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn errors_that_existed_before_are_not_reported() {
+        let (_dir, root) = workspace(&["src/a.rs", "src/b.rs"]);
+        std::fs::write(root.join("src/b.rs"), "BAD\n").unwrap();
+        let (diags, _) = tool(&[("rust", "/bin/sh", "rs")]);
+        diags
+            .call(json!({"path": "src/a.rs"}), &cx(&root))
+            .await
+            .unwrap();
+
+        // `a.rs` was synced, so its last report is the baseline.
+        let edit_tool = after_edit(&diags, Arc::new(crate::edit::EditTool));
+        let out = edit_tool
+            .call(edit("fn main() {}", "fn main() {}\n"), &cx(&root))
+            .await
+            .unwrap();
+        assert!(!out.text.contains("diagnostics"), "{}", out.text);
+
+        // `b.rs` never was, so its old text is synced first.
+        let write_tool = after_edit(&diags, Arc::new(crate::write::WriteTool));
+        let input = json!({"path": "src/b.rs", "content": "BAD\nfn c() {}\n"});
+        let out = write_tool.call(input, &cx(&root)).await.unwrap();
+        assert!(!out.is_error, "{}", out.text);
+        assert!(!out.text.contains("diagnostics"), "{}", out.text);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn introduced_lists_at_most_ten() {
+        let (_dir, root) = workspace(&["src/a.rs"]);
+        let (diags, _) = tool(&[("rust", "/bin/sh", "rs")]);
+        diags
+            .call(json!({"path": "src/a.rs"}), &cx(&root))
+            .await
+            .unwrap();
+        let tool = after_edit(&diags, Arc::new(crate::edit::EditTool));
+
+        let out = tool
+            .call(edit("fn main() {}", &"BAD\n".repeat(12)), &cx(&root))
+            .await
+            .unwrap();
+        let listed = out.text.lines().filter(|l| l.starts_with("src/a.rs:"));
+        assert_eq!(listed.count(), 10, "{}", out.text);
+        assert!(out.text.contains("(12 errors)"), "{}", out.text);
+        assert!(out.text.ends_with("call `diagnostics` for the full list"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dead_server_adds_nothing() {
+        let (_dir, root) = workspace(&["src/a.rs"]);
+        let (diags, _) = tool(&[("rust", "/bin/sh", "rs")]);
+        diags
+            .call(json!({"path": "src/a.rs"}), &cx(&root))
+            .await
+            .unwrap();
+        let tool = after_edit(&diags, Arc::new(crate::edit::EditTool));
+
+        let out = tool
+            .call(edit("fn main() {}", "HANGUP BAD"), &cx(&root))
+            .await
+            .unwrap();
+        assert!(!out.is_error, "{}", out.text);
+        assert!(!out.text.contains("diagnostics"), "{}", out.text);
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/a.rs")).unwrap(),
+            "HANGUP BAD\n"
+        );
     }
 
     #[test]
