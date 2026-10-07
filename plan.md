@@ -97,15 +97,26 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.1 | todo | P1 | 4 | 0% | |
-| T59.2 | todo | P1 | 2 | 0% | |
 | T59.3 | todo | P1 | 4 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T59.5 | todo | P2 | 3 | 0% | |
 | T59.6 | todo | P3 | 3 | 0% | |
 | T59.7 | todo | P3 | 4 | 0% | |
 | T59.8 | todo | P3 | 2 | 0% | |
 | T59.9 | todo | P3 | 2 | 0% | |
 | T59.10 | todo | P3 | 2 | 0% | |
+| T61.1 | todo | P1 | 1 | 0% | |
+| T61.2 | todo | P1 | 2 | 0% | |
+| T61.3 | todo | P1 | 2 | 0% | |
+| T61.4 | todo | P1 | 2 | 0% | |
+| T61.5.1 | todo | P2 | 3 | 0% | |
+| T61.5.2 | todo | P2 | 3 | 0% | |
+| T61.5.3 | todo | P2 | 3 | 0% | |
+| T61.6 | todo | P2 | 2 | 0% | |
+| T61.7 | todo | P2 | 2 | 0% | |
+| T61.8 | todo | P3 | 1 | 0% | |
+| T61.9 | todo | P2 | 3 | 0% | |
+| T61.10 | todo | P3 | 2 | 0% | |
+| T61.11 | todo | P3 | 3 | 0% | |
 
 ## Reference
 
@@ -1970,32 +1981,6 @@ Done when: a unit test over a scripted transcript asserts every touched path and
 
 Out of scope: per-file line ranges, dropping the model call entirely, the TUI view of the state.
 
-#### T59.2 Fold repeated output lines before the visible cut
-
-Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
-
-Goal: runs of identical or digit-only-different lines in tool output (progress bars, `Compiling …`, repeated warnings) fold to one line plus `(×N)` before `truncate::visible`, cutting context tokens by at least 5 % on the bench with no error line lost.
-
-Files:
-- `crates/cox-core/src/truncate.rs`
-- `crates/cox-core/src/turn.rs`
-
-Steps:
-1. `fold_repeats(text: &str) -> Cow<str>` in `truncate.rs`: compare each line with the previous one after masking digit runs; fold runs of ≥ 3; never fold a line that matches `error|panicked|FAILED|warning:` the first time it appears (a repeat still folds). Rtok's `cmd` rules are the reference behaviour; a shared crate is a later amendment, not a new dependency here.
-2. Call it at the `truncate::visible` call site (`turn.rs:679`) so the archived full output is untouched and `expand` still returns the raw bytes.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: table tests for folding, digit masking and the error-line rule pass; `research.md` has the bench row (context-token-turns −5 %, pass rate unchanged).
-
-Out of scope: per-command rules, ANSI handling beyond what `visible` does today.
-
 #### T59.3 `edit` and `write` report the diagnostics they introduced
 
 Model: opus · Status: open · Depends: T41.6 · Size: ~190 · Priority: P1 · Complexity: 4
@@ -2051,34 +2036,6 @@ mise exec -- cargo fmt --check
 Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
 
 Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
-
-#### T59.5 `project` tool: run the project's own check command
-
-Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
-
-Goal: one `project` tool call with `action = check | test | lint | fmt` runs the detected command (`just check`, `cargo test`, `npm test`, `go test ./...`, …) through the normal `bash` sandbox and approval path and returns the folded result, replacing the model's guess of the command; bench mean tool calls per task −5 %.
-
-Files:
-- `crates/cox-tools/src/project.rs` (new)
-- `crates/cox-session/src/tools.rs`
-- `crates/cox-protocol/src/config.rs`
-
-Steps:
-1. Detection in order: `[project]` config, `justfile` recipes, `Cargo.toml`, `package.json` scripts, `go.mod`, `pyproject.toml` (Empryo idea: `src/core/tools/project.ts`, `toolchain.ts`).
-2. Run through the existing `bash` tool's executor so `Engine` approval and the sandbox are unchanged; output passes T59.2's folding.
-3. Register behind `tools.project = false`.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: detection table tests for each manifest; an approval test shows `project` asks exactly like `bash` for the same command; bench row in `research.md`.
-
-Out of scope: installing toolchains, parsing test output into structures.
 
 #### T59.6 LSP `definition` and `references` tools on the running servers
 
@@ -2216,7 +2173,309 @@ Every card in this phase:
 - updates the shared docs in the same change — behaviour in `docs/design/desktop.md` (DT§), visuals and tokens in `desktop/design/DESIGN.md` (DS§) and `desktop/design/tokens/`, settings in `docs/config.md` and `docs/config.jsonschema` — written platform-neutral, naming the Rust call a client makes, so a Windows or Linux agent can build the same feature from the docs alone;
 - leaves a test that fails without it (`insta` or a unit test in Rust, swift-snapshot-testing or Swift Testing in Swift).
 
+### P61 — Build speed (goal: a Rust change reaches the running macOS app without a fat-LTO link, an unchanged Rust core is never rebuilt on CI, and the workspace and the Swift packages each compile once per run; every card records its before/after time)
 
+Rationale in §6 A140. Found by reading the build configuration (2026-10-07), not yet measured: the XCFramework always builds with the `dist` profile (fat LTO, one codegen unit), also under `just desktop-open`'s watcher and in CI's `swift test` job, and its `uniffi-bindgen` binary is linked the same way; the workspace has 79 integration-test binaries (`cox-core` 21, `cox` 19, `cox-tui` 15), each linked against the whole tree; `Swatinem/rust-cache` never caches workspace members, so each desktop CI job rebuilds all 35 crates; the CI matrix builds with `--all-features` and tests without them, so each target compiles the workspace twice; the six Swift packages are tested one by one, each in its own `.build`, so `CoxModel` compiles up to five times; the SwiftLint build-tool plugin runs on every build of every target.
+
+**Order.** T61.1 first (the baseline every later card compares against). Then T61.2 → T61.3 → T61.4 (the desktop path, the largest gain). T61.5.1–T61.5.3, T61.6, T61.7 and T61.9 are independent of each other. T61.8, T61.10 and T61.11 last; each may end as "rejected" with the measurement that rejected it.
+
+Timings go to a new `research.md` §4.3.9 "Build times", in the shape of R§4.3.4: each row is the median of 5 runs, with the machine, load average and commit. A card whose change gains nothing measurable is reverted and closed with that row.
+
+#### T61.1 Build-time baseline
+
+Model: haiku · Status: open · Depends: — · Size: ~0 (research.md only) · Priority: P1 · Complexity: 1
+
+Goal: `research.md` §4.3.9 holds the numbers P61 is judged by.
+
+Files:
+- `research.md`
+
+Steps:
+1. Rust, each with `--timings` (keep the HTML out of git): a clean `cargo build --workspace`; an incremental build after touching `crates/cox-core/src/turn.rs`; the build phase of `cargo nextest run --workspace` (clean and after the same touch); `cargo build -p cox-ffi --lib --profile dist --target aarch64-apple-darwin` clean and after the touch; the full `just desktop-xcframework`.
+2. Swift: `swift build --build-tests --build-system swiftbuild` per package under `desktop/macos/Packages/` (clean), and `just desktop-app` clean and after a one-line change in `CoxUI`.
+3. CI: the wall time of the last green `rust / <target>` and `desktop-macos` jobs on `main`, from `gh run view`.
+
+Check:
+```bash
+grep -n '4.3.9' research.md
+```
+
+Done when: §4.3.9 has a row for every step above, with the top five crates by compile time from the `--timings` report.
+
+Out of scope: any change to the build.
+
+#### T61.2 Fast profile for the XCFramework outside a release
+
+Model: sonnet · Status: open · Depends: T61.1 · Size: ~40 · Priority: P1 · Complexity: 2
+
+Goal: `just desktop-open`, `just desktop-app` and CI's `desktop-macos` job build `cox-ffi` without fat LTO; only a DMG and the desktop build workflow use `dist` (A15: what ships is `dist`).
+
+Files:
+- `Cargo.toml`
+- `scripts/desktop/xcframework.sh`
+- `justfile`
+
+Steps:
+1. `[profile.ffi-dev]` in `Cargo.toml`: `inherits = "release"`, `lto = false`, `codegen-units = 16`, `incremental = true`, `debug = "line-tables-only"`, with a comment saying why it exists next to `dist`.
+2. `xcframework.sh` takes the profile from `COX_FFI_PROFILE` (default `ffi-dev`), validates it against `ffi-dev|dist` and prints which one it built.
+3. `just desktop-dmg` and `.github/workflows/desktop-build.yml` set `COX_FFI_PROFILE=dist` (the workflow is a one-line `env:`; it does not count as a source file).
+
+Check:
+```bash
+just desktop-xcframework
+COX_FFI_PROFILE=dist just desktop-xcframework
+just desktop-app
+```
+
+Done when: §4.3.9 has the incremental `just desktop-xcframework` time before and after; the DMG still comes from `dist` (the script's printed profile in the workflow log).
+
+Out of scope: the bindings generator (T61.3), caching (T61.4).
+
+#### T61.3 Bindings generator on the host dev profile, skipped when the library did not change
+
+Model: sonnet · Status: open · Depends: T61.2 · Size: ~40 · Priority: P1 · Complexity: 2
+
+Goal: `uniffi-bindgen` is built once in the dev profile for the host, and `xcframework.sh` regenerates the bindings and the XCFramework only when `libcox_ffi.a` changed.
+
+Files:
+- `scripts/desktop/xcframework.sh`
+
+Steps:
+1. Run the generator with `cargo run -p cox-ffi --features bindgen --bin uniffi-bindgen` and no `--profile`/`--target`: library mode reads the metadata from the archive passed as `--library`, so the generator's own profile does not matter.
+2. After `cargo build`, hash the library (`shasum -a 256`) and compare with `desktop/macos/build/CoxFFI.xcframework/.source-sha256`; on a match print "unchanged" and exit 0. Write the stamp after a successful `-create-xcframework`.
+
+Check:
+```bash
+just desktop-xcframework
+cp desktop/macos/build/bindings/cox_ffi.swift "$TMPDIR/before.swift"
+just desktop-xcframework   # prints "unchanged"
+git stash && just desktop-xcframework && git stash pop
+diff "$TMPDIR/before.swift" desktop/macos/build/bindings/cox_ffi.swift
+```
+
+Done when: the bindings are byte-identical to the ones the `dist`-profile generator wrote; a second run with no Rust change is a no-op; §4.3.9 has the time of that no-op.
+
+Out of scope: CI caching (T61.4).
+
+#### T61.4 CI: cache the XCFramework and SwiftPM
+
+Model: sonnet · Status: open · Depends: T61.3 · Size: ~50 · Priority: P1 · Complexity: 2
+
+Goal: a pull request that changes no Rust restores `CoxFFI.xcframework` instead of building it, and Swift dependencies come from a cache.
+
+Files:
+- `.github/actions/desktop-macos/action.yml`
+
+Steps:
+1. `actions/cache` for `desktop/macos/build/CoxFFI.xcframework` and `desktop/macos/build/bindings`, keyed on `runner.os`, `COX_FFI_PROFILE`, `hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', 'mise.toml', 'scripts/desktop/xcframework.sh')`. On a hit, skip the Rust setup, `rust-cache` and the build; the `arm64 only` check still runs.
+2. `actions/cache` for `~/Library/Caches/org.swift.swiftpm` and `desktop/macos/Packages/*/.build`, keyed on `hashFiles('desktop/macos/Packages/*/Package.resolved')` with a restore key without the hash.
+3. Pin both actions by commit SHA, as the rest of the workflow does.
+
+Check: two runs of `desktop-macos` on one pull request, the second after a Swift-only commit: its log shows the cache hit and no `cargo build`.
+
+Done when: §4.3.9 has both job times; the desktop build workflow, which shares the action, still builds `dist`.
+
+Out of scope: sccache (T61.7).
+
+#### T61.5.1 One integration-test binary for `cox-core`
+
+Model: sonnet · Status: open · Depends: T61.1 · Size: ~60 (moves, plus one `main.rs`) · Priority: P2 · Complexity: 3
+
+Goal: `crates/cox-core/tests/*.rs` (21 files) become modules of one test binary, so `nextest` links one binary instead of 21.
+
+Files:
+- `crates/cox-core/tests/it/main.rs` (new; `mod` lines only)
+- `crates/cox-core/Cargo.toml` (one `[[test]] name = "it"` if auto-discovery needs it)
+- the moved test files (renames; they do not count as source files)
+
+Steps:
+1. `git mv` each file into `tests/it/`; `common/` and `scenarios/` move with them. `cox-app`'s dev setup reuses cox-core's harness (`crates/cox-app/Cargo.toml` comment): keep the path it uses working.
+2. insta snapshot names carry the module path: move the snapshot files with `cargo insta test --accept` only after confirming each moved snapshot's content is unchanged (`git diff -M --stat` shows renames only).
+3. Update every `--test <name>` for this crate in `justfile`, `.github/`, `docs/`, `AGENTS.md` and open `plan.md` cards to `--test it -E 'test(/^<name>::/)'`.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core
+mise exec -- cargo nextest run -p cox-app
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Done when: the test count before and after is equal (`nextest list`); §4.3.9 has the `-p cox-core` build-phase time before and after.
+
+Out of scope: other crates (T61.5.2, T61.5.3).
+
+#### T61.5.2 One integration-test binary for `cox`
+
+Model: sonnet · Status: open · Depends: T61.5.1 · Size: ~60 · Priority: P2 · Complexity: 3
+
+Goal: as T61.5.1 for `crates/cox/tests/` (19 files), except the binaries a command names by itself: `docs` and `ide` (`just docs-check`, CI's docs job), `deps` (named in `AGENTS.md`), `trycmd` and `tui_e2e` (own fixtures and terminal) stay separate.
+
+Files: as T61.5.1, for `crates/cox`.
+
+Steps: as T61.5.1. `plugin_example_dart` keeps its test name, which `just plugin-examples` filters on.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox
+just docs-check
+```
+
+Done when: equal test counts; §4.3.9 has the before/after.
+
+Out of scope: `cox-tui` and the rest.
+
+#### T61.5.3 One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
+
+Model: sonnet · Status: open · Depends: T61.5.2 · Size: ~80 · Priority: P2 · Complexity: 3
+
+Goal: as T61.5.1 for the remaining crates with more than one test file; `cox-tui`'s `screenshots` stays separate (named by `--test screenshots`).
+
+Files: as T61.5.1, for each crate.
+
+Steps: as T61.5.1, one commit per crate.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo insta test --check
+```
+
+Done when: equal test counts per crate; §4.3.9 has the workspace build-phase time after all three cards.
+
+Out of scope: unit tests in `src/`.
+
+#### T61.6 CI: one feature set per target
+
+Model: haiku · Status: open · Depends: T61.1 · Size: ~5 · Priority: P2 · Complexity: 2
+
+Goal: the `rust` matrix compiles the workspace once per target: `build-command`, clippy and nextest use the same features, so nextest reuses the build.
+
+Files:
+- `.github/workflows/ci.yml`
+
+Steps:
+1. `test-command: cargo nextest run --workspace --all-features` (the voice packages are already installed by `setup-command`). If a test fails only under `--all-features`, stop and report it rather than dropping the flag.
+2. Make `just check-all` match, so local and CI runs share artifacts.
+
+Check: the job log of `rust / aarch64-apple-darwin` shows nextest starting with no `Compiling` line for a workspace crate after the build step.
+
+Done when: §4.3.9 has the job time before and after for all three targets.
+
+Out of scope: `pyrlyn/ci`'s shared `ci-rust.yml` (its own repository).
+
+#### T61.7 sccache for local builds and the in-repository CI jobs
+
+Model: sonnet · Status: open · Depends: T61.1 · Size: ~40 · Priority: P2 · Complexity: 2
+
+Goal: dependencies compiled in one worktree are reused by another without sharing a `target/` (sharing one breaks, as seen 2026-09-23), and the CI jobs outside the shared `rust` matrix reuse compiled crates across runs.
+
+Files:
+- `mise.toml`
+- `.github/actions/desktop-macos/action.yml`
+- `toolchain.md` (and the workspace `rust.md` row, as its rule asks)
+
+Steps:
+1. Pin sccache in `mise.toml` with a reason comment. Set `RUSTC_WRAPPER` only when sccache is on `PATH` (fail open: a missing sccache never fails a build), `SCCACHE_CACHE_SIZE` bounded for this disk, and `CMAKE_C_COMPILER_LAUNCHER`/`CMAKE_CXX_COMPILER_LAUNCHER` so whisper.cpp (`cox-voice`) is cached too.
+2. Leave `CARGO_INCREMENTAL` alone: sccache skips incremental workspace crates and caches their dependencies, which is the gain.
+3. CI: `mozilla-actions/sccache-action` (pinned by SHA) with the GitHub Actions cache backend in the desktop action and the `sandbox-landlock`, `plugins` and `plugin-examples` jobs.
+
+Check:
+```bash
+mise exec -- cargo build -p cox && sccache --show-stats
+```
+then the same in a second worktree with a fresh `target/`: the stats show cache hits for the dependencies.
+
+Done when: §4.3.9 has the clean build of the second worktree with and without sccache.
+
+Out of scope: the shared `rust` matrix (lives in `pyrlyn/ci`; proposed there separately).
+
+#### T61.8 Optimized build scripts and proc macros in dev
+
+Model: haiku · Status: open · Depends: T61.1 · Size: ~5 · Priority: P3 · Complexity: 1
+
+Goal: decide by measurement whether `[profile.dev.build-override] opt-level = 3` speeds the dev build (diesel, serde, schemars, uniffi and clap macros; typify's `build.rs`).
+
+Files:
+- `Cargo.toml`
+
+Steps:
+1. Add the override; record a clean and an incremental `cargo build --workspace`.
+2. Keep it only if both are not slower; otherwise revert.
+
+Check:
+```bash
+mise exec -- cargo build --workspace --timings
+```
+
+Done when: §4.3.9 has the row and the verdict.
+
+Out of scope: other profile changes.
+
+#### T61.9 One build graph for the Swift package tests
+
+Model: sonnet · Status: open · Depends: T61.4 · Size: ~60 · Priority: P2 · Complexity: 3
+
+Goal: the six packages' test targets build in one Xcode build graph, so `CoxModel`, swift-snapshot-testing and SwiftLintPlugins compile once per run instead of once per package.
+
+Files:
+- `desktop/macos/project.yml` (a `CoxTests` scheme over every package test target, serial, as `swift test --no-parallel` is today)
+- `.github/workflows/ci.yml` (`desktop-macos`: `xcodebuild test -scheme CoxTests -derivedDataPath desktop/macos/build/DerivedData` replaces the per-package loop)
+- `justfile` (`just desktop-test`)
+
+Steps:
+1. Keep `SNAPSHOT_ARTIFACTS` and the failing-snapshot upload working; keep the 60-minute timeout.
+2. Cache `desktop/macos/build/DerivedData` in CI next to T61.4's SwiftPM cache.
+3. If a package's tests cannot run under the scheme (the `ColorResource` issue, SwiftPM #9655), keep that one package on `swift test` and say why in the workflow.
+
+Check: `just desktop-test` locally, and the `desktop-macos` job on a pull request, run the same number of tests as the per-package loop.
+
+Done when: §4.3.9 has the job time before and after.
+
+Out of scope: test parallelism (the UI tests share one `NSApplication`).
+
+#### T61.10 SwiftLint plugin off during builds, on in the lint job
+
+Model: haiku · Status: open · Depends: T61.9 · Size: ~30 · Priority: P3 · Complexity: 2
+
+Goal: building or testing the Swift packages does not run SwiftLint on every target; the lint still gates every pull request (`desktop-macos-lint`) and runs locally through one `just` recipe. Needs the creator's confirmation that DS§9's rule is satisfied by the lint job alone, before work starts.
+
+Files:
+- the six `desktop/macos/Packages/*/Package.swift` (one shared pattern: the plugin is attached only when `Context.environment["COX_SWIFTLINT_PLUGIN"] == "1"`)
+- `justfile` (`just desktop-lint`, the same command as the CI job)
+- `desktop/design/DESIGN.md` (DS§9: where the lint runs)
+
+Steps:
+1. Keep the `SwiftLintPlugins` package pin, so the version check against `mise.toml` still holds.
+
+Check: `just desktop-lint` fails on `desktop/macos/LintFixtures`; `COX_SWIFTLINT_PLUGIN=1 swift build` in one package still lints.
+
+Done when: §4.3.9 has an incremental `just desktop-app` after a one-line `CoxUI` change, before and after.
+
+Out of scope: lint rules.
+
+#### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
+
+Model: opus · Status: open · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
+
+Goal: switching between `just test` (a `-p` subset) and `just check-all` (`--workspace`) does not rebuild dependencies because their features unify differently, or the card is rejected with the reason.
+
+Files:
+- `Cargo.toml`
+- a workspace-hack crate if chosen (`crates/cox-workspace-hack`)
+- `docs/design/crates.md`
+
+Steps:
+1. Measure the rebuild first: `just check-all`, then `just test --changed-since HEAD~1` and count the dependency crates `cargo` recompiles. Zero → close as not needed.
+2. Compare cargo's own workspace feature unification (check whether it is stable in the pinned Rust; cite the cargo docs) with `cargo-hakari`. hakari makes every member depend on the hack crate: `crates/cox/tests/deps.rs` (`ffi_depends_only_on_app_and_protocol`, `app_has_no_terminal_or_cli`, the "only X depends on Y" rules) must still pass; a hack crate that drags `ratatui` or `clap` into `cox-ffi`'s graph is rejected.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test deps
+```
+
+Done when: §4.3.9 has the rebuild count before and after, or the rejection and its reason.
+
+Out of scope: changing which crates depend on which.
 
 ---
 
@@ -2421,6 +2680,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A137 A7, A8, A19 — by the creator (2026-10-06): the Hugo site in `website/` and its `deploy-pages` workflow are removed; `docs/` stays the one place for user docs, published by `sync-docs` to <https://pyrlyn.github.io/landing/cox/docs/>. Dependabot's npm entry for `/website` goes with it; README, CONTRIBUTING, `docs/site.md` and `docs/sonarcloud-setup.md` point at `docs/` and the landing site. Why: one documentation source instead of two that drift. Effect: the site's own `architecture` and `screens` pages, which had no `docs/` counterpart, move to `docs/architecture.md` and `docs/screens.md` (images from `docs/screenshots/`, the `just screenshots` output); the already-published GitHub Pages site at `pyrlyn.github.io/cox` is no longer updated until Pages is turned off in the repository settings.
 - A138 §3 P22 (T22.12) — by the creator (2026-10-07): `cox config set` (and the desktop's `set_json_in`, which shares `set_value_in`) checks the edited user file by deserializing `Config` from the `default` layer plus the edited text, through the loader's own figment and error mapping, and writes nothing when that fails. Why: `set` wrote out-of-range and unknown-variant values (`desktop.appearance.depth 1.5`) that every later load rejected, so one command left the user's config unloadable. Effect: `ConfigError` gains `Rejected(CoreError)`; the check leaves out the project, env, flag and Claude layers, so `set` never refuses a valid edit because of another layer, and the desktop's write-then-rollback in `cox_app::settings::set` stays for the full layered view.
 - A139 §3 (new P60: T60.1–T60.10), `roadmap.md` — by the creator (2026-10-07), after a Best of run where every candidate failed with "provider auth failed": (1) the app never starts a turn or a Best of candidate on a provider it cannot use — the provider comes from `tiers.code.provider` and must be in `usable_providers` (A110), and the user can also pick another provider's model in the window before the first turn; (2) the provider is shown in the model chip as an icon, its name and a problem badge; (3) the toolbar's model capsule and Ask/Plan/Auto control move into the composer, whose chips already show them; (4) a glare slider (`desktop.appearance.specular`, a 0–1 scale on the material's sweep) joins Appearance; (5) the Best of compare shows the real failure reason, never `$-0.00`, and no actions on a failed candidate; (6) choosing Bypass from the composer's mode menu asks for a confirmation first, since the menu puts it one click away (the old toolbar control offered it only while it was on); the Bypass strip stays (creator, 2026-10-07: "do what is best"); (7) every desktop improvement updates the shared docs (DT§, DS§, `docs/config.md`) so the Windows and any later Linux client can repeat it. Why: the creator's request. Effect: P60; switching provider mid-session goes to `roadmap.md`. No §0 decision changes.
+- A140 §3 (new P61: T61.1–T61.11), by the creator (2026-10-07): build speed for Rust and Swift — a fast profile for the XCFramework outside a release, the bindings generator on the host dev profile and skipped when the library is unchanged, CI caches for the XCFramework, SwiftPM and DerivedData, one integration-test binary per crate, one feature set per CI target, sccache locally and in the in-repository CI jobs, one Xcode build graph for the Swift package tests, the SwiftLint plugin off during builds (after the creator confirms DS§9), and two measured experiments (`build-override`, feature unification). Why: an analysis of the build configuration (2026-10-07) found the XCFramework always linked with fat LTO, 79 integration-test binaries, workspace members never cached on CI, the workspace compiled twice per CI target and `CoxModel` up to five times per Swift test run. Effect: thirteen cards; A15 still holds — what ships is `dist`; every card records before/after timings in `research.md` §4.3.9 and is reverted if it gains nothing. No decision in §0 changes; sccache and, if T61.11 chooses it, cargo-hakari are tools added by their cards with `toolchain.md` rows.
 
 ## 7. Risk register
 
