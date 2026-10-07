@@ -35,6 +35,7 @@ uses part of cox as a library and is better than the others.
 **Non-goals (v1).** Windows/Linux GUI; Mac App Store; a code editor (the app
 opens files in the user's editor); cloud execution; iOS.
 Windows is now planned (`plan.md` A127, P57 and P58: M1 parity, WinUI 3 over `cox-ffi`; its design doc comes from T58.2).
+The published uniffi-bindgen-cs release `v0.11.0+v0.31.0` reads uniffi 0.31 and cannot read the uniffi 0.32.2 that `cox-ffi` links (R10.2.1, R10.2.2). The Windows generator is a local fork of that repository: PR #176 fast-forwarded onto `main` (`0fc022a`, uniffi 0.32) and PR #166 merged on top (`53fe29f`) so a callback interface returns `Task`. Upstream has merged neither. `cox-ffi` stays on 0.32.2 (creator, 2026-10-08).
 
 **Budgets — the falsifiers.** If the shipped M1 misses any of these on an
 M1 MacBook Air with 8 GB, the native-first argument failed and the design is
