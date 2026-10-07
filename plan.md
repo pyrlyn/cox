@@ -102,6 +102,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T59.6 | todo | P3 | 3 | 0% | |
 | T59.7 | todo | P3 | 4 | 0% | |
 | T59.8 | todo | P3 | 2 | 0% | |
+| T59.9 | todo | P3 | 2 | 0% | |
 | T59.10 | todo | P3 | 2 | 0% | |
 | T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
@@ -2125,6 +2126,28 @@ mise exec -- cargo fmt --check
 Done when: tests for a unique, an ambiguous and a missing symbol in Rust and TypeScript fixtures.
 
 Out of scope: symbol-addressed edit (separate card after this one shows use in the bench).
+
+#### T59.9 Investigate: file claims for parallel subagents
+
+Model: sonnet · Status: open · Depends: — · Size: ~0 (research) · Priority: P3 · Complexity: 2
+
+Goal: decide with evidence whether parallel subagents (`Concurrency::Parallel`, `crates/cox-core/src/subagent.rs:395`) need per-file write claims (Empryo idea: `WorkspaceCoordinator.ts`, a claim table that makes the second writer wait or fail), or whether worktrees (P44) already cover it.
+
+Files:
+- `research.md`
+
+Steps:
+1. Count, in `just bench` runs with parallel subagents, how often two subagents wrote the same file in one parent turn.
+2. Write the number, the command and the commit to `research.md`; propose a card only if the rate is above 1 % of parallel runs.
+
+Check:
+```bash
+just bench
+```
+
+Done when: the `research.md` row exists and this card is closed or followed by a sized card.
+
+Out of scope: implementing claims.
 
 #### T59.10 Memory entries linked to files boost recall
 
