@@ -266,6 +266,23 @@
         }
       }
     },
+    "tools": {
+      "description": "`[tools]`",
+      "$ref": "#/$defs/ToolsConfig",
+      "default": {
+        "project": false
+      }
+    },
+    "project": {
+      "description": "`[project]`",
+      "$ref": "#/$defs/ProjectConfig",
+      "default": {
+        "check": "",
+        "test": "",
+        "lint": "",
+        "fmt": ""
+      }
+    },
     "voice": {
       "description": "`[voice]`",
       "$ref": "#/$defs/VoiceConfig",
@@ -1727,6 +1744,45 @@
             "type": "string"
           },
           "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "ToolsConfig": {
+      "description": "`[tools]` (T59.5): built-in tools that stay out of the tool list until\nswitched on, because each one adds a schema to the cache-stable prefix.",
+      "type": "object",
+      "properties": {
+        "project": {
+          "description": "Whether the `project` tool (run the project's own check, test, lint\nor format-check command) is offered.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProjectConfig": {
+      "description": "`[project]` (T59.5): the commands the `project` tool runs. An empty\nstring means \"detect it from the manifests\"; a command set here runs\nthrough the same sandbox and permission path as `bash`, so a project\nconfig may set it without a guard.",
+      "type": "object",
+      "properties": {
+        "check": {
+          "description": "Command for `action = check` (type-check or build).",
+          "type": "string",
+          "default": ""
+        },
+        "test": {
+          "description": "Command for `action = test`.",
+          "type": "string",
+          "default": ""
+        },
+        "lint": {
+          "description": "Command for `action = lint`.",
+          "type": "string",
+          "default": ""
+        },
+        "fmt": {
+          "description": "Command for `action = fmt` (a format check; it must not rewrite files).",
+          "type": "string",
+          "default": ""
         }
       },
       "additionalProperties": false

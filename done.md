@@ -9827,6 +9827,81 @@ Check: `mise exec -- cargo nextest run -p cox-config -p cox-app`: 259 tests run,
 
 Not done: the whole-workspace nextest and clippy were not run (only the two crates this touches).
 
+#### T59.2 Fold repeated output lines before the visible cut
+
+Model: sonnet · Status: done 2026-10-07 · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
+
+Execution plan:
+1. `truncate.rs`: `fold_repeats` (digit-masked key, exact key for `error|panicked|failed|warning:` lines so no distinct diagnostic merges), and `visible_folding`, which folds, then applies the same head/tail cut; a folded result carries `[… N KiB archived; repeated lines folded; expand #id]` (no line range: folded line numbers are not the archive's).
+2. `turn.rs`: the `visible` call site folds only `bash` output. `read` output carries line numbers and exact text an `edit` needs, and `grep` matches carry `file:line`, so folding them would lose information.
+3. Verify with table tests (folding, digit masking, error-line rule, archive handle, raw archive untouched); the bench half of the Check is not run (no benchmarks on this run).
+
+Goal: runs of identical or digit-only-different lines in tool output (progress bars, `Compiling …`, repeated warnings) fold to one line plus `(×N)` before `truncate::visible`, cutting context tokens by at least 5 % on the bench with no error line lost.
+
+Files:
+- `crates/cox-core/src/truncate.rs`
+- `crates/cox-core/src/turn.rs`
+
+Steps:
+1. `fold_repeats(text: &str) -> Cow<str>` in `truncate.rs`: compare each line with the previous one after masking digit runs; fold runs of ≥ 3; never fold a line that matches `error|panicked|FAILED|warning:` the first time it appears (a repeat still folds). Rtok's `cmd` rules are the reference behaviour; a shared crate is a later amendment, not a new dependency here.
+2. Call it at the `truncate::visible` call site (`turn.rs:679`) so the archived full output is untouched and `expand` still returns the raw bytes.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: table tests for folding, digit masking and the error-line rule pass; `research.md` has the bench row (context-token-turns −5 %, pass rate unchanged).
+
+Out of scope: per-command rules, ANSI handling beyond what `visible` does today.
+
+Result: `fold_repeats` and `visible_folding` in `crates/cox-core/src/truncate.rs`; the `visible` call site in `crates/cox-core/src/turn.rs` folds `bash` output only — narrower than the card's every-tool call site, approved by the creator on 2026-10-07 (`read` is line-numbered source an `edit` must match and `grep` hits carry `file:line`, so folding them would drop information). A folded result names its archive row (`[… N KiB archived; repeated lines folded; expand #id]`, with no line range because folded line numbers are not the archive's), and the archive keeps the raw bytes. Diagnostic lines (`error`, `panicked`, `failed`, `warning:`, any case) fold only exact repeats, so no distinct diagnostic is lost. The bench half of the Check and the `research.md` bench row were not run (no benchmarks on this run); the behaviour is proved by tests instead.
+
+Check output:
+```
+mise exec -- cargo nextest run -p cox-core -p cox-app -p cox: 777 tests run: 777 passed, 3 skipped
+mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings: clean
+mise exec -- cargo fmt --check: clean
+```
+
+#### T59.5 `project` tool: run the project's own check command
+
+Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: one `project` tool call with `action = check | test | lint | fmt` runs the detected command (`just check`, `cargo test`, `npm test`, `go test ./...`, …) through the normal `bash` sandbox and approval path and returns the folded result, replacing the model's guess of the command; bench mean tool calls per task −5 %.
+
+Files:
+- `crates/cox-tools/src/project.rs` (new)
+- `crates/cox-session/src/tools.rs`
+- `crates/cox-protocol/src/config.rs`
+
+Steps:
+1. Detection in order: `[project]` config, `justfile` recipes, `Cargo.toml`, `package.json` scripts, `go.mod`, `pyproject.toml` (Empryo idea: `src/core/tools/project.ts`, `toolchain.ts`).
+2. Run through the existing `bash` tool's executor so `Engine` approval and the sandbox are unchanged; output passes T59.2's folding.
+3. Register behind `tools.project = false`.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: detection table tests for each manifest; an approval test shows `project` asks exactly like `bash` for the same command; bench row in `research.md`.
+
+Out of scope: installing toolchains, parsing test output into structures.
+
+Status: done 2026-10-07
+Result: `cox_tools::project::ProjectTool` detects the command (`[project]` config, then `justfile` recipes with no required argument, `Cargo.toml`, `package.json` scripts from a fixed candidate list, `go.mod`, `pyproject.toml` `[tool.*]` tables) and hands it to `BashTool::call`, so the sandbox, PTY, timeout, archive and `sandbox_denied` handling are `bash`'s own. `subject`, `segments` and `risk` are `bash`'s for the detected command; `cox_permission::rules::canonical_tool` maps `project` to `bash`, so `Bash(...)` allow/ask/deny rules and session grants cover it and a command cannot dodge a rule by arriving as `project`. `call` re-detects under the session cwd and refuses unless the result equals the detection the call was judged on (a manifest edited in between, or a cwd that is not the session root, cannot swap the command). `fmt` is a format check and never rewrites. Registered by `cox_session::tools::with_project` behind `tools.project = false`; new `[tools]` and `[project]` config tables with `default.toml`, `docs/config.md` and `docs/config.jsonschema` updated. `package.json` script bodies are never copied into the command. Reused: `BashTool`, `bash::{classify, segments}`, the `Engine`. T59.2's output folding does not exist yet, so output takes the existing truncate/archive path.
+
+Check: `mise exec -- cargo nextest run -p cox-tools -p cox-session -p cox-protocol -p cox-config -p cox -p cox-core -p cox-permission`: 927 tests run, 927 passed (4 skipped), including `detection_table_picks_the_manifests_command` (15 rows), `detection_finds_nothing_without_a_matching_manifest_entry`, `project_asks_exactly_like_bash_for_the_same_command` (cox-core `tests/permission.rs`), `project_tool_is_registered_only_behind_its_flag`, and the config.md, config.jsonschema and deps drift tests. `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+Not done: `just bench` and the `research.md` bench row (the mean-tool-calls −5 % claim) were not run, by instruction. No insta snapshot changed. The real binary was not run against a scratch `COX_HOME`. No action-level `call` test runs a command end to end (the executor is `BashTool`'s, covered by its own tests). `package.json` detection assumes `npm`, not pnpm/yarn/bun.
+
 #### T52.24 `cox-app` merges chosen best-of candidates with a chosen model or agent
 
 Depends: — (T52.9–T52.12 are done) · Size: ~200 · Files: `crates/cox-app/src/best_of.rs`, `crates/cox-app/src/app.rs`, `crates/cox-app/src/workspace.rs`

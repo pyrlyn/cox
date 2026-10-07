@@ -389,6 +389,7 @@ pub async fn open_reporting(
     ));
     all.extend(surface_tools);
     let all = tools::with_lsp(all, &config, &writable);
+    let all = tools::with_project(all, &config, cwd);
     let all = tools::with_tool_search_index(all);
     let session = match resume {
         Some((id, history)) => Session::resume(
