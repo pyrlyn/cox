@@ -103,7 +103,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T59.7 | todo | P3 | 4 | 0% | |
 | T59.8 | todo | P3 | 2 | 0% | |
 | T59.9 | todo | P3 | 2 | 0% | |
-| T59.10 | in progress | P3 | 2 | 0% | Claude Code / sonnet |
 | T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
@@ -2141,38 +2140,6 @@ just bench
 Done when: the `research.md` row exists and this card is closed or followed by a sized card.
 
 Out of scope: implementing claims.
-
-#### T59.10 Memory entries linked to files boost recall
-
-Model: sonnet · Status: in progress · Depends: — · Size: ~150 · Priority: P3 · Complexity: 2
-
-Execution plan (Claude Code / sonnet):
-1. `cox-store`: migration `00000000000008_memory_files` (`memory_files(memory_id, path)`, cascade on delete), `schema.rs` table, `Store::memory_set_files` and `Store::memory_search_touching` as defaulted trait methods in `cox-protocol` so other `Store` impls keep compiling.
-2. `memory_search_touching`: the FTS candidates (same query and order as `memory_search`) are the text list; those linked to a touched path form the linked list; RRF (k=60) merges them, ties by memory id. No touched paths delegates to `memory_search`, so the order is unchanged. A linked entry that does not match the query text never enters the result.
-3. `cox-tools/src/memory.rs`: `memory_save` links body tokens that `confine` accepts and that are files; `memory_search` derives the touched paths from the session's `read`/`edit`/`write` calls in the rollout.
-4. Tests in `cox-store` (linked entry first, unchanged order without touched paths) and `cox-tools`; then the Check below.
-
-Goal: a memory entry that names a file is ranked above an equally text-matching entry when that file was read or edited in the session.
-
-Files:
-- `crates/cox-store/migrations/<new>/up.sql` (a `memory_files` table; migrations count as fixtures, not source files)
-- `crates/cox-store/src/lib.rs`
-- `crates/cox-store/src/schema.rs`
-
-Steps:
-1. Fill `memory_files(memory_id, path)` on save from paths in the body that exist under the workspace.
-2. `memory_search` (`lib.rs:483`, FTS from `00000000000001_init/up.sql:36`) takes the session's touched paths and merges a file-linked list with the FTS list by RRF, ties by id. Diesel DSL only, no raw SQL in Rust.
-
-Check:
-```bash
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: a store test shows the linked entry first and an unchanged order without touched paths.
-
-Out of scope: embeddings, UI.
 
 ---
 
