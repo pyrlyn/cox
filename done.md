@@ -9827,6 +9827,46 @@ Check: `mise exec -- cargo nextest run -p cox-config -p cox-app`: 259 tests run,
 
 Not done: the whole-workspace nextest and clippy were not run (only the two crates this touches).
 
+#### T59.2 Fold repeated output lines before the visible cut
+
+Model: sonnet · Status: done 2026-10-07 · Depends: — · Size: ~120 · Priority: P1 · Complexity: 2
+
+Execution plan:
+1. `truncate.rs`: `fold_repeats` (digit-masked key, exact key for `error|panicked|failed|warning:` lines so no distinct diagnostic merges), and `visible_folding`, which folds, then applies the same head/tail cut; a folded result carries `[… N KiB archived; repeated lines folded; expand #id]` (no line range: folded line numbers are not the archive's).
+2. `turn.rs`: the `visible` call site folds only `bash` output. `read` output carries line numbers and exact text an `edit` needs, and `grep` matches carry `file:line`, so folding them would lose information.
+3. Verify with table tests (folding, digit masking, error-line rule, archive handle, raw archive untouched); the bench half of the Check is not run (no benchmarks on this run).
+
+Goal: runs of identical or digit-only-different lines in tool output (progress bars, `Compiling …`, repeated warnings) fold to one line plus `(×N)` before `truncate::visible`, cutting context tokens by at least 5 % on the bench with no error line lost.
+
+Files:
+- `crates/cox-core/src/truncate.rs`
+- `crates/cox-core/src/turn.rs`
+
+Steps:
+1. `fold_repeats(text: &str) -> Cow<str>` in `truncate.rs`: compare each line with the previous one after masking digit runs; fold runs of ≥ 3; never fold a line that matches `error|panicked|FAILED|warning:` the first time it appears (a repeat still folds). Rtok's `cmd` rules are the reference behaviour; a shared crate is a later amendment, not a new dependency here.
+2. Call it at the `truncate::visible` call site (`turn.rs:679`) so the archived full output is untouched and `expand` still returns the raw bytes.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: table tests for folding, digit masking and the error-line rule pass; `research.md` has the bench row (context-token-turns −5 %, pass rate unchanged).
+
+Out of scope: per-command rules, ANSI handling beyond what `visible` does today.
+
+Result: `fold_repeats` and `visible_folding` in `crates/cox-core/src/truncate.rs`; the `visible` call site in `crates/cox-core/src/turn.rs` folds `bash` output only — narrower than the card's every-tool call site, approved by the creator on 2026-10-07 (`read` is line-numbered source an `edit` must match and `grep` hits carry `file:line`, so folding them would drop information). A folded result names its archive row (`[… N KiB archived; repeated lines folded; expand #id]`, with no line range because folded line numbers are not the archive's), and the archive keeps the raw bytes. Diagnostic lines (`error`, `panicked`, `failed`, `warning:`, any case) fold only exact repeats, so no distinct diagnostic is lost. The bench half of the Check and the `research.md` bench row were not run (no benchmarks on this run); the behaviour is proved by tests instead.
+
+Check output:
+```
+mise exec -- cargo nextest run -p cox-core -p cox-app -p cox: 777 tests run: 777 passed, 3 skipped
+mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings: clean
+mise exec -- cargo fmt --check: clean
+```
+
 #### T59.5 `project` tool: run the project's own check command
 
 Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
