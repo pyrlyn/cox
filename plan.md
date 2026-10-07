@@ -119,7 +119,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T61.11 | todo | P3 | 3 | 0% | |
 | T62.2 | todo | P1 | 2 | 0% | |
 | T62.5 | todo | P1 | 2 | 0% | |
-| T62.6 | in progress | P3 | 1 | 0% | Claude Code / haiku |
 | T62.7 | todo | P3 | 1 | 0% | |
 | T62.8 | todo | P3 | 1 | 0% | |
 | T62.9 | todo | P3 | 1 | 0% | |
@@ -2733,12 +2732,6 @@ Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-
 ### T62.5. `web_fetch` has no SSRF guard
 
 `cox-tools/src/web_fetch.rs:55,70` is `Risk::ReadOnly` with only a scheme check, and `cox-web::fetch` (`cox-web/src/lib.rs:60-109`) follows up to 5 redirects with no private-address filtering — the model reads `169.254.169.254`, internal localhost services or RFC1918 hosts without approval and sees the bodies. Done means: link-local/loopback/private ranges are denied (or ask) by default.
-
-### T62.6. pid-reuse race in the bash kill path
-
-`cox-tools/src/bash/mod.rs:649-651`: after the child is reaped, the code still `killpg`s the group to catch grandchildren; a reused pid in that window signals an unrelated process group. Done means: a held group id (or pidfd-style reaping) removes the race.
-
-Execution plan: (1) wait for the leader with `waitid(P_PID, WEXITED | WNOWAIT)` so it stays an unreaped zombie and its pid, hence its group id, stays reserved; (2) hold the `Child` in `Abandoned` and reap it only after the last `killpg`, synchronously when it exited and on a detached thread otherwise; (3) regression test that the wait leaves the status reapable, then nextest, clippy and fmt for `cox-tools`.
 
 ### T62.7. Duplicated repo-root resolution
 
