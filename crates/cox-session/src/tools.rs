@@ -80,8 +80,8 @@ pub fn with_client_tools(
 /// servers start under `sandboxed_argv`, the wrap every stdio MCP server
 /// gets, with the same `writable` roots; `danger-full-access` runs them bare
 /// because `sandboxed_argv` does. Before `with_tool_search_index`, so
-/// `tool_search` can find it. With `lsp.after_edit`, `edit` and `write`
-/// share its pool to report the diagnostics they introduced (T59.3).
+/// `tool_search` can find it. With `lsp.after_edit`, the local `edit` and
+/// `write` share its pool to report the diagnostics they introduced (T59.3).
 pub(crate) fn with_lsp(
     mut tools: Vec<Arc<dyn Tool>>,
     config: &cox_protocol::Config,
@@ -103,16 +103,26 @@ pub(crate) fn with_lsp(
     let pool = Arc::new(LspPool::new(config.lsp.clone(), spawner));
     if config.lsp.after_edit {
         let wait = std::time::Duration::from_millis(u64::from(config.lsp.after_edit_ms));
+        // Only the local tools: ACP's client `edit`/`write` keep the names
+        // but write the editor's buffer, not the file the server reads.
+        let local = [EditTool.spec(), WriteTool.spec()];
         tools = tools
             .into_iter()
-            .map(|t| match t.spec().name.as_str() {
-                "edit" | "write" => Arc::new(AfterEdit::new(
-                    t,
-                    pool.clone(),
-                    wait,
-                    cox_sanitize::sanitize,
-                )) as Arc<dyn Tool>,
-                _ => t,
+            .map(|t| {
+                let spec = t.spec();
+                if local
+                    .iter()
+                    .any(|l| l.name == spec.name && l.description == spec.description)
+                {
+                    Arc::new(AfterEdit::new(
+                        t,
+                        pool.clone(),
+                        wait,
+                        cox_sanitize::sanitize,
+                    )) as Arc<dyn Tool>
+                } else {
+                    t
+                }
             })
             .collect();
     }

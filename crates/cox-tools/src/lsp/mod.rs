@@ -372,16 +372,17 @@ impl AfterEdit {
             Some(known) => known,
             // A file that does not exist yet has nothing to compare against.
             None if !path.exists() => Vec::new(),
-            None => {
-                let old = read_text(&path)?;
-                server
-                    .diagnostics(&path, &old, self.wait)
-                    .await
-                    .ok()?
-                    .diagnostics
-            }
+            None => self.settled(&server, &path, &read_text(&path)?).await?,
         };
         Some((path, server, baseline))
+    }
+
+    /// The server's report for `text`, only when it settled in time. A
+    /// deadline report holds whatever arrived — maybe nothing, maybe the
+    /// previous text's list — so diffing it would invent or hide errors.
+    async fn settled(&self, server: &Server, path: &Path, text: &str) -> Option<Vec<Diagnostic>> {
+        let report = server.diagnostics(path, text, self.wait).await.ok()?;
+        report.note.is_none().then_some(report.diagnostics)
     }
 
     /// The lines the result gains: diagnostics absent from `baseline`, keyed
@@ -394,11 +395,10 @@ impl AfterEdit {
         root: &Path,
     ) -> Option<String> {
         let text = read_text(path)?;
-        let report = server.diagnostics(path, &text, self.wait).await.ok()?;
+        let after = self.settled(server, path, &text).await?;
         let key = |d: &Diagnostic| (d.range.start.line, d.code.clone(), d.message.clone());
         let known: Vec<_> = baseline.iter().map(key).collect();
-        let new: Vec<Diagnostic> = report
-            .diagnostics
+        let new: Vec<Diagnostic> = after
             .into_iter()
             .filter(|d| !known.contains(&key(d)))
             .collect();
@@ -591,7 +591,8 @@ mod tests {
     /// Tracks each file's text and answers every save with `fake: first
     /// line`, plus an `E1` error (behind an escape sequence, as untrusted
     /// text) on each line holding `BAD`. A file holding `HANGUP` makes it
-    /// hang up, the way a crashed server does while its process lingers.
+    /// hang up, the way a crashed server does while its process lingers;
+    /// one holding `SLOW` gets no answer, so the caller's deadline wins.
     async fn fake_server(mut r: FakeRead, mut w: FakeWrite) {
         handshake(&mut r, &mut w, json!({"textDocumentSync": 1})).await;
         let mut docs: HashMap<String, String> = HashMap::new();
@@ -611,6 +612,9 @@ mod tests {
                     let text = docs.get(uri).cloned().unwrap_or_default();
                     if text.contains("HANGUP") {
                         return;
+                    }
+                    if text.contains("SLOW") {
+                        continue;
                     }
                     let mut diags = vec![diag("fake: first line")];
                     for (n, _) in text.lines().enumerate().filter(|(_, l)| l.contains("BAD")) {
@@ -822,6 +826,25 @@ mod tests {
         assert!(!out.text.contains("diagnostics"), "{}", out.text);
 
         // `b.rs` never was, so its old text is synced first.
+        let write_tool = after_edit(&diags, Arc::new(crate::write::WriteTool));
+        let input = json!({"path": "src/b.rs", "content": "BAD\nfn c() {}\n"});
+        let out = write_tool.call(input, &cx(&root)).await.unwrap();
+        assert!(!out.is_error, "{}", out.text);
+        assert!(!out.text.contains("diagnostics"), "{}", out.text);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_baseline_cut_off_by_the_deadline_adds_nothing() {
+        let (_dir, root) = workspace(&["src/a.rs", "src/b.rs"]);
+        std::fs::write(root.join("src/b.rs"), "BAD SLOW\n").unwrap();
+        let (diags, _) = tool(&[("rust", "/bin/sh", "rs")]);
+        diags
+            .call(json!({"path": "src/a.rs"}), &cx(&root))
+            .await
+            .unwrap();
+
+        // The old text never settles, so there is no baseline to diff: the
+        // error that was already there must not come back as new.
         let write_tool = after_edit(&diags, Arc::new(crate::write::WriteTool));
         let input = json!({"path": "src/b.rs", "content": "BAD\nfn c() {}\n"});
         let out = write_tool.call(input, &cx(&root)).await.unwrap();

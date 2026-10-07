@@ -93,7 +93,10 @@ their result with the diagnostics the change introduced: only when the file's
 server already runs (an edit never starts one), keyed by start line, code and
 message against the server's last report for the file, errors first, at most
 ten lines, waiting at most `lsp.after_edit_ms`. A dead or slow server adds
-nothing; the server's text passes through `sanitize` first.
+nothing, and neither does a report the server had not settled by the
+deadline; the server's text passes through `sanitize` first. ACP's
+client-backed `edit` and `write` are left alone: they write the editor's
+buffer, not the file the server reads.
 
 The default servers (`[lsp.servers]`, see config.md):
 
