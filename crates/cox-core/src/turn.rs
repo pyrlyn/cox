@@ -680,7 +680,15 @@ async fn run_one(
                     .await;
             }
             let visible = pointer.unwrap_or_else(|| {
-                crate::truncate::visible(
+                // Only shell output: `read` text is line-numbered source an
+                // `edit` must match exactly and `grep` hits carry `file:line`,
+                // so folding either would drop information, not noise.
+                let shorten = if tool.spec().name == "bash" {
+                    crate::truncate::visible_folding
+                } else {
+                    crate::truncate::visible
+                };
+                shorten(
                     &output.text,
                     id,
                     session.config.context.tool_output_visible_bytes as usize,
@@ -1040,6 +1048,93 @@ mod tests {
         assert_eq!(media_type, "image/png");
         assert_eq!(*data_b64, STANDARD.encode(PNG));
         assert_eq!(session.history().await[2], last);
+    }
+
+    /// A tool that prints 30 progress lines and one error.
+    struct Chatty(&'static str);
+
+    #[async_trait::async_trait]
+    impl Tool for Chatty {
+        fn spec(&self) -> cox_protocol::types::ToolSpec {
+            cox_protocol::types::ToolSpec {
+                name: self.0.into(),
+                description: "chatty".into(),
+                input_schema: serde_json::json!({"type": "object"}),
+                deferred: false,
+                risk: Risk::ReadOnly,
+                concurrency: Concurrency::Parallel,
+            }
+        }
+        fn subject(&self, _input: &Value) -> String {
+            String::new()
+        }
+        async fn call(&self, _input: Value, _cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+            let mut text: String = (1..=30).map(|n| format!("Compiling {n}/30\n")).collect();
+            text.push_str("error: boom\n");
+            Ok(ToolOutput {
+                text,
+                is_error: false,
+                diff: None,
+                structured: None,
+            })
+        }
+    }
+
+    /// The result `name` hands the model, and the archived bytes behind it.
+    async fn chatty_result(name: &'static str) -> (String, Vec<u8>) {
+        use cox_protocol::traits::Store as _;
+        let store = Arc::new(MemoryStore::new());
+        let scenario = format!(
+            "[[turn]]\ntext = \"run\"\ntool_calls = [{{ name = \"{name}\", input = {{}} }}]\n\n\
+             [[turn]]\ntext = \"done\"\n"
+        );
+        let mut config = cox_protocol::Config::default();
+        config.session.auto_title = false;
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(Chatty(name))];
+        let session = Session::new(
+            config,
+            Arc::new(Scripted::from_toml(&scenario, "").expect("scenario")),
+            tools,
+            store.clone(),
+            store.clone(),
+            PathBuf::from("/tmp/cox-turn-chatty"),
+        )
+        .expect("session");
+        let mut events = session.events().expect("events");
+        session
+            .submit(cox_protocol::types::Submission::UserTurn {
+                text: "go".into(),
+                attachments: vec![],
+                confirm_think: false,
+            })
+            .await
+            .expect("turn");
+        while let Ok(ev) = events.try_recv() {
+            if let Event::ToolCallDone { result, .. } = ev {
+                let archive = result.archive.expect("archived");
+                let raw = store.archive_get(&archive.id).expect("archive row");
+                return (result.visible, raw);
+            }
+        }
+        panic!("no tool result");
+    }
+
+    /// T59.2, the lossless rule: the model sees folded `bash` output, and
+    /// the archive row it names still holds every raw line.
+    #[tokio::test]
+    async fn bash_output_is_folded_while_the_archive_keeps_the_raw_lines() {
+        let (visible, raw) = chatty_result("bash").await;
+        assert!(visible.starts_with("Compiling 1/30 (×30)\nerror: boom\n[… "));
+        assert!(visible.contains("repeated lines folded; expand #"));
+        let raw = String::from_utf8(raw).expect("utf8");
+        assert_eq!(raw.lines().count(), 31);
+    }
+
+    /// T59.2: output of any tool but `bash` keeps every line.
+    #[tokio::test]
+    async fn other_tools_output_is_not_folded() {
+        let (visible, _) = chatty_result("chatty").await;
+        assert_eq!(visible.lines().count(), 31, "{visible}");
     }
 
     /// A91: reasoning streams into its own `Thinking` item, which closes
