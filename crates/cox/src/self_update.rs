@@ -35,10 +35,16 @@ fn asset_base(tag: &str, target: &str) -> String {
     format!("https://github.com/{REPO}/releases/download/{tag}/cox-{target}.tar.xz")
 }
 
+/// Latest-release API endpoint. The `/repos/` segment is mandatory:
+/// without it GitHub answers 404 for every lookup.
+fn latest_url() -> String {
+    format!("https://api.github.com/repos/{REPO}/releases/latest")
+}
+
 /// Latest release tag via the GitHub API (public, no auth).
 async fn latest_tag(client: &reqwest::Client) -> anyhow::Result<String> {
     let tag: serde_json::Value = client
-        .get(format!("https://api.github.com/{REPO}/releases/latest"))
+        .get(latest_url())
         .header("User-Agent", "cox-self-update")
         .timeout(TIMEOUT)
         .send()
@@ -132,4 +138,17 @@ fn unpack_cox(archive: &[u8], dest: &PathBuf) -> anyhow::Result<()> {
 fn self_replace(exe: &PathBuf, staged: &PathBuf) -> anyhow::Result<()> {
     std::fs::rename(staged, exe)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn latest_url_targets_the_repos_endpoint() {
+        let url = latest_url();
+        assert!(url.starts_with("https://api.github.com/repos/"), "{url}");
+        assert!(url.ends_with("/releases/latest"), "{url}");
+        assert!(url.contains(REPO), "{url}");
+    }
 }
