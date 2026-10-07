@@ -121,7 +121,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T62.5 | todo | P1 | 2 | 0% | |
 | T62.6 | todo | P3 | 1 | 0% | |
 | T62.7 | todo | P3 | 1 | 0% | |
-| T62.8 | todo | P3 | 1 | 0% | |
+| T62.8 | in progress | P3 | 1 | 0% | Claude Code / haiku |
 | T62.9 | todo | P3 | 1 | 0% | |
 
 ## Reference
@@ -2745,6 +2745,11 @@ Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-
 ### T62.8. `checkpoint changes()` silently truncates on root-count mismatch
 
 `crates/cox-tools/src/checkpoint.rs:166`: `before.trees.iter().zip(&after.trees)` drops unpaired roots instead of erroring — a snapshot pair from different root sets reports partial diffs. Done means: mismatched root sets are an error.
+
+Plan:
+1. `crates/cox-protocol/src/errors.rs`: add `ToolError::RootsMismatch { before, after }` naming both root lists; regenerate `docs/protocol.jsonschema`.
+2. `crates/cox-tools/src/checkpoint.rs` `changes()`: refuse a pair whose roots differ in count or position before the zip; `cox-core`'s `after()` already turns the error into a warn-once notice.
+3. Regression test `changes_errors_when_root_sets_differ`; verify with nextest on cox-protocol, cox-tools, cox-core, clippy, fmt.
 
 ### T62.9. Small fixes: `confine` colon ban and retry jitter
 
