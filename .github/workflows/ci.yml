@@ -37,14 +37,16 @@ jobs:
         uses: pyrlyn/ci/.github/actions/config@f880dee803f157cd4268a503418b4ecaf4da7078 # main
 
   # The shared pyrlyn/ci workflow, pinned by commit (descendant of e6e376e, which
-  # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27):
+  # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27, and of
+  # pyrlyn/ci#47: with `skip` every target runs its no-op steps on ubuntu-latest, so a
+  # docs-only change starts no macOS runner for `rust / aarch64-apple-darwin`):
   # fmt once, then per target clippy (--all-targets --all-features), check, and
   # nextest on every target (Linux x86_64 and aarch64, macOS aarch64; macOS is
   # Apple Silicon only).
   rust:
     needs: config
     if: ${{ !cancelled() }}
-    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
+    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@d55d5927f412944861509eb04ad65ea1760643db # main
     # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
     # `actions: write` on the calling job.
     permissions:
@@ -214,30 +216,38 @@ jobs:
   # regresses more than 20% against scripts/footprint.json (keyed by
   # OS-arch plus `-ci`, so each runner compares against a baseline measured on
   # a runner, never against a laptop's; T30.4).
-  footprint:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [xcode-27, ubuntu-24.04]
-    # A matrix job skipped at job level reports one check under its raw name, so the required
-    # `footprint (<os>)` checks would wait: on a docs-only change every step is a no-op instead.
+  # One job per runner with a static name, not a matrix: a docs-only change skips both at job
+  # level (no runner starts, no macOS for `footprint (xcode-27)`), and a skipped job with a
+  # static name still reports under that name, so the required `footprint (<os>)` checks pass.
+  # A skipped matrix job would report one check under its raw name and leave them waiting.
+  footprint-macos:
+    name: footprint (xcode-27)
     needs: config
-    if: ${{ !cancelled() }}
-    runs-on: ${{ matrix.os }}
-    env:
-      RUN: ${{ needs.config.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    runs-on: xcode-27
     steps:
-      - if: env.RUN == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - if: env.RUN == 'true'
-        uses: ./.github/actions/rust
+      - uses: ./.github/actions/rust
 
-      - if: env.RUN == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: footprint regression check
-        if: env.RUN == 'true'
+        run: bash scripts/footprint.sh --check
+
+  footprint-linux:
+    name: footprint (ubuntu-24.04)
+    needs: config
+    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: ./.github/actions/rust
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: footprint regression check
         run: bash scripts/footprint.sh --check
 
   # Which suites this change needs, from the shared pyrlyn/ci classification
@@ -460,7 +470,10 @@ jobs:
   revert-on-failure:
     name: revert-on-failure
     needs:
-      [rust, sandbox-landlock, plugins, plugin-examples, deny, audit, footprint, docs]
+      [
+        rust, sandbox-landlock, plugins, plugin-examples, deny, audit,
+        footprint-macos, footprint-linux, docs,
+      ]
     if: >-
       always()
       && github.event_name == 'push'
