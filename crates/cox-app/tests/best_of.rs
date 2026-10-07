@@ -17,11 +17,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use cox_app::app::{App, Host};
+use cox_app::app::{App, AppError, Host};
 use cox_app::live::LiveSession;
 use cox_app::{
-    BestOfRequest, BlockKind, Candidate, CandidateState, InboxItem, Launch, TimelinePatch,
+    BestOfError, BestOfMerge, BestOfRequest, BlockKind, Candidate, CandidateState, InboxItem,
+    Launch, TimelinePatch,
 };
+use cox_protocol::Config;
 use cox_protocol::errors::WorktreeError;
 use cox_protocol::traits::{FileStat, Store as _, Worktree, Worktrees};
 
@@ -34,14 +36,15 @@ const REPLY: &str = r#"
 text = "Done."
 "#;
 
-struct NoKeys;
+struct FakeKey;
 
-impl Host for NoKeys {
+impl Host for FakeKey {
     fn notify(&self, _: InboxItem, _: u32) {}
     fn badge(&self, _: u32) {}
     fn open_url(&self, _: &str) {}
-    fn secret(&self, _: &str) -> Option<String> {
-        None
+    /// Only the fake agent's key, as the app's Keychain would hold it.
+    fn secret(&self, section: &str) -> Option<String> {
+        (section == "fake").then(|| String::from("test-key"))
     }
 }
 
@@ -125,7 +128,7 @@ fn scratch() -> (tempfile::TempDir, Arc<Trees>) {
 
 fn app(dir: &Path, trees: &Arc<Trees>) -> Arc<App> {
     let worktrees: Arc<dyn Worktrees> = trees.clone();
-    App::with_worktrees(Some(dir.join("user/.cox")), Arc::new(NoKeys), worktrees).expect("app")
+    App::with_worktrees(Some(dir.join("user/.cox")), Arc::new(FakeKey), worktrees).expect("app")
 }
 
 async fn launch(app: &Arc<App>, dir: &Path, candidates: Vec<Candidate>) -> Launch {
@@ -400,4 +403,277 @@ async fn best_of_refuses_a_cox_candidate_without_a_usable_provider_before_its_wo
     assert!(candidate.worktree.is_none() && candidate.session.is_none());
     assert!(trees.asked.lock().expect("asked").is_empty());
     assert!(launch.sessions.is_empty());
+}
+
+// T52.24 (A142): merging chosen candidates with a model or an agent.
+
+/// A launch of `candidates` whose sessions have all finished.
+async fn finished(app: &Arc<App>, dir: &Path, candidates: Vec<Candidate>) -> Launch {
+    let launch = launch(app, dir, candidates).await;
+    for session in &launch.sessions {
+        finish(session).await;
+    }
+    launch
+}
+
+async fn merge(
+    app: &Arc<App>,
+    launch: &Launch,
+    from: &[u32],
+    by: Candidate,
+) -> Result<Launch, AppError> {
+    let merge = BestOfMerge {
+        id: launch.group.id.clone(),
+        from: from.to_vec(),
+        by,
+    };
+    app.best_of_merge(merge, THEME.into()).await
+}
+
+/// A merge whose session has finished.
+async fn merged(app: &Arc<App>, launch: &Launch, from: &[u32], by: Candidate) -> Launch {
+    let merged = merge(app, launch, from, by).await.expect("merge");
+    for session in &merged.sessions {
+        finish(session).await;
+    }
+    merged
+}
+
+fn worktree(launch: &Launch, n: usize) -> PathBuf {
+    launch.group.candidates[n]
+        .worktree
+        .clone()
+        .expect("tree")
+        .path
+}
+
+fn user_texts(session: &LiveSession) -> Vec<String> {
+    session
+        .snapshot()
+        .into_iter()
+        .filter_map(|b| match b.kind {
+            BlockKind::User { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+fn ledger(dir: &Path, session: &LiveSession) -> Vec<f64> {
+    let store = cox_store::Store::open(&dir.join("user/.cox")).expect("store");
+    let rows = store.usage_ledger(&session.id()).expect("ledger");
+    rows.iter().map(|r| r.usage.usage.cost_usd).collect()
+}
+
+/// Names `tests/fixtures/fake_acp.sh` as the agent `fake` in the scratch
+/// user config; false where this host has no argv sandbox backend, which
+/// T35.2's own test covers.
+fn fake_agent(dir: &Path) -> bool {
+    let program = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp.sh");
+    let home = dir.join("user/.cox");
+    std::fs::create_dir_all(&home).expect("home");
+    let config = format!(
+        "[external_agents.fake]\ncommand = {program:?}\nargs = []\nkey_env = \"COX_FAKE_ACP_KEY\"\n"
+    );
+    std::fs::write(home.join("config.toml"), config).expect("config");
+    let roots = [dir.join("project")];
+    cox_session::agent_argv(&program, &[], &Config::default(), &roots).is_ok()
+}
+
+fn fake() -> Candidate {
+    Candidate::Agent {
+        name: "fake".into(),
+    }
+}
+
+#[tokio::test]
+async fn best_of_merge_refuses_fewer_than_two() {
+    let (dir, trees) = scratch();
+    let app = app(dir.path(), &trees);
+    let launch = finished(&app, dir.path(), vec![cox(), cox()]).await;
+    for from in [&[0][..], &[1, 1]] {
+        let refused = merge(&app, &launch, from, cox()).await.err();
+        assert!(
+            matches!(refused, Some(AppError::BestOf(BestOfError::TooFewToMerge))),
+            "{refused:?}"
+        );
+    }
+    let asked = trees.asked.lock().expect("asked").len();
+    assert_eq!(asked, 2, "no worktree for a refused merge");
+}
+
+#[tokio::test]
+async fn best_of_merge_refuses_a_candidate_not_done() {
+    let (dir, trees) = scratch();
+    let app = app(dir.path(), &trees);
+    let missing = Candidate::Agent {
+        name: "missing".into(),
+    };
+    let launch = finished(&app, dir.path(), vec![cox(), missing, cox()]).await;
+    let refused = merge(&app, &launch, &[0, 1], cox()).await.err();
+    assert!(
+        matches!(
+            refused,
+            Some(AppError::BestOf(BestOfError::NotDone { index: 1, .. }))
+        ),
+        "{refused:?}"
+    );
+    // The missing agent's worktree was made before it failed to start.
+    assert_eq!(trees.asked.lock().expect("asked").len(), 3);
+}
+
+#[tokio::test]
+async fn best_of_merge_refuses_after_a_pick() {
+    let (dir, trees) = scratch();
+    let app = app(dir.path(), &trees);
+    let launch = finished(&app, dir.path(), vec![cox(), cox(), cox()]).await;
+    std::fs::write(worktree(&launch, 2).join("DIRTY"), "kept\n").expect("write");
+    app.pick(&launch.group.id, 0, false).await.expect("pick");
+    let refused = merge(&app, &launch, &[0, 2], cox()).await.err();
+    assert!(
+        matches!(refused, Some(AppError::BestOf(BestOfError::Picked(_)))),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn best_of_merge_prompt_holds_each_chosen_answer_and_only_those() {
+    let (dir, trees) = scratch();
+    let app = app(dir.path(), &trees);
+    let launch = finished(&app, dir.path(), vec![cox(), cox(), cox()]).await;
+    let merged = merged(&app, &launch, &[2, 0], cox()).await;
+    let last = trees.asked.lock().expect("asked").last().cloned();
+    let name = format!("best-{}-4", launch.group.id);
+    assert_eq!(last.map(|(n, _)| n), Some(name));
+    let prompts = user_texts(&merged.sessions[0]);
+    assert_eq!(prompts.len(), 1);
+    let prompt = &prompts[0];
+    assert!(prompt.contains(PROMPT), "{prompt}");
+    assert_eq!(prompt.matches("\nCandidate ").count(), 2, "{prompt}");
+    // Each candidate's final answer, fenced as data.
+    assert_eq!(prompt.matches("```text\nDone.\n```").count(), 2, "{prompt}");
+}
+
+#[tokio::test]
+async fn best_of_merge_runs_on_the_chosen_model() {
+    let (dir, trees) = scratch();
+    let app = app(dir.path(), &trees);
+    let launch = finished(&app, dir.path(), vec![cox(), cox()]).await;
+    let by = Candidate::Cox {
+        model: Some("merge-model".into()),
+    };
+    let merged = merged(&app, &launch, &[0, 1], by.clone()).await;
+    let row = merged.group.candidates.last().expect("merge row");
+    assert_eq!(row.candidate, by);
+    let models: Vec<String> = merged.sessions[0]
+        .snapshot()
+        .into_iter()
+        .filter_map(|b| match b.kind {
+            BlockKind::TurnMeta { model, .. } => Some(model.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(models, ["merge-model"]);
+}
+
+#[tokio::test]
+async fn best_of_merge_runs_on_the_chosen_agent() {
+    let (dir, trees) = scratch();
+    if !fake_agent(dir.path()) {
+        return;
+    }
+    let app = app(dir.path(), &trees);
+    let launch = finished(&app, dir.path(), vec![cox(), cox()]).await;
+    let merged = merged(&app, &launch, &[0, 1], fake()).await;
+    let row = merged.group.candidates.last().expect("merge row");
+    assert!(row.failed.is_none(), "{:?}", row.failed);
+    assert_eq!(row.candidate, fake());
+    let replies: Vec<String> = merged.sessions[0]
+        .snapshot()
+        .into_iter()
+        .filter_map(|b| match b.kind {
+            BlockKind::Assistant { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(replies, ["hello from the fake agent with a key"]);
+}
+
+#[tokio::test]
+async fn best_of_merge_is_a_candidate_compare_and_pick_see() {
+    let (dir, trees) = scratch();
+    let app = app(dir.path(), &trees);
+    let launch = finished(&app, dir.path(), vec![cox(), cox()]).await;
+    let merged = merged(&app, &launch, &[0, 1], cox()).await;
+    assert_eq!(merged.group.candidates.len(), 3);
+    assert_eq!(merged.group.candidates[2].merged_from, Some(vec![0, 1]));
+    assert_eq!(merged.group.candidates[0].merged_from, None);
+    let views = app.compare(&launch.group.id).await.expect("compare");
+    assert_eq!(views.len(), 3);
+    assert_eq!(views[2].state, CandidateState::Done);
+    assert_eq!(views[2].session, Some(merged.sessions[0].id()));
+    // Its sidebar row sits in the group.
+    let tree = worktree(&merged, 2);
+    let listed = app.workspace().sessions(&tree, 50).expect("sessions");
+    assert_eq!(
+        listed.iter().map(|s| s.best_of.clone()).collect::<Vec<_>>(),
+        [Some(launch.group.id.0.clone())]
+    );
+    let picked = app.pick(&launch.group.id, 2, false).await.expect("pick");
+    assert_eq!(picked.pruned, [worktree(&launch, 0), worktree(&launch, 1)]);
+    assert!(tree.exists());
+}
+
+#[tokio::test]
+async fn best_of_merge_usage_is_its_own_ledger_rows() {
+    let (dir, trees) = scratch();
+    let app = app(dir.path(), &trees);
+    let launch = finished(&app, dir.path(), vec![cox(), cox()]).await;
+    let merged = merged(&app, &launch, &[0, 1], cox()).await;
+    let own = ledger(dir.path(), &merged.sessions[0]);
+    assert!(!own.is_empty(), "the merger has its own usage rows");
+    let expected: f64 = launch
+        .sessions
+        .iter()
+        .chain(&merged.sessions)
+        .flat_map(|s| ledger(dir.path(), s))
+        .sum();
+    let total = app
+        .workspace()
+        .best_of_cost(&launch.group.id)
+        .expect("total");
+    assert!((total - expected).abs() < 1e-9, "{total} != {expected}");
+}
+
+#[tokio::test]
+async fn best_of_merge_by_an_agent_writes_no_usage_row() {
+    let (dir, trees) = scratch();
+    if !fake_agent(dir.path()) {
+        return;
+    }
+    let app = app(dir.path(), &trees);
+    let launch = finished(&app, dir.path(), vec![cox(), cox()]).await;
+    let workspace = app.workspace();
+    let before = workspace.best_of_cost(&launch.group.id).expect("total");
+    let merged = merged(&app, &launch, &[0, 1], fake()).await;
+    assert!(ledger(dir.path(), &merged.sessions[0]).is_empty());
+    let after = workspace.best_of_cost(&launch.group.id).expect("total");
+    assert!((after - before).abs() < 1e-12, "{after} != {before}");
+}
+
+#[tokio::test]
+async fn best_of_mergeable_lists_only_done_candidates() {
+    let (dir, trees) = scratch();
+    let app = app(dir.path(), &trees);
+    let missing = Candidate::Agent {
+        name: "missing".into(),
+    };
+    let launch = finished(&app, dir.path(), vec![cox(), missing, cox()]).await;
+    let mergeable = app.mergeable(&launch.group.id).expect("mergeable");
+    assert_eq!(mergeable, [0, 2]);
+    app.pick(&launch.group.id, 0, false).await.expect("pick");
+    assert!(
+        app.mergeable(&launch.group.id)
+            .expect("mergeable")
+            .is_empty()
+    );
 }

@@ -1431,6 +1431,7 @@ pub struct Launched {
     pub failed: Option<String>,
     pub started_ms: u64,
     pub pruned: bool,
+    pub merged_from: Option<Vec<u32>>,
 }
 
 #[uniffi::remote(Record)]
