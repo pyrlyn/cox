@@ -123,7 +123,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T62.9 | todo | P3 | 1 | 0% | |
 | T63.1 | todo | P2 | 2 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T63.3 | in progress | P1 | 1 | 0% | Claude Code / claude-haiku-5-5 |
 | T63.4 | todo | P2 | 4 | 0% | |
 | T63.4.1 | todo | P2 | 2 | 0% | |
 | T63.4.2 | todo | P2 | 3 | 0% | |
@@ -2505,7 +2504,7 @@ Each card is written so an agent can do it from the card alone: what to install,
 | `swift-architecture-check` | No such package. Real architecture linters exist — [Harmonize](https://github.com/perrystreetsoftware/Harmonize), [SolidLikeARock](https://github.com/nenadvulic/solid-like-a-rock) — but each adds SwiftSyntax or another binary. | a SwiftLint `custom_rules` entry: SwiftLint 0.65.1 is already pinned (`mise.toml`) and its build-tool plugin already runs on every package target |
 | swift-dependencies | [pointfreeco/swift-dependencies](https://github.com/pointfreeco/swift-dependencies) 1.17.1 (2026-08-28), `swift-tools-version: 6.4`, so it needs Xcode 27's Swift 6.4 — the toolchain CI pins and the one in use locally. MIT. | itself |
 
-**Order.** T63.3 first (one config change). T63.1 any time. T63.2 after T61.4 if that card is still open, since both edit the `desktop-macos` job; if T61.9 lands first, T63.2 selects scheme test targets instead of packages (step 6). T63.4 is being implemented on branch `feature/swift-dependencies` in its own pull request with tests; that pull request claims and closes the card.
+**Order.** T63.1 any time. T63.2 after T61.4 if that card is still open, since both edit the `desktop-macos` job; if T61.9 lands first, T63.2 selects scheme test targets instead of packages (step 6). T63.4 is being implemented on branch `feature/swift-dependencies` in its own pull request with tests; that pull request claims and closes the card.
 
 #### T63.1 Property-based tests for `SessionStore`
 
@@ -2833,86 +2832,6 @@ Done when: §4.3.9 (T61.1's table) has the `desktop-macos` job time for a Rust-o
 Risks: an input the hash misses lets a broken package skip — the list is explicit and `main` always runs everything, so a miss is caught on the next `main` run (step 5) and fixed by adding the path; a flaky test that passed once stays green until its inputs change.
 
 Out of scope: caching `.build` and DerivedData (T61.4, T61.9); splitting the job per package across runners.
-
-#### T63.3 Lint: no AppKit or SwiftUI in `CoxModel` and `CoxCore`
-
-Model: claude-haiku-5-5 · Status: in progress · Depends: — · Size: ~30 (config, fixtures, one CI line) · Priority: P1 · Complexity: 1
-
-Goal: a UI-framework import or AppKit type in `Packages/CoxModel/Sources` (`CoxClient` and `CoxModel`) or `Packages/CoxCore/Sources` fails the build of that package and the `desktop-macos-lint` job.
-
-State today (checked 2026-10-07 on `origin/main` d5b1570d): neither package imports AppKit, SwiftUI, UIKit or Cocoa, and neither names an AppKit type. `CoxModel`'s imports are `CoxClient`, `Foundation`, `Observation`, `OrderedCollections`, `Synchronization` and `UniformTypeIdentifiers`; `CoxCore`'s are `CoxClient`, `CoxFFIBindings` and `Foundation`. The rule therefore starts green and only guards.
-
-Why: DT§4.6 keeps these two packages UI-free so the stores and the core client run in tests and previews without a window, and so the Windows client (P58) can follow the same split. Nothing enforces it, and one `import AppKit` for an `NSWorkspace` call would compile and pass review. Risk if skipped: the split erodes quietly, and the first sign is a store test that needs a running `NSApplication`.
-
-Install: nothing. SwiftLint 0.65.1 is pinned in `mise.toml` (CI) and through SwiftLintPlugins 0.65.1 in every package (build). `swift-architecture-check` does not exist (see the table above).
-
-Files:
-- `desktop/macos/.swiftlint.yml` (two custom rules)
-- `desktop/macos/LintFixtures/Rejected/no_ui_import_in_core.swift` and `no_appkit_type_in_core.swift` (new)
-- `.github/workflows/ci.yml` (`desktop-macos-lint`: lint the two packages' sources directly)
-
-Steps:
-1. Add to `custom_rules` in `desktop/macos/.swiftlint.yml`. The rules sit in the root config, which every package reaches through `parent_config`, and are scoped by path with `included`, so no package's own config changes. The fixture paths are included so CI can prove each rule fires:
-
-   ```yaml
-     # DT§4.6: CoxModel (CoxClient, CoxModel) and CoxCore hold state and the core client only;
-     # they never import a UI framework, so tests and previews need no window (T63.3).
-     no_ui_import_in_core:
-       name: No UI framework in CoxModel or CoxCore
-       included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_ui_import_in_core\.swift$)'
-       regex: '^\s*(?:@[\w()]+\s+)*import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(?:AppKit|SwiftUI|UIKit|Cocoa)\b'
-       message: 'CoxModel and CoxCore stay UI-free: move this to CoxPlatform or CoxUI (DT§4.6)'
-       severity: error
-       excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
-
-     no_appkit_type_in_core:
-       name: No AppKit type in CoxModel or CoxCore
-       included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_appkit_type_in_core\.swift$)'
-       regex: '\bNS(?:App|Application|Window|WindowController|View|ViewController|HostingView|Color|Image|Font|Pasteboard|Workspace|Event|Screen|Responder|Menu|MenuItem|Alert|Cursor|Sound|StatusBar|StatusItem|TextView|TextField|Button)\b'
-       message: 'An AppKit type in CoxModel or CoxCore: move it behind a protocol in CoxClient (DT§4.6)'
-       severity: error
-       excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
-   ```
-
-   The type list names AppKit classes only; Foundation's `NS` names (`NSHomeDirectory`, `NSLock`, `NSRegularExpression`) stay allowed.
-2. Fixtures, one violation each, named after the rule as the existing `swiftlint fixtures` step expects:
-
-   ```swift
-   // LintFixtures/Rejected/no_ui_import_in_core.swift
-   import AppKit
-   ```
-
-   ```swift
-   // LintFixtures/Rejected/no_appkit_type_in_core.swift
-   func openLink() { NSWorkspace.shared.open(URL(filePath: "/")) }
-   ```
-
-3. `ci.yml`, `desktop-macos-lint`: after "swiftlint app", a step that lints the two packages' sources itself, so the rule still gates pull requests if T61.10 turns the build-tool plugin off during builds:
-
-   ```yaml
-      - name: swiftlint UI-free packages
-        working-directory: desktop/macos
-        run: swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources
-   ```
-
-4. Enforcement points: locally, `swift build` or `swift test` in `CoxModel` or `CoxCore` fails through the SwiftLintBuildToolPlugin (error severity); in Xcode, the same plugin marks the line; in CI, `desktop-macos` fails while building the package and `desktop-macos-lint` fails in the new step and proves the rules with the fixtures.
-5. DS§9 in `desktop/design/DESIGN.md` lists the custom rules: add the two names and one line on why.
-
-Check:
-```bash
-cd desktop/macos
-swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_ui_import_in_core.swift    # fails (no_ui_import_in_core)
-swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_appkit_type_in_core.swift  # fails (no_appkit_type_in_core)
-swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources  # passes
-(cd Packages/CoxModel && swift build --build-system swiftbuild)
-```
-Then add `import AppKit` to `Packages/CoxModel/Sources/CoxModel/SessionStore.swift` locally: `swift build` fails with the rule's message; revert.
-
-Done when: both fixtures fail with their rule, both packages lint clean, and a temporary `import SwiftUI` in `CoxCore` fails `swift build` there.
-
-Risks: SwiftLint matches `included` against the file's absolute path, both from the build plugin and from `swiftlint lint <relative path>`; the fixture check and the temporary import confirm the pattern reaches both. A regex rule is textual; a type reached through a typealias from another module is not caught (none exists today).
-
-Out of scope: rules for the other packages; a semantic linter (Harmonize, SolidLikeARock) — revisit only if a textual rule misses a real case.
 
 #### T63.4 Dependency injection through swift-dependencies
 
