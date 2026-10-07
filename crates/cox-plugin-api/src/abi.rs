@@ -24,6 +24,34 @@ use thiserror::Error;
 
 use crate::manifest::ModelTier;
 
+/// A place a plugin can run: who drives the session (PL§15.1).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Surface {
+    /// The TUI and `cox --plain`.
+    Terminal,
+    /// The macOS app, local or over `cox app-server`.
+    Desktop,
+    /// `cox run -p`.
+    Headless,
+    /// `cox acp`.
+    Acp,
+}
+
+impl Surface {
+    /// The manifest and approval-line spelling.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Desktop => "desktop",
+            Self::Headless => "headless",
+            Self::Acp => "acp",
+        }
+    }
+}
+
 /// `cox_init` input: once per session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct InitIn {
@@ -39,6 +67,11 @@ pub struct InitIn {
     /// JSON rather than `Capabilities`, which denies unknown keys: a
     /// capability added in a later minor must not break an older guest.
     pub granted: Value,
+    /// Who drives the session, so a plugin returns only its surface's parts.
+    /// Absent from a cox older than PL§15; a guest reads absence as
+    /// `terminal`, the only surface plugins were written for.
+    #[serde(default)]
+    pub surface: Option<Surface>,
 }
 
 /// The session a plugin is initialised for.
@@ -70,6 +103,83 @@ pub struct InitOut {
     pub renderers: Vec<String>,
     /// `Event` serde tags it wants in `cox_on_event`.
     pub subscribe: Vec<String>,
+    /// Desktop-only contributions; dropped with a notice on any other
+    /// surface (PL§15.6).
+    pub desktop: DesktopOut,
+}
+
+/// At most this many toolbar actions per plugin (PL§15.4).
+pub const MAX_TOOLBAR_ACTIONS: usize = 2;
+/// At most this many actions on one desktop notification (PL§15.4).
+pub const MAX_NOTICE_ACTIONS: usize = 2;
+
+/// What `InitOut.desktop` carries (PL§15.4). The app draws each one natively
+/// from this data; a plugin never supplies UI code.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct DesktopOut {
+    /// One inspector tab, filled by `cox_render` with `Slot::DesktopInspector`.
+    pub inspector: Option<TabDecl>,
+    /// Toolbar items, at most [`MAX_TOOLBAR_ACTIONS`].
+    pub toolbar: Vec<ActionDecl>,
+    /// Command-palette actions.
+    pub palette: Vec<ActionDecl>,
+}
+
+/// The inspector tab a plugin adds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TabDecl {
+    /// The tab's title.
+    pub title: String,
+    /// An SF Symbol name; see [`is_symbol_name`].
+    pub symbol: String,
+}
+
+/// A toolbar item or palette action. A click goes through `cox_command`, so
+/// it cannot submit anything a command could not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ActionDecl {
+    /// One of the plugin's `InitOut.commands` names.
+    pub command: String,
+    /// The label, or the tooltip for a toolbar icon.
+    pub title: String,
+    /// An SF Symbol name; see [`is_symbol_name`].
+    pub symbol: String,
+}
+
+/// Whether `name` is a symbol name the host passes on: `[a-z0-9.]{1,64}`.
+/// Checked in the host because the name reaches AppKit, which would take any
+/// string; a name that is valid but unknown draws a fallback glyph there.
+pub fn is_symbol_name(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.')
+}
+
+/// `cox_desktop_notify` input (`cox:desktop/v1`, PL§15.4): a notification
+/// whose buttons run the plugin's own commands.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DesktopNotice {
+    /// Severity, capped at `warn` like every plugin notice.
+    pub level: NoticeLevel,
+    /// The headline.
+    pub title: String,
+    /// The detail.
+    #[serde(default)]
+    pub body: String,
+    /// Buttons, at most [`MAX_NOTICE_ACTIONS`].
+    #[serde(default)]
+    pub actions: Vec<NoticeAction>,
+}
+
+/// A button on a [`DesktopNotice`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct NoticeAction {
+    /// The button's label.
+    pub label: String,
+    /// One of the plugin's `InitOut.commands` names.
+    pub command: String,
 }
 
 /// A slash command a plugin offers.
@@ -109,6 +219,10 @@ pub enum Slot {
     /// Full-screen overlay.
     #[serde(rename = "overlay")]
     Overlay,
+    /// The desktop inspector tab (PL§15.4); asked for only after the plugin
+    /// declared `InitOut.desktop.inspector`, so an older guest never sees it.
+    #[serde(rename = "desktop.inspector")]
+    DesktopInspector,
 }
 
 /// `cox_on_event` input (PL§5).
@@ -204,6 +318,9 @@ pub enum CommandOut {
     TogglePanel,
     /// Open the plugin's overlay.
     OpenOverlay,
+    /// Select the plugin's inspector tab: the desktop counterpart of
+    /// `OpenOverlay`, dropped with a notice on the terminal.
+    OpenInspector,
     /// Show a notice.
     Notice(PluginNotice),
     /// Do nothing.
@@ -365,6 +482,14 @@ pub enum AbiError {
     /// Not allowed from the calling export (PL§4, deadlock and render caps).
     #[error("not allowed in this context")]
     NotInThisContext,
+    /// A surface-only host function called on another surface. Checked
+    /// before the grant: "not granted" would mislead for something that can
+    /// never work here (PL§15.6).
+    #[error("not available on the {} surface", .surface.name())]
+    NotOnThisSurface {
+        /// The surface the session runs on.
+        surface: Surface,
+    },
     /// The capability is not granted.
     #[error("capability {capability} is not granted")]
     NotGranted {
@@ -430,6 +555,7 @@ mod tests {
             },
             CommandOut::TogglePanel,
             CommandOut::OpenOverlay,
+            CommandOut::OpenInspector,
             CommandOut::Notice(notice),
             CommandOut::Nothing,
         ];
@@ -447,6 +573,7 @@ mod tests {
                 "compact",
                 "toggle_panel",
                 "open_overlay",
+                "open_inspector",
                 "notice",
                 "nothing"
             ]
@@ -510,5 +637,124 @@ mod tests {
         let err: AbiError = serde_json::from_value(json!({ "kind": "budget", "remaining_usd": 0 }))
             .expect("abi error");
         assert_eq!(err, AbiError::Budget);
+
+        // The surface parts follow the same rule (PL§15.7).
+        let init: InitIn = serde_json::from_value(json!({
+            "api": 1, "plugin_id": "jev", "config": {}, "granted": {},
+            "session": { "id": "s1", "cwd": "/w" }, "surface": "desktop", "added": 1,
+        }))
+        .expect("host → guest");
+        assert_eq!(init.surface, Some(Surface::Desktop));
+        let out: InitOut = serde_json::from_value(json!({
+            "desktop": {
+                "inspector": { "title": "Glance", "symbol": "eye", "badge": 3 },
+                "toolbar": [{ "command": "go", "title": "Go", "symbol": "play", "hint": "x" }],
+                "sidebar": [],
+            },
+        }))
+        .expect("guest → host");
+        assert_eq!(out.desktop.inspector.expect("tab").title, "Glance");
+        assert_eq!(out.desktop.toolbar[0].command, "go");
+        let notice: DesktopNotice = serde_json::from_value(json!({
+            "level": "warn", "title": "t", "sound": "ding",
+            "actions": [{ "label": "Open", "command": "go", "style": "primary" }],
+        }))
+        .expect("desktop notice");
+        assert_eq!(notice.actions.len(), 1);
+        assert!(notice.body.is_empty());
+        let err: AbiError = serde_json::from_value(
+            json!({ "kind": "not_on_this_surface", "surface": "acp", "x": 1 }),
+        )
+        .expect("abi error");
+        assert_eq!(
+            err,
+            AbiError::NotOnThisSurface {
+                surface: Surface::Acp
+            }
+        );
+    }
+
+    #[test]
+    fn init_in_without_surface_reads_as_none() {
+        let init: InitIn = serde_json::from_value(json!({
+            "api": 1, "plugin_id": "jev", "config": {}, "granted": {},
+            "session": { "id": "s1", "cwd": "/w" },
+        }))
+        .expect("an older host's init");
+        assert_eq!(init.surface, None);
+    }
+
+    #[test]
+    fn surface_round_trips_and_uses_lowercase_names() {
+        for (surface, name) in [
+            (Surface::Terminal, "terminal"),
+            (Surface::Desktop, "desktop"),
+            (Surface::Headless, "headless"),
+            (Surface::Acp, "acp"),
+        ] {
+            round_trip(&surface);
+            assert_eq!(serde_json::to_value(surface).expect("serializes"), name);
+            assert_eq!(surface.name(), name);
+        }
+        assert!(serde_json::from_value::<Surface>(json!("tui")).is_err());
+    }
+
+    #[test]
+    fn desktop_payloads_round_trip() {
+        let action = ActionDecl {
+            command: "go".into(),
+            title: "Go".into(),
+            symbol: "play.fill".into(),
+        };
+        round_trip(&InitOut {
+            desktop: DesktopOut {
+                inspector: Some(TabDecl {
+                    title: "Glance".into(),
+                    symbol: "eye".into(),
+                }),
+                toolbar: vec![action.clone()],
+                palette: vec![action],
+            },
+            ..InitOut::default()
+        });
+        round_trip(&DesktopNotice {
+            level: NoticeLevel::Info,
+            title: "Done".into(),
+            body: "all green".into(),
+            actions: vec![NoticeAction {
+                label: "Open".into(),
+                command: "go".into(),
+            }],
+        });
+        round_trip(&AbiError::NotOnThisSurface {
+            surface: Surface::Terminal,
+        });
+        round_trip(&RenderIn {
+            slot: Slot::DesktopInspector,
+            width: 40,
+            height: 12,
+        });
+    }
+
+    #[test]
+    fn inspector_slot_is_spelled_desktop_dot_inspector() {
+        let v = serde_json::to_value(Slot::DesktopInspector).expect("serializes");
+        assert_eq!(v, "desktop.inspector");
+        assert_eq!(
+            AbiError::NotOnThisSurface {
+                surface: Surface::Terminal
+            }
+            .to_string(),
+            "not available on the terminal surface"
+        );
+    }
+
+    #[test]
+    fn symbol_names_are_lowercase_ascii_dotted_and_bounded() {
+        assert!(is_symbol_name("puzzlepiece.extension"));
+        assert!(is_symbol_name(&"a".repeat(64)));
+        for bad in ["", "Eye", "a b", "a/b", "é", &"a".repeat(65)] {
+            assert!(!is_symbol_name(bad), "{bad}");
+        }
     }
 }

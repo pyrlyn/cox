@@ -146,6 +146,9 @@ fn slot_capability(slot: Slot) -> &'static str {
         Slot::StatusLeft | Slot::StatusRight => "ui.status",
         Slot::Panel => "ui.panel",
         Slot::Overlay => "ui.overlay",
+        // Not a grant line until T33.45.1 adds it, so the slot stays closed
+        // (fail closed) until the grant and the surface filter exist.
+        Slot::DesktopInspector => "desktop.inspector",
     }
 }
 

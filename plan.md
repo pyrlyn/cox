@@ -28,7 +28,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T33.43 | todo | P1 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.45.1 | todo | P2 | 3 | 0% | |
-| T33.45.2 | in progress | P2 | 3 | 0% | Claude Code / sonnet |
 | T33.45.3 | todo | P2 | 4 | 0% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
 | T33.45.5 | todo | P2 | 4 | 0% | |
@@ -1121,14 +1120,6 @@ Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and a
 Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/plugin.schema.json` · Design: `docs/design/plugins.md` §15, A134
 
 Check: `surfaces_default_to_every_surface`, `surface_table_outside_its_surfaces_is_rejected`, `ui_keys_is_an_alias_of_terminal_keys`, `stored_ui_keys_grant_covers_terminal_keys` and the manifest schema drift test pass.
-
-#### T33.45.2 ABI: surface payloads
-
-Depends: — · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin-api/src/ui.rs`, `docs/plugin-abi.schema.json` · Design: `docs/design/plugins.md` §15, A134
-
-Plan: (1) `abi.rs`: `Surface` (same derives and lowercase spelling as T33.45.1's manifest copy, so the merge only drops one), `InitIn.surface`, `TabDecl`, `ActionDecl`, `DesktopOut`/`InitOut.desktop`, `DesktopNotice` + `NoticeAction`, `Slot::DesktopInspector`, `CommandOut::OpenInspector`, `AbiError::NotOnThisSurface { surface }`; (2) `ui.rs`: `Span.link`, `Widget::Image { path, alt }` counted by the node cap; (3) re-export from `lib.rs`, regenerate `docs/plugin-abi.schema.json` through the drift test, fix the exhaustive matches the new variants break in consumer crates with the minimal arm; (4) round-trip and `unknown_fields_are_ignored_both_ways` tests, then scoped nextest, clippy, fmt.
-
-Check: round trips for `Surface`, `InitOut.desktop`, `DesktopNotice`, `Widget::Image`, `Span.link`; `unknown_fields_are_ignored_both_ways` covers the new fields; the ABI schema drift test passes.
 
 #### T33.45.3 Host: load filter, granted filter, `cox:desktop/v1`
 

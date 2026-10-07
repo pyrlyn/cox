@@ -131,6 +131,8 @@ pub fn widget<'a>(state: &'a State, plugin: &str, slot: Slot) -> Option<&'a Widg
 fn slot_visible(state: &State, plugin: &str, slot: Slot) -> bool {
     match slot {
         Slot::StatusLeft | Slot::StatusRight => true,
+        // A desktop slot never has a terminal surface to be visible on.
+        Slot::DesktopInspector => false,
         Slot::Panel => state.plugin_panel_open.as_deref() == Some(plugin),
         Slot::Overlay => matches!(&state.modal, Some(Modal::Plugin { id }) if id == plugin),
     }
@@ -144,6 +146,7 @@ fn area_for(state: &State, slot: Slot) -> (u16, u16) {
         Slot::StatusLeft | Slot::StatusRight => (SEGMENT_COLS, 1),
         Slot::Panel => (state.term.0, PANEL_ROWS),
         Slot::Overlay => state.term,
+        Slot::DesktopInspector => (0, 0),
     }
 }
 

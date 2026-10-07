@@ -16,9 +16,11 @@ pub mod manifest;
 pub mod ui;
 
 pub use abi::{
-    AbiError, Advice, Answer, CommandDecl, CommandIn, CommandOut, DecidePoint, Effects, EventBatch,
-    HookCall, HttpReq, HttpResp, InitIn, InitOut, KeyDecl, ModelCall, NoticeLevel, PluginNotice,
-    ProviderCall, Question, RenderIn, RenderItemIn, SessionInfo, Slot, ToolCallIn,
+    AbiError, ActionDecl, Advice, Answer, CommandDecl, CommandIn, CommandOut, DecidePoint,
+    DesktopNotice, DesktopOut, Effects, EventBatch, HookCall, HttpReq, HttpResp, InitIn, InitOut,
+    KeyDecl, MAX_NOTICE_ACTIONS, MAX_TOOLBAR_ACTIONS, ModelCall, NoticeAction, NoticeLevel,
+    PluginNotice, ProviderCall, Question, RenderIn, RenderItemIn, SessionInfo, Slot, Surface,
+    TabDecl, ToolCallIn, is_symbol_name,
 };
 
 pub use manifest::{
@@ -95,6 +97,7 @@ mod tests {
             Advice,
             AbiError,
             Widget,
+            DesktopNotice,
         );
         let schema = json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
