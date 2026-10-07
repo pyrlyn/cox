@@ -9907,3 +9907,9 @@ Not done: `just bench` and the `research.md` bench row (the mean-tool-calls −5
 `crates/cox/src/self_update.rs`: the latest-release API URL lacked GitHub's mandatory `/repos/` segment, so every `cox self update` without `--version` aborted on 404; only explicit `--version` worked. Found by the 2026-10-07 audit (T62). Fix: the URL lives in `latest_url()` with a unit test asserting the endpoint shape, so a regression cannot ship silently again.
 Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 1 · Files: `crates/cox/src/self_update.rs`
 Check: `cargo test -p cox --lib self_update`.
+
+#### T62.3 a read-only bash command can no longer read a denied path
+
+The default `Read(~/.ssh/**)` / `Read(~/.aws/**)` denies guarded only the `read` tool: `bash: cat ~/.ssh/id_rsa` classifies as `Risk::ReadOnly` (auto-allowed, no approval) and the sandbox grants global file-read, so the key text entered the model's context — exactly what the deny existed to prevent. No Bash command rule can enumerate every reader (`cat`, `head`, `grep`, redirections, …). Found by the 2026-10-07 audit. Fix: `Engine::decide` now cross-checks read-path deny rules against the absolute paths a read-only call names — the whole subject and every simple command of a split line, `~` expanded, quotes and punctuation trimmed, opaque lines included via their raw text. `Write(...)`-scoped rules do not fire, so the guard answers exactly what a read rule denies.
+Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P0 · Complexity: 2 · Files: `crates/cox-permission/src/lib.rs`, `crates/cox-permission/src/rules.rs`
+Check: `cargo test -p cox-permission` — 8 passed (3 new: literal, tilde, quoted, chained and `~/.aws` variants; unaffected commands; opaque `eval` line); `cargo test -p cox-core --test permission` — 81 passed.
