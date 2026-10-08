@@ -36,6 +36,31 @@ clean
 $ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
 clean
 ```
+#### T59.11 Outline rows include the end line
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: ~40 · Priority: P0 · Complexity: 1 · Files: `crates/cox-syntax/src/outline.rs`, `crates/cox-tools/src/read.rs`, `crates/cox-tools/src/repomap.rs`
+Goal: an outline row is `start-end: signature` (1-based, inclusive), so the next `read` passes that span as `lines` instead of guessing where the item ends.
+Plan:
+1. Row type `(usize, usize, String)`: start line, end line, signature. End line is `child.end_position().row + 1`. Fallback rows use the same line for start and end.
+2. Render `{start}-{end}: {signature}`. The `bar` fixture row is `5-7: pub fn bar(x: u32) -> u32`.
+3. `ReadTool::spec` says the outline is `start-end: signature`; pass `lines` as that `start-end`. Tool name stays `read`. No new parameter.
+4. `read_outline_of_1000_line_rust_fixture_is_short_and_lists_every_pub_fn` still finds each `pub fn`, and that row matches `^[0-9]+-[0-9]+: `.
+What landed: `collect` keeps the inclusive end line; `render` prints `start-end`; markdown and keyword fallbacks use `n-n`; the `read` description tells the model to pass that span as `lines`; the repomap assertion matches a one-line function (`2-2`).
+Not done: no symbol index, no `check_edit_safe`, no token-savings counter, no provider call, no `symbol` parameter on `read` (T59.8). The ACP editor-buffer keyword outline (`crates/cox-acp/src/client_tools.rs`) still prints a start line only; it does not call `cox-syntax`.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo test -p cox-syntax -p cox-tools outline
+PASS cox-syntax outline::tests::outline_falls_back_to_markdown_headings
+PASS cox-syntax outline::tests::outline_falls_back_to_keyword_lines_for_unknown_extension
+PASS cox-syntax outline::tests::outline_rust_lists_pub_fn_and_struct
+PASS cox-tools read::tests::read_outline_of_1000_line_rust_fixture_is_short_and_lists_every_pub_fn
+4 tests run: 4 passed
+$ mise exec rust@1.98.1 -- cargo fmt --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-syntax -p cox-tools --all-targets -- -D warnings
+clean
+```
+A bare `mise exec --` on this Linux host stops while installing `aqua:yonaskolb/XcodeGen@2.46.0` (darwin-only) before cargo starts. The three commands above are the pinned Rust from `mise.toml` (`rust@1.98.1`).
 
 #### T33.14.1 `cox_http`
 
