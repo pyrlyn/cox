@@ -214,6 +214,8 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `enabled` = `true` — the deferred ReadOnly `diagnostics` tool (P41): one sandboxed stdio LSP server per language per session, killed when the session ends
 - `timeout_s` = `30` — seconds per diagnostics request
 - `quiet_ms` = `500` — after the last pushed publishDiagnostics, wait this long before taking the result as complete
+- `after_edit` = `false` — edit and write end their result with the diagnostics they introduced, asked only of a language server that already runs (an edit never starts one)
+- `after_edit_ms` = `1500` — longest wait for those diagnostics after a change; a slow or dead server adds nothing
 ## `[lsp.servers.rust]`
 
 - `command` = `"rust-analyzer"` — program to spawn, found on PATH, under the same sandbox wrap as an MCP stdio server; [lsp.servers.<name>] is user config only — a project config cannot set lsp.servers (a repository must not choose a program cox runs)

@@ -19,6 +19,7 @@ use cox_tools::edit::EditTool;
 use cox_tools::expand::ExpandTool;
 use cox_tools::glob::GlobTool;
 use cox_tools::grep::GrepTool;
+use cox_tools::lsp::{AfterEdit, DiagnosticsTool, LspPool};
 use cox_tools::memory::{MemorySaveTool, MemorySearchTool};
 use cox_tools::read::ReadTool;
 use cox_tools::todo::TodoTool;
@@ -79,28 +80,53 @@ pub fn with_client_tools(
 /// servers start under `sandboxed_argv`, the wrap every stdio MCP server
 /// gets, with the same `writable` roots; `danger-full-access` runs them bare
 /// because `sandboxed_argv` does. Before `with_tool_search_index`, so
-/// `tool_search` can find it.
+/// `tool_search` can find it. With `lsp.after_edit`, the local `edit` and
+/// `write` share its pool to report the diagnostics they introduced (T59.3).
 pub(crate) fn with_lsp(
     mut tools: Vec<Arc<dyn Tool>>,
     config: &cox_protocol::Config,
     writable: &[PathBuf],
 ) -> Vec<Arc<dyn Tool>> {
-    if config.lsp.enabled {
-        let (wrap_config, writable) = (config.clone(), writable.to_vec());
-        let spawner: cox_tools::lsp::Spawner =
-            Arc::new(move |server: &cox_protocol::config::LspServerConfig| {
-                crate::sandbox::sandboxed_argv(
-                    std::path::Path::new(&server.command),
-                    &server.args,
-                    &wrap_config,
-                    &writable,
-                )
-            });
-        tools.push(Arc::new(cox_tools::lsp::DiagnosticsTool::new(
-            config.lsp.clone(),
-            spawner,
-        )));
+    if !config.lsp.enabled {
+        return tools;
     }
+    let (wrap_config, writable) = (config.clone(), writable.to_vec());
+    let spawner: cox_tools::lsp::Spawner =
+        Arc::new(move |server: &cox_protocol::config::LspServerConfig| {
+            crate::sandbox::sandboxed_argv(
+                std::path::Path::new(&server.command),
+                &server.args,
+                &wrap_config,
+                &writable,
+            )
+        });
+    let pool = Arc::new(LspPool::new(config.lsp.clone(), spawner));
+    if config.lsp.after_edit {
+        let wait = std::time::Duration::from_millis(u64::from(config.lsp.after_edit_ms));
+        // Only the local tools: ACP's client `edit`/`write` keep the names
+        // but write the editor's buffer, not the file the server reads.
+        let local = [EditTool.spec(), WriteTool.spec()];
+        tools = tools
+            .into_iter()
+            .map(|t| {
+                let spec = t.spec();
+                if local
+                    .iter()
+                    .any(|l| l.name == spec.name && l.description == spec.description)
+                {
+                    Arc::new(AfterEdit::new(
+                        t,
+                        pool.clone(),
+                        wait,
+                        cox_sanitize::sanitize,
+                    )) as Arc<dyn Tool>
+                } else {
+                    t
+                }
+            })
+            .collect();
+    }
+    tools.push(Arc::new(DiagnosticsTool::from_pool(pool)));
     tools
 }
 

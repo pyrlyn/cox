@@ -10010,3 +10010,44 @@ Result: `PluginManifest.surfaces: Option<Vec<Surface>>` (absent = every surface,
 Check: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-session -p cox`: 375 tests run, 375 passed, 2 skipped (including the Check's five tests and `plugin_schema_matches_committed_file`). `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `cargo build -p cox-plugin-api --target wasm32-unknown-unknown` builds. No insta snapshot changed.
 
 Not done: `plugins/templates/rust/plugin.toml.tmpl` still writes `ui.keys` (the new spelling goes into `cox plugin new` with the SDK/example card, T33.45.8); the load filter, `InitIn.granted` filtering and listing of surfaces are T33.45.3/T33.45.4.
+
+### T59.3. `edit` and `write` report the diagnostics they introduced
+
+Model: Claude Code / opus-5.5, Cursor / grok-4.7 · Status: done 2026-10-07 · Depends: T41.6 · Size: ~190 · Priority: P1 · Complexity: 4
+
+Goal: when a language server for the file is already running, `edit`/`write` end their result with the diagnostics that are new since before the change (at most 10 lines, errors first), so the model does not spend a `bash` check call to find its own error; bench check-call count −20 %.
+
+Files:
+- `crates/cox-tools/src/lsp/mod.rs`
+- `crates/cox-tools/src/edit.rs`
+- `crates/cox-session/src/tools.rs`
+
+Steps:
+1. Move the server pool out of `DiagnosticsTool` (`lsp/mod.rs:40-49`) into a shared `Arc<LspPool>` with `running_for(path) -> Option<Arc<Server>>` that never spawns (the §1 `diagnostics` row, `plan.md:591`, starts a server lazily from `diagnostics` only; an edit must never start one). Build it once in the registry (`cox-session/src/tools.rs:27`) and hand it to `diagnostics`, `edit` and `write` (`WriteTool`, `write.rs:65`, gets the same 3-line hook).
+2. In `EditTool` (`edit.rs:33`): before writing, take the server's last diagnostics for the file; after writing, call `Server::diagnostics` (`server.rs:253`) with a short wait (`lsp.after_edit_ms`, default 1500) and append only the set difference keyed by (range start line, code, message). A dead or slow server adds nothing — never an error and never a retry.
+3. `[lsp] after_edit = false` by default in `cox-protocol` config; the fake launcher (`lsp/mod.rs:65`) drives the tests.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: tests with the fake server show the new error after an edit that introduces it, nothing when the server is not running, and nothing extra for errors that existed before; `research.md` has the bench row (bash check calls −20 %, pass rate not lower).
+
+Out of scope: starting servers, code actions, diagnostics for files the edit did not touch.
+
+Execution plan (Claude Code / opus-5.5):
+1. `lsp/mod.rs`: move the pool, start and evict logic into `LspPool` (`running_for` never spawns); `DiagnosticsTool` keeps its constructors and holds an `Arc<LspPool>`. `lsp/server.rs` gets `Server::last(path)`, the cached report for a synced file.
+2. `lsp/mod.rs`: an `AfterEdit` wrapper around any `Tool` instead of hooks inside `edit.rs`/`write.rs`, so `EditTool`/`WriteTool` stay unit structs and both share one hook: baseline (last report, or one sync of the old text), inner call, sync of the new text within `lsp.after_edit_ms`, set difference by (start line, code, message), at most 10 lines errors first, text through an injected sanitizer. Any LSP failure or timeout adds nothing.
+3. `cox-protocol` config: `lsp.after_edit = false`, `lsp.after_edit_ms = 1500`; regenerate `default.toml` docs and `docs/config.jsonschema`. `cox-session/src/tools.rs`: build one pool in `with_lsp`, wrap `edit`/`write` when `after_edit`, pass `cox_sanitize::sanitize`.
+4. Fake-server tests: new error shown, nothing when no server runs, nothing for pre-existing errors, dead server adds nothing. Verify with nextest (cox-tools, cox-session, cox, cox-config, cox-protocol), clippy, fmt. No bench (not run in this pass).
+
+- Result: `LspPool` (`crates/cox-tools/src/lsp/mod.rs`) now owns the per-language servers that `DiagnosticsTool` held; `diagnostics` still starts them, and `running_for(path)` hands a running one to anyone else without ever spawning. `Server::last(path)` (`lsp/server.rs`) returns the cached report for a file cox already synced. `AfterEdit` wraps a `Tool`: before the inner call it confines the path (`path::confine`, the same writable roots as `edit`/`write`), takes the running server and the baseline (the last report, or one sync of the old text for a file the server never saw; empty for a new file); after a successful call it syncs the new text within `lsp.after_edit_ms` and appends the diagnostics whose (start line, code, message) is not in the baseline, in `diag::format`'s errors-first order, at most ten lines plus a "more" pointer to `diagnostics`, all through the injected sanitizer. No running server, a dead or slow one, a report the server had not settled by the deadline (baseline or after; such a report holds whatever arrived, so diffing it would invent or hide errors), a timeout (twice `after_edit_ms` overall) or a cancel adds nothing and never turns the edit into an error. `cox-session`'s `with_lsp` builds one pool, wraps the local `edit` and `write` when `lsp.after_edit` (matched by name and description, so ACP's client-backed `edit`/`write`, which write the editor buffer rather than the file the server reads, are left alone), and hands both the pool and `cox_sanitize::sanitize` in (`cox-tools` may not depend on `cox-sanitize`). Config: `lsp.after_edit = false`, `lsp.after_edit_ms = 1500`; `docs/config.md` and `docs/config.jsonschema` regenerated by their drift tests; `docs/tools.md` describes it.
+- Merge: this combines two implementations of the card, PR #156 (Claude Code) and PR #161 (Cursor). PR #156 is the base: one hook for both `edit` and `write`, the config keys, the sanitizer, `Server::last` instead of a second per-file cache in the pool, and the old-text sync for a file the server never saw (PR #161 diffed such a file against an empty baseline, so its old errors came back as new). From PR #161: a report cut off by the deadline is not diffed, and ACP's client-backed tools are not wrapped. PR #161's `LspEdit` in `edit.rs` and its `AFTER_EDIT` constants were dropped; `edit.rs` is unchanged.
+- Deviation: a wrapper (`AfterEdit`) in `lsp/mod.rs` instead of code in `edit.rs` and `write.rs`, so both tools share one hook and stay unit structs (their call sites in `cox-core` and the tests are unchanged). Files touched: `lsp/mod.rs`, `lsp/server.rs`, `cox-session/src/tools.rs`, `cox-protocol/src/config.rs` and `default.toml`, plus generated docs: more than the card's three, about 190 non-comment code lines outside tests.
+- Tests (`lsp::tests`, fake server through the launcher): `edit_reports_the_error_it_introduced`, `edit_adds_nothing_when_no_server_runs` (and nothing is started), `errors_that_existed_before_are_not_reported` (a synced file via `last`, and an unsynced file through `write` via the old-text sync), `introduced_lists_at_most_ten`, `dead_server_adds_nothing`, `a_baseline_cut_off_by_the_deadline_adds_nothing` (from the merge: fails when a deadline report is diffed).
+- Check output summary after the merge: `mise exec -- cargo nextest run -p cox-tools -p cox-session -p cox-protocol -p cox-config --no-fail-fast`: 371 run, 371 passed, 1 skipped; `cargo clippy -p cox-tools -p cox-session -p cox-protocol -p cox-config --all-targets -- -D warnings` clean; `cargo fmt --check` clean. Before the merge (PR #156 alone): `mise exec -- cargo nextest run --workspace --no-fail-fast`: 2063 run, 2062 passed, 1 failed — `cox-plugin hostfn::tests::http_to_allowed_host_round_trips`, untouched by this change, passed when rerun alone. `cargo nextest run -p cox-tools -p cox-session -p cox -p cox-protocol -p cox-config --no-fail-fast`: 562 run, 562 passed (an earlier fail-fast run had `cox::plain plain_has_no_csi_cursor_moves` and `plain_transcript_snapshot` time out waiting for the first prompt while the workspace was still compiling; both passed on the rerun). `cargo nextest run -p cox-tools -E 'test(lsp)'`: 32 passed. `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean. No insta snapshot changed.
+- Not done: `just bench` and the `research.md` bench row (bash check calls −20 %) were not run in this pass (no benchmarks by rule for this run); the default stays `after_edit = false` until they are. The real binary was not run against a scratch `COX_HOME`: the disk filled during that build, so the target dir was cleaned instead; the config keys are covered by the config drift tests.

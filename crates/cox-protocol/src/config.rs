@@ -1182,6 +1182,11 @@ pub struct LspConfig {
     /// Quiet period, in milliseconds, after the last pushed
     /// `publishDiagnostics` before the result is taken as complete.
     pub quiet_ms: u32,
+    /// Whether `edit` and `write` end with the diagnostics they introduced,
+    /// asked of a language server only when one already runs (T59.3).
+    pub after_edit: bool,
+    /// Longest wait, in milliseconds, for those diagnostics after a change.
+    pub after_edit_ms: u32,
     /// `[lsp.servers.<name>]` entries.
     pub servers: BTreeMap<String, LspServerConfig>,
 }
@@ -1213,6 +1218,8 @@ impl Default for LspConfig {
             enabled: true,
             timeout_s: 30,
             quiet_ms: 500,
+            after_edit: false,
+            after_edit_ms: 1500,
             servers: servers
                 .into_iter()
                 .map(|(name, s)| (name.to_string(), s))

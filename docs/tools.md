@@ -88,6 +88,16 @@ complete after `lsp.quiet_ms` with no newer push and no `$/progress` work
 open; a server that advertises `diagnosticProvider` is asked instead. A
 deadline returns what arrived with a note, not an error.
 
+With `lsp.after_edit = true` (off by default, T59.3), `edit` and `write` end
+their result with the diagnostics the change introduced: only when the file's
+server already runs (an edit never starts one), keyed by start line, code and
+message against the server's last report for the file, errors first, at most
+ten lines, waiting at most `lsp.after_edit_ms`. A dead or slow server adds
+nothing, and neither does a report the server had not settled by the
+deadline; the server's text passes through `sanitize` first. ACP's
+client-backed `edit` and `write` are left alone: they write the editor's
+buffer, not the file the server reads.
+
 The default servers (`[lsp.servers]`, see config.md):
 
 | Name | Program | Extensions |
