@@ -3,8 +3,9 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    # Draft PRs get standard CI: docs-only changes finish in ~2 min and the
-    # signal (fmt/clippy/nextest green) is what promotes a draft to ready.
+    # Draft PRs run no CI: every job below is skipped on a draft, and marking the PR
+    # ready for review (`ready_for_review`) runs the full set.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
   # Dependabot pull requests: dependabot.yml calls this workflow so they get the
   # same jobs before its patch-only auto-merge.
@@ -28,6 +29,7 @@ jobs:
   # then do no work but still report under their names, so the required checks pass, and
   # `docs` runs the tests that read docs/. A failed `config` runs everything.
   config:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -45,7 +47,9 @@ jobs:
   # Apple Silicon only).
   rust:
     needs: config
-    if: ${{ !cancelled() }}
+    if: >-
+      !cancelled()
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     uses: pyrlyn/ci/.github/workflows/ci-rust.yml@27290ae30105592f683c236fc76dcc2ee4348bdf # main
     # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
     # `actions: write` on the calling job.
@@ -82,7 +86,9 @@ jobs:
   # back to Landlock + seccomp and still hold the same guarantees.
   sandbox-landlock:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     env:
       COX_EXPECT_SANDBOX: landlock
@@ -132,7 +138,9 @@ jobs:
   # it) plus the wasm32-unknown-unknown build every plugin ships as.
   plugins:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -155,7 +163,9 @@ jobs:
   # go/kotlin join this job once T33.34/T33.36 land.
   plugin-examples:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -189,7 +199,9 @@ jobs:
 
   deny:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -197,7 +209,9 @@ jobs:
 
   audit:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -223,7 +237,9 @@ jobs:
   footprint-macos:
     name: footprint (xcode-27)
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -238,7 +254,9 @@ jobs:
   footprint-linux:
     name: footprint (ubuntu-24.04)
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -262,6 +280,7 @@ jobs:
   # skipping them. A skipped macOS job reports `skipped` under its own name,
   # which a required check treats as passed.
   changes:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     uses: pyrlyn/ci/.github/workflows/changes.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
     permissions:
       contents: read
@@ -283,6 +302,7 @@ jobs:
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -349,6 +369,7 @@ jobs:
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success'
       || needs.changes.outputs.swift == 'true' || needs.changes.outputs.rust == 'true')
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -413,7 +434,9 @@ jobs:
   # on any change, like the config-schema drift test. Node only, so Linux.
   desktop-tokens:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -444,7 +467,9 @@ jobs:
   # job runs the same tests.
   docs:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only == 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only == 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
