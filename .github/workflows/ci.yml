@@ -7,13 +7,9 @@ on:
     # ready for review (`ready_for_review`) runs the full set.
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
-  # Dependabot pull requests: dependabot.yml calls this workflow so they get the
-  # same jobs before its patch-only auto-merge.
-  workflow_call:
 
 # Build and test jobs need only to read the repository; a job that needs more
-# (revert-on-failure) declares its own. This also caps these jobs when
-# dependabot.yml calls this workflow with wider permissions.
+# (revert-on-failure) declares its own.
 permissions:
   contents: read
 
@@ -22,7 +18,7 @@ env:
 
 # Every job installs Rust from mise.toml, the single source of the Rust
 # version: the `rust` job through the shared pyrlyn/ci workflow, the others
-# through .github/actions/rust. Both fail when rustc is not that pin.
+# through pyrlyn/ci's setup-rust action. Both fail when rustc is not that pin.
 jobs:
   # infra's config action on .github/infra.yml: `docs-only` is "true" when every changed file
   # is documentation (fails open: "false" when unsure, e.g. a .github/ change). The jobs below
@@ -36,7 +32,7 @@ jobs:
       docs-only: ${{ steps.config.outputs.docs-only }}
     steps:
       - id: config
-        uses: pyrlyn/ci/.github/actions/config@f880dee803f157cd4268a503418b4ecaf4da7078 # main
+        uses: pyrlyn/ci/.github/actions/config@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
   # The shared pyrlyn/ci workflow, pinned by commit (descendant of e6e376e, which
   # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27, and of
@@ -50,7 +46,7 @@ jobs:
     if: >-
       !cancelled()
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@27290ae30105592f683c236fc76dcc2ee4348bdf # main
+    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
     # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
     # `actions: write` on the calling job.
     permissions:
@@ -95,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -124,7 +120,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -146,7 +142,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # wasm32-unknown-unknown comes with the mise.toml pin.
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -172,7 +168,7 @@ jobs:
 
       # `cox`'s tests build cox-plugin-fixtures, whose build.rs compiles the
       # guest workspace for wasm32 (T33.28); the target comes with the pin.
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -215,7 +211,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
       # cargo-audit does not read deny.toml, so its `[advisories] ignore` list
       # (each entry with its reason and review date) is passed as --ignore
       # flags: one list, one place to remove an entry.
@@ -244,7 +240,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -261,7 +257,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -281,7 +277,7 @@ jobs:
   # which a required check treats as passed.
   changes:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    uses: pyrlyn/ci/.github/workflows/changes.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
+    uses: pyrlyn/ci/.github/workflows/changes.yml@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
     permissions:
       contents: read
     with:
@@ -307,7 +303,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pyrlyn/ci/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
         with:
           version: '27'
 
@@ -477,7 +473,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -511,6 +507,6 @@ jobs:
       # The shared action skips new branches, bot and earlier auto-revert commits, bases
       # missing locally and pushes touching .github/ (GITHUB_TOKEN cannot push workflow
       # files). No re-apply PR, as before (that would need pull-requests: write).
-      - uses: pyrlyn/ci/.github/actions/revert-on-failure@863d8960601216eec62d4aa78924f84ce61d72b9
+      - uses: pyrlyn/ci/.github/actions/revert-on-failure@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
         with:
           reapply-pr: "false"
