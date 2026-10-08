@@ -116,13 +116,17 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
-| T62.2 | todo | P1 | 2 | 0% | |
-| T62.4 | todo | P1 | 2 | 0% | |
-| T62.5 | todo | P1 | 2 | 0% | |
 | T62.6 | todo | P3 | 1 | 0% | |
 | T62.7 | todo | P3 | 1 | 0% | |
 | T62.8 | todo | P3 | 1 | 0% | |
 | T62.9 | todo | P3 | 1 | 0% | |
+| T63.1 | todo | P2 | 2 | 0% | |
+| T63.2 | todo | P2 | 3 | 0% | |
+| T63.3 | todo | P1 | 1 | 0% | |
+| T63.4 | todo | P2 | 4 | 0% | |
+| T63.4.1 | todo | P2 | 2 | 0% | |
+| T63.4.2 | todo | P2 | 3 | 0% | |
+| T63.4.3 | todo | P2 | 3 | 0% | |
 
 ## Reference
 
@@ -2457,6 +2461,698 @@ Out of scope: changing which crates depend on which.
 
 ---
 
+### P63 — Desktop architecture and test hardening (goal: SessionStore's patch rules are checked against generated inputs, not only hand-picked cases; a pull request re-runs only the Swift packages its change can affect; `CoxModel` and `CoxCore` cannot import AppKit or SwiftUI; the stores get their clients from one dependency system instead of initializer plumbing)
+
+Rationale in §6 A141. Found by reading `desktop/macos` (2026-10-07): `SessionStore.apply` (`Packages/CoxModel/Sources/CoxModel/SessionStore.swift`) is covered by fixture replays and a few hand-written patch lists in `SessionStoreTests.swift`; `desktop-macos` runs `swift test` in all six packages on every Swift or Rust change, 1,109 reference images included (1,083 in `CoxUI`, 26 in `CoxTranscript`); no rule stops a UI framework import in `CoxModel` or `CoxCore`, although neither has one today; `AppModel` (`App/CoxApp.swift`) passes `LaunchCore`'s clients into every store by hand.
+
+Each card is written so an agent can do it from the card alone: what to install, where, the files, the code and the check. Libraries were checked on 2026-10-07 against their GitHub repositories and releases:
+
+| Asked for | Found | Used instead |
+| --- | --- | --- |
+| `swift-check` | No Swift property-testing package by that name. `github.com/IronVelo/swift-check` is a Rust crate for searching bytes. | [x-sheep/swift-property-based](https://github.com/x-sheep/swift-property-based) 2.0.1 (2026-09-25; product `PropertyBased`; Swift Testing native, Swift 6.2+, shrinking, `.fixedSeed`; MIT) |
+| `swift-testing-expectations` | No such package. The nearest, [dfed/swift-testing-expectation](https://github.com/dfed/swift-testing-expectation) 0.1.4 (2025-05-20), is an async `Expectation` for Swift Testing, not property testing. | as above |
+| SwiftCheck | [typelift/SwiftCheck](https://github.com/typelift/SwiftCheck): last release 0.12.0 (2019-03-28), last push 2022-04-03, XCTest-era. Dead, so not added. | as above |
+| swift-gen | [pointfreeco/swift-gen](https://github.com/pointfreeco/swift-gen): generators only, no runner and no shrinking. PropertyBased ships a fork of it. | as above |
+| `swift-architecture-check` | No such package. Real architecture linters exist — [Harmonize](https://github.com/perrystreetsoftware/Harmonize), [SolidLikeARock](https://github.com/nenadvulic/solid-like-a-rock) — but each adds SwiftSyntax or another binary. | a SwiftLint `custom_rules` entry: SwiftLint 0.65.1 is already pinned (`mise.toml`) and its build-tool plugin already runs on every package target |
+| swift-dependencies | [pointfreeco/swift-dependencies](https://github.com/pointfreeco/swift-dependencies) 1.17.1 (2026-08-28), `swift-tools-version: 6.4`, so it needs Xcode 27's Swift 6.4 — the toolchain CI pins and the one in use locally. MIT. | itself |
+
+**Order.** T63.3 first (one config change). T63.1 any time. T63.2 after T61.4 if that card is still open, since both edit the `desktop-macos` job; if T61.9 lands first, T63.2 selects scheme test targets instead of packages (step 6). T63.4 is being implemented on branch `feature/swift-dependencies` in its own pull request with tests; that pull request claims and closes the card.
+
+#### T63.1 Property-based tests for `SessionStore`
+
+Model: sonnet · Status: open · Depends: — · Size: ~10 (manifest) + ~180 tests · Priority: P2 · Complexity: 2
+
+Goal: `SessionStore`'s patch rules — `upsert` ordering and in-place replace, `remove`, `reset` deduplication, batching, and the `lastLines` tail — hold for hundreds of generated patch sequences per run, compared with a plain-array reference model of `cox_app::coalesce::apply`.
+
+Why: the rules are mirrored by hand from Rust, and today's tests pin about ten hand-picked sequences. Collisions (an `upsert` to an id that exists, an anchor that was removed, a `remove` of a missing id) multiply quickly; a generator finds the combination nobody wrote down and shrinks it to the shortest failing list. Risk if skipped: a Swift-side ordering drift shows up only as a transcript in the wrong order for a user, not as a test failure.
+
+Install (no global tool; SwiftPM fetches it):
+- `desktop/macos/Packages/CoxModel/Package.swift`: the package dependency `https://github.com/x-sheep/swift-property-based`, `exact: "2.0.1"` (the repository pins test libraries exactly, as swift-snapshot-testing is), on the test target only.
+
+Files:
+- `desktop/macos/Packages/CoxModel/Package.swift`
+- `desktop/macos/Packages/CoxModel/Package.resolved` (regenerated by `swift package resolve`)
+- `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/SessionStorePropertyTests.swift` (new)
+- `toolchain.md` (a row in the SwiftPM table) and `plan.md` §1 (the dependency row `AGENTS.md` asks for)
+
+Steps:
+1. Manifest — the two changed lists in `Packages/CoxModel/Package.swift`:
+
+   ```swift
+   dependencies: [
+     .package(url: "https://github.com/apple/swift-collections", from: "1.7.1"),
+     .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
+     // T63.1: generated inputs and shrinking for the store's patch rules; tests only.
+     .package(url: "https://github.com/x-sheep/swift-property-based", exact: "2.0.1"),
+   ],
+   ```
+
+   ```swift
+   .testTarget(
+     name: "CoxModelTests",
+     dependencies: [
+       "CoxModel",
+       .product(name: "PropertyBased", package: "swift-property-based"),
+     ],
+     plugins: [swiftLint]
+   ),
+   ```
+
+2. `cd desktop/macos/Packages/CoxModel && swift package resolve`, then check whether `Package.resolved` of `CoxCore`, `CoxPlatform`, `CoxTranscriptText` and `CoxTranscript` changed too (a test-only dependency should not reach them; CI's "Swift pins unchanged by the build" step fails if one changed and was not committed).
+3. The test file. `propertyCheck` takes `isolation: isolated (any Actor)? = #isolation`, so in a `@MainActor` test its closure runs on the main actor and may call the store directly. Ids come from a pool of five so upserts collide; anchors include ids that never exist; text is short so failures shrink to something readable:
+
+   ```swift
+   // Copyright (c) 2026 Ivan Tugay
+   // SPDX-License-Identifier: GPL-3.0-or-later
+   // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
+   // SessionStore's patch rules against generated patch lists (T63.1): the store must order
+   // blocks as a plain-array model of `cox_app::coalesce::apply` does, for any mix of upserts
+   // and removes, not only the lists SessionStoreTests spells out.
+
+   import CoxClient
+   import PropertyBased
+   import Testing
+
+   @testable import CoxModel
+
+   /// One timeline edit; `description` keeps a shrunk failure readable.
+   enum Edit: Sendable, CustomStringConvertible {
+     case upsert(BlockID, text: String, after: BlockID?)
+     case remove(BlockID)
+
+     var patch: TimelinePatch {
+       switch self {
+       case .upsert(let id, let text, let after):
+         .upsert(block: Block(id: id, turn: 1, kind: .thinking(text: text)), after: after)
+       case .remove(let id):
+         .remove(id: id)
+       }
+     }
+
+     var description: String {
+       switch self {
+       case .upsert(let id, let text, let after): "upsert(\(id), \(text), after: \(after ?? "nil"))"
+       case .remove(let id): "remove(\(id))"
+       }
+     }
+   }
+
+   /// Five ids so edits collide; anchors b5 and b6 never exist, so those blocks append.
+   func editLists() -> Generator<[Edit], some Sequence> {
+     let id = Gen.int(in: 0...4).map { "b\($0)" }
+     let anchor = Gen.int(in: -1...6).map { n -> BlockID? in n < 0 ? nil : "b\(n)" }
+     let text = Gen.letter.string(of: 0...3)
+     let edit = Gen<Edit>.oneOf(
+       zip(id, text, anchor).map { Edit.upsert($0, text: $1, after: $2) },
+       id.map { Edit.remove($0) })
+     return edit.array(of: 0...40)
+   }
+
+   /// The ordering rule over a plain array: an existing id is replaced in place, `nil` inserts
+   /// first, a known anchor inserts after it, an unknown one appends.
+   func reference(_ edits: [Edit]) -> [(id: BlockID, text: String)] {
+     var rows: [(id: BlockID, text: String)] = []
+     for edit in edits {
+       switch edit {
+       case .upsert(let id, let text, let after):
+         if let at = rows.firstIndex(where: { $0.id == id }) {
+           rows[at].text = text
+           continue
+         }
+         let index =
+           after.map { anchor in rows.firstIndex { $0.id == anchor }.map { $0 + 1 } ?? rows.count }
+           ?? 0
+         rows.insert((id, text), at: index)
+       case .remove(let id):
+         rows.removeAll { $0.id == id }
+       }
+     }
+     return rows
+   }
+
+   @MainActor
+   func emptyStore() -> SessionStore {
+     SessionStore(session: FixtureSession(fixture: Fixture(batches: [], snapshot: [])))
+   }
+
+   @MainActor
+   @Suite struct SessionStoreProperties {
+     @Test func ordersBlocksAsTheReferenceModel() async {
+       await propertyCheck(count: 300, input: editLists()) { edits in
+         let store = emptyStore()
+         store.apply(edits.map(\.patch))
+         let expected = reference(edits)
+         #expect(Array(store.blocks.keys) == expected.map(\.id))
+         #expect(store.blocks.values.map(\.kind) == expected.map { .thinking(text: $0.text) })
+       }
+     }
+
+     @Test func repeatingTheLastEditChangesNothing() async {
+       await propertyCheck(input: editLists(), editLists().filter { !$0.isEmpty }) { edits, tail in
+         let once = emptyStore()
+         once.apply((edits + tail).map(\.patch))
+         let twice = emptyStore()
+         twice.apply((edits + tail + [tail[tail.count - 1]]).map(\.patch))
+         #expect(once.blocks == twice.blocks)
+       }
+     }
+
+     @Test func splittingABatchDoesNotChangeTheResult() async {
+       await propertyCheck(input: editLists(), Gen.int(in: 0...40)) { edits, cut in
+         let whole = emptyStore()
+         whole.apply(edits.map(\.patch))
+         let split = emptyStore()
+         let at = min(cut, edits.count)
+         split.apply(edits[..<at].map(\.patch))
+         split.apply(edits[at...].map(\.patch))
+         #expect(whole.blocks == split.blocks)
+       }
+     }
+
+     @Test func resetKeepsTheFirstPositionAndTheLastValue() async {
+       await propertyCheck(input: editLists()) { edits in
+         let blocks = edits.compactMap { edit -> Block? in
+           guard case .upsert(let id, let text, _) = edit else { return nil }
+           return Block(id: id, turn: 1, kind: .thinking(text: text))
+         }
+         let store = emptyStore()
+         store.apply([.reset(blocks: blocks)])
+         var firstSeen: [BlockID] = []
+         for block in blocks where !firstSeen.contains(block.id) { firstSeen.append(block.id) }
+         #expect(Array(store.blocks.keys) == firstSeen)
+         for id in firstSeen {
+           #expect(store.blocks[id] == blocks.last { $0.id == id })
+         }
+       }
+     }
+
+     @Test func lastLinesKeepsAtMostFiveLinesOfTheEnd() async {
+       let text = Gen.int(in: 0...2).map { ["a", "\n", "\r\n"][$0] }.array(of: 0...60)
+         .map { $0.joined() }
+       await propertyCheck(count: 500, input: text) { text in
+         let tail = lastLines(text)
+         let body = tail.utf8.last == UInt8(ascii: "\n") ? tail.utf8.dropLast() : tail.utf8[...]
+         #expect(text.hasSuffix(tail))
+         #expect(body.filter { $0 == UInt8(ascii: "\n") }.count < tailLines)
+       }
+     }
+   }
+   ```
+
+4. Run it, then make it fail on purpose once to see the shrunk output: change `?? rows.count` to `?? 0` in `reference`, run, read the "shrunk down from" line and the printed `.fixedSeed("…")`, revert.
+5. A failure found later: add the printed `.fixedSeed(...)` trait to that test while fixing, then turn the shrunk input into a plain regression test in `SessionStoreTests.swift` (the `AGENTS.md` rule for bug fixes) and drop the seed.
+6. `toolchain.md`, SwiftPM table: `| swift-property-based | local (CoxModel tests) | https://github.com/x-sheep/swift-property-based | T63.1: generated patch lists and shrinking for SessionStore's rules |`.
+
+Check:
+```bash
+cd desktop/macos/Packages/CoxModel
+swift test --no-parallel --build-system swiftbuild --filter SessionStoreProperties
+swift test --no-parallel --build-system swiftbuild
+```
+
+Done when: the five properties pass with their default counts; the deliberate break in step 4 fails `ordersBlocksAsTheReferenceModel` with a shrunk list of at most a few edits; no other package's `Package.resolved` changed; the `desktop-macos` job stays green.
+
+Risks: a property that is false by design (read the Rust consumer before "fixing" the store to satisfy a test); random seeds make a rare failure appear on an unrelated PR — the failure prints its seed, so it is reproducible, and it is a real bug either way.
+
+Out of scope: properties for the other stores; fuzzing `TimelineDecoding.swift`.
+
+#### T63.2 CI: re-run only the Swift packages a change can affect
+
+Model: sonnet · Status: open · Depends: T61.4 (shared job; not a code dependency) · Size: ~120 (script, workflow) · Priority: P2 · Complexity: 3
+
+Goal: on a pull request, a package whose test inputs are byte-identical to a run that already passed on `main` (or earlier on the same pull request) is not tested again; everything else runs as today. A change to `CoxUI` alone re-runs `CoxUI` and `CoxTranscript`, not `CoxModel`, `CoxCore`, `CoxPlatform` or `CoxTranscriptText`; a Rust-only change skips the 1,109 snapshot images entirely.
+
+What is and is not feasible: SwiftPM has no per-test result cache and swift-snapshot-testing compares freshly rendered images by design, so "only the changed snapshots" cannot be done inside one package. The unit that can be skipped soundly is a package whose whole input — its sources, tests, reference images, local dependencies, pins and toolchain — did not change since a passing run. Build outputs (`.build`, the SwiftPM cache, `CoxFFI.xcframework`) are cached by T61.4, not here.
+
+Why: the snapshot packages dominate the job's time and most pull requests touch neither them nor what they import. Risk if skipped: every Rust or unrelated Swift change keeps paying for 1,109 renders on the `xcode-27` runners. The job comment in `ci.yml` ("Always the full build … never only the changed ones") is a deliberate rule; this card changes it for pull requests only, by A141 — the app target is still built on every run.
+
+Install: nothing new. `actions/cache/restore` and `actions/cache/save` v6.1.0, pinned by commit SHA `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` (`gh api repos/actions/cache/git/ref/tags/v6.1.0`; re-check for a newer release when claiming).
+
+Files:
+- `scripts/desktop/swift_test.sh` (new): the per-package loop now inline in `ci.yml`, plus the input hash and the pass markers
+- `.github/workflows/ci.yml` (`desktop-macos`: the marker restore and save around the `swift test` step, and the trigger in step 5)
+- `justfile` (`just desktop-test` calls the script with `COX_SWIFT_TEST_ALL=1`, so local runs stay full)
+
+Steps:
+1. Inputs per package (the local dependency graph from the six manifests, plus what the tests read):
+
+   | Package | Hashed paths besides its own directory |
+   | --- | --- |
+   | `CoxModel` | `desktop/macos/Fixtures` |
+   | `CoxUI` | — (no local dependency; tokens are generated into the package) |
+   | `CoxCore` | `CoxModel`, `crates/`, `Cargo.toml`, `Cargo.lock`, `scripts/desktop/xcframework.sh` (the XCFramework it links) |
+   | `CoxPlatform` | `CoxModel` |
+   | `CoxTranscriptText` | `CoxModel` |
+   | `CoxTranscript` | `CoxModel`, `CoxTranscriptText`, `CoxUI` |
+
+   Every package also hashes `desktop/macos/.swiftlint.yml`, `mise.toml`, `scripts/desktop/swift_test.sh`, `.github/workflows/ci.yml`, and the toolchain identity: `xcodebuild -version` and `sw_vers -productVersion` (a new image re-renders snapshots differently, so it must re-run them). A package directory includes `Tests/**/__Snapshots__`, so a re-recorded image re-runs its package.
+2. The script. Hash tracked content through git, which is exact and fast on a clean checkout:
+
+   ```bash
+   #!/usr/bin/env bash
+   # The Swift package tests for CI and `just desktop-test` (T63.2): each package runs unless a
+   # pass marker for the exact hash of its inputs exists. COX_SWIFT_TEST_ALL=1 runs every
+   # package; markers live in $COX_SWIFT_TEST_MARKERS, restored and saved by ci.yml.
+   set -euo pipefail
+   shopt -s nullglob
+   cd "$(git rev-parse --show-toplevel)"
+   pkgs=desktop/macos/Packages
+   markers=${COX_SWIFT_TEST_MARKERS:-desktop/macos/build/swift-test-pass}
+   mkdir -p "$markers"
+
+   inputs() {
+     case "$1" in
+       CoxModel) echo "$pkgs/CoxModel desktop/macos/Fixtures" ;;
+       CoxUI) echo "$pkgs/CoxUI" ;;
+       CoxCore) echo "$pkgs/CoxCore $pkgs/CoxModel crates Cargo.toml Cargo.lock scripts/desktop/xcframework.sh" ;;
+       CoxPlatform) echo "$pkgs/CoxPlatform $pkgs/CoxModel" ;;
+       CoxTranscriptText) echo "$pkgs/CoxTranscriptText $pkgs/CoxModel" ;;
+       CoxTranscript) echo "$pkgs/CoxTranscript $pkgs/CoxModel $pkgs/CoxTranscriptText $pkgs/CoxUI" ;;
+       *) echo "swift_test.sh: no input list for $1; add one" >&2; return 1 ;;
+     esac
+   }
+
+   toolchain=$(xcodebuild -version; sw_vers -productVersion)
+   shared="desktop/macos/.swiftlint.yml mise.toml scripts/desktop/swift_test.sh .github/workflows/ci.yml"
+   failed=()
+   for manifest in "$pkgs"/*/Package.swift; do
+     package=$(dirname "$manifest")
+     name=$(basename "$package")
+     paths=$(inputs "$name") || exit 1
+     # shellcheck disable=SC2086 # the path lists are split on purpose
+     hash=$({ git ls-files -s -- $paths $shared; echo "$toolchain"; } | git hash-object --stdin)
+     if [ "${COX_SWIFT_TEST_ALL:-0}" != 1 ] && [ -e "$markers/$name-$hash" ]; then
+       echo "$name: inputs unchanged since a passing run ($hash), skipped"
+       touch "$markers/$name-$hash"  # still in use: keep it past the pruning below
+       continue
+     fi
+     # swiftbuild: see SwiftPM #9655 (ColorResource symbols for Colors.xcassets).
+     if swift test --no-parallel --build-system swiftbuild --package-path "$package"; then
+       touch "$markers/$name-$hash"
+     else
+       failed+=("$name")
+     fi
+   done
+   # Keep the marker cache small: a hash older than two weeks will not match again soon.
+   find "$markers" -type f -mtime +14 -delete
+   if [ ${#failed[@]} -gt 0 ]; then
+     echo "swift test failed in: ${failed[*]}" >&2
+     exit 1
+   fi
+   ```
+
+   An unknown package fails loudly (fail closed): a seventh package must get an input list before CI can pass.
+3. `ci.yml`, `desktop-macos`: the restore before `swift test`, the step calling the script, the save after it. `actions/cache` keys are immutable, so each run saves a new key and restores the newest by prefix:
+
+   ```yaml
+      - name: swift test pass markers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: desktop/macos/build/swift-test-pass
+          key: swift-test-pass-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: swift-test-pass-v1-
+
+      - name: swift test
+        timeout-minutes: 60
+        env:
+          SNAPSHOT_ARTIFACTS: ${{ runner.temp }}/snapshots
+          # Only a pull request may skip; any other trigger tests every package.
+          COX_SWIFT_TEST_ALL: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+        run: bash scripts/desktop/swift_test.sh
+
+      - name: save swift test pass markers
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: desktop/macos/build/swift-test-pass
+          key: swift-test-pass-v1-${{ github.run_id }}-${{ github.run_attempt }}
+   ```
+
+   The save also runs after a failure, so the packages that passed keep their markers; a failed package never writes one.
+4. Replace the job comment's "Always the full build: every package and the app, never only the changed ones" with the new rule: every package on `main` and on manual runs; on a pull request, only packages whose inputs changed since a passing run; the app target always.
+5. Cache scope: a pull request reads caches from its own ref and from `main`, never from another pull request. `ci.yml` runs on `pull_request`, `workflow_dispatch` and `workflow_call` only, so no run on `main` writes markers today and the gain would be limited to re-pushes of one pull request. Add `push: branches: [main]` to `ci.yml` with `paths: ['desktop/**', 'crates/**', 'Cargo.lock', 'scripts/desktop/**']`, and make sure only `desktop-macos` (and the jobs it `needs`) runs on that event; ask the creator first, since it adds a macOS run per merge.
+6. If T61.9 has landed (one `xcodebuild test -scheme CoxTests`), keep the same hashes and markers but pass `-only-testing:<Package>Tests` for the packages that need a run instead of looping `swift test`.
+7. `justfile`: `desktop-test` runs `COX_SWIFT_TEST_ALL=1 bash scripts/desktop/swift_test.sh`.
+
+Check:
+- On this card's pull request: a first push runs all six packages and the save step stores a key. Then push a commit that touches only `crates/cox-tools/src/git.rs`: the log shows five packages "skipped" and `CoxCore` tested. Then one touching only a `CoxUI` source: `CoxUI` and `CoxTranscript` run, four skip.
+- Locally: `just desktop-test` runs every package.
+
+Done when: §4.3.9 (T61.1's table) has the `desktop-macos` job time for a Rust-only and a `CoxUI`-only pull request before and after; the failing-snapshot artifact still uploads when `CoxUI` fails.
+
+Risks: an input the hash misses lets a broken package skip — the list is explicit and `main` always runs everything, so a miss is caught on the next `main` run (step 5) and fixed by adding the path; a flaky test that passed once stays green until its inputs change.
+
+Out of scope: caching `.build` and DerivedData (T61.4, T61.9); splitting the job per package across runners.
+
+#### T63.3 Lint: no AppKit or SwiftUI in `CoxModel` and `CoxCore`
+
+Model: haiku · Status: open · Depends: — · Size: ~30 (config, fixtures, one CI line) · Priority: P1 · Complexity: 1
+
+Goal: a UI-framework import or AppKit type in `Packages/CoxModel/Sources` (`CoxClient` and `CoxModel`) or `Packages/CoxCore/Sources` fails the build of that package and the `desktop-macos-lint` job.
+
+State today (checked 2026-10-07 on `origin/main` d5b1570d): neither package imports AppKit, SwiftUI, UIKit or Cocoa, and neither names an AppKit type. `CoxModel`'s imports are `CoxClient`, `Foundation`, `Observation`, `OrderedCollections`, `Synchronization` and `UniformTypeIdentifiers`; `CoxCore`'s are `CoxClient`, `CoxFFIBindings` and `Foundation`. The rule therefore starts green and only guards.
+
+Why: DT§4.6 keeps these two packages UI-free so the stores and the core client run in tests and previews without a window, and so the Windows client (P58) can follow the same split. Nothing enforces it, and one `import AppKit` for an `NSWorkspace` call would compile and pass review. Risk if skipped: the split erodes quietly, and the first sign is a store test that needs a running `NSApplication`.
+
+Install: nothing. SwiftLint 0.65.1 is pinned in `mise.toml` (CI) and through SwiftLintPlugins 0.65.1 in every package (build). `swift-architecture-check` does not exist (see the table above).
+
+Files:
+- `desktop/macos/.swiftlint.yml` (two custom rules)
+- `desktop/macos/LintFixtures/Rejected/no_ui_import_in_core.swift` and `no_appkit_type_in_core.swift` (new)
+- `.github/workflows/ci.yml` (`desktop-macos-lint`: lint the two packages' sources directly)
+
+Steps:
+1. Add to `custom_rules` in `desktop/macos/.swiftlint.yml`. The rules sit in the root config, which every package reaches through `parent_config`, and are scoped by path with `included`, so no package's own config changes. The fixture paths are included so CI can prove each rule fires:
+
+   ```yaml
+     # DT§4.6: CoxModel (CoxClient, CoxModel) and CoxCore hold state and the core client only;
+     # they never import a UI framework, so tests and previews need no window (T63.3).
+     no_ui_import_in_core:
+       name: No UI framework in CoxModel or CoxCore
+       included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_ui_import_in_core\.swift$)'
+       regex: '^\s*(?:@[\w()]+\s+)*import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(?:AppKit|SwiftUI|UIKit|Cocoa)\b'
+       message: 'CoxModel and CoxCore stay UI-free: move this to CoxPlatform or CoxUI (DT§4.6)'
+       severity: error
+       excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+
+     no_appkit_type_in_core:
+       name: No AppKit type in CoxModel or CoxCore
+       included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_appkit_type_in_core\.swift$)'
+       regex: '\bNS(?:App|Application|Window|WindowController|View|ViewController|HostingView|Color|Image|Font|Pasteboard|Workspace|Event|Screen|Responder|Menu|MenuItem|Alert|Cursor|Sound|StatusBar|StatusItem|TextView|TextField|Button)\b'
+       message: 'An AppKit type in CoxModel or CoxCore: move it behind a protocol in CoxClient (DT§4.6)'
+       severity: error
+       excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+   ```
+
+   The type list names AppKit classes only; Foundation's `NS` names (`NSHomeDirectory`, `NSLock`, `NSRegularExpression`) stay allowed.
+2. Fixtures, one violation each, named after the rule as the existing `swiftlint fixtures` step expects:
+
+   ```swift
+   // LintFixtures/Rejected/no_ui_import_in_core.swift
+   import AppKit
+   ```
+
+   ```swift
+   // LintFixtures/Rejected/no_appkit_type_in_core.swift
+   func openLink() { NSWorkspace.shared.open(URL(filePath: "/")) }
+   ```
+
+3. `ci.yml`, `desktop-macos-lint`: after "swiftlint app", a step that lints the two packages' sources itself, so the rule still gates pull requests if T61.10 turns the build-tool plugin off during builds:
+
+   ```yaml
+      - name: swiftlint UI-free packages
+        working-directory: desktop/macos
+        run: swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources
+   ```
+
+4. Enforcement points: locally, `swift build` or `swift test` in `CoxModel` or `CoxCore` fails through the SwiftLintBuildToolPlugin (error severity); in Xcode, the same plugin marks the line; in CI, `desktop-macos` fails while building the package and `desktop-macos-lint` fails in the new step and proves the rules with the fixtures.
+5. DS§9 in `desktop/design/DESIGN.md` lists the custom rules: add the two names and one line on why.
+
+Check:
+```bash
+cd desktop/macos
+swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_ui_import_in_core.swift    # fails (no_ui_import_in_core)
+swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_appkit_type_in_core.swift  # fails (no_appkit_type_in_core)
+swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources  # passes
+(cd Packages/CoxModel && swift build --build-system swiftbuild)
+```
+Then add `import AppKit` to `Packages/CoxModel/Sources/CoxModel/SessionStore.swift` locally: `swift build` fails with the rule's message; revert.
+
+Done when: both fixtures fail with their rule, both packages lint clean, and a temporary `import SwiftUI` in `CoxCore` fails `swift build` there.
+
+Risks: SwiftLint matches `included` against the file's absolute path, both from the build plugin and from `swiftlint lint <relative path>`; the fixture check and the temporary import confirm the pattern reaches both. A regex rule is textual; a type reached through a typealias from another module is not caught (none exists today).
+
+Out of scope: rules for the other packages; a semantic linter (Harmonize, SolidLikeARock) — revisit only if a textual rule misses a real case.
+
+#### T63.4 Dependency injection through swift-dependencies
+
+Model: sonnet · Status: open · Depends: — · Size: ~350 across T63.4.1–T63.4.3 below (`AGENTS.md` task size) · Priority: P2 · Complexity: 4
+
+In progress on branch `feature/swift-dependencies`, in its own pull request with tests; that pull request claims this card, keeps the table and `todo.md` in sync, and moves the card to `done.md`.
+
+Goal: the stores in `CoxModel` read `CoreClient`, `InboxClient` and `SecretStore` through `@Dependency` instead of initializer arguments threaded from `AppModel`; `LaunchCore` still makes the one live-or-fixture choice and hands it over once with `prepareDependencies`; tests override a client per test with a trait; Xcode previews get fixture values without a core.
+
+Why: today every new store or client means another initializer argument in `AppModel.init` (`App/CoxApp.swift`) and in every test that builds the store; `SettingsStore(client:secrets:cwd:)`, `SidebarStore(workspace:inbox:)` and `InboxStore(client:)` already carry them. With one `DependencyValues` registry, a store names what it needs, a test overrides only that, and previews fall back to `previewValue`. Risk if skipped: the plumbing grows with each store (P58's Windows client copies the pattern from DT§4.6), and a test that forgets an argument fails at compile time across many files instead of at one override.
+
+What does not change: `SessionClient` is per-session state, not a service — each `SessionStore` owns the one `CoreClient.open` returned, so `SessionStore.init(session:)` stays. Its key below exists for previews and tests only and has no live value. `LiveCoreClient` needs `MacHost` from `CoxPlatform`, so `CoxCore` declares no live value; the app sets it.
+
+Install (SwiftPM; no global tool), `https://github.com/pointfreeco/swift-dependencies`, `exact: "1.17.1"` (latest release, 2026-08-28; `swift-tools-version: 6.4`, so Xcode 27 / Swift 6.4, which CI and local already use). Products: `Dependencies` in library targets, `DependenciesTestSupport` in test targets. Never `DependenciesMacros`: it is the only product that builds swift-syntax.
+- `desktop/macos/Packages/CoxModel/Package.swift`: package pin; `Dependencies` on `CoxClient` and `CoxModel`; `DependenciesTestSupport` on `CoxModelTests`.
+- `desktop/macos/Packages/CoxPlatform/Package.swift`: the same pin; `Dependencies` on `CoxPlatform` (it owns `SecretStore`'s live value).
+- `desktop/macos/Packages/CoxCore/Package.swift`: no direct pin unless a `CoxCore` type starts reading `@Dependency`; it resolves the package through `CoxModel` anyway.
+- `desktop/macos/project.yml`: the package and the `Dependencies` product on the `Cox` target (`prepareDependencies` is called from `App/`).
+- Every `Package.resolved` of a package that depends on `CoxModel` (`CoxCore`, `CoxPlatform`, `CoxTranscriptText`, `CoxTranscript`) gains swift-dependencies and its transitive pins (swift-concurrency-extras, swift-issue-reporting, swift-clocks, combine-schedulers, swift-syntax): commit them all, or CI's "Swift pins unchanged by the build" fails.
+- `toolchain.md` (SwiftPM table row) and `plan.md` §1 (dependency row).
+
+##### T63.4.1 Keys and values (`CoxClient`, `CoxPlatform`)
+
+Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
+
+Files:
+- `desktop/macos/Packages/CoxModel/Package.swift`, `desktop/macos/Packages/CoxPlatform/Package.swift`, the five `Package.resolved`
+- `desktop/macos/Packages/CoxModel/Sources/CoxClient/Dependencies.swift` (new)
+- `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/Dependencies+Live.swift` (new)
+- `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/DependenciesTests.swift` (new)
+
+Manifest (`CoxModel`):
+
+```swift
+dependencies: [
+  .package(url: "https://github.com/apple/swift-collections", from: "1.7.1"),
+  .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
+  // T63.4: one registry for the stores' clients; Dependencies only, never the macros.
+  .package(url: "https://github.com/pointfreeco/swift-dependencies", exact: "1.17.1"),
+],
+targets: [
+  .target(
+    name: "CoxClient",
+    dependencies: [.product(name: "Dependencies", package: "swift-dependencies")],
+    plugins: [swiftLint]),
+  .target(
+    name: "CoxModel",
+    dependencies: [
+      "CoxClient",
+      .product(name: "OrderedCollections", package: "swift-collections"),
+      .product(name: "Dependencies", package: "swift-dependencies"),
+    ],
+    plugins: [swiftLint]),
+  .testTarget(
+    name: "CoxModelTests",
+    dependencies: [
+      "CoxModel",
+      .product(name: "DependenciesTestSupport", package: "swift-dependencies"),
+    ],
+    plugins: [swiftLint]),
+]
+```
+
+Keys in `CoxClient` (the interface module), as `TestDependencyKey`s so the live values can live where the live types are:
+
+```swift
+import Dependencies
+
+/// Where sessions open. Live: what `LaunchCore` picked, set once by `prepareDependencies`.
+public enum CoreClientKey: TestDependencyKey {
+  public static let testValue: any CoreClient = UnimplementedCoreClient()
+  public static let previewValue: any CoreClient =
+    FixtureCoreClient(fixture: Fixture(batches: [], snapshot: []))
+}
+
+/// What needs the person, across sessions. Live: the launch's core when it is an inbox.
+public enum InboxClientKey: TestDependencyKey {
+  public static let testValue: any InboxClient = NoInbox()
+  public static let previewValue: any InboxClient = NoInbox()
+}
+
+/// Provider keys. Live: `CoxPlatform` (the Keychain, or memory under `COX_KEYRING=off`).
+public enum SecretStoreKey: TestDependencyKey {
+  public static let testValue: any SecretStore = MemorySecretStore()
+  public static let previewValue: any SecretStore = MemorySecretStore()
+}
+
+/// Previews and tests only: a live session always comes from `CoreClient.open`.
+public enum SessionClientKey: TestDependencyKey {
+  public static var testValue: any SessionClient {
+    FixtureSession(fixture: Fixture(batches: [], snapshot: []))
+  }
+  public static var previewValue: any SessionClient { testValue }
+}
+
+extension DependencyValues {
+  public var coreClient: any CoreClient {
+    get { self[CoreClientKey.self] }
+    set { self[CoreClientKey.self] = newValue }
+  }
+  public var inboxClient: any InboxClient {
+    get { self[InboxClientKey.self] }
+    set { self[InboxClientKey.self] = newValue }
+  }
+  public var secretStore: any SecretStore {
+    get { self[SecretStoreKey.self] }
+    set { self[SecretStoreKey.self] = newValue }
+  }
+  public var sessionClient: any SessionClient {
+    get { self[SessionClientKey.self] }
+    set { self[SessionClientKey.self] = newValue }
+  }
+}
+
+/// A test that opens a session must say which core it opens on.
+struct UnimplementedCoreClient: CoreClient {
+  func open(_ request: OpenSession) async throws -> any SessionClient {
+    reportIssue("CoreClient.open: no core set; override \\.coreClient in this test")
+    throw CancellationError()
+  }
+}
+
+struct NoInbox: InboxClient {
+  func inbox() -> [InboxItem] { [] }
+}
+```
+
+`reportIssue` comes from IssueReporting, which `Dependencies` re-exports. A `TestDependencyKey` read in the live app without `prepareDependencies` setting it is itself reported as an issue, which is the wanted failure: the app must set the core.
+
+Live value in `CoxPlatform` (`Dependencies+Live.swift`), moving the `COX_KEYRING` rule out of `LaunchCore`:
+
+```swift
+import CoxClient
+import Dependencies
+import Foundation
+
+extension SecretStoreKey: DependencyKey {
+  /// `COX_KEYRING=off`, as cargo sets it for every development run, keeps keys out of the
+  /// Keychain (A49, A51).
+  public static let liveValue: any SecretStore =
+    ProcessInfo.processInfo.environment["COX_KEYRING"] == "off"
+    ? MemorySecretStore() : KeychainSecretStore()
+}
+```
+
+Check: `swift test` in `CoxModel` and `CoxPlatform`; `DependenciesTests.swift` proves that the test values are the stand-ins (`withDependencies` reads `\.secretStore` as a `MemorySecretStore`) and that `UnimplementedCoreClient.open` is reported (`withKnownIssue`).
+
+##### T63.4.2 The stores read `@Dependency` (`CoxModel`)
+
+Model: sonnet · Status: open · Depends: T63.4.1 · Size: ~80 + tests · Priority: P2 · Complexity: 3
+
+Files:
+- `Packages/CoxModel/Sources/CoxModel/InboxStore.swift`, `SettingsStore.swift`, `SidebarStore.swift`
+- their tests in `Packages/CoxModel/Tests/CoxModelTests/`
+
+In an `@Observable` class the wrapper must be `@ObservationIgnored`; it captures the dependency context when the store is created:
+
+```swift
+@Observable
+@MainActor
+public final class InboxStore {
+  @ObservationIgnored @Dependency(\.inboxClient) private var client
+  public init() {}
+  // the rest unchanged
+}
+```
+
+`SettingsStore` keeps `client` (a `SettingsClient`, the live core, not one of the four) and `cwd` as arguments and drops `secrets`:
+
+```swift
+@ObservationIgnored @Dependency(\.secretStore) private var secrets
+public init(client: any SettingsClient, cwd: String) { (self.client, self.cwd) = (client, cwd) }
+```
+
+`SidebarStore` takes `inbox: InboxStore?` as today; the inbox store builds its own client. Keep each old initializer as a deprecated forwarding one until T63.4.3 moves the call sites, then delete it in the same pull request.
+
+Tests override per test with the `DependenciesTestSupport` trait:
+
+```swift
+import CoxClient
+import DependenciesTestSupport
+import Testing
+
+@testable import CoxModel
+
+struct OneApproval: InboxClient {
+  let item: InboxItem
+  func inbox() -> [InboxItem] { [item] }
+}
+
+@MainActor
+@Test(.dependency(\.secretStore, MemorySecretStore(["anthropic": "k"])))
+func settingsReadsTheKeyFromTheStore() throws {
+  let store = SettingsStore(client: FakeSettingsClient(), cwd: "/")
+  // the assertions the existing SettingsStoreTests make, with no `secrets:` argument
+}
+```
+
+Check: `swift test` in `CoxModel`; no test builds a store with a client argument that the store now reads from `DependencyValues`.
+
+##### T63.4.3 App wiring (`App/`)
+
+Model: sonnet · Status: open · Depends: T63.4.2 · Size: ~80 · Priority: P2 · Complexity: 3
+
+Files:
+- `desktop/macos/App/CoxApp.swift`, `desktop/macos/App/LaunchCore.swift`, `desktop/macos/project.yml`
+- `docs/design/desktop.md` (DT§4.6: how a client reaches a store, written platform-neutral for P58)
+
+`CoxApp` prepares the dependencies once, before any store exists; `LaunchCore.pick()` is still the one place that chooses fixture or live:
+
+```swift
+import Dependencies
+
+@main
+struct CoxApp: App {
+  @State private var model: AppModel
+
+  init() {
+    let launch = LaunchCore.pick()
+    // Once per launch, before the first store reads a client (DT§4.1).
+    prepareDependencies {
+      if let core = try? launch.core.get() {
+        $0.coreClient = core
+        if let inbox = core as? any InboxClient { $0.inboxClient = inbox }
+      }
+    }
+    _model = State(initialValue: AppModel(launch: launch))
+  }
+  // body unchanged
+}
+```
+
+`LaunchCore` loses its `secrets` field: `MacHost` and `SettingsStore` read `\.secretStore` (live value from T63.4.1). `AppModel.init` then builds `SettingsStore(client: launch.live.get(), cwd: LaunchCore.project())` and `SidebarStore(workspace: …, inbox: (try? launch.core.get()) is any InboxClient ? InboxStore() : nil)`. A fixture launch still replays through `FixtureCoreClient`, because `LaunchCore.pick()` put it in `launch.core` and `prepareDependencies` set it.
+
+`project.yml`:
+
+```yaml
+packages:
+  swift-dependencies:
+    url: https://github.com/pointfreeco/swift-dependencies
+    exactVersion: 1.17.1
+targets:
+  Cox:
+    dependencies:
+      - package: swift-dependencies
+        product: Dependencies
+```
+
+Name clash: AppIntents has its own `@Dependency` property wrapper, used in `App/Intents/AskCoxIntent.swift` and `App/Intents/Entities.swift` (`@Dependency private var model: AppModel`, registered in `App/Intents/Shortcuts.swift` through `AppDependencyManager`). Those files must not `import Dependencies`. A file that needs both spells them `@AppIntents.Dependency` and `@Dependencies.Dependency`; the intents keep AppIntents' wrapper for `AppModel`.
+
+Check: `just desktop-app`; launch with `-CoxFixture desktop/macos/Fixtures/edit.json` and without; Shortcuts still lists the App Intents (T51.17); `COX_KEYRING=off` still never touches the Keychain.
+
+Done when (T63.4 as a whole): no store in `CoxModel` takes `CoreClient`, `InboxClient` or `SecretStore` as an initializer argument; `AppModel.init` passes no client to a store that reads it from `DependencyValues`; every package's tests and `desktop-macos` pass; `swift-syntax` is resolved but not built (the build log has no `SwiftSyntax` target); a fixture launch and a live launch behave as before.
+
+Risks: `prepareDependencies` called twice or after a store read a value is reported by the library — keep it as the first statement of `CoxApp.init`; a store created inside a `Task` or a callback captures that context's values, so stores are made on the main actor at launch or in a view, as today; one more dependency tree (five transitive packages) to keep current, each needs its `toolchain.md` row.
+
+Out of scope: `SettingsClient`, `WorkspaceClient` and the `RemoteHosts` connector as dependencies (follow-up cards if T63.4 proves out); the Windows client (P58).
+
+#### P63 acceptance criteria
+
+| Card | Accepted when |
+| --- | --- |
+| T63.1 | `swift-property-based` 2.0.1 is a `CoxModelTests`-only dependency with a `toolchain.md` row; `SessionStorePropertyTests.swift` has the five properties (reference ordering, repeated last edit, split batch, reset, `lastLines`) and they pass in `desktop-macos`; a deliberately broken reference model fails with a shrunk input and a printed seed; no other package's pins changed |
+| T63.2 | `scripts/desktop/swift_test.sh` runs every package locally and on non-pull-request runs; on a pull request a Rust-only change skips the five packages that do not link `CoxFFI` and a `CoxUI`-only change runs `CoxUI` and `CoxTranscript` only; pass markers are restored and saved by SHA-pinned `actions/cache` v6.1.0 steps; the job comment states the new rule; §4.3.9 has before/after job times; the app target still builds on every run |
+| T63.3 | `no_ui_import_in_core` and `no_appkit_type_in_core` are error-severity custom rules in `desktop/macos/.swiftlint.yml`, scoped to `CoxModel` and `CoxCore` sources; their `LintFixtures/Rejected` files fail with the right rule; `desktop-macos-lint` lints both packages' sources with `--strict`; a temporary `import AppKit` in `CoxModel` fails `swift build`; DS§9 lists both rules |
+| T63.4 | swift-dependencies 1.17.1 (`Dependencies`, `DependenciesTestSupport`) is pinned in `CoxModel`, `CoxPlatform` and `project.yml`, all `Package.resolved` files committed; `CoreClient`, `InboxClient`, `SecretStore` and `SessionClient` have keys with test and preview values, `SecretStore` a live value in `CoxPlatform`; the stores read them with `@ObservationIgnored @Dependency`; `CoxApp.init` sets the launch's choice through `prepareDependencies` and `LaunchCore` still makes it; the AppIntents `@Dependency` files are unchanged and build; tests override clients with `.dependency`/`.dependencies` traits; DT§4.6 documents it; delivered by the `feature/swift-dependencies` pull request |
+
+---
+
 ## 4. Definition of done for v0.1
 
 1. `cox` runs a multi-turn coding session against Anthropic, OpenAI Responses and a local Ollama model with the same tool set, with the sandbox on, on macOS and Linux.
@@ -2659,6 +3355,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A138 §3 P22 (T22.12) — by the creator (2026-10-07): `cox config set` (and the desktop's `set_json_in`, which shares `set_value_in`) checks the edited user file by deserializing `Config` from the `default` layer plus the edited text, through the loader's own figment and error mapping, and writes nothing when that fails. Why: `set` wrote out-of-range and unknown-variant values (`desktop.appearance.depth 1.5`) that every later load rejected, so one command left the user's config unloadable. Effect: `ConfigError` gains `Rejected(CoreError)`; the check leaves out the project, env, flag and Claude layers, so `set` never refuses a valid edit because of another layer, and the desktop's write-then-rollback in `cox_app::settings::set` stays for the full layered view.
 - A139 §3 (new P60: T60.1–T60.10), `roadmap.md` — by the creator (2026-10-07), after a Best of run where every candidate failed with "provider auth failed": (1) the app never starts a turn or a Best of candidate on a provider it cannot use — the provider comes from `tiers.code.provider` and must be in `usable_providers` (A110), and the user can also pick another provider's model in the window before the first turn; (2) the provider is shown in the model chip as an icon, its name and a problem badge; (3) the toolbar's model capsule and Ask/Plan/Auto control move into the composer, whose chips already show them; (4) a glare slider (`desktop.appearance.specular`, a 0–1 scale on the material's sweep) joins Appearance; (5) the Best of compare shows the real failure reason, never `$-0.00`, and no actions on a failed candidate; (6) choosing Bypass from the composer's mode menu asks for a confirmation first, since the menu puts it one click away (the old toolbar control offered it only while it was on); the Bypass strip stays (creator, 2026-10-07: "do what is best"); (7) every desktop improvement updates the shared docs (DT§, DS§, `docs/config.md`) so the Windows and any later Linux client can repeat it. Why: the creator's request. Effect: P60; switching provider mid-session goes to `roadmap.md`. No §0 decision changes.
 - A140 §3 (new P61: T61.1–T61.11), by the creator (2026-10-07): build speed for Rust and Swift — a fast profile for the XCFramework outside a release, the bindings generator on the host dev profile and skipped when the library is unchanged, CI caches for the XCFramework, SwiftPM and DerivedData, one integration-test binary per crate, one feature set per CI target, sccache locally and in the in-repository CI jobs, one Xcode build graph for the Swift package tests, the SwiftLint plugin off during builds (after the creator confirms DS§9), and two measured experiments (`build-override`, feature unification). Why: an analysis of the build configuration (2026-10-07) found the XCFramework always linked with fat LTO, 79 integration-test binaries, workspace members never cached on CI, the workspace compiled twice per CI target and `CoxModel` up to five times per Swift test run. Effect: thirteen cards; A15 still holds — what ships is `dist`; every card records before/after timings in `research.md` §4.3.9 and is reverted if it gains nothing. No decision in §0 changes; sccache and, if T61.11 chooses it, cargo-hakari are tools added by their cards with `toolchain.md` rows.
+- A141 §3 (new P63: T63.1–T63.4), by the creator (2026-10-07): four improvements for the macOS app's architecture and tests — property-based tests for `SessionStore` with x-sheep/swift-property-based (the asked-for `swift-check` and `swift-testing-expectations` do not exist as property-testing libraries, and SwiftCheck is unmaintained); pull requests re-run only the Swift packages whose inputs changed since a passing run, through content-hash pass markers in `actions/cache` (snapshots cannot be skipped one by one inside a package); SwiftLint custom rules that keep AppKit and SwiftUI out of `CoxModel` and `CoxCore` (the asked-for `swift-architecture-check` does not exist, and SwiftLint 0.65.1 is already pinned); and the stores' clients through pointfreeco/swift-dependencies 1.17.1, implemented on branch `feature/swift-dependencies`. Why: the creator's request, after a review of the desktop stack (SwiftUI with Observation stores, manual initializer injection, 1,109 snapshot images re-rendered on every desktop CI run). Effect: four cards (T63.4 in three parts); `ci.yml`'s "always the full build" rule for `desktop-macos` changes for pull requests only (T63.2) — `main`, manual runs and `just desktop-test` still run every package, and the app target is built on every run. No decision in §0 changes; each new SwiftPM dependency gets its `toolchain.md` row in its card.
 
 ## 7. Risk register
 
@@ -2697,18 +3394,6 @@ unless Docker e2e is required.
 ### T62. Audit fixes (2026-10-07)
 
 Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-test `unwrap/expect/panic!` across ~150k LOC, parameterized SQL, hardened plugin install path (https-only, sha256-gated, tar ToC refusal), correct flock session lock. T62.1 (self-update 404) is closed in `done.md`.
-
-### T62.2. Known panic path in `edit`'s whitespace fallback with `replace_all`
-
-`crates/cox-tools/src/edit.rs:206-221`: fallback windows are not de-overlapped and byte offsets are computed against the original content while splicing an already-mutated string — overlapping normalized windows with a shorter `new` panic on `replace_range` ("range end out of bounds"). The comment at `edit.rs:210-215` admits it, against the project's no-panic rule. Done means: the result is rebuilt from segments (or overlapping starts dropped), with a regression test.
-
-### T62.4. Build/test commands classified read-only execute project-controlled code without approval
-
-`bash/classify.rs:372-378`: `cargo check|test|build|clippy|…` and `npm|pnpm|yarn test` are `Risk::ReadOnly`, so in Default mode they auto-run — the model can first edit `build.rs` / a `pretest` hook and then "run tests", executing its own code with no approval prompt. The sandbox limits the blast radius, but it is code execution approved as read-only. Done means: these classify as `Exec` (or ReadOnly survives only for genuinely non-executing subcommands).
-
-### T62.5. `web_fetch` has no SSRF guard
-
-`cox-tools/src/web_fetch.rs:55,70` is `Risk::ReadOnly` with only a scheme check, and `cox-web::fetch` (`cox-web/src/lib.rs:60-109`) follows up to 5 redirects with no private-address filtering — the model reads `169.254.169.254`, internal localhost services or RFC1918 hosts without approval and sees the bodies. Done means: link-local/loopback/private ranges are denied (or ask) by default.
 
 ### T62.6. pid-reuse race in the bash kill path
 

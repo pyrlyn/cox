@@ -147,13 +147,13 @@ impl Engine {
         // `cat ~/.ssh/id_rsa` classifies ReadOnly and no Bash command rule
         // can enumerate every reader, so the read path denies also match the
         // paths a read-only command names.
-        if call.risk == Risk::ReadOnly {
-            if let Some(rule) = self.denied_read_path(call) {
-                return Outcome::Deny {
-                    reason: format!("denied by rule {rule}"),
-                    by: DecidedBy::Rule,
-                };
-            }
+        if call.risk == Risk::ReadOnly
+            && let Some(rule) = self.denied_read_path(call)
+        {
+            return Outcome::Deny {
+                reason: format!("denied by rule {rule}"),
+                by: DecidedBy::Rule,
+            };
         }
         if mode == PermissionMode::Bypass {
             return Outcome::Allow {
