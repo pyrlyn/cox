@@ -41,17 +41,148 @@ pub struct Fetched {
     pub truncated: bool,
 }
 
-/// A client configured with cox's timeout, redirect limit and user agent.
+/// A client configured with cox's timeout, redirect limit, user agent and
+/// the private-address guard: every connection — including each redirect
+/// hop — resolves through [`PublicOnly`], which refuses loopback,
+/// link-local, private and unspecified addresses (T62.5).
 pub fn client() -> Client {
+    match reqwest::Client::builder()
+        .timeout(TIMEOUT)
+        .redirect(private_guard_policy())
+        .user_agent("cox (+https://github.com/pyrlyn/cox)")
+        .dns_resolver(std::sync::Arc::new(PublicOnly))
+        .build()
+    {
+        Ok(built) => built,
+        // The builder only fails on a broken TLS backend; a bare client
+        // still fetches, just without the timeout, and `fetch` bounds the
+        // body itself. The guard is re-installed so it never depends on the
+        // backend's health.
+        Err(_) => reqwest::Client::builder()
+            .redirect(private_guard_policy())
+            .dns_resolver(std::sync::Arc::new(PublicOnly))
+            .build()
+            .unwrap_or_default(),
+    }
+}
+
+const PRIVATE_REFUSAL: &str =
+    "cox refuses to fetch loopback, link-local, private or unspecified addresses";
+
+/// Whether `url`'s host is an IP literal the private-address guard
+/// refuses, and the message saying so. The resolver and the redirect
+/// policy cannot see the first URL's literal host, so the tool layer asks
+/// this before its first request (T62.5).
+pub fn refused_literal(url: &str) -> Option<&'static str> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    let ip: std::net::IpAddr = host.parse().ok()?;
+    (!is_public(ip)).then_some(PRIVATE_REFUSAL)
+}
+
+/// A client without the private-address guard, for tests that serve their
+/// fixtures from loopback. Production code always goes through [`client`].
+#[doc(hidden)]
+pub fn client_for_tests() -> Client {
     reqwest::Client::builder()
         .timeout(TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(5))
         .user_agent("cox (+https://github.com/pyrlyn/cox)")
         .build()
-        // The builder only fails on a broken TLS backend; a bare client
-        // still fetches, just without the timeout, and `fetch` bounds the
-        // body itself.
         .unwrap_or_default()
+}
+
+/// The redirect half of the private-address guard (T62.5): a host name
+/// re-resolves through [`PublicOnly`] on every hop, but an IP-literal host
+/// skips resolution entirely, so each redirect is checked here too. The
+/// custom policy also carries the five-hop limit `limited(5)` used to.
+fn private_guard_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt
+            .url()
+            .host_str()
+            .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+            .is_some_and(|ip| !is_public(ip))
+        {
+            return attempt.error(PRIVATE_REFUSAL);
+        }
+        if attempt.previous().len() >= 5 {
+            attempt.stop()
+        } else {
+            attempt.follow()
+        }
+    })
+}
+
+/// A resolver that answers public addresses only (T62.5). `web_fetch` is
+/// auto-allowed as read-only, so without this the model could read
+/// `169.254.169.254`, an internal `localhost` service or an RFC1918 host
+/// and see the body. Redirects re-resolve through the same resolver, so a
+/// public URL that bounces to a private one is stopped too.
+#[derive(Clone, Default)]
+struct PublicOnly;
+
+impl reqwest::dns::Resolve for PublicOnly {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            // getaddrinfo blocks, so it runs on the blocking pool the way
+            // reqwest's own resolver runs it.
+            let resolved = tokio::task::spawn_blocking(move || {
+                use std::net::ToSocketAddrs;
+                (host.as_str(), 0)
+                    .to_socket_addrs()
+                    .map(|a| a.collect::<Vec<_>>())
+            })
+            .await
+            .map_err(boxed_error)
+            .and_then(|r| r.map_err(boxed_error));
+            let addrs: Vec<std::net::SocketAddr> = resolved?;
+            let public: Vec<_> = addrs
+                .into_iter()
+                .filter(|addr| is_public(addr.ip()))
+                .collect();
+            if public.is_empty() {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "cox refuses to fetch loopback, link-local, private or unspecified addresses",
+                ))
+                    as Box<dyn std::error::Error + Send + Sync>);
+            }
+            Ok(Box::new(public.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+fn boxed_error<E: std::error::Error + Send + Sync + 'static>(
+    e: E,
+) -> Box<dyn std::error::Error + Send + Sync> {
+    Box::new(e)
+}
+
+/// Whether `ip` may be fetched: everything a browser's private-network
+/// guard blocks — loopback, link-local, private (RFC1918 and IPv6 ULA),
+/// unspecified and broadcast — is refused, mapped IPv4 included.
+fn is_public(ip: std::net::IpAddr) -> bool {
+    fn public_v4(v4: std::net::Ipv4Addr) -> bool {
+        !(v4.is_private()
+            || v4.is_loopback()
+            || v4.is_link_local()
+            || v4.is_broadcast()
+            || v4.is_unspecified())
+    }
+    match ip {
+        std::net::IpAddr::V4(v4) => public_v4(v4),
+        std::net::IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return public_v4(mapped);
+            }
+            let first = v6.segments()[0];
+            let unique_local = (first & 0xfe00) == 0xfc00;
+            let link_local = (first & 0xffc0) == 0xfe80;
+            !(v6.is_loopback() || v6.is_unspecified() || unique_local || link_local)
+        }
+    }
 }
 
 /// Fetches `url` with `http`, capping the body at `max_bytes` and reducing
@@ -110,11 +241,24 @@ pub async fn fetch(
 
 fn fetch_error(e: reqwest::Error) -> ToolError {
     if e.is_timeout() {
-        ToolError::Timeout
-    } else {
-        ToolError::Denied {
-            why: format!("fetch failed: {e}"),
+        return ToolError::Timeout;
+    }
+    // The private-address guard refuses before any bytes move, and reqwest
+    // buries its words in the source chain; they are the useful ones.
+    let mut source = std::error::Error::source(&e);
+    while let Some(err) = source {
+        if let Some(io) = err
+            .downcast_ref::<std::io::Error>()
+            .filter(|io| io.kind() == std::io::ErrorKind::PermissionDenied)
+        {
+            return ToolError::Denied {
+                why: io.to_string(),
+            };
         }
+        source = err.source();
+    }
+    ToolError::Denied {
+        why: format!("fetch failed: {e}"),
     }
 }
 
@@ -307,6 +451,55 @@ fn decode(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_addresses_are_not_public() {
+        let refused = [
+            "127.0.0.1",
+            "0.0.0.0",
+            "169.254.169.254",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "::1",
+            "::",
+            "fe80::1",
+            "fc00::1",
+            "fd12:3456::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
+        ];
+        let allowed = ["1.1.1.1", "93.184.216.34", "2606:4700::1111"];
+        for raw in refused {
+            let ip: std::net::IpAddr = raw.parse().expect(raw);
+            assert!(!is_public(ip), "{raw} must be refused");
+        }
+        for raw in allowed {
+            let ip: std::net::IpAddr = raw.parse().expect(raw);
+            assert!(is_public(ip), "{raw} must be allowed");
+        }
+    }
+
+    /// T62.5: `web_fetch` is auto-allowed read-only, so a private target
+    /// must be refused before any bytes move — by name or literal, loopback
+    /// included.
+    #[test]
+    fn fetching_a_private_target_is_refused() {
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let url = "http://localhost:1/";
+        let fetched = runtime.block_on(fetch(&client(), url, DEFAULT_MAX_BYTES, &cancel));
+        match fetched {
+            Err(ToolError::Denied { why }) => {
+                assert!(why.contains("refuses"), "{url}: {why}");
+            }
+            Ok(_) => panic!("{url} must be denied, but the fetch succeeded"),
+            Err(other) => panic!("{url} must be denied, got {other:?}"),
+        }
+    }
 
     #[test]
     fn web_fetch_extract_keeps_headings_paragraphs_lists_and_code() {
