@@ -159,6 +159,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T63.4.1 | todo | P2 | 2 | 0% | |
 | T63.4.2 | todo | P2 | 3 | 0% | |
 | T63.4.3 | todo | P2 | 3 | 0% | |
+| T65.2 | todo | P1 | 2 | 0% | |
 
 ## Reference
 
@@ -654,7 +655,8 @@ Microcompaction (no model call): when building a request, tool results older tha
 | `todo` | `items: [{id, text, state}]` | ReadOnly | rendered list | state drives the TUI todo panel |
 | `expand` | `id` (archive id); `lines: "a-b"` | ReadOnly | archived bytes (capped, further pointers) | deferred: false (always present, tiny schema) |
 | `ask_user` | `question`; `options: [..]` | ReadOnly | the answer | blocks the turn; headless → error unless `--answer` |
-| `tool_search` | `query` | ReadOnly | up to 5 matching deferred tool specs, appended to `system[0]` | BM25 over name + description |
+| `tool_search` | `query`; `detail: "summary"\|"full"` (default `summary`) | ReadOnly | up to 5 hits as `{name, description}`, or the full spec when `detail` is `full`; `structured.discovered` is always the names | BM25 over name + description; a summary carries no `input_schema` (T65.2) |
+| `mcp_exec` | `code`; `timeout_s` (clamped to 1–30, default 30) | Write | the program's final print only, capped at 8 000 bytes | deferred false, with `bash` and `tool_search`; one new sandboxed `python3 -I -u` per call; `describe` is name and description, never `input_schema` (T65.1) |
 | `web_fetch` | `url`; `max_bytes` | ReadOnly (network) | readable text | Anthropic server tool passthrough when available; else reqwest + readability; domain rules |
 | `diagnostics` | `path` | Exec until its language server runs, then ReadOnly | `path:line:col: severity: message [source code]`, sorted, summary last | deferred; one lazily started LSP server per language under the session sandbox, killed at session end; with no server an is_error result that points to `bash` (T41.6) |
 | `agent` | `task`; `preset: "explore"\|"shell"\|<name>`; `tier`; `tools: [..]`; `budget_usd`; `background: bool` | inherits max of its tools | result text ≤ cap, summarised on cheap if over | subagent = nested `Session` with its own rollout, parent id set |
@@ -3149,6 +3151,26 @@ Out of scope: `SettingsClient`, `WorkspaceClient` and the `RemoteHosts` connecto
 | T63.3 | `no_ui_import_in_core` and `no_appkit_type_in_core` are error-severity custom rules in `desktop/macos/.swiftlint.yml`, scoped to `CoxModel` and `CoxCore` sources; their `LintFixtures/Rejected` files fail with the right rule; `desktop-macos-lint` lints both packages' sources with `--strict`; a temporary `import AppKit` in `CoxModel` fails `swift build`; DS§9 lists both rules |
 | T63.4 | swift-dependencies 1.17.1 (`Dependencies`, `DependenciesTestSupport`) is pinned in `CoxModel`, `CoxPlatform` and `project.yml`, all `Package.resolved` files committed; `CoreClient`, `InboxClient`, `SecretStore` and `SessionClient` have keys with test and preview values, `SecretStore` a live value in `CoxPlatform`; the stores read them with `@ObservationIgnored @Dependency`; `CoxApp.init` sets the launch's choice through `prepareDependencies` and `LaunchCore` still makes it; the AppIntents `@Dependency` files are unchanged and build; tests override clients with `.dependency`/`.dependencies` traits; DT§4.6 documents it; delivered by the `feature/swift-dependencies` pull request |
 
+### P65 — MCP results stay off the prompt until a program prints them
+
+One sandboxed Python program may `search`, `describe` and `call` MCP tools and print one small JSON result. The host keeps every schema and every raw tool payload. `tool_search` defaults to the same summary. No new crate, no Podman, no persistent interpreter, no `save_tool`, no JSON memory directory, and nothing copied from the GPL code-execution server. Suggested id T63 is already P63 (A141), so these cards are T65.
+
+T65.1 is in `done.md`.
+
+#### T65.2 tool_search summary mode
+
+Model: - · Status: open · Depends: T65.1 · Size: ~40 · Priority: P1 · Complexity: 2
+Goal: `tool_search` returns `{name, description}` unless the caller asks for the full spec, and discovery still returns names.
+Files: `crates/cox-tools/src/tool_search.rs` only.
+Steps:
+1. Optional `detail` on the input schema: `summary` (default) or `full`.
+2. `summary` serializes `{name, description}` for each hit. `full` keeps today's pretty `ToolSpec`.
+3. `structured.discovered` still returns names. Do not change `context.rs`.
+4. Extend the tests around the rank and discovered-names cases with `tool_search_summary_omits_input_schema`.
+Check: `mise exec -- cargo test -p cox-tools tool_search` — `tool_search_summary_omits_input_schema` and the rank test pass.
+Done when: a summary hit has no `input_schema` key and a `full` hit still has one; discovered names are unchanged.
+Out of scope: any other file.
+
 ---
 
 ## 4. Definition of done for v0.1
@@ -3354,6 +3376,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A139 §3 (new P60: T60.1–T60.10), `roadmap.md` — by the creator (2026-10-07), after a Best of run where every candidate failed with "provider auth failed": (1) the app never starts a turn or a Best of candidate on a provider it cannot use — the provider comes from `tiers.code.provider` and must be in `usable_providers` (A110), and the user can also pick another provider's model in the window before the first turn; (2) the provider is shown in the model chip as an icon, its name and a problem badge; (3) the toolbar's model capsule and Ask/Plan/Auto control move into the composer, whose chips already show them; (4) a glare slider (`desktop.appearance.specular`, a 0–1 scale on the material's sweep) joins Appearance; (5) the Best of compare shows the real failure reason, never `$-0.00`, and no actions on a failed candidate; (6) choosing Bypass from the composer's mode menu asks for a confirmation first, since the menu puts it one click away (the old toolbar control offered it only while it was on); the Bypass strip stays (creator, 2026-10-07: "do what is best"); (7) every desktop improvement updates the shared docs (DT§, DS§, `docs/config.md`) so the Windows and any later Linux client can repeat it. Why: the creator's request. Effect: P60; switching provider mid-session goes to `roadmap.md`. No §0 decision changes.
 - A140 §3 (new P61: T61.1–T61.11), by the creator (2026-10-07): build speed for Rust and Swift — a fast profile for the XCFramework outside a release, the bindings generator on the host dev profile and skipped when the library is unchanged, CI caches for the XCFramework, SwiftPM and DerivedData, one integration-test binary per crate, one feature set per CI target, sccache locally and in the in-repository CI jobs, one Xcode build graph for the Swift package tests, the SwiftLint plugin off during builds (after the creator confirms DS§9), and two measured experiments (`build-override`, feature unification). Why: an analysis of the build configuration (2026-10-07) found the XCFramework always linked with fat LTO, 79 integration-test binaries, workspace members never cached on CI, the workspace compiled twice per CI target and `CoxModel` up to five times per Swift test run. Effect: thirteen cards; A15 still holds — what ships is `dist`; every card records before/after timings in `research.md` §4.3.9 and is reverted if it gains nothing. No decision in §0 changes; sccache and, if T61.11 chooses it, cargo-hakari are tools added by their cards with `toolchain.md` rows.
 - A141 §3 (new P63: T63.1–T63.4), by the creator (2026-10-07): four improvements for the macOS app's architecture and tests — property-based tests for `SessionStore` with x-sheep/swift-property-based (the asked-for `swift-check` and `swift-testing-expectations` do not exist as property-testing libraries, and SwiftCheck is unmaintained); pull requests re-run only the Swift packages whose inputs changed since a passing run, through content-hash pass markers in `actions/cache` (snapshots cannot be skipped one by one inside a package); SwiftLint custom rules that keep AppKit and SwiftUI out of `CoxModel` and `CoxCore` (the asked-for `swift-architecture-check` does not exist, and SwiftLint 0.65.1 is already pinned); and the stores' clients through pointfreeco/swift-dependencies 1.17.1, implemented on branch `feature/swift-dependencies`. Why: the creator's request, after a review of the desktop stack (SwiftUI with Observation stores, manual initializer injection, 1,109 snapshot images re-rendered on every desktop CI run). Effect: four cards (T63.4 in three parts); `ci.yml`'s "always the full build" rule for `desktop-macos` changes for pull requests only (T63.2) — `main`, manual runs and `just desktop-test` still run every package, and the app target is built on every run. No decision in §0 changes; each new SwiftPM dependency gets its `toolchain.md` row in its card.
+- A142 §1.11, §3 (new P65: T65.1, T65.2) — one sandboxed program fans out MCP calls, and `tool_search` can answer with names and descriptions. Why: a tool result of thousands of bytes should reach the model only when the program prints a summary, and a search hit should not carry `input_schema` until the caller asks for the full spec. Suggested id T63 is already P63 (A141), so the cards are T65. Effect: no new crate and no new dependency; `describe` is name and description only; each call starts a new `python3 -I -u` under `sandbox::command` with network off and one fresh temp directory as its only writable root; session registration of the tool waits for a later card because T65.1 is at its file cap. Nothing is copied from the GPL code-execution server. No decision in §0 changes.
 
 ## 7. Risk register
 

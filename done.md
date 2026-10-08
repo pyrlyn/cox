@@ -1,4 +1,23 @@
 
+#### T65.1 mcp_exec: one sandboxed program fans out MCP calls
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: — · Size: 616 lines in `mcp_exec.rs` plus one `pub mod` · Priority: P0 · Complexity: 3 · Files: `crates/cox-tools/src/mcp_exec.rs`, `crates/cox-tools/src/lib.rs`
+Goal: a unit test where two tool results are 10_000 bytes each and the model-visible string is only the program's final print.
+What landed: `McpExecTool` (`deferred: false`, `Risk::Write`) runs an original Python driver in a new process on every call. `cox_sandbox::sandbox::command` builds it with network off and one fresh temp directory as the only writable root (also a root, so bubblewrap still mounts a path under its private `/tmp`). `sandbox::command` inserts `-c`, so the shell `exec`s `python3 -I -u <driver>`. The driver allows top-level await and speaks `search`, `describe` and `call`; any other stdout `type` is rejected. `describe` is name and description only. `ToolOutput.text` is the program's `result` text, cut at 8_000 bytes with `… truncated`. The tool does not archive. A non-zero exit or a timeout is `is_error` plus the stderr tail. A missing `python3` is `ToolError::Denied` with `python3 is missing`. No protocol change.
+Not done: `McpExecTool` is not registered on the session. That wiring is another file past this card's cap. `mcp_exec.rs` is 616 lines, over the ~200 line card: the driver, the sandbox spawn, the RPC loop and the acceptance test do not pass the Check as separate cards.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools mcp_exec
+test mcp_exec::tests::result_text_over_8000_bytes_ends_with_truncated_trailer ... ok
+test mcp_exec::tests::mcp_exec_is_a_present_write_tool_with_no_network ... ok
+test mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print ... ok
+3 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
 #### T33.14.1 `cox_http`
 
 Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43; the filesystem half is T33.14.2.
