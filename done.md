@@ -1,4 +1,25 @@
 
+#### T64.24 Quarantine untrusted MCP tool definitions
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: larger than the usual card (the prompt required the hash, the migration, the session wiring and the CLI together) · Priority: P0 · Files: `crates/cox-mcp/src/trust.rs`, `crates/cox-mcp/src/client.rs`, `crates/cox-mcp/tests/client.rs`, `crates/cox-store/migrations/00000000000008_mcp_tool_trust/`, `crates/cox-store/src/mcp_trust.rs`, `crates/cox-session/src/mcp.rs`, `crates/cox/src/mcp_cmd.rs`, `crates/cox/src/cli.rs`
+Goal: a server's tool description and `readOnlyHint` do not reach the model or skip approval until the stored contract hash matches.
+What landed: `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). `mcp_tool_trust` stores only an approved hash. A missing row is `Pending` for project `.mcp.json` and plugins, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A different stored hash is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` indexes `spec().description`, so a pending tool whose real description was `ignore previous instructions` is not returned. `cox mcp trust <server>` writes every current hash; `cox mcp trust` lists pending and changed tools. A store read error stays `Pending` (it must not look like a missing row and baseline). `cox-mcp` links `sha2`, already a workspace dependency.
+Not done: T64.7 and T64.10 stay open. A project `[mcp.servers]` entry is still source `config` until T64.7 reverts it. An unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
+Check:
+```text
+$ mise exec rust -- cargo nextest run -p cox-mcp -p cox-permission -p cox-store -p cox
+PASS cox-mcp::client untrusted_description_and_read_only_hint_do_not_reach_the_model
+PASS cox-store mcp_trust::tests::mcp_trust_approve_replaces_the_hash_and_get_misses_an_unknown_tool
+PASS cox-store tests::schema_snapshot_matches
+PASS cox-store tests::older_binary_refuses_newer_schema
+Summary [  23.360s] 279 tests run: 279 passed, 4 skipped
+$ mise exec rust -- cargo clippy --workspace --all-targets -- -D warnings
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 52.26s
+$ mise exec rust -- cargo fmt --all -- --check
+clean
+```
+`mise exec --` (every tool in `mise.toml`) cannot start on this Linux host: `aqua:yonaskolb/XcodeGen@2.46.0` is darwin-only. The commands above use `mise exec rust --`, which is the pinned Rust 1.98.1 the prompt's `mise exec -- cargo` is there to select.
+
 #### T33.14.1 `cox_http`
 
 Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43; the filesystem half is T33.14.2.

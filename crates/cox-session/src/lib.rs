@@ -370,8 +370,16 @@ pub async fn open_reporting(
     // D14); `with_tool_search_index` below makes it discoverable.
     all.push(Arc::new(cox_ext::skills::SkillTool::new(found.skills)));
     if config.mcp.enabled {
-        let (mcp, notices) =
-            mcp::mcp_tools(&config, cwd, mcp_login, asker, plugins.mcp, &writable).await;
+        let (mcp, notices) = mcp::mcp_tools(
+            &config,
+            cwd,
+            mcp_login,
+            asker,
+            plugins.mcp,
+            &writable,
+            &store,
+        )
+        .await;
         all.extend(mcp);
         warnings.extend(notices.into_iter().map(Warning::Mcp));
     }
