@@ -1,4 +1,23 @@
 
+#### T65.2 tool_search summary mode
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: T65.1 · Size: ~50 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/tool_search.rs`
+Goal: `tool_search` returns `{name, description}` unless the caller asks for the full spec, and discovery still returns names.
+What landed: optional `detail` is `summary` (the default) or `full`. Summary serializes `{name, description}` for each hit. `full` keeps the pretty `ToolSpec`. `structured.discovered` is still the names. `context.rs` is unchanged.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools tool_search
+test tool_search::tests::tool_search_ranks_the_matching_deferred_tool_first ... ok
+test tool_search::tests::tool_search_returns_at_most_five_and_nothing_for_no_match ... ok
+test tool_search::tests::tool_search_reports_discovered_names_in_structured_output ... ok
+test tool_search::tests::tool_search_summary_omits_input_schema ... ok
+4 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
 #### T65.1 mcp_exec: one sandboxed program fans out MCP calls
 
 Model: grok-4.7 · Status: done 2026-10-08 · Depends: — · Size: 616 lines in `mcp_exec.rs` plus one `pub mod` · Priority: P0 · Complexity: 3 · Files: `crates/cox-tools/src/mcp_exec.rs`, `crates/cox-tools/src/lib.rs`

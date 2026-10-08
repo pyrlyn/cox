@@ -159,7 +159,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T63.4.1 | todo | P2 | 2 | 0% | |
 | T63.4.2 | todo | P2 | 3 | 0% | |
 | T63.4.3 | todo | P2 | 3 | 0% | |
-| T65.2 | todo | P1 | 2 | 0% | |
 
 ## Reference
 
@@ -3155,21 +3154,7 @@ Out of scope: `SettingsClient`, `WorkspaceClient` and the `RemoteHosts` connecto
 
 One sandboxed Python program may `search`, `describe` and `call` MCP tools and print one small JSON result. The host keeps every schema and every raw tool payload. `tool_search` defaults to the same summary. No new crate, no Podman, no persistent interpreter, no `save_tool`, no JSON memory directory, and nothing copied from the GPL code-execution server. Suggested id T63 is already P63 (A141), so these cards are T65.
 
-T65.1 is in `done.md`.
-
-#### T65.2 tool_search summary mode
-
-Model: - · Status: open · Depends: T65.1 · Size: ~40 · Priority: P1 · Complexity: 2
-Goal: `tool_search` returns `{name, description}` unless the caller asks for the full spec, and discovery still returns names.
-Files: `crates/cox-tools/src/tool_search.rs` only.
-Steps:
-1. Optional `detail` on the input schema: `summary` (default) or `full`.
-2. `summary` serializes `{name, description}` for each hit. `full` keeps today's pretty `ToolSpec`.
-3. `structured.discovered` still returns names. Do not change `context.rs`.
-4. Extend the tests around the rank and discovered-names cases with `tool_search_summary_omits_input_schema`.
-Check: `mise exec -- cargo test -p cox-tools tool_search` — `tool_search_summary_omits_input_schema` and the rank test pass.
-Done when: a summary hit has no `input_schema` key and a `full` hit still has one; discovered names are unchanged.
-Out of scope: any other file.
+T65.1 and T65.2 are in `done.md`.
 
 ---
 
