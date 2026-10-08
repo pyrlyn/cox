@@ -103,6 +103,18 @@ fn plugin_example_dart() {
 
     stdout(cox(home, cwd).args(["plugin", "install", dir.to_str().unwrap(), "--yes"]));
     stdout(cox(home, cwd).args(["plugin", "enable", "example-dart", "--yes"]));
+    // T64.24: the grant covers the package, not the description the server
+    // reports when it starts. A plugin server stays pending until this.
+    let trusted = String::from_utf8(stdout(cox(home, cwd).args([
+        "mcp",
+        "trust",
+        "example-dart-count",
+    ])))
+    .unwrap();
+    assert!(
+        trusted.contains("trusted 1 tools on `example-dart-count`"),
+        "{trusted}"
+    );
 
     let list: Value =
         serde_json::from_slice(&stdout(cox(home, cwd).args(["plugin", "list", "--json"]))).unwrap();

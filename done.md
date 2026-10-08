@@ -19,6 +19,7 @@ $ mise exec rust -- cargo fmt --all -- --check
 clean
 ```
 `mise exec --` (every tool in `mise.toml`) cannot start on this Linux host: `aqua:yonaskolb/XcodeGen@2.46.0` is darwin-only. The commands above use `mise exec rust --`, which is the pinned Rust 1.98.1 the prompt's `mise exec -- cargo` is there to select.
+The Dart example (`plugin_example_dart`, ignored unless `just plugin-examples dart`) trusts `example-dart-count` before the scripted turn. A plugin grant covers the package, not the description the server reports when it starts.
 
 #### T33.14.1 `cox_http`
 
