@@ -349,7 +349,7 @@ pub async fn open_reporting(
         &found.skills,
     );
     warnings.extend(dropped.into_iter().map(Warning::Instruction));
-    let mut all = tools(answer, &store, mdir);
+    let mut all = tools(answer, &store, mdir.clone());
     // T47.3: made before MCP connects, so each server's handshake already
     // declares (or not) the elicitation capability.
     let (asker, asks) = mcp::question_channel(questions).unzip();
@@ -391,6 +391,10 @@ pub async fn open_reporting(
     let all = tools::with_lsp(all, &config, &writable);
     let all = tools::with_project(all, &config, cwd);
     let all = tools::with_tool_search_index(all);
+    // Read before `config` moves into the session. The core never opens
+    // this directory (D2); an empty result (header only, disabled, minimal,
+    // or a zero budget) appends nothing.
+    let memory_index = memory_index_for(&config, &mdir);
     let session = match resume {
         Some((id, history)) => Session::resume(
             config,
@@ -420,6 +424,9 @@ pub async fn open_reporting(
     }
     session.set_agent_defs(agents_found.agents);
     session.set_instructions(instructions, skills_index);
+    if !memory_index.is_empty() {
+        session.set_memory_index(memory_index);
+    }
     // T35.13: one driver per granted `[[external_agents]]` entry; an entry
     // whose CLI or key is missing is left out with one warning (EA§7).
     #[cfg(feature = "plugins")]
@@ -556,6 +563,29 @@ pub fn memory_dir_for(config: &Config, home: &Path, cwd: &Path) -> PathBuf {
         cox_ext::memory::memory_dir(home, cwd)
     } else {
         PathBuf::from(&config.memory.dir)
+    }
+}
+
+/// Index text for `system[3]`, or empty when memory is off, the profile is
+/// `minimal`, the budget is zero, or nothing but the header fits. Built
+/// here because `cox-core` reads no files (D2).
+fn memory_index_for(config: &Config, dir: &Path) -> String {
+    if !config.memory.enabled
+        || config.context.memory_budget_tokens == 0
+        || config.core.profile == "minimal"
+    {
+        return String::new();
+    }
+    let text = cox_ext::memory::index_text(
+        &cox_ext::memory::list_facts(dir),
+        config.context.memory_budget_tokens,
+    );
+    // `index_text` always emits the header. A header with no entry under
+    // it is nothing to append.
+    if text.lines().skip(1).any(|line| !line.is_empty()) {
+        text
+    } else {
+        String::new()
     }
 }
 
@@ -710,5 +740,85 @@ mod tests {
             serde_json::to_vec(&r.system[0..=2]).expect("prefix")
         };
         assert_eq!(prefix(&sent[0]), prefix(&sent[1]));
+    }
+
+    /// The index line reaches `system[3]`; the fact body stays on disk
+    /// until `memory_get`. A header with no entries appends nothing, and
+    /// minimal / disabled / a zero budget do the same.
+    #[tokio::test]
+    async fn memory_index_reaches_system_three_without_the_body() {
+        use crate::testing::{Recorder, user_turn};
+        let home = tempfile::tempdir().expect("home");
+        let work = tempfile::tempdir().expect("work");
+        let body = "The session cookie is set in middleware and nowhere else.";
+        let mem = memory_dir_for(&Config::default(), home.path(), work.path());
+        cox_ext::memory::save_fact(
+            &mem,
+            "auth-flow",
+            "Login goes through auth.rs.",
+            "decision",
+            body,
+        )
+        .expect("save fact");
+        let config = Config::default();
+        let index = memory_index_for(&config, &mem);
+        assert!(index.starts_with("Memory index:\n"), "{index}");
+        assert!(
+            index.contains("- auth-flow: Login goes through auth.rs."),
+            "{index}"
+        );
+        assert!(!index.contains("middleware"), "{index}");
+
+        let store = Arc::new(Store::open(home.path()).expect("store"));
+        let recorder = Arc::new(Recorder {
+            inner: cox_provider::scripted::Scripted::from_toml("[[turn]]\ntext = \"ok\"\n", "")
+                .expect("scenario"),
+            sent: std::sync::Mutex::default(),
+        });
+        let session = Session::new_with_id(
+            SessionId::new(),
+            config.clone(),
+            recorder.clone(),
+            vec![],
+            store.clone(),
+            store,
+            work.path().to_path_buf(),
+        )
+        .expect("session");
+        session.set_memory_index(index);
+        user_turn(&session, "one").await;
+        let sent = recorder.sent.lock().expect("sent").clone();
+        let volatile = &sent[0].system[3].text;
+        assert!(
+            volatile.contains("Memory index:\n- auth-flow: Login goes through auth.rs."),
+            "{volatile}"
+        );
+        assert!(!volatile.contains(body), "{volatile}");
+        assert!(!volatile.contains("description:"), "{volatile}");
+        assert!(!sent[0].system[3].cache);
+        assert!(!sent[0].system[0].text.contains("Memory index:"));
+        assert!(!sent[0].system[1].text.contains("Memory index:"));
+        assert!(!sent[0].system[2].text.contains("Memory index:"));
+
+        let mut minimal = config.clone();
+        minimal.core.profile = "minimal".into();
+        assert!(memory_index_for(&minimal, &mem).is_empty());
+        let mut disabled = config.clone();
+        disabled.memory.enabled = false;
+        assert!(memory_index_for(&disabled, &mem).is_empty());
+        let mut zero = config.clone();
+        zero.context.memory_budget_tokens = 0;
+        assert!(memory_index_for(&zero, &mem).is_empty());
+        let mut tight = config;
+        tight.context.memory_budget_tokens = 1;
+        assert!(
+            memory_index_for(&tight, &mem).is_empty(),
+            "a budget that fits only the header appends nothing"
+        );
+        let empty = tempfile::tempdir().expect("empty");
+        assert!(
+            memory_index_for(&Config::default(), empty.path()).is_empty(),
+            "a header alone is not appended"
+        );
     }
 }

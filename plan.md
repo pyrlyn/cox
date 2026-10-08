@@ -624,7 +624,7 @@ Microcompaction (no model call): when building a request, tool results older tha
 | `web_fetch` | `url`; `max_bytes` | ReadOnly (network) | readable text | Anthropic server tool passthrough when available; else reqwest + readability; domain rules |
 | `diagnostics` | `path` | Exec until its language server runs, then ReadOnly | `path:line:col: severity: message [source code]`, sorted, summary last | deferred; one lazily started LSP server per language under the session sandbox, killed at session end; with no server an is_error result that points to `bash` (T41.6) |
 | `agent` | `task`; `preset: "explore"\|"shell"\|<name>`; `tier`; `tools: [..]`; `budget_usd`; `background: bool` | inherits max of its tools | result text ≤ cap, summarised on cheap if over | subagent = nested `Session` with its own rollout, parent id set |
-| `memory_save` / `memory_search` | `name, body` / `query` | Write / ReadOnly | id / hits | P10 |
+| `memory_save` / `memory_search` / `memory_get` | `name, body` / `query` / `name` | Write / ReadOnly / ReadOnly | id / hits / body after frontmatter | P10; the index (name + description) joins volatile `system[3]` under `context.memory_budget_tokens` |
 | `mcp__<server>__<tool>` | server's schema | from server annotations, default Write | server result, archived like any tool | deferred by default |
 
 Every tool's `subject()` is what rules match on: the confined path, the command line, the URL, or the namespaced MCP name.

@@ -27,6 +27,7 @@ Core tools are always in context; deferred tools join through `tool_search`
 | `agent` | max of its tools; Destructive with `isolation: "worktree"` | yes | preset | `explore` / `shell` presets, own budget; worktree isolation asks (denied in plan) |
 | `memory_save` | Write | yes | name | one fact file + index + FTS row |
 | `memory_search` | ReadOnly | yes | query | FTS first, then files; top 5 capped |
+| `memory_get` | ReadOnly | yes | name | one fact's body after the frontmatter; missing name is not an error |
 | `diagnostics` | ReadOnly (Exec for the call that starts a server) | yes | path | one sandboxed LSP server per language; falls back to `bash` |
 | `mcp__<server>__<tool>` | from server annotations (default Write) | yes | namespaced name | fail-open servers |
 
