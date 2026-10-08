@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_index_budget_fitting_one_of_three_names_the_two_left_out() {
+    fn memory_index_text_budget_fitting_one_of_three_names_the_two_left_out() {
         let entries = [wide("alpha"), wide("bravo"), wide("charlie")];
         let mut one = String::from("Memory index:\n");
         one.push_str(&entry_line(&entries[0]));
@@ -307,7 +307,7 @@ mod tests {
             "banner must fit where a second entry does not"
         );
         let text = index_text(&entries, budget);
-        assert!(text.contains(&entry_line(&entries[0]).trim_end()));
+        assert!(text.contains(entry_line(&entries[0]).trim_end()));
         assert!(!text.contains("- bravo:"), "{text}");
         assert!(!text.contains("- charlie:"), "{text}");
         assert!(text.ends_with(banner), "{text}");
@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_index_budget_fitting_every_entry_has_no_more_line() {
+    fn memory_index_text_budget_fitting_every_entry_has_no_more_line() {
         let entries = [wide("alpha"), wide("bravo"), wide("charlie")];
         let mut full = String::from("Memory index:\n");
         let mut budget = 0u32;
@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_index_zero_budget_returns_the_header_and_a_sub_header_budget_is_banner_only() {
+    fn memory_index_text_zero_budget_returns_the_header_and_a_sub_header_budget_is_banner_only() {
         let entries = [wide("alpha"), wide("bravo"), wide("charlie")];
         // Current zero-budget behavior: the header is emitted and the loop
         // adds nothing. A zero allowance does not become the elision line
@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_index_replaces_the_last_kept_line_when_the_banner_does_not_fit() {
+    fn memory_index_text_replaces_the_last_kept_line_when_the_banner_does_not_fit() {
         let entries = [wide("alpha"), wide("bravo"), wide("charlie")];
         let mut one = String::from("Memory index:\n");
         one.push_str(&entry_line(&entries[0]));
@@ -357,7 +357,7 @@ mod tests {
             "banner must miss beside both entries"
         );
         let text = index_text(&entries, budget);
-        assert!(text.contains(&entry_line(&entries[0]).trim_end()), "{text}");
+        assert!(text.contains(entry_line(&entries[0]).trim_end()), "{text}");
         assert!(!text.contains("- bravo:"), "{text}");
         assert!(
             text.ends_with("… 2 more; memory_search to read them\n"),
