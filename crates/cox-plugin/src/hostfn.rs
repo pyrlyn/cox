@@ -943,6 +943,7 @@ pub(crate) mod tests {
     fn init_config_is_the_plugins_own_table() {
         let manifest = PluginManifest {
             api: 1,
+            surfaces: None,
             id: "jev".into(),
             version: "0.1.0".into(),
             name: "Jev".into(),
