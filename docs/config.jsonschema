@@ -133,6 +133,13 @@
         "repomap_budget_tokens": 0
       }
     },
+    "compaction": {
+      "description": "`[compaction]`",
+      "$ref": "#/$defs/CompactionConfig",
+      "default": {
+        "strategy": "state+llm"
+      }
+    },
     "permissions": {
       "description": "`[permissions]`",
       "$ref": "#/$defs/PermissionsConfig",
@@ -1168,6 +1175,33 @@
         }
       },
       "additionalProperties": false
+    },
+    "CompactionConfig": {
+      "description": "`[compaction]` (T59.1).",
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "description": "`compaction.strategy`: who writes the summary's file and error\nsections.",
+          "$ref": "#/$defs/CompactionStrategy",
+          "default": "state+llm"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CompactionStrategy": {
+      "description": "`compaction.strategy` (T59.1). `state+llm` is the default because the\ncreator chose it on 2026-10-07, before the bench; `llm` stays available as\nan opt-out.",
+      "oneOf": [
+        {
+          "description": "The model writes every section from the transcript.",
+          "type": "string",
+          "const": "llm"
+        },
+        {
+          "description": "Files touched, errors seen and the last request are read off the\ntranscript; the model writes only the narrative sections.",
+          "type": "string",
+          "const": "state+llm"
+        }
+      ]
     },
     "PermissionsConfig": {
       "description": "`[permissions]` (plan.md §1.6/§1.8).",
