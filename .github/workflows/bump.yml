@@ -55,13 +55,7 @@ jobs:
       release-notes-header: |-
         > [!WARNING]
         > Dev build: compiled with the Cargo `dev` profile (unoptimized, with debug info) and published as a prerelease.
-      release-script: scripts/release.sh
-      commit-message: "chore: release v{version}"
+      # scripts/release.sh, ci.yml + pipeline.yml and release.yml are pyrlyn/ci's defaults.
       mise-install-args: rust
-      # The workflows that report protect-main's required checks when dispatched.
-      ci-workflows: |
-        ci.yml
-        pipeline.yml
-      release-workflows: release.yml
     secrets:
       BUMP_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
