@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-//! `memory_save` / `memory_search` (T10.1): durable project facts. Saving
-//! writes `<name>.md` plus the `MEMORY.md` index line and upserts the
-//! store's FTS rows (for T10.2's dedup reader); searching reads the FTS
-//! hits first, then fills the rest from the files, top 5 with capped
-//! excerpts. The file format mirrors `cox_ext::memory` (which this crate
-//! may not depend on — plan.md dependency direction), kept in sync by the
-//! roundtrip test below.
+//! `memory_save` / `memory_search` / `memory_get` (T10.1): durable project
+//! facts. Saving writes `<name>.md` plus the `MEMORY.md` index line and
+//! upserts the store's FTS rows (for T10.2's dedup reader); searching reads
+//! the FTS hits first, then fills the rest from the files, top 5 with capped
+//! excerpts. `memory_get` returns one fact's body after the frontmatter, so
+//! the one-line index is not the whole fact. The file format mirrors
+//! `cox_ext::memory` (which this crate may not depend on — plan.md
+//! dependency direction), kept in sync by the roundtrip test below.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -40,6 +41,16 @@ pub struct MemorySearchTool {
     dir: PathBuf,
 }
 
+/// `memory_get`: return one fact's body by slug.
+pub struct MemoryGetTool {
+    /// Held so this tool is built like `memory_search` (one store, one
+    /// directory). The body comes from the file the index was built from;
+    /// the store's FTS row is only an excerpt.
+    #[allow(dead_code)]
+    store: Arc<dyn Store>,
+    dir: PathBuf,
+}
+
 impl MemorySaveTool {
     /// Serves saves into `dir`, indexing into `store`.
     pub fn new(store: Arc<dyn Store>, dir: PathBuf) -> Self {
@@ -49,6 +60,14 @@ impl MemorySaveTool {
 
 impl MemorySearchTool {
     /// Serves searches over `dir`, ranking `store` FTS hits first.
+    pub fn new(store: Arc<dyn Store>, dir: PathBuf) -> Self {
+        Self { store, dir }
+    }
+}
+
+impl MemoryGetTool {
+    /// Serves reads of `{dir}/{name}.md`. `store` matches the other memory
+    /// tools' constructor; the body is the file, not the FTS excerpt.
     pub fn new(store: Arc<dyn Store>, dir: PathBuf) -> Self {
         Self { store, dir }
     }
@@ -75,6 +94,12 @@ struct SearchInput {
     /// Max hits (default 5, at most 10).
     #[serde(default)]
     limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetInput {
+    /// Fact slug (`[a-z0-9-]`), the file stem.
+    name: String,
 }
 
 #[async_trait]
@@ -227,6 +252,63 @@ impl Tool for MemorySearchTool {
             structured: Some(serde_json::json!({
                 "hits": hits.iter().map(|h| h.name.as_str()).collect::<Vec<_>>(),
             })),
+        })
+    }
+}
+
+#[async_trait]
+impl Tool for MemoryGetTool {
+    fn spec(&self) -> ToolSpec {
+        let input_schema = serde_json::to_value(schema_for!(GetInput)).unwrap_or(Value::Null);
+        ToolSpec {
+            name: "memory_get".to_string(),
+            description: "Reads one saved project fact by its slug and returns the body, \
+                without the frontmatter. Use it when the memory index or `memory_search` \
+                names a fact whose details you need; the index line is only the description."
+                .to_string(),
+            input_schema,
+            deferred: true,
+            risk: Risk::ReadOnly,
+            concurrency: Concurrency::Parallel,
+        }
+    }
+
+    fn subject(&self, input: &Value) -> String {
+        input
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    async fn call(&self, input: Value, _cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+        let input: GetInput = serde_json::from_value(input).map_err(|e| ToolError::Denied {
+            why: format!("invalid memory_get input: {e}"),
+        })?;
+        if !is_valid_name(&input.name) {
+            return Err(ToolError::Denied {
+                why: format!("invalid memory name {:?}: use [a-z0-9-]", input.name),
+            });
+        }
+        let path = self.dir.join(format!("{}.md", input.name));
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ToolOutput {
+                    text: format!("no memory `{}`", input.name),
+                    is_error: false,
+                    diff: None,
+                    structured: None,
+                });
+            }
+            Err(_) => return Err(ToolError::Io),
+        };
+        let (_, body) = split_fact(&text);
+        Ok(ToolOutput {
+            text: body,
+            is_error: false,
+            diff: None,
+            structured: Some(serde_json::json!({"name": input.name})),
         })
     }
 }
@@ -610,5 +692,46 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn memory_get_returns_the_body_and_rejects_a_path_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let mem = dir.path().join("proj").join("memory");
+        let store = FakeStore::new();
+        let body = "Login goes through auth.rs.\nThe session cookie is set in middleware.";
+        let save = MemorySaveTool::new(store.clone(), mem.clone());
+        save.call(
+            serde_json::json!({
+                "name": "auth-flow",
+                "body": body,
+                "description": "Login goes through auth.rs.",
+                "type": "decision",
+            }),
+            &cx(),
+        )
+        .await
+        .expect("save");
+        let get = MemoryGetTool::new(store, mem);
+        let out = get
+            .call(serde_json::json!({"name": "auth-flow"}), &cx())
+            .await
+            .expect("get");
+        assert_eq!(out.text, body);
+        assert!(!out.is_error);
+        assert!(!out.text.contains("description:"), "{}", out.text);
+        assert!(!out.text.contains("type:"), "{}", out.text);
+        let missing = get
+            .call(serde_json::json!({"name": "absent"}), &cx())
+            .await
+            .expect("missing is not an error");
+        assert_eq!(missing.text, "no memory `absent`");
+        assert!(!missing.is_error);
+        assert!(
+            get.call(serde_json::json!({"name": "../x"}), &cx())
+                .await
+                .is_err(),
+            "a name that fails is_valid_name is refused"
+        );
     }
 }
