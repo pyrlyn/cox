@@ -1,4 +1,25 @@
 
+#### T65.1 Deferred lockfile doc lookup
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: `docs.rs` is past the 200-line guide because query, fetch and `llms.txt` share one cache format (A142) · Priority: P1 · Complexity: 3 · Files: `crates/cox-tools/src/docs.rs`, `crates/cox-tools/src/lib.rs`, `crates/cox-session/src/tools.rs`, `docs/tools.md`
+Goal: `docs_resolve`, `docs_query` and `docs_fetch` stay out of the default prompt. The lockfile names the version, a local `items.jsonl` answers the query, and only `docs_fetch` downloads rustdoc from docs.rs.
+Plan:
+1. `docs_resolve` reads `Cargo.lock` text from the workspace roots and returns `cargo/<name>/<version>`. No `cargo` subprocess. Missing name: `not in lockfile`.
+2. `docs_query` searches `~/.rtok/docs/<name>/<version>/items.jsonl` when that directory exists, otherwise `~/.cox/docs`. Case-folded term overlap, every term required, at most 5 hits of 400 characters. A missing cache returns `not cached` and does not construct `docs_fetch`. After a failed parse, `libraryName` and `question` rename to `name` and `query` inside this tool only. `name = "llms"` searches a root `llms.txt` and downloads nothing.
+3. `docs_fetch` GETs `https://docs.rs/crate/<name>/<version>/json.zst` with no `Authorization` header and a 30 s timeout. The version comes from the lockfile, never `latest`, unless the lockfile has no entry and the caller passed a version. Bytes, their sha256, and `items.jsonl` are written only after the body decodes. A failed GET leaves a previous file in place.
+Check: `docs_tools_are_deferred`, `query_deserialize_returns_the_matching_path_first`, `missing_cache_returns_not_cached_and_does_not_construct_fetch`, `tool_search_finds_docs_query`.
+What landed: `crates/cox-tools/src/docs.rs` (`DocsResolveTool`, `DocsQueryTool`, `DocsFetchTool`), `pub mod docs` in `lib.rs`, the three tools registered in `cox-session` before the `tool_search` rebuild, and the `docs/tools.md` rows. `cox-tools` depends on `sha2` 0.11 (already a workspace dependency) and `zstd` 0.13 (already in the lockfile via wasmtime). No Context7 URL, no API key, no change to `memory_save` or `memory_search`.
+Check:
+```text
+$ mise exec -- cargo test -p cox-tools docs::
+test result: ok. 13 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo test -p cox-session tools::
+test result: ok. 4 passed; 0 failed
+  tools::tests::tool_search_finds_docs_query ... ok
+$ mise exec -- cargo clippy -p cox-tools -p cox-session --all-targets -- -D warnings
+Finished `dev` profile; no warnings
+```
+
 #### T33.14.1 `cox_http`
 
 Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43; the filesystem half is T33.14.2.

@@ -94,6 +94,9 @@ grep-regex = "0.1.14"
 globset = "0.4"
 nucleo = "0.5"
 similar = "3.2"
+# T65.1: decompress the docs.rs rustdoc download (`json.zst`). Already in
+# the lockfile through wasmtime; cox-tools now depends on it directly.
+zstd = "0.13"
 diffy = "0.5"
 tree-sitter = "0.27"
 tree-sitter-bash = "0.25"
