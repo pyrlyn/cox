@@ -4,6 +4,40 @@ https://github.com/pyrlyn/cox
 
 A modular terminal coding agent in Rust (coxswain: steers work while models, tools, and extensions row). TUI, headless, ACP, MCP.
 
+## Cloud review findings (2026-10-08)
+
+New bugs, dead code and moves from a read-only Cursor cloud review of clean `main` (agent `bc-31eef317-b77c-5beb-976e-00002188574d`; full report: `cloud/cox.md` in the private `listepo/roadmap` repo). They form phase P64: T64.1–T64.23, ordered P0, P1, P2. **confirmed** means seen in the tree; **suspected** means plausible from the code but not proven. Crate paths are under `crates/`; line numbers are as of the review. None of these is in the task table yet: to take one, add its row and write a card the usual way (§2).
+
+| ID | Priority | Kind | Status | Where | Fix |
+| --- | --- | --- | --- | --- | --- |
+| T64.1 | P0 | bug | confirmed | `cox-config/src/load.rs:156-423` (no hooks revert); run at `cox-ext/src/hooks.rs:176-185`, `cox-session/src/lib.rs:457-458` | Project and `.claude` hooks run unsandboxed (`/bin/sh -c`, tool JSON on stdin) with no trust prompt. Revert project hook entries in the project guards, or run them under the status-line sandbox (`load.rs:349-358`). |
+| T64.2 | P0 | bug | confirmed | `load.rs:453-470`; `cox-session/src/lib.rs:231-235`; `cox-core/src/turn.rs:505` | A project `core.workspace_roots` is not guarded and becomes `ToolCx.roots` for `confine`. Revert project roots outside the git root and the user's roots. |
+| T64.3 | P0 | bug | confirmed | `cox-protocol/src/config.rs:515-517`; `GUARDED_KEYS` at `load.rs:453-470` | A project can set `providers.*.base_url` or add providers, and the user's API keys follow that URL. Revert project `base_url`, `api_key_env` and new `[providers.*]` tables. |
+| T64.4 | P1 | bug | confirmed | `load.rs:197-206`; `cox-permission/src/lib.rs:317-318` | A project may set `permissions.mode = auto` (only `bypass` is reverted). Revert any project mode wider than the user layer. |
+| T64.5 | P1 | bug | confirmed | `load.rs:228-237`; `cox-sandbox/src/sandbox/mod.rs:199-207` | A project may set `sandbox.network = true` and extra `sandbox.writable`. Revert them unless the user layer already allows them. |
+| T64.6 | P1 | bug | confirmed | `cox-permission/src/policy.rs:33-37`; no approval check in the project guards | A project may set `permissions.approval = on-failure`, which auto-runs confined `Exec`. Refuse a project approval looser than the user layer. |
+| T64.7 | P1 | bug | confirmed | `load.rs:1085-1120` (test keeps `mcp.servers["new"]`); LSP revert at `:295-323` | A project may add MCP stdio servers. Revert project-added or changed `mcp.servers` the way `lsp.servers` is reverted. |
+| T64.8 | P1 | bug | confirmed (no test run) | `cox-core/src/turn.rs:286-291`; `cox-tools/src/write.rs:102-107`; `cox-tools/src/edit.rs:80-85` | `write`/`edit` are `Concurrency::Parallel`, so same-path calls in one batch race and the last rename wins. Group the parallel batch by `touches()` path. |
+| T64.9 | P1 | bug | confirmed (documented design) | `cox-sandbox/src/sandbox/landlock.rs:53-65` | Landlock grants read of `/`, so read-only and workspace-write sandboxes can read the whole disk. Narrow reads to the workspace roots, or refuse Landlock where read isolation is required. |
+| T64.10 | P1 | bug | confirmed | `cox-session/src/mcp.rs:122-130`, `:158-165`; `cox-session/src/sandbox.rs:89-97` | An MCP stdio server that cannot be wrapped under Landlock runs with host privileges plus a notice. Refuse or quarantine it. |
+| T64.11 | P1 | bug | confirmed | `.github/workflows/ci.yml:3-11`, `:470-481` | `revert-on-failure` needs a push to `main`, but `ci.yml` has no `push` trigger, so the job never runs. Add the trigger or delete the job. |
+| T64.12 | P2 | bug | confirmed | `cox-web/src/lib.rs:48-66` | The `web_fetch` client fallback drops `.timeout(TIMEOUT)`. Fail closed, or set the timeout on the fallback. |
+| T64.13 | P2 | bug | confirmed | `cox-mcp/src/auth.rs:228-256` | The OAuth loopback forwards the first TCP connection's query; `state` is checked only later. Accept only `GET /callback` and keep listening until `state` matches. |
+| T64.14 | P2 | bug | confirmed | `cox-store/src/lock.rs:100-105` | An unreadable or corrupt session lock file becomes `Holder::default()` (pid 0). Treat it as busy with an unknown holder. |
+| T64.15 | P2 | bug | suspected | `cox-sandbox/src/path.rs:41-76`; `cox-tools/src/read.rs:89-96` | `confine` then `std::fs::read`/`write` leaves a symlink-swap window. Open with `O_NOFOLLOW`/`openat`, or serialize readers and writers per path. |
+| T64.16 | P2 | bug | suspected (a comment says it is intentional) | `cox-permission/src/lib.rs:256-268` | The Bash read-deny skips relative tokens: `deny Read(~/.ssh/**)` misses `cat id_rsa` run inside `~/.ssh`. Resolve relative tokens against the session cwd. |
+| T64.17 | P2 | bug | confirmed | `cox-protocol/src/config.rs:1416-1417`; `cox-session/src/lib.rs:552-559` | A project may point `memory.dir` anywhere. Guard it like the other path keys. |
+| T64.18 | P2 | dead code | confirmed | `cox-core/src/session.rs:53-55` (`#[allow(dead_code)]`); set at `compact.rs:413` | `State::Compacting` is written but never matched. Match it in the UI/status, or drop it and its allow. |
+| T64.19 | P2 | dead code | confirmed | `crates/cox/Cargo.toml:106-107` | `crates/cox` depends on `keyring`, but `cox/src` has no `keyring::` (unused since T37.31). Remove the dependency. |
+| T64.20 | P2 | dead code | confirmed | `cox-protocol/src/agent.rs:57` | `AgentDef::restrict` has only test callers. Call it where `cox-core`/`cox-session` open a child, or make it `pub(crate)`. |
+| T64.21 | P2 | dead code | confirmed | `report.html` (39,581 bytes, tracked, not ignored); `AGENTS.md:7` | Gitignore it if it is generated, or move it under `docs/` and update `AGENTS.md`. |
+| T64.22 | P2 | move | confirmed | `cox-provider-http/src/http.rs:84-88` and `cox-mcp/src/auth.rs:69-100` → one keyring helper | Share `keyring_enabled` and the `Entry::new("cox", …)` policy (~20 lines). Extract a `secret-store` crate only when a third consumer appears. |
+| T64.23 | P2 | move | confirmed | `brand/build.mjs:1-18` → `@pyrlyn/brand` | Upstream only the generic merge/table code. `tokens.json` and the logos stay here. |
+
+Already tracked here, not added again: `cox-cursor-cloud` with no workspace dependents and `Store::cloud_run_*` used only in `cloud_runs.rs` (dead code D2/D3, move M7) are P56 work (T56.x).
+
+Not added: the provider stack and the permission/sandbox/sanitize/mcp/config crates are already extracted (T32), so moves M1/M2 are only renames; the release workflow already lives in `pyrlyn/ci`, and `scripts/release.sh` should stay (M5); the 10 `#[allow(dead_code)]` sites are test- or feature-gated apart from T64.18; the Jev client is not dead.
+
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
 | T33.14.2 | todo | P2 | 3 | 0% | |
