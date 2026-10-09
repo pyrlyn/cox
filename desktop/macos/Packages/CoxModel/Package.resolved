@@ -1,5 +1,5 @@
 {
-  "originHash" : "f8c5bab840d06e7b588271528a932c14e5b8f886512e5bd0f99f4b52fc1bffcb",
+  "originHash" : "f3aa3cf0242b1fdd101a09dc22bbb8216643a8f9899a98c65ca2e6847f92d127",
   "pins" : [
     {
       "identity" : "combine-schedulers",
@@ -53,6 +53,15 @@
       "state" : {
         "revision" : "75b000cea2ca6d7527a57e1b9cc0bdf21a9abe9f",
         "version" : "2.1.1"
+      }
+    },
+    {
+      "identity" : "swift-property-based",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/x-sheep/swift-property-based",
+      "state" : {
+        "revision" : "7d405e77a7b729390ed1d9a66e1f80a707fd03c4",
+        "version" : "2.0.1"
       }
     },
     {
