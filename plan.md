@@ -2795,7 +2795,7 @@ Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeI
 
 #### T66.1 Compaction lists the archive ids that still expand
 
-Model: opus · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 3
+Model: Claude Code / claude-sonnet · Status: in progress · Depends: — · Size: ~120 · Priority: P1 · Complexity: 3
 
 Goal: after any compaction, the summary item ends with a byte-stable, bounded `## Archived outputs` section. It names every archive id from the compacted turns, so the model can still `expand` evidence it no longer sees. No earlier turn is edited.
 
