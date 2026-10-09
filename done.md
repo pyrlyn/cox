@@ -1,4 +1,94 @@
 
+#### T64.1 Revert project hook commands
+
+Model: Grok 4.7 · Status: done 2026-10-09 · Depends: — · Size: ~140 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox/src/config_load.rs`, `crates/cox-protocol/default.toml`
+Goal: a repository `.cox/config.toml` or `.claude` file cannot add or change hook commands. Those commands run as `/bin/sh -c` with tool JSON on stdin and no sandbox. User config and `~/.claude` hooks stay.
+Plan:
+1. `apply_project_guards` reverts `hooks.events` to the layers without the project when they differ, and reports one `GuardViolation` (`hooks`).
+2. `timeout_s` and `fail_open` stay project-settable. `source_of` does not treat those scalars as reverted.
+3. The Claude-settings import test expects a repository hook to be dropped. A new test keeps the `~/.claude` command and drops the repository one.
+What landed: the guard, the two tests, the `default.toml` comment (and generated `docs/config.md`), plus the compatibility notes in `docs/compat.md`, `docs/design/extensions.md` and plan D13 / §1.6.
+Not done: hooks are still unsandboxed when the user configured them (the status-line sandbox alternative). T64.2 and later stay open.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config
+37 tests run: 37 passed
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config -p cox-protocol -p cox -E 'test(/project_config_cannot_set_hook_commands|user_claude_hooks_survive|config_claude_settings_import|every_guarded_key_has_its_own_reason|config_docs_config_md_matches|project_claude_settings_allow|user_claude_settings_allow/)'
+7 tests run: 7 passed
+$ mise exec rust@1.98.1 -- cargo fmt --all -- --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-config -p cox-protocol -p cox --all-targets -- -D warnings
+clean
+```
+`mise` is not on the default PATH in this environment; the commands used `~/.local/bin/mise` after `mise install rust`. A full `cargo nextest run -p cox` also ran two `external_agents_cursor` tests that fail here because Landlock cannot wrap the fixture agent's argv (`cannot run under the sandbox`). That warning is unrelated to hook loading; CI's sandbox host is the check for it.
+
+#### T59.11 Fold a JSON tool result into one line per node
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: T59.2 · Size: ~580 (`json_tree.rs` past the ~200 cap; see A144) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/json_tree.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-core/src/lib.rs`
+Goal: a single-line JSON design or AST dump larger than `tool_output_visible_bytes` is folded before the line cut, so the model keeps a template line and an `expand` trailer instead of losing the middle; the archive row stays the raw bytes. `read` and `grep` stay unfolded.
+Plan:
+1. `fold_json`: skip a uniform scalar table (an array of objects with the same scalar keys and at least three columns); hoist values used at least twice; template object bodies used at least twice, omitting `id` and `name` (and `children`, which stay nested lines); one positional line per node; deterministic key order; `None` when the folded text is not shorter than `serde_json::to_string` of the input.
+2. In `turn.rs`, inside the `unwrap_or_else` that calls `visible` / `visible_folding`, before shorten: if the tool is not `read` or `grep` and the output is one JSON value and `fold_json` returns a shorter text, shorten that text. The archive `put` stays first and keeps the raw bytes.
+3. Tests: repeated bodies become one template; a single-use field stays inline; a 3-column scalar table returns `None`; two calls return equal strings; identical nodes stay one line each; a `bash` JSON result over the visible budget shows a template line and an expand trailer, and the archive bytes equal the raw output.
+What landed: `crates/cox-core/src/json_tree.rs` (`fold_json`) and `json_source` in `turn.rs`. Nodes are not hoisted (a repeated node stays a positional line); only field values are. `compact.rs`, `dedup.rs` and `fold_repeats` are unchanged. No Figma client, no new dependency.
+Check:
+```text
+$ mise exec -- cargo test -p cox-core json_tree -- --test-threads=8
+test json_tree::tests::identical_nodes_stay_one_line_each ... ok
+test json_tree::tests::repeated_bodies_become_one_template ... ok
+test json_tree::tests::single_use_field_stays_inline ... ok
+test json_tree::tests::two_calls_return_equal_strings ... ok
+test json_tree::tests::three_column_scalar_table_is_not_folded ... ok
+5 passed
+$ mise exec -- cargo test -p cox-core turn
+turn::tests::bash_json_over_budget_shows_a_template_and_keeps_the_raw_archive ... ok
+(the `turn` filter: 20 unit + 17 integration tests passed)
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
+#### T65.2 tool_search summary mode
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: T65.1 · Size: ~50 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/tool_search.rs`
+Goal: `tool_search` returns `{name, description}` unless the caller asks for the full spec, and discovery still returns names.
+What landed: optional `detail` is `summary` (the default) or `full`. Summary serializes `{name, description}` for each hit. `full` keeps the pretty `ToolSpec`. `structured.discovered` is still the names. `context.rs` is unchanged.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools tool_search
+test tool_search::tests::tool_search_ranks_the_matching_deferred_tool_first ... ok
+test tool_search::tests::tool_search_returns_at_most_five_and_nothing_for_no_match ... ok
+test tool_search::tests::tool_search_reports_discovered_names_in_structured_output ... ok
+test tool_search::tests::tool_search_summary_omits_input_schema ... ok
+4 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
+#### T65.1 mcp_exec: one sandboxed program fans out MCP calls
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: — · Size: 616 lines in `mcp_exec.rs` plus one `pub mod` · Priority: P0 · Complexity: 3 · Files: `crates/cox-tools/src/mcp_exec.rs`, `crates/cox-tools/src/lib.rs`
+Goal: a unit test where two tool results are 10_000 bytes each and the model-visible string is only the program's final print.
+What landed: `McpExecTool` (`deferred: false`, `Risk::Write`) runs an original Python driver in a new process on every call. `cox_sandbox::sandbox::command` builds it with network off and one fresh temp directory as the only writable root (also a root, so bubblewrap still mounts a path under its private `/tmp`). `sandbox::command` inserts `-c`, so the shell `exec`s `python3 -I -u <driver>`. The driver allows top-level await and speaks `search`, `describe` and `call`; any other stdout `type` is rejected. `describe` is name and description only. `ToolOutput.text` is the program's `result` text, cut at 8_000 bytes with `… truncated`. The tool does not archive. A non-zero exit or a timeout is `is_error` plus the stderr tail. A missing `python3` is `ToolError::Denied` with `python3 is missing`. No protocol change.
+Not done: `McpExecTool` is not registered on the session. That wiring is another file past this card's cap. `mcp_exec.rs` is 616 lines, over the ~200 line card: the driver, the sandbox spawn, the RPC loop and the acceptance test do not pass the Check as separate cards.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools mcp_exec
+test mcp_exec::tests::result_text_over_8000_bytes_ends_with_truncated_trailer ... ok
+test mcp_exec::tests::mcp_exec_is_a_present_write_tool_with_no_network ... ok
+test mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print ... ok
+3 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
 #### T65.1 Deferred lockfile doc lookup
 
 Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: `docs.rs` is past the 200-line guide because query, fetch and `llms.txt` share one cache format (A145) · Priority: P1 · Complexity: 3 · Files: `crates/cox-tools/src/docs.rs`, `crates/cox-tools/src/lib.rs`, `crates/cox-session/src/tools.rs`, `docs/tools.md`
