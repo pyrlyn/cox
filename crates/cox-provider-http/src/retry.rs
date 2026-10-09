@@ -11,7 +11,10 @@
 //! event reached the caller. Once a byte was delivered the caller's state
 //! (a half-built message) cannot be rewound, so the error surfaces instead.
 
+use std::collections::hash_map::RandomState;
 use std::future::Future;
+use std::hash::{BuildHasher, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cox_protocol::errors::ProviderError;
@@ -45,17 +48,30 @@ impl Policy {
         if let Some(s) = retry_after_s {
             return Duration::from_secs(s.min(60));
         }
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        // Uniform in [-0.25, 0.25] from the clock's sub-second noise: enough
-        // to de-synchronise concurrent sessions without a random crate.
-        let jitter = (nanos % 501) as f64 / 1000.0 - 0.25;
+        // Uniform in [-0.25, 0.25) so concurrent sessions de-synchronise.
+        let jitter = unit_noise() * 0.5 - 0.25;
         self.base
             .saturating_mul(1u32 << attempt.min(16))
             .mul_f64(1.0 + jitter)
     }
+}
+
+/// A value in `[0, 1)` for jitter. The clock's sub-second part is one input
+/// only: callers that start together read nearly the same nanoseconds, so
+/// the counter makes two calls in one clock tick differ, and the std
+/// `RandomState` gives each call fresh random keys (no new dependency).
+fn unit_noise() -> f64 {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let mut hasher = RandomState::new().build_hasher();
+    hasher.write_u64(SEQ.fetch_add(1, Ordering::Relaxed));
+    hasher.write_u32(nanos);
+    // The top 53 bits fill an f64 mantissa exactly, so the result is uniform
+    // over [0, 1) with no modulo bias.
+    (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64
 }
 
 /// Which failures are worth another attempt (plan.md §1.14).
@@ -158,6 +174,34 @@ mod tests {
         assert!((3.0..=5.0).contains(&d2), "{d2}");
         assert_eq!(p.delay(0, Some(7)), Duration::from_secs(7));
         assert_eq!(p.delay(0, Some(3600)), Duration::from_secs(60));
+    }
+
+    /// Callers that start together must not wait the same time: back-to-back
+    /// calls in one clock tick still produce different jitter.
+    #[test]
+    fn retry_jitter_differs_across_back_to_back_calls() {
+        let p = Policy::default();
+        let waits: std::collections::HashSet<u128> =
+            (0..16).map(|_| p.delay(0, None).as_nanos()).collect();
+        assert!(waits.len() > 1, "all 16 waits equal: {waits:?}");
+    }
+
+    #[test]
+    fn retry_jitter_stays_within_a_quarter_of_the_nominal_wait() {
+        let p = Policy {
+            max_retries: 4,
+            base: Duration::from_secs(1),
+        };
+        for attempt in 0..6u32 {
+            let nominal = f64::from(1u32 << attempt);
+            for _ in 0..200 {
+                let d = p.delay(attempt, None).as_secs_f64();
+                assert!(
+                    (0.75 * nominal..=1.25 * nominal).contains(&d),
+                    "attempt {attempt}: {d}"
+                );
+            }
+        }
     }
 
     #[tokio::test]

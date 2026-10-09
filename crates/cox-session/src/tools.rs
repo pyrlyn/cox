@@ -15,10 +15,12 @@ use cox_protocol::traits::Tool;
 use cox_store::Store;
 use cox_tools::ask_user::{Answers, AskUserTool};
 use cox_tools::bash::BashTool;
+use cox_tools::docs::{DocsFetchTool, DocsQueryTool, DocsResolveTool};
 use cox_tools::edit::EditTool;
 use cox_tools::expand::ExpandTool;
 use cox_tools::glob::GlobTool;
 use cox_tools::grep::GrepTool;
+use cox_tools::lsp::{AfterEdit, DiagnosticsTool, LspPool};
 use cox_tools::memory::{MemorySaveTool, MemorySearchTool};
 use cox_tools::read::ReadTool;
 use cox_tools::todo::TodoTool;
@@ -46,6 +48,11 @@ pub fn tools(answer: Option<String>, store: &Arc<Store>, mdir: PathBuf) -> Vec<A
         Arc::new(AskUserTool::new(Answers::Fixed(answer))),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemorySearchTool::new(mem, mdir)),
+        // Deferred, like memory: `tool_search` indexes them because this
+        // insert is before the spec rebuild below (T65.1, D6d).
+        Arc::new(DocsResolveTool),
+        Arc::new(DocsQueryTool::from_home()),
+        Arc::new(DocsFetchTool::from_home()),
     ];
     let specs: Vec<_> = tools.iter().map(|t| t.spec()).collect();
     tools.push(Arc::new(ToolSearchTool::new(specs)));
@@ -79,28 +86,53 @@ pub fn with_client_tools(
 /// servers start under `sandboxed_argv`, the wrap every stdio MCP server
 /// gets, with the same `writable` roots; `danger-full-access` runs them bare
 /// because `sandboxed_argv` does. Before `with_tool_search_index`, so
-/// `tool_search` can find it.
+/// `tool_search` can find it. With `lsp.after_edit`, the local `edit` and
+/// `write` share its pool to report the diagnostics they introduced (T59.3).
 pub(crate) fn with_lsp(
     mut tools: Vec<Arc<dyn Tool>>,
     config: &cox_protocol::Config,
     writable: &[PathBuf],
 ) -> Vec<Arc<dyn Tool>> {
-    if config.lsp.enabled {
-        let (wrap_config, writable) = (config.clone(), writable.to_vec());
-        let spawner: cox_tools::lsp::Spawner =
-            Arc::new(move |server: &cox_protocol::config::LspServerConfig| {
-                crate::sandbox::sandboxed_argv(
-                    std::path::Path::new(&server.command),
-                    &server.args,
-                    &wrap_config,
-                    &writable,
-                )
-            });
-        tools.push(Arc::new(cox_tools::lsp::DiagnosticsTool::new(
-            config.lsp.clone(),
-            spawner,
-        )));
+    if !config.lsp.enabled {
+        return tools;
     }
+    let (wrap_config, writable) = (config.clone(), writable.to_vec());
+    let spawner: cox_tools::lsp::Spawner =
+        Arc::new(move |server: &cox_protocol::config::LspServerConfig| {
+            crate::sandbox::sandboxed_argv(
+                std::path::Path::new(&server.command),
+                &server.args,
+                &wrap_config,
+                &writable,
+            )
+        });
+    let pool = Arc::new(LspPool::new(config.lsp.clone(), spawner));
+    if config.lsp.after_edit {
+        let wait = std::time::Duration::from_millis(u64::from(config.lsp.after_edit_ms));
+        // Only the local tools: ACP's client `edit`/`write` keep the names
+        // but write the editor's buffer, not the file the server reads.
+        let local = [EditTool.spec(), WriteTool.spec()];
+        tools = tools
+            .into_iter()
+            .map(|t| {
+                let spec = t.spec();
+                if local
+                    .iter()
+                    .any(|l| l.name == spec.name && l.description == spec.description)
+                {
+                    Arc::new(AfterEdit::new(
+                        t,
+                        pool.clone(),
+                        wait,
+                        cox_sanitize::sanitize,
+                    )) as Arc<dyn Tool>
+                } else {
+                    t
+                }
+            })
+            .collect();
+    }
+    tools.push(Arc::new(DiagnosticsTool::from_pool(pool)));
     tools
 }
 
@@ -316,5 +348,59 @@ mod tests {
         config.lsp.enabled = false;
         let without = with_lsp(tools(None, &store, tmp.path().join("memory")), &config, &[]);
         assert!(without.iter().all(|t| t.spec().name != "diagnostics"));
+    }
+
+    /// T65.1: crate docs stay out of the prompt (`deferred`) and
+    /// `tool_search` for "crate documentation" still returns `docs_query`.
+    #[tokio::test]
+    async fn tool_search_finds_docs_query() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open(tmp.path()).expect("open store"));
+        let built = tools(None, &store, tmp.path().join("memory"));
+        let prompt_names: Vec<_> = built
+            .iter()
+            .map(|tool| tool.spec())
+            .filter(|spec| !spec.deferred)
+            .map(|spec| spec.name)
+            .collect();
+        assert!(
+            prompt_names
+                .iter()
+                .all(|name| name != "docs_resolve" && name != "docs_query" && name != "docs_fetch")
+        );
+        let search = built
+            .iter()
+            .find(|tool| tool.spec().name == "tool_search")
+            .expect("tool_search")
+            .clone();
+        let (out_tx, _out_rx) = tokio::sync::mpsc::channel(1);
+        let cx = cox_tools::tool_cx(
+            vec![tmp.path().to_path_buf()],
+            tmp.path().to_path_buf(),
+            cox_protocol::SandboxPolicy {
+                mode: cox_protocol::types::SandboxMode::ReadOnly,
+                network: false,
+                writable: vec![],
+                readonly_in_workspace: vec![],
+                linux_backend: Default::default(),
+            },
+            Arc::new(NoopArchive) as Arc<dyn cox_protocol::Archive>,
+            tokio_util::sync::CancellationToken::new(),
+            out_tx,
+            SessionId::new(),
+            cox_protocol::ids::CallId::new(),
+        );
+        let out = search
+            .call(serde_json::json!({"query": "crate documentation"}), &cx)
+            .await
+            .expect("search");
+        let found = out.structured.expect("discovered names");
+        let names = found["discovered"].as_array().expect("names");
+        assert!(names.len() <= 5, "{}", out.text);
+        assert!(
+            names.iter().any(|name| name == "docs_query"),
+            "{}",
+            out.text
+        );
     }
 }
