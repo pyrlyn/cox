@@ -3189,6 +3189,33 @@ Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size:
 
 Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
 
+#### T66.15 Cut the subagent result cap on a char boundary
+
+Model: opus · Status: in progress · Depends: — · Size: ~30 · Priority: P1 · Complexity: 1
+
+Goal: a non-ASCII child answer over `result_cap_tokens` is cut, not a panic. When `summarize` returns `None`, `run_task` falls back to `result.truncate(cap * 4)` (`subagent.rs:1149`). `String::truncate` panics when that byte index is inside a char, so a Cyrillic, CJK or emoji answer over the cap crashes the parent session. Seen while implementing T66.2.
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/tests/subagent.rs`
+- `crates/cox-core/tests/scenarios/subagent_cut_non_ascii.toml` (fixture)
+
+Steps:
+1. Cut at `result.floor_char_boundary(cap * 4)` (stable since Rust 1.91; the workspace `rust-version` is 1.98). No workspace helper does this: `cox-tools/src/read.rs:229` and `cox-acp/src/terminal.rs:72` each walk `is_char_boundary` inline. The cut stays in place, one line, so it merges with T66.2's archive trailer around it.
+2. The scenario's child answers `x` followed by 5000 `я` (10001 bytes), so byte 4000 and byte 8000 both fall inside a char whichever preset cap applies. Its summarize turn is a scripted `error`, so `summarize` returns `None` and the cut runs.
+3. `over_cap_non_ascii_answer_is_cut_on_a_char_boundary` asserts the parent's tool result is ok, starts with `xя` and ends with `[cut at the result cap]`. Without step 1 the child task panics and the test fails.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the new test passes and fails with step 1 reverted.
+
+Out of scope: archiving the full answer, which is T66.2; the other inline boundary walks.
+
 ---
 
 ## 4. Definition of done for v0.1
@@ -3402,6 +3429,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A146 §1.7, §1.12, T64.24 — quarantine untrusted MCP tool definitions. A server's tool description and `readOnlyHint` are untrusted input. `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). Migration `00000000000008_mcp_tool_trust` stores the approved hash (`status` is only `approved`). A missing row is `Pending` for a server from project `.mcp.json` or a plugin, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A stored hash that differs is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses the fixed sentence `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` (so `readOnlyHint` cannot skip approval) and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` already indexes `spec().description`, so there is no second filter. `cox mcp trust <server>` connects and writes every current hash; `cox mcp trust` lists pending and changed tools. Why: a project or plugin server can put instructions in a tool description, or set `readOnlyHint`, and both were reaching the model and the permission engine. Effect: `cox-mcp` links `sha2`, already a workspace dependency. T64.7 and T64.10 stay open — a project `[mcp.servers]` entry is still source `config` until T64.7 reverts it, and an unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
 
 - A147 §3 (new P66: T66.1–T66.14), by the creator (2026-10-09): prime-agent-derived improvements, from a study of PrimeIntellect-ai/prime-agent at `afe8d14c` (v0.9.8, 2026-10-08). Idea-only, clean-room. prime-agent is MIT ("Copyright (c) 2025-2026 Prime Intellect Ltd." and "Copyright (c) 2025 Mario Zechner"), which is compatible with cox's licence. Its Rust code, though, is a byte-level port of a TypeScript product that breaks cox's rules (camelCase JSON, `anyhow` outside `crates/cox`, `unwrap`, no Diesel), so nothing is copied and no notice is needed. A card that ever copies a substantial part adds prime-agent's full MIT text, both copyright lines and the URL to that file and to `THIRD-PARTY-NOTICES`, and the notice is never replaced by cox's header. Why: the study shows four gaps in cox. (1) Compaction does not tell the model which archived outputs still expand. (2) An over-cap subagent answer is summarised or cut with no archive row, against "Lossless by default", and a background answer cannot be collected later. (3) There is no reviewed, reversible way to adjust prompt notes, memory, skills and subagents. (4) `cox run -p` has no gate-driven loop with turn, token and time limits. Effect: fourteen cards in a new phase. `budget::decide` stays the USD cap; `prompt.md` and `prompt_minimal.md` stay immutable; a project config cannot set `[autonomous]`, because its gates are shell commands. T66.12 is a design gate: resident sessions and a supervisor change a crate boundary, so their implementation cards come in a later amendment after the creator approves `docs/design/serve.md`, and T66.13 and T66.14 wait for them. No new dependency; cox-ext links the workspace `sha2`. Overflow recovery already exists (`retried_after_too_long`), so it gets no card. Not taken, with reasons in P66: peer agent sockets, the Python kernel, state factories, per-model prompt blocks in the cached prefix, Prime's prompt prose, and the `HarnessEntry` and `GoalState` schemas. No §0 decision changes.
+- A148 §3 P66 (new T66.15), 2026-10-09 — the subagent result cap cuts on a char boundary. Why: the fallback cut `String::truncate(cap * 4)` panics on a non-ASCII answer over the cap, and no `panic!` is allowed outside tests. Effect: one card; no new dependency, no §0 decision changes.
 
 ## 7. Risk register
 

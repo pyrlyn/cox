@@ -117,3 +117,4 @@
 - T66.12. Design: resident sessions and a supervisor
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
+- T66.15. Cut the subagent result cap on a char boundary
