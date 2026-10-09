@@ -734,12 +734,22 @@ async fn compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim() {
 }
 
 #[tokio::test]
-async fn compaction_notice_shows_32_of_40_ids() {
+async fn compaction_notice_shows_the_newest_32_of_40_ids() {
     let turns = [("read", 40), ("grep", 1), ("edit", 1)];
-    let (_, after, _) =
+    let (_, after, ids) =
         compact_archived(&turns, cox_protocol::config::CompactionStrategy::Llm).await;
     let text = summary_text(&after);
-    let listed = text.lines().filter(|l| l.starts_with("- #")).count();
-    assert_eq!(listed, 32, "{text}");
+    let mut dropped = ids[0].clone();
+    dropped.sort();
+    let want: Vec<String> = dropped[8..]
+        .iter()
+        .map(|id| format!("- #{id} read"))
+        .collect();
+    let listed: Vec<String> = text
+        .lines()
+        .filter(|l| l.starts_with("- #"))
+        .map(str::to_string)
+        .collect();
+    assert_eq!(listed, want, "the newest 32 of 40, ascending: {text}");
     assert!(text.ends_with("\n… and 8 more"), "{text}");
 }

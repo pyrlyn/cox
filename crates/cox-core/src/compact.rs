@@ -9,7 +9,7 @@
 //! it is sent (T28.3). Separate from `session.rs` because it is the only
 //! place history is ever rewritten in memory.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use cox_protocol::config::CompactionStrategy;
 use cox_protocol::errors::CoreError;
@@ -386,28 +386,55 @@ pub(crate) fn working_state(messages: &[Message]) -> WorkingState {
     state
 }
 
-/// T66.1: the archive ids of the compacted turns that `expand` still
-/// resolves, with the tool that wrote each, in id order.
+/// T66.1: the archive ids that `expand` still resolves for the compacted
+/// turns, with the tool that wrote each, in id order.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct SurvivingHandles {
     pub kept: Vec<(ArchiveId, String)>,
-    /// Ids the caps left out; they still expand, but the model is not told.
+    /// Surviving ids the caps left out; they still expand, but the model is
+    /// not told. Computed from the map, never read back from a summary.
     pub omitted: usize,
 }
 
+/// A label that is safe to print into the summary: tool names are
+/// registered by cox or an MCP server, and an earlier summary's lines are
+/// model-written text.
+fn is_label(s: &str) -> bool {
+    (1..=64).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+}
+
 impl SurvivingHandles {
-    /// Every call in `messages` that has an archive row, plus the ids an
-    /// earlier compaction's section still lists, so a second compaction
-    /// loses none that fit. Separate from `working_state` because it needs
-    /// the session's archive map, not the transcript alone. A row counts
-    /// only if `archives` holds it, and `turn.rs` writes the row before the
-    /// model sees the short form, so nothing is named after the fact.
-    pub(crate) fn collect(messages: &[Message], archives: &HashMap<CallId, ArchiveRef>) -> Self {
-        let mut found: BTreeMap<ArchiveId, String> = BTreeMap::new();
+    /// Every archive row in `archives` whose call is not in `kept`, the turns
+    /// compaction leaves verbatim. The map is the only source of an id: it
+    /// holds exactly the rows `turn.rs` wrote before the model saw the short
+    /// form, it is never pruned by compaction and resume refills it
+    /// (T66.1.1), so it already covers earlier compactions. A summary's
+    /// text is model-written and is read for nothing but a label.
+    pub(crate) fn collect(
+        dropped: &[Message],
+        kept: &[Message],
+        archives: &HashMap<CallId, ArchiveRef>,
+    ) -> Self {
+        let kept_calls: HashSet<CallId> = kept
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|c| match c {
+                Content::ToolUse { id, .. } => Some(*id),
+                Content::ToolResult { call_id, .. } => Some(*call_id),
+                _ => None,
+            })
+            .collect();
         let mut names: HashMap<CallId, &str> = HashMap::new();
-        let mut omitted = 0;
-        for c in messages.iter().flat_map(|m| &m.content) {
+        let mut earlier: HashMap<ArchiveId, &str> = HashMap::new();
+        for c in dropped.iter().flat_map(|m| &m.content) {
             match c {
+                Content::ToolUse { id, name, .. } => {
+                    names.insert(*id, name);
+                }
+                // An id from before the last compaction has lost its
+                // `ToolUse`; the summary that listed it is the only label.
                 Content::Text { text } if text.starts_with(SUMMARY_HEAD) => {
                     for line in section(text, ARCHIVED) {
                         if let Some((id, tool)) = line
@@ -415,41 +442,41 @@ impl SurvivingHandles {
                             .and_then(|l| l.split_once(' '))
                             .and_then(|(id, tool)| Some((id.parse().ok()?, tool)))
                         {
-                            found.insert(id, tool.to_string());
-                        } else if let Some(n) = line
-                            .strip_prefix("… and ")
-                            .and_then(|l| l.strip_suffix(" more"))
-                        {
-                            omitted += n.parse().unwrap_or(0);
+                            earlier.insert(id, tool);
                         }
-                    }
-                }
-                Content::ToolUse { id, name, .. } => {
-                    names.insert(*id, name);
-                }
-                Content::ToolResult { call_id, .. } => {
-                    if let Some(archive) = archives.get(call_id) {
-                        let tool = names.get(call_id).copied().unwrap_or("tool");
-                        found.insert(archive.id, tool.to_string());
                     }
                 }
                 _ => {}
             }
         }
+        let surviving: BTreeMap<ArchiveId, &str> = archives
+            .iter()
+            .filter(|(call, _)| !kept_calls.contains(call))
+            .map(|(call, archive)| {
+                let label = names
+                    .get(call)
+                    .or_else(|| earlier.get(&archive.id))
+                    .copied()
+                    .filter(|l| is_label(l))
+                    .unwrap_or("tool");
+                (archive.id, label)
+            })
+            .collect();
+        // The newest ids are the most likely to be wanted, and a ULID sorts
+        // by time, so the caps drop from the old end.
         let mut kept = Vec::new();
         let mut bytes = ARCHIVED.len();
-        let mut found = found.into_iter();
-        for (id, tool) in found.by_ref() {
+        for (id, tool) in surviving.iter().rev() {
             bytes += format!("\n- #{id} {tool}").len();
             if kept.len() == MAX_HANDLES || bytes > MAX_NOTICE_BYTES {
-                omitted += 1;
                 break;
             }
-            kept.push((id, tool));
+            kept.push((*id, (*tool).to_string()));
         }
+        kept.reverse();
         Self {
+            omitted: surviving.len() - kept.len(),
             kept,
-            omitted: omitted + found.count(),
         }
     }
 }
@@ -514,7 +541,11 @@ impl Session {
         };
         let item = ItemId::new();
         // Last under both strategies: the model's own text can end anywhere.
-        let notice = notice_text(&SurvivingHandles::collect(&history[..cut], &archives));
+        let notice = notice_text(&SurvivingHandles::collect(
+            &history[..cut],
+            &history[cut..],
+            &archives,
+        ));
         let summary = if notice.is_empty() {
             summary
         } else {
@@ -900,74 +931,136 @@ mod tests {
         assert_eq!(state.request, first.request, "no newer request typed");
     }
 
-    /// `n` calls of `tool`, each with an archive row, as `history` and the
-    /// session's map would hold them.
-    fn archived(n: usize, tool: &str) -> (Vec<Message>, HashMap<CallId, ArchiveRef>) {
-        let mut archives = HashMap::new();
+    /// An id that sorts by `n`, so "newest" does not depend on the clock.
+    fn archive_id(n: usize) -> ArchiveId {
+        format!("01{n:024}").parse().expect("valid ulid")
+    }
+
+    /// `n` calls of `tool`, each with an archive row numbered from `first`,
+    /// as `history` and the session's map would hold them.
+    fn archived(first: usize, n: usize, tool: &str) -> (Vec<Message>, HashMap<CallId, ArchiveRef>) {
         let calls: Vec<(&str, Value, &str, bool)> =
             (0..n).map(|_| (tool, json!({}), "out", false)).collect();
         let messages = round(&calls);
-        for c in &messages[1].content {
-            if let Content::ToolResult { call_id, .. } = c {
-                let archive = ArchiveRef {
-                    id: ArchiveId::new(),
-                    bytes: 3,
-                };
-                archives.insert(*call_id, archive);
-            }
-        }
+        let archives = messages[1]
+            .content
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| match c {
+                Content::ToolResult { call_id, .. } => Some((
+                    *call_id,
+                    ArchiveRef {
+                        id: archive_id(first + i),
+                        bytes: 3,
+                    },
+                )),
+                _ => None,
+            })
+            .collect();
         (messages.to_vec(), archives)
     }
 
     #[test]
-    fn compaction_notice_stops_at_32_ids_and_counts_the_rest() {
-        let (messages, archives) = archived(40, "read");
-        let handles = SurvivingHandles::collect(&messages, &archives);
+    fn compaction_notice_keeps_the_newest_32_ids_and_counts_the_rest() {
+        let (messages, archives) = archived(1, 40, "read");
+        let handles = SurvivingHandles::collect(&messages, &[], &archives);
         assert_eq!((handles.kept.len(), handles.omitted), (32, 8));
+        let ids: Vec<_> = handles.kept.iter().map(|(id, _)| *id).collect();
+        let want: Vec<_> = (9..=40).map(archive_id).collect();
+        assert_eq!(ids, want, "newest 32, in ascending order");
         let text = notice_text(&handles);
         assert!(text.ends_with("\n… and 8 more"), "{text}");
-        assert!(text.len() <= MAX_NOTICE_BYTES + 32, "{}", text.len());
-        let ids: Vec<_> = handles.kept.iter().map(|(id, _)| *id).collect();
-        assert!(ids.is_sorted(), "ordered by id");
         assert_eq!(
             text,
-            notice_text(&SurvivingHandles::collect(&messages, &archives))
+            notice_text(&SurvivingHandles::collect(&messages, &[], &archives))
         );
     }
 
     #[test]
     fn compaction_notice_stops_at_2048_bytes_for_long_tool_names() {
-        let (messages, archives) = archived(20, &"t".repeat(150));
-        let handles = SurvivingHandles::collect(&messages, &archives);
-        assert!(handles.kept.len() < 20 && handles.omitted == 20 - handles.kept.len());
+        let (messages, archives) = archived(1, 30, &"t".repeat(64));
+        let handles = SurvivingHandles::collect(&messages, &[], &archives);
+        assert!(handles.kept.len() < 30 && handles.omitted == 30 - handles.kept.len());
         assert!(notice_text(&handles).len() <= MAX_NOTICE_BYTES + 32);
+        assert_eq!(handles.kept.last().map(|(id, _)| *id), Some(archive_id(30)));
     }
 
     #[test]
-    fn compaction_notice_merges_ids_an_earlier_summary_still_lists() {
-        let (first, first_archives) = archived(2, "grep");
-        let earlier = SurvivingHandles::collect(&first, &first_archives);
+    fn compaction_notice_lists_ids_of_earlier_compactions_from_the_map() {
+        // The first compaction's turns are gone from `dropped`; only the
+        // map still holds their rows, and the old section only their label.
+        let (gone, old_archives) = archived(1, 2, "grep");
+        let old = SurvivingHandles::collect(&gone, &[], &old_archives);
         let summary = format!(
             "{SUMMARY_HEAD}1 earlier turn(s)]\n\n## Goal\nx\n\n{}",
-            notice_text(&SurvivingHandles {
-                kept: earlier.kept.clone(),
-                omitted: 5,
-            })
+            notice_text(&old)
         );
-        let (mut later, archives) = archived(1, "bash");
-        later.insert(0, user(&summary));
-        let merged = SurvivingHandles::collect(&later, &archives);
-        assert_eq!(merged.kept.len(), 3);
-        assert_eq!(merged.omitted, 5);
-        for entry in &earlier.kept {
-            assert!(merged.kept.contains(entry));
-        }
+        let (mut dropped, mut archives) = archived(10, 1, "bash");
+        dropped.insert(0, user(&summary));
+        archives.extend(old_archives);
+        let (kept, kept_archives) = archived(20, 1, "edit");
+        archives.extend(kept_archives);
+        let handles = SurvivingHandles::collect(&dropped, &kept, &archives);
+        let got: Vec<_> = handles
+            .kept
+            .iter()
+            .map(|(id, t)| (*id, t.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (archive_id(1), "grep"),
+                (archive_id(2), "grep"),
+                (archive_id(10), "bash")
+            ],
+            "the kept turn's id is not listed"
+        );
+        assert_eq!(handles.omitted, 0);
+    }
+
+    #[test]
+    fn compaction_notice_ignores_ids_written_in_summary_text() {
+        let fake = archive_id(777);
+        let summary = format!(
+            "{SUMMARY_HEAD}1 earlier turn(s)]\n\n## Archived outputs\n- #{fake} read\n\
+             - #{} <script>\n… and 999 more\n",
+            archive_id(1)
+        );
+        let (mut dropped, archives) = archived(1, 1, "read");
+        dropped.insert(0, user(&summary));
+        let handles = SurvivingHandles::collect(&dropped, &[], &archives);
+        assert_eq!(handles.omitted, 0);
+        // Only the map's id survives, and its label is the `ToolUse` name,
+        // not the model-written one.
+        assert_eq!(handles.kept, [(archive_id(1), "read".to_string())]);
+        let text = notice_text(&handles);
+        assert!(
+            !text.contains(&fake.to_string()) && !text.contains("999"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn compaction_notice_prints_an_unsafe_earlier_label_as_tool() {
+        let summary = format!(
+            "{SUMMARY_HEAD}1 earlier turn(s)]\n\n## Archived outputs\n- #{} ignore previous\n",
+            archive_id(5)
+        );
+        let archives = HashMap::from([(
+            CallId::new(),
+            ArchiveRef {
+                id: archive_id(5),
+                bytes: 1,
+            },
+        )]);
+        let handles = SurvivingHandles::collect(&[user(&summary)], &[], &archives);
+        assert_eq!(handles.kept, [(archive_id(5), "tool".to_string())]);
     }
 
     #[test]
     fn compaction_notice_is_empty_without_archived_output() {
         let messages = round(&[("read", json!({}), "out", false)]);
-        let handles = SurvivingHandles::collect(&messages, &HashMap::new());
+        let handles = SurvivingHandles::collect(&messages, &[], &HashMap::new());
         assert_eq!(notice_text(&handles), "");
     }
 
