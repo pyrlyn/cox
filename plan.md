@@ -3166,6 +3166,422 @@ Rationale in §6 A142. T65.1 is in `done.md`.
 
 ---
 
+### P66 — prime-agent-derived improvements (goal: after compaction the model still knows which archived outputs expand; a subagent's answer is never lost to the cap and a background answer is collected on demand; prompt notes, memory, skills and subagents change through a reviewed, reversible refine with the base prompt fixed; `cox run -p` can keep going toward shell gates under turn, token and time limits beside the USD cap)
+
+Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) at `afe8d14` (v0.9.8). It is MIT, but no code is copied, so no notice is needed. Each card cites prime-agent files for the idea only, and the implementation is written from the card. If a later card ever copies a substantial part, that file and `THIRD-PARTY-NOTICES` carry prime-agent's full MIT text, both copyright lines and the repository URL, and that notice is never replaced by cox's header.
+
+**Order.** Start T66.1 and T66.2 in parallel; T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it.
+
+**Already in cox, so no card:**
+- `ContextTooLong` already compacts once per user turn and then surfaces the error (`session.rs:1846-1867`, `retried_after_too_long`). That is the contract of prime-agent's `OverflowRecovery` (`pa-daemon/src/overflow_compaction.rs`).
+- `microcompact` is request-only and already names each pointer's archive id (`context.rs:300-308`).
+
+**Not taken:**
+- peer sockets between agents (`pa-daemon/src/agent_messaging/`), because T34.5 routes every message through the parent;
+- the Python kernel and `rlm.factory`;
+- per-model prompt blocks inside the cached prefix;
+- Prime's prompt prose;
+- the `HarnessEntry` and `GoalState` schemas;
+- the `pa-daemon` JSONL socket dialect.
+
+#### T66.1 Compaction lists the archive ids that still expand
+
+Model: opus · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 3
+
+Goal: after any compaction, the summary item ends with a byte-stable, bounded `## Archived outputs` section. It names every archive id from the compacted turns, so the model can still `expand` evidence it no longer sees. No earlier turn is edited.
+
+Files:
+- `crates/cox-core/src/compact.rs`
+- `crates/cox-core/src/session.rs` (only if step 1 finds the gap)
+- the cox-core compaction test file
+
+Steps:
+1. Check whether `inner.archives` (`session.rs:90`) is refilled when a session resumes from its rollout; only one insert was found (`session.rs:1274`). If it is not refilled, refill it from the replayed tool results here, or split that into T66.1.1 if it breaks the size limit.
+2. `SurvivingHandles { kept: Vec<(ArchiveId, String)>, omitted: usize }` holds each archive id and its tool name. Build it from `inner.archives` for the call ids in `history[..cut]`, ordered by id. Only ids that `turn.rs:659-668` wrote before the model saw the short form count; nothing is named after the fact. `notice_text(&SurvivingHandles) -> String` stops at 32 entries or 2048 bytes and then writes `… and N more`. prime-agent's notice has no bound (idea: `pa-core/src/session_engine/ipython_state.rs` `notice_content`).
+3. Render it as the last section of `WorkingState::render` (T59.1). It then lives in the `Summary` item text, which the rollout already replays (`rollout.rs:153-160`). `WorkingState::carry` merges, re-sorts and re-caps it on the next compaction.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core compaction
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the `compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim` insta snapshot passes:
+- three archived outputs in the dropped turns appear by id;
+- the last two turns are byte-identical before and after;
+- compacting the same history twice gives the same bytes;
+- a history with 40 ids shows 32 and `… and 8 more`.
+
+Out of scope: a new event type, and any change to the `Content::Pointer` text or to `microcompact`.
+
+#### T66.2 A subagent's over-cap answer is archived before the parent sees the short form
+
+Model: sonnet · Status: open · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2
+
+Goal: when a child's answer is over `result_cap_tokens`, the full text becomes an archive row first. The summary or cut that the parent receives ends with `full answer: expand <id>`. Today the answer is summarised or cut with no archive row (`subagent.rs:1138-1151`), which breaks "Lossless by default".
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/src/tasks.rs`
+- the cox-core subagent test file
+
+Steps:
+1. In the cap path, call `session.archive.put` with the full answer before `summarize` runs; it is the same call `turn.rs:659-668` uses. Put the `expand` trailer after the summary or cut and before the worktree trailer.
+2. The background path (`drive`, `subagent.rs:813-857`) passes that `ArchiveRef` to `Event::TaskCompleted { archive }`, which is `None` today. `notice_text` then says `full output: expand <id>`, as detached `bash` already does (`tasks.rs:159`).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `over_cap_child_answer_is_archived_before_the_parent_sees_it` passes on the scripted provider:
+- the archive row exists;
+- the parent's tool result holds the summary and the id;
+- `expand` returns the full answer byte for byte.
+
+Out of scope: collecting a background answer, which is T66.3.
+
+#### T66.3 `agent` collect: a status and a capped preview by task id
+
+Model: sonnet · Status: open · Depends: T66.2 · Size: ~150 · Priority: P1 · Complexity: 3
+
+Goal: the parent fetches a background child's result when it needs it. The spawn result never holds the child's answer.
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/src/tasks.rs`
+- the cox-core subagent test file
+
+Steps:
+1. A background spawn returns `AgentHandle { task_id, name, status }` as `structured` (`subagent.rs:588-596` already carries the id). The history pointer line written by `publish_task_result` (`tasks.rs:96-106`) ends with `collect <task id>`.
+2. Add a `collect` input to the same `agent` tool: `{"collect": ["<task id>", …], "timeout_ms": n}`. For each task it returns `status`, one of `queued`, `running`, `done`, `error` or `cancelled`. Once a task has settled, it also returns a preview within the preset's `result_cap_tokens` and, when T66.2 archived the answer, `expand <id>`. A timeout returns a snapshot, never an error (idea: `pa-core/src/session_engine/rlm_host.rs` `RlmSubagentHost::collect`; `pa-daemon/src/rlm_child_model.rs` caps its preview at 160 characters).
+3. Delivery stays through the parent (T34.5). Usage rows stay where they are: in the child's session, with cap summaries under `Job::Summarize`. A foreground `agent` call is unchanged, because the parent waits for that answer by design.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when a scripted-provider test shows:
+- the spawn result holds no answer text;
+- `collect` on a running task returns `running`;
+- after completion, `collect` returns a preview within the cap and the archive id;
+- `expand` returns the full body.
+
+Out of scope: a separate `task_output` tool; peer messages between children.
+
+#### T66.4 Store: the `refine_events` table
+
+Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
+
+Goal: every refine (proposed, applied, rejected or rolled back) is one Diesel row that a later undo and `cox refine list` can read.
+
+Files:
+- `crates/cox-store/migrations/00000000000010_refine_events/{up,down}.sql`
+- `crates/cox-store/src/schema.rs`
+- `crates/cox-store/src/refine.rs` (new): model and queries, in the same shape as `mcp_trust.rs`
+
+Steps:
+1. Columns:
+   - `id` (TEXT primary key)
+   - `session_id`
+   - `scope` (`local`|`global`)
+   - `trigger` (`manual`|`auto`)
+   - `evidence` (the model's rationale for the whole refine; prime-agent records evidence per refine, not per edit)
+   - `edits` (JSON array of `{action, kind, id, before_sha, after_sha}`)
+   - `outcome` (`applied`|`rejected`|`rolled_back`)
+   - `rollback_of` (nullable)
+   - `fingerprint`
+   - `created_at`
+2. Add `refine_insert`, `refine_get` and `refine_list(session, limit)` through the typed DSL, with no raw SQL outside the migration.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-store refine
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when a row round-trips, the list is newest first, and the down migration drops the table.
+
+Out of scope: writing files, which is T66.5.
+
+#### T66.5 Harness entries on disk: apply, backup, rollback, fingerprint
+
+Model: sonnet · Status: open · Depends: T66.4 · Size: ~200 · Priority: P2 · Complexity: 3
+
+Goal: the four refinable kinds (`prompt-note`, `memory`, `skill` and `subagent`; no factory) are applied with a backup first, undone exactly, and fingerprinted by content.
+
+Files:
+- `crates/cox-ext/src/harness.rs` (new)
+- `crates/cox-ext/src/lib.rs`
+- the cox-ext harness test file
+
+Steps:
+1. Scope:
+   - Local is the default and stays in the session: `COX_HOME/sessions/<id>/harness/<kind>/<id>.md`.
+   - Global is used only when the caller asks for it, and writes where cox already reads each kind:
+     - a memory fact through `memory.rs` `save_fact`/`rebuild_index`;
+     - skills under `~/.cox/skills`;
+     - subagents under `~/.cox/agents` (`agents.rs:49-64`);
+     - prompt notes under `~/.cox/notes`.
+   - Ids match `[a-z0-9-]{1,64}`, so no path built from one can leave the scope root.
+2. `apply(edits) -> Applied { before, after }` copies every file it touches to `<scope>/harness-backup/<event id>/` before writing. `rollback(event id)` restores those copies. An entry created with no previous version is deleted on rollback (idea: `pa-core/src/refinement/mod.rs` `rollback_proposal`).
+3. `fingerprint(scope)` is sha256 over the entries sorted by `scope\0kind\0id`, together with their content (idea: `pa-core/src/refinement/ranking.rs` `harness_digest_fingerprint`). cox-ext links the workspace `sha2`.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-ext harness
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when tests prove that:
+- rollback restores the bytes;
+- an id with `/` or `..` is refused;
+- the same store gives the same fingerprint;
+- a local edit is invisible to another session's load.
+
+Out of scope: proposing edits (T66.6) and the session wiring (T66.7).
+
+#### T66.6 Core: a refine proposal from one cheap call, with the base prompt fixed
+
+Model: opus · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: the core turns the transcript tail, the digest of current entries and the user's `/refine` text into a validated list of edits. It writes no file, and the base prompt can never be a target.
+
+Files:
+- `crates/cox-core/src/refine.rs` (new)
+- `crates/cox-core/src/prompts/refine.md` (new; written for cox, not Prime's prose)
+- `crates/cox-core/tests/refine.rs`
+
+Steps:
+1. Make one call on the `Job::Memory` routing tier, the same pattern as `memory_extract.rs`. No new `Job` variant is added.
+2. The model returns `{evidence, edits: [{action: create|update|delete, kind, id, content?, reason}]}`. Validation:
+   - at most 5 edits;
+   - `content` of at most 4 KB;
+   - `kind` is one of the four;
+   - `id` matches the pattern;
+   - any id that names the base prompt is refused (idea: `pa-core/src/refinement/planner.rs`, "base system prompt is not editable").
+   An invalid proposal yields no edits and outcome `rejected` with the reason.
+3. `prompt.md` and `prompt_minimal.md` stay `include_str!` constants (`context.rs:28, 32`).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core refine
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when tests show that:
+- an edit aimed at the base prompt is refused;
+- malformed JSON is rejected;
+- a valid proposal parses;
+- after a refine, the base prompt bytes and `system[0..=2]` are byte-identical to before.
+
+Out of scope: applying edits or running a refine in the background automatically.
+
+#### T66.7 Session: apply a refine, record it, and render the digest after the cached prefix
+
+Model: sonnet · Status: open · Depends: T66.5, T66.6 · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: the session layer, not the core, writes the files and the store row. Prompt notes reach the model as a tail block in the volatile slot, so a refine never moves the cache breakpoint.
+
+Files:
+- `crates/cox-session/src/refine.rs` (new): proposal → `harness::apply` → `refine_insert`, and undo through `harness::rollback`
+- `crates/cox-core/src/context.rs`: the digest goes into `system[3]`, after the last cache breakpoint (`context.rs:194-214`)
+- the cox-session refine test file
+
+Steps:
+1. `refine(text, scope)` and `undo(event id)` record each outcome in `refine_events`. A proposal whose fingerprint equals the stored one writes no new backup and returns `unchanged`.
+2. The digest is built from the stored entries and rebuilt only when the fingerprint changes. Changes to skills and subagents take effect in the next session, because the skills index sits in the cached `system[2]`.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-session refine
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when tests show that:
+- refining twice against the same store leaves the cached prefix bytes and the digest bytes unchanged;
+- an undo restores the files and writes a `rolled_back` row;
+- a local note shows up in its own session's `system[3]` and not in another session's.
+
+Out of scope: the commands, which are T66.8.
+
+#### T66.8 `/refine` and `cox refine`
+
+Model: sonnet · Status: open · Depends: T66.7 · Size: ~120 · Priority: P2 · Complexity: 2
+
+Goal: the user can propose, review, apply and undo a refine from the TUI and the CLI. Global scope always needs the explicit flag.
+
+Files:
+- `crates/cox-tui/src/commands.rs` (next to `/loop`)
+- `crates/cox/src/cli.rs`
+- the e2e test file
+
+Steps:
+1. The TUI commands are `/refine <text> [--global]`, `/refine list` and `/refine undo [<event id>]`. A proposal is shown as a diff and applied only after confirmation.
+2. The CLI commands are `cox refine list|undo <id>`.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox refine
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when an e2e run against a scratch `COX_HOME` on the scripted provider applies one local note, lists it, and undoes it.
+
+Out of scope: running refine automatically on a timer.
+
+#### T66.9 A pure autonomous driver beside the USD cap
+
+Model: opus · Status: open · Depends: — · Size: ~200 · Priority: P2 · Complexity: 4
+
+Goal: a pure function decides whether a headless run starts another turn. It continues only toward failing gates and stays within its own turn, token and time limits. `budget::decide` stays the USD cap.
+
+Files:
+- `crates/cox-protocol/src/autonomous.rs` (new): `AutonomousPolicy`, the `GateRunner` trait, `GateResult` and `AutonomousStop`
+- `crates/cox-core/src/autonomous.rs` (new)
+- `crates/cox-core/tests/autonomous.rs`
+
+Steps:
+1. Policy defaults, from prime-agent's `pa-core/src/autonomous/mod.rs`:
+   - 3 continuations;
+   - 12 turns;
+   - 80 000 tokens;
+   - 30 minutes;
+   - 3 gate retries;
+   - a 5-minute timeout per gate.
+2. `decide(&State, last_stop, gate) -> Next::Continue(text) | Next::Stop(AutonomousStop)`:
+   - `Error`, `Interrupted`, `Refusal` and `Budget` never continue (idea: `pa-core/src/autonomous/gates.rs` `should_autonomously_continue`).
+   - Gates run in order and the first failure wins.
+   - All gates passing stops the run with `GatesPassed`.
+   - A failure with retries left continues, with the failing command and the tail of its output.
+   - Exhausted retries stop with `GateRetriesExhausted`.
+   - Each limit stops the run under its own reason.
+3. `no_progress_streak` counts continuations that changed no file and repeated the same gate result. At 2 the run stops with `NoProgress`. The streak lives in the run's `State`.
+4. A passed gate only means its commands passed; it is not task success. The stop reason is `GatesPassed`, and no surface prints "done" or "success" for it.
+5. Autonomous mode needs at least one gate; a policy with none is a config error.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core autonomous
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the tests, run with a fake `GateRunner`, show that:
+- a pass stops the run;
+- a fail followed by a pass stops on the second try;
+- the token limit stops the run while a gate is still failing;
+- an error does not continue;
+- an interrupt does not continue;
+- two no-progress continuations stop the run.
+
+Out of scope: config, the shell runner and the run loop (T66.10, T66.11). The TUI does not enter this loop.
+
+#### T66.10 `[autonomous]` config, which a project cannot set
+
+Model: sonnet · Status: open · Depends: T66.9 · Size: ~100 · Priority: P2 · Complexity: 2
+
+Goal: the user sets gates and limits, but a repository cannot. Gates are shell commands, so a project-set gate would let a repository run code.
+
+Files:
+- `crates/cox-protocol/src/config.rs`
+- `crates/cox-config/src/load.rs`: add `autonomous` to `GUARDED_KEYS` (`load.rs:497`)
+- `docs/config.jsonschema`, regenerated through the drift test
+
+Steps:
+1. The `[autonomous]` table has `gates = []`, `max_continuations`, `max_turns`, `max_tokens`, `timeout_secs`, `gate_retries` and `gate_timeout_secs`.
+2. A project layer that sets any of these keys is reverted with a warning, as for the other guarded keys.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-config
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `project_cannot_set_autonomous_gates` passes and the schema drift test is green.
+
+Out of scope: running the gates.
+
+#### T66.11 `cox run -p --autonomous`: shell gates and the headless loop
+
+Model: sonnet · Status: open · Depends: T66.10 · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: a headless run continues under the driver's verdict. Every gate runs inside the same sandbox as `bash`.
+
+Files:
+- `crates/cox-tools/src/gate.rs` (new): `ShellGateRunner`. It uses `sandbox::command` with the session's `Policy` and the gate timeout. The output tail is capped and archived first, as for `bash`.
+- `crates/cox/src/run.rs`: after each `UserTurn`, ask `decide`; on `Continue`, submit its text as the next `UserTurn`; print the stop reason
+- `tests/autonomous.rs`
+
+Steps:
+1. Only `cox run -p` reads `--autonomous`, and the interactive TUI never enters the loop. The model still edits the todo list (`cox-tools/src/todo.rs`); the driver does not.
+2. The stream-json output carries one `autonomous` record per decision.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox autonomous
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when, against `COX_HOME=/tmp/cox-scratch` with the scripted provider, a gate that fails once and then passes yields exactly two turns and `GatesPassed`.
+
+Out of scope: goals that persist across runs.
+
+#### T66.12 Design: resident sessions and a supervisor
+
+Model: opus · Status: open · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
+
+Goal: settle the crate-boundary change before any code. Today the TUI owns `cox_core::Session` (`cox-tui/src/app.rs:18, 94`), and the session lock (`cox-store/src/lock.rs`) ends with the process.
+
+Files:
+- `docs/design/serve.md` (new)
+
+Steps (each question is answered with code references):
+1. Can the attach protocol be the existing app-server protocol (`docs/app-server.md`: `open`, `send`, `snapshot`, `patches`) instead of a second enum in cox-protocol? If not, why not?
+2. Does the TUI consume `cox_app` patches or raw `Event`s?
+3. `cox serve` runs one worker process per session under one supervisor. It restarts a failed worker after 250 ms, doubling up to 30 s, and gives up after 5 consecutive failures; a worker that lives 30 s resets the count (idea: `pa-daemon/src/supervisor.rs`, `supervisor/supervision.rs`).
+4. Where does the socket live under `COX_HOME`, with what mode, and who may attach?
+5. The session lock moves to the worker.
+6. Reattach replays the rollout from cox-store and never a second JSONL dialect.
+7. `docs/app-server.md` says a running turn keeps running on the host, but `cox app-server --stdio` exits when stdin closes (`cox-app/src/server.rs:145, 237-243`). Fix the doc or the behaviour.
+8. Acceptance test for the later cards: on a scratch `COX_HOME`, start serve, run one scripted turn, kill the client, and reattach. The rollout must grow only by that turn's events.
+
+Check:
+```bash
+test -s docs/design/serve.md
+```
+
+Done when the doc ends with the implementation cards (each within the size limit). The creator then approves them in a new §6 amendment, and only then does code start.
+
+Out of scope: any code.
+
+#### T66.13 Heartbeat re-entry for a resident session
+
+Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 3
+
+Goal: a resident session can receive a recurring prompt (idea: `pa-core/src/cron/store/heartbeat.rs`, a recurring job with a non-empty prompt, one per session). `cox-ext/src/presence.rs` stays a presence record and is not extended into a scheduler. The card's files and steps are written when T66.12's cards are approved.
+
+#### T66.14 Archive old sessions without deleting them
+
+Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 2
+
+Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
+
+---
+
 ## 4. Definition of done for v0.1
 
 1. `cox` runs a multi-turn coding session against Anthropic, OpenAI Responses and a local Ollama model with the same tool set, with the sandbox on, on macOS and Linux.
@@ -3375,6 +3791,8 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A145 §1.1, §1.11, §3 (new P65: T65.1) — deferred crate-doc tools, claimed 2026-10-08. `docs_resolve`, `docs_query` and `docs_fetch` stay out of the default prompt (`deferred: true`, D6d). The lockfile names the version; a local `items.jsonl` answers the query; only `docs_fetch` GETs `https://docs.rs/crate/<name>/<version>/json.zst` (no `Authorization` header, no Context7 URL, no API key). `docs_query` with `name = "llms"` searches an `llms.txt` already inside a workspace root and downloads nothing. Why: crate documentation is the same shape as memory — useful, not core, found through `tool_search`. Effect: T65.1. `cox-tools` depends on `sha2` (already a workspace dependency) and `zstd` 0.13 (already in the lockfile via wasmtime) to digest and decompress that download. No §0 decision changes. The card exceeds the 200-line guide because the query, the fetch and the `llms.txt` path share one cache format; splitting them would leave a reader with nothing to read.
 
 - A146 §1.7, §1.12, T64.24 — quarantine untrusted MCP tool definitions. A server's tool description and `readOnlyHint` are untrusted input. `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). Migration `00000000000008_mcp_tool_trust` stores the approved hash (`status` is only `approved`). A missing row is `Pending` for a server from project `.mcp.json` or a plugin, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A stored hash that differs is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses the fixed sentence `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` (so `readOnlyHint` cannot skip approval) and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` already indexes `spec().description`, so there is no second filter. `cox mcp trust <server>` connects and writes every current hash; `cox mcp trust` lists pending and changed tools. Why: a project or plugin server can put instructions in a tool description, or set `readOnlyHint`, and both were reaching the model and the permission engine. Effect: `cox-mcp` links `sha2`, already a workspace dependency. T64.7 and T64.10 stay open — a project `[mcp.servers]` entry is still source `config` until T64.7 reverts it, and an unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
+
+- A147 §3 (new P66: T66.1–T66.14), by the creator (2026-10-09): prime-agent-derived improvements, from a study of PrimeIntellect-ai/prime-agent at `afe8d14c` (v0.9.8, 2026-10-08). Idea-only, clean-room. prime-agent is MIT ("Copyright (c) 2025-2026 Prime Intellect Ltd." and "Copyright (c) 2025 Mario Zechner"), which is compatible with cox's licence. Its Rust code, though, is a byte-level port of a TypeScript product that breaks cox's rules (camelCase JSON, `anyhow` outside `crates/cox`, `unwrap`, no Diesel), so nothing is copied and no notice is needed. A card that ever copies a substantial part adds prime-agent's full MIT text, both copyright lines and the URL to that file and to `THIRD-PARTY-NOTICES`, and the notice is never replaced by cox's header. Why: the study shows four gaps in cox. (1) Compaction does not tell the model which archived outputs still expand. (2) An over-cap subagent answer is summarised or cut with no archive row, against "Lossless by default", and a background answer cannot be collected later. (3) There is no reviewed, reversible way to adjust prompt notes, memory, skills and subagents. (4) `cox run -p` has no gate-driven loop with turn, token and time limits. Effect: fourteen cards in a new phase. `budget::decide` stays the USD cap; `prompt.md` and `prompt_minimal.md` stay immutable; a project config cannot set `[autonomous]`, because its gates are shell commands. T66.12 is a design gate: resident sessions and a supervisor change a crate boundary, so their implementation cards come in a later amendment after the creator approves `docs/design/serve.md`, and T66.13 and T66.14 wait for them. No new dependency; cox-ext links the workspace `sha2`. Overflow recovery already exists (`retried_after_too_long`), so it gets no card. Not taken, with reasons in P66: peer agent sockets, the Python kernel, state factories, per-model prompt blocks in the cached prefix, Prime's prompt prose, and the `HarnessEntry` and `GoalState` schemas. No §0 decision changes.
 
 ## 7. Risk register
 
