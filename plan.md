@@ -223,7 +223,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-provider` | the provider registry and `from_env`; `Scripted` and `Replay` (the `Provider` glue over `cox-provider-testkit`); usage extraction; re-exports the wires at the old `anthropic` and `openai` paths | reqwest 0.12 (rustls) |
 | `cox-provider-anthropic` | the Anthropic Messages wire (T32.13; split out of `cox-provider`): request building, stream parsing, wire types from the vendored spec, `schema/` | reqwest 0.12, typify 0.8 (build.rs, T30.10/T30.12) |
 | `cox-provider-openai` | the OpenAI Responses and Chat wires (T32.14; split out of `cox-provider`) | reqwest 0.12, async-openai 0.42 (`response-types` only, T30.11) |
-| `cox-tools` | `read`, `grep`, `glob`, `edit`, `apply_patch`, `write`, `bash`, `todo`, `ask_user`, `agent`, `tool_search`, `web_fetch`, `expand`; the LSP stdio JSON-RPC client (`lsp::client`, T41.2) | similar 3.2, nix, thiserror (`LspError`, T41.2), url 2.5 (LSP `file://` URIs, T41.3) |
+| `cox-tools` | `read`, `grep`, `glob`, `edit`, `apply_patch`, `write`, `bash`, `todo`, `ask_user`, `agent`, `tool_search`, `web_fetch`, `expand`, `docs_resolve` / `docs_query` / `docs_fetch` (T65.1); the LSP stdio JSON-RPC client (`lsp::client`, T41.2) | similar 3.2, nix, thiserror (`LspError`, T41.2), url 2.5 (LSP `file://` URIs, T41.3), sha2 0.11 (docs cache digest, T65.1; already a workspace dependency), zstd 0.13 (docs.rs `json.zst`, T65.1; already in the lockfile via wasmtime) |
 | `cox-sandbox` | `path::confine`, `sandbox::{seatbelt,bwrap,landlock}` (T32.3; split out of `cox-tools`): path confinement to the workspace roots and the platform sandbox front door. `cox-tools` re-exports both as `path` and `sandbox` | landlock 0.4.7, seccompiler 0.5, nix |
 | `cox-patch` | the V4A patch engine (T32.6; split out of `cox-tools`): `parse` text ↔ AST, `stage` progressive hunk matching. Pure: no filesystem, no `ToolCx`; the `apply_patch` `Tool` impl stays in `cox-tools` (`v4a::tool`) so `path::confine` keeps one call site. `cox-tools` re-exports it as `v4a` | proptest 1.11 (dev) |
 | `cox-syntax` | tree-sitter and its grammars (T32.4; split out of `cox-tools`): `outline` (signature extraction for `read`'s outline mode) and `parse_bash` (the parser behind `bash`'s risk classifier). `cox-tools` re-exports `outline` at its old path | tree-sitter 0.27 + bash/rust/typescript/python/go grammars |
@@ -659,6 +659,9 @@ Microcompaction (no model call): when building a request, tool results older tha
 | `diagnostics` | `path` | Exec until its language server runs, then ReadOnly | `path:line:col: severity: message [source code]`, sorted, summary last | deferred; one lazily started LSP server per language under the session sandbox, killed at session end; with no server an is_error result that points to `bash` (T41.6) |
 | `agent` | `task`; `preset: "explore"\|"shell"\|<name>`; `tier`; `tools: [..]`; `budget_usd`; `background: bool` | inherits max of its tools | result text ≤ cap, summarised on cheap if over | subagent = nested `Session` with its own rollout, parent id set |
 | `memory_save` / `memory_search` | `name, body` / `query` | Write / ReadOnly | id / hits | P10 |
+| `docs_resolve` | `name` | ReadOnly | `cargo/<name>/<version>` | deferred; `Cargo.lock` text, no `cargo` subprocess (T65.1) |
+| `docs_query` | `name`, `query`; `version` | ReadOnly | at most 5 snippets, 400 characters each | deferred; `~/.rtok/docs/<name>/<version>` if that directory exists, else `~/.cox/docs`; `name=llms` searches a root `llms.txt` and downloads nothing (T65.1) |
+| `docs_fetch` | `name`; `version` | ReadOnly | cache summary | deferred; one GET of `https://docs.rs/crate/<name>/<version>/json.zst`, no `Authorization` header, 30 s timeout; subject is that URL; version comes from the lockfile, never `latest`, unless the lockfile has no entry (T65.1) |
 | `mcp__<server>__<tool>` | server's schema | from server annotations, default Write | server result, archived like any tool | deferred by default |
 
 Every tool's `subject()` is what rules match on: the confined path, the command line, the URL, or the namespaced MCP name.
@@ -3150,6 +3153,12 @@ T65.1 and T65.2 are in `done.md`.
 
 ---
 
+### P65 — Crate docs (goal: deferred lockfile lookup of cached rustdoc, no third-party docs API)
+
+Rationale in §6 A142. T65.1 is in `done.md`.
+
+---
+
 ## 4. Definition of done for v0.1
 
 1. `cox` runs a multi-turn coding session against Anthropic, OpenAI Responses and a local Ollama model with the same tool set, with the sandbox on, on macOS and Linux.
@@ -3356,6 +3365,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A142 §3 P59 (new T59.11) — an outline row carries an inclusive end line (`start-end: signature`), so a follow-up `read` with `lines` does not guess where the item stops (2026-10-08). Why: `collect` kept only the start line. Effect: one card; no symbol index, no new `read` parameter, no new dependency. T59.8 resolves symbols from that span and otherwise stays as written.
 - A143 §1.11, §3 (new P65: T65.1, T65.2) — one sandboxed program fans out MCP calls, and `tool_search` can answer with names and descriptions. Why: a tool result of thousands of bytes should reach the model only when the program prints a summary, and a search hit should not carry `input_schema` until the caller asks for the full spec. Suggested id T63 is already P63 (A141), so the cards are T65. Effect: no new crate and no new dependency; `describe` is name and description only; each call starts a new `python3 -I -u` under `sandbox::command` with network off and one fresh temp directory as its only writable root; session registration of the tool waits for a later card because T65.1 is at its file cap. Nothing is copied from the GPL code-execution server. No decision in §0 changes.
 - A144 §3 P59 (T59.11, done 2026-10-08) — a JSON tool result folds to one line per node before the visible cut. Why: a single-line design or AST dump larger than `tool_output_visible_bytes` collapsed to the archive trailer. Effect: one card, in `done.md`; `compact.rs`, `dedup.rs` and `fold_repeats` stay as they are. No §0 decision changes. The fold, its call site and the tests are one Check, so they landed together past the ~200 line cap (`json_tree.rs` is the pure function; splitting it would leave neither half able to pass).
+- A145 §1.1, §1.11, §3 (new P65: T65.1) — deferred crate-doc tools, claimed 2026-10-08. `docs_resolve`, `docs_query` and `docs_fetch` stay out of the default prompt (`deferred: true`, D6d). The lockfile names the version; a local `items.jsonl` answers the query; only `docs_fetch` GETs `https://docs.rs/crate/<name>/<version>/json.zst` (no `Authorization` header, no Context7 URL, no API key). `docs_query` with `name = "llms"` searches an `llms.txt` already inside a workspace root and downloads nothing. Why: crate documentation is the same shape as memory — useful, not core, found through `tool_search`. Effect: T65.1. `cox-tools` depends on `sha2` (already a workspace dependency) and `zstd` 0.13 (already in the lockfile via wasmtime) to digest and decompress that download. No §0 decision changes. The card exceeds the 200-line guide because the query, the fetch and the `llms.txt` path share one cache format; splitting them would leave a reader with nothing to read.
 
 ## 7. Risk register
 
