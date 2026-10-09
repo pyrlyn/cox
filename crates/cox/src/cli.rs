@@ -291,6 +291,8 @@ pub struct SessionsArgs {
 /// `cox mcp [--allow-write] [--tools a,b]` (plan.md T6.2): read-only tools
 /// by default; writes are opt-in and `bash` only by name.
 /// `cox mcp login|logout <server>` (T22.5) manage an HTTP server's OAuth token.
+/// `cox mcp trust [<server>]` (T64.24) approves tool definitions, or lists
+/// the ones still pending or changed.
 #[derive(Args, Debug, Default, Clone)]
 pub struct McpArgs {
     #[command(subcommand)]
@@ -314,6 +316,12 @@ pub enum McpAction {
     Logout {
         /// Server name from config, `.mcp.json` or `~/.claude.json`.
         server: String,
+    },
+    /// Approve one server's current tool definitions, or list tools that
+    /// are pending or whose definition changed.
+    Trust {
+        /// Server to approve. Omit to list pending and changed tools.
+        server: Option<String>,
     },
 }
 

@@ -320,6 +320,10 @@ the rollout keeps every line, and resume stops reading at the marker. The
 next turn keeps counting from where the session was (`T8` after a rewind
 to `T7`), so a turn number never means two things.
 
+## MCP tool definitions are not trusted until you say so
+
+A tool description and a `readOnlyHint` come from the server, so they are untrusted input. cox hashes `name`, the description and a canonical form of the input schema (annotations are not part of the hash). A server from your user config or `~/.claude.json` is recorded the first time it connects. A server from the project's `.mcp.json`, or from a plugin, stays pending until you run `cox mcp trust <server>`, which stores the current hashes. While a tool is pending, or its definition has changed since the stored hash, the model sees only `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, the tool is treated as a write (a `readOnlyHint` does not skip approval), and a call returns that sentence without reaching the server. `cox mcp trust` with no name lists the pending and changed tools. A later change to the description or the schema does not replace the stored hash; trust the new definition with `cox mcp trust <server>` again.
+
 ## MCP servers that need a login
 
 An HTTP MCP server may answer the handshake with `401` and a `WWW-Authenticate` challenge. cox then runs the standard flow (authorization code with PKCE, dynamic client registration when the server offers it) through rmcp: in the TUI the login URL is printed and the browser opened, a listener on `127.0.0.1` takes the redirect, and the token is filed in the OS keyring as `cox/mcp/<name>`. From then on the token is attached to every request and refreshed before it expires. Headless surfaces (`cox run`, `cox acp`) never wait for a browser: the server is skipped with the warning `run \`cox mcp login <name>\``, which runs the same flow outside a session. `cox mcp logout <name>` forgets the token, and `cox doctor` prints one `mcp auth <name>` row per HTTP server (`ok (expires in 3h)`, `expired`, `none`).

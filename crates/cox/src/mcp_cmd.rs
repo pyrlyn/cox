@@ -7,6 +7,7 @@
 //! this is the only place the flags, the engine and the store meet.
 //! `cox mcp login|logout <server>` (T22.5) run the OAuth flow for an HTTP
 //! server outside a session, so a headless start never has to.
+//! `cox mcp trust` (T64.24) records the tool definitions the user accepts.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -67,6 +68,7 @@ pub fn run(cli: &Cli, args: &McpArgs, cwd: &Path) -> anyhow::Result<()> {
     match &args.action {
         Some(McpAction::Login { server }) => return login(&config, cwd, server),
         Some(McpAction::Logout { server }) => return logout(server),
+        Some(McpAction::Trust { server }) => return trust(&config, cli, cwd, server.as_deref()),
         None => {}
     }
     let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
@@ -124,6 +126,68 @@ fn login(config: &cox_protocol::config::Config, cwd: &Path, server: &str) -> any
         .ok_or_else(|| anyhow::anyhow!("login needs a terminal"))?;
     tokio::runtime::Runtime::new()?.block_on(cox_mcp::auth::login(&url, store, None, &*prompt))?;
     println!("logged in to `{server}`; the token is in the keyring (cox/mcp/{server})");
+    Ok(())
+}
+
+/// Connects the discovered servers and either approves one server's
+/// current hashes or prints the tools that are not approved. Approving
+/// overwrites a changed hash: this command is the user accepting the
+/// definition in front of them.
+fn trust(
+    config: &cox_protocol::config::Config,
+    cli: &Cli,
+    cwd: &Path,
+    server: Option<&str>,
+) -> anyhow::Result<()> {
+    let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
+    let store = Arc::new(Store::open(&home)?);
+    let mut writable = config.core.workspace_roots.clone();
+    if writable.is_empty() {
+        writable.push(cwd.to_path_buf());
+    }
+    let plugins = cox_session::load_plugins(config, &home, cwd, store.clone(), Some(&writable));
+    let (listed, notices) = tokio::runtime::Runtime::new()?
+        .block_on(cox_session::mcp::mcp_tool_trust_list(
+            config,
+            cwd,
+            &store,
+            plugins.mcp,
+            &writable,
+            server,
+        ))
+        .map_err(|name| anyhow::anyhow!("no MCP server named `{name}`"))?;
+    if let Some(name) = server {
+        if let Some((skipped, reason)) = notices.iter().find_map(|notice| {
+            cox_mcp::client::skipped_server(notice).filter(|(server, _)| *server == name)
+        }) {
+            anyhow::bail!("mcp server `{skipped}` skipped: {reason}");
+        }
+        for row in &listed {
+            store.mcp_trust_approve(&row.server, &row.name, &row.hash)?;
+        }
+        println!("trusted {} tools on `{name}`", listed.len());
+        return Ok(());
+    }
+    for notice in &notices {
+        eprintln!("cox: {notice}");
+    }
+    let mut waiting: Vec<_> = listed
+        .iter()
+        .filter(|row| row.trust != cox_mcp::trust::ToolTrust::Approved)
+        .collect();
+    waiting.sort_by(|a, b| (&a.server, &a.name).cmp(&(&b.server, &b.name)));
+    if waiting.is_empty() {
+        println!("no pending or changed MCP tools");
+        return Ok(());
+    }
+    for row in waiting {
+        let status = match row.trust {
+            cox_mcp::trust::ToolTrust::Pending => "pending",
+            cox_mcp::trust::ToolTrust::Changed => "changed",
+            cox_mcp::trust::ToolTrust::Approved => continue,
+        };
+        println!("{status} {} {}", row.server, row.name);
+    }
     Ok(())
 }
 

@@ -1320,10 +1320,12 @@ version = "0.1.2"
 dependencies = [
  "async-trait",
  "cox-protocol",
+ "cox-tools",
  "keyring",
  "reqwest 0.13.5",
  "rmcp",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
