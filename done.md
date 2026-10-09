@@ -22,6 +22,35 @@ clean
 ```
 `mise` is not on the default PATH in this environment; the commands used `~/.local/bin/mise` after `mise install rust`. A full `cargo nextest run -p cox` also ran two `external_agents_cursor` tests that fail here because Landlock cannot wrap the fixture agent's argv (`cannot run under the sandbox`). That warning is unrelated to hook loading; CI's sandbox host is the check for it.
 
+#### T59.11 Fold a JSON tool result into one line per node
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: T59.2 · Size: ~580 (`json_tree.rs` past the ~200 cap; see A144) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/json_tree.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-core/src/lib.rs`
+Goal: a single-line JSON design or AST dump larger than `tool_output_visible_bytes` is folded before the line cut, so the model keeps a template line and an `expand` trailer instead of losing the middle; the archive row stays the raw bytes. `read` and `grep` stay unfolded.
+Plan:
+1. `fold_json`: skip a uniform scalar table (an array of objects with the same scalar keys and at least three columns); hoist values used at least twice; template object bodies used at least twice, omitting `id` and `name` (and `children`, which stay nested lines); one positional line per node; deterministic key order; `None` when the folded text is not shorter than `serde_json::to_string` of the input.
+2. In `turn.rs`, inside the `unwrap_or_else` that calls `visible` / `visible_folding`, before shorten: if the tool is not `read` or `grep` and the output is one JSON value and `fold_json` returns a shorter text, shorten that text. The archive `put` stays first and keeps the raw bytes.
+3. Tests: repeated bodies become one template; a single-use field stays inline; a 3-column scalar table returns `None`; two calls return equal strings; identical nodes stay one line each; a `bash` JSON result over the visible budget shows a template line and an expand trailer, and the archive bytes equal the raw output.
+What landed: `crates/cox-core/src/json_tree.rs` (`fold_json`) and `json_source` in `turn.rs`. Nodes are not hoisted (a repeated node stays a positional line); only field values are. `compact.rs`, `dedup.rs` and `fold_repeats` are unchanged. No Figma client, no new dependency.
+Check:
+```text
+$ mise exec -- cargo test -p cox-core json_tree -- --test-threads=8
+test json_tree::tests::identical_nodes_stay_one_line_each ... ok
+test json_tree::tests::repeated_bodies_become_one_template ... ok
+test json_tree::tests::single_use_field_stays_inline ... ok
+test json_tree::tests::two_calls_return_equal_strings ... ok
+test json_tree::tests::three_column_scalar_table_is_not_folded ... ok
+5 passed
+$ mise exec -- cargo test -p cox-core turn
+turn::tests::bash_json_over_budget_shows_a_template_and_keeps_the_raw_archive ... ok
+(the `turn` filter: 20 unit + 17 integration tests passed)
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
 #### T59.11 Outline rows include the end line
 
 Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: ~40 · Priority: P0 · Complexity: 1 · Files: `crates/cox-syntax/src/outline.rs`, `crates/cox-tools/src/read.rs`, `crates/cox-tools/src/repomap.rs`
