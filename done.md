@@ -10691,4 +10691,34 @@ Out of scope: any other remote-execution subject.
 Result: `cloud_agent` is a canonical tool name (alias `CloudAgent`); a rule `CloudAgent(owner/repo)` parses only for a strict GitHub pair and matches ignoring case, so a deny for `Acme/Widgets` also stops `acme/widgets`. `Engine::decide` routes the tool to one function after the deny rules and before `bypass`: a malformed subject is denied, `plan` denies, only an exact allow rule from the loaded config allows (a bare `CloudAgent` allow and session grants do not), every other case asks, and policy `never` denies like any ask. `cloud_agent_approval_text(call)` builds the approval text from the call's subject and its `remote` and `ref` input fields and strips control and bidi characters. The A122 test loads a real project config through `cox-config` (a dev-dependency; `deps.rs` counts only normal dependencies). Docs: `docs/how-it-works.md` and §1.8. Not done: the approval modal still renders the ask as `rule CloudAgent(owner/repo) asks` (a `Why::RuleAsk`); showing `cloud_agent_approval_text` there, and the driver that builds the call, belong to T56.6.
 Check output: `mise exec -- cargo nextest run -p cox-permission` — 14 passed, including cloud_agent_asks_in_auto_and_bypass, cloud_agent_is_denied_in_plan_mode, cloud_agent_user_allow_rule_matches_one_repo, cloud_agent_project_allow_is_reverted, cloud_agent_approval_text_names_repo_ref_and_off_machine; `mise exec -- cargo clippy -p cox-permission --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
+#### T66.2 A subagent's over-cap answer is archived before the parent sees the short form
 
+Model: Claude Code / claude-sonnet · Status: done 2026-10-09 · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2
+
+Goal: when a child's answer is over `result_cap_tokens`, the full text becomes an archive row first. The summary or cut that the parent receives ends with `full answer: expand <id>`. Today the answer is summarised or cut with no archive row (`subagent.rs:1138-1151`), which breaks "Lossless by default".
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/src/tasks.rs`
+- the cox-core subagent test file
+
+Steps:
+1. In the cap path, call `session.archive.put` with the full answer before `summarize` runs; it is the same call `turn.rs:659-668` uses. Put the `expand` trailer after the summary or cut and before the worktree trailer.
+2. The background path (`drive`, `subagent.rs:813-857`) passes that `ArchiveRef` to `Event::TaskCompleted { archive }`, which is `None` today. `notice_text` then says `full output: expand <id>`, as detached `bash` already does (`tasks.rs:159`).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `over_cap_child_answer_is_archived_before_the_parent_sees_it` passes on the scripted provider:
+- the archive row exists;
+- the parent's tool result holds the summary and the id;
+- `expand` returns the full answer byte for byte.
+
+Out of scope: collecting a background answer, which is T66.3.
+
+Result: `run_task` writes the full answer with `parent.archive.put` (tool `agent`, subject the task label, a fresh `CallId` because a woken child has no call of its own) only when `len/4 > result_cap_tokens`, before `summarize` runs. The summary or cut then ends with `full answer: expand <id>`, ahead of the worktree trailer. An under-cap answer is unchanged. `TaskOutcome.archive` feeds `Event::TaskCompleted { archive }` on the foreground and background paths, and the background completion detail uses the new `tasks::agent_detail` (`$cost, full output: expand <id>`, the wording detached `bash` uses; it replaces `cost_detail`). A failed archive write only drops the trailer; the cap still applies. Tests: `over_cap_child_answer_is_archived_before_the_parent_sees_it` (archive row byte for byte, parent result is the summary plus the id), `agent_detail_names_the_archive_row_only_when_there_is_one`; `subagent_result_over_cap_is_summarised_on_the_summarize_job` now expects the trailer. Not done: `result.truncate(cap * 4)` can still split a multi-byte character (existing, outside this card); no real-binary run (the change is covered by the scripted provider).
+Check output: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed; `mise exec -- cargo nextest run -p cox-core` — 366 passed, 1 skipped; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.

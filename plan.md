@@ -2824,35 +2824,6 @@ Done when the `compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim
 
 Out of scope: a new event type, and any change to the `Content::Pointer` text or to `microcompact`.
 
-#### T66.2 A subagent's over-cap answer is archived before the parent sees the short form
-
-Model: sonnet · Status: open · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2
-
-Goal: when a child's answer is over `result_cap_tokens`, the full text becomes an archive row first. The summary or cut that the parent receives ends with `full answer: expand <id>`. Today the answer is summarised or cut with no archive row (`subagent.rs:1138-1151`), which breaks "Lossless by default".
-
-Files:
-- `crates/cox-core/src/subagent.rs`
-- `crates/cox-core/src/tasks.rs`
-- the cox-core subagent test file
-
-Steps:
-1. In the cap path, call `session.archive.put` with the full answer before `summarize` runs; it is the same call `turn.rs:659-668` uses. Put the `expand` trailer after the summary or cut and before the worktree trailer.
-2. The background path (`drive`, `subagent.rs:813-857`) passes that `ArchiveRef` to `Event::TaskCompleted { archive }`, which is `None` today. `notice_text` then says `full output: expand <id>`, as detached `bash` already does (`tasks.rs:159`).
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core subagent
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `over_cap_child_answer_is_archived_before_the_parent_sees_it` passes on the scripted provider:
-- the archive row exists;
-- the parent's tool result holds the summary and the id;
-- `expand` returns the full answer byte for byte.
-
-Out of scope: collecting a background answer, which is T66.3.
-
 #### T66.3 `agent` collect: a status and a capped preview by task id
 
 Model: sonnet · Status: open · Depends: T66.2 · Size: ~150 · Priority: P1 · Complexity: 3
