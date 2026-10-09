@@ -606,6 +606,9 @@ pub fn init_input(
             .unwrap_or_else(|| json!({})),
         session,
         granted: serde_json::to_value(&manifest.capabilities).unwrap_or_else(|_| json!({})),
+        // T33.45.3 passes the session's surface; until then a guest reads
+        // absence as `terminal`, as PL§15.2 says.
+        surface: None,
     }
 }
 

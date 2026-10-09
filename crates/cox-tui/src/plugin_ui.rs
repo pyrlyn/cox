@@ -66,7 +66,7 @@ fn rows(widget: &Widget) -> u16 {
         Widget::List { items, .. } => n(items.len()),
         Widget::Table { rows, .. } => n(rows.len()).saturating_add(1),
         Widget::KeyValue(pairs) => n(pairs.len()),
-        Widget::Gauge { .. } => 1,
+        Widget::Gauge { .. } | Widget::Image { .. } => 1,
         Widget::Stack {
             vertical: true,
             children,
@@ -155,6 +155,16 @@ impl Pen<'_> {
             Widget::Text(lines) => {
                 Paragraph::new(lines.iter().map(|l| self.line(l)).collect::<Vec<_>>())
                     .render(area, buf)
+            }
+            // The terminal cannot show the picture, so the label stands in
+            // for it (PL§15.6 case 5); T33.45.4 owns the finished look.
+            Widget::Image { alt, .. } => {
+                let alt = ui::Span {
+                    text: alt.clone(),
+                    style: StyleToken::Dim,
+                    ..ui::Span::default()
+                };
+                Paragraph::new(self.line(&[alt])).render(area, buf)
             }
             Widget::List { items, selected } => {
                 let list = List::new(items.iter().map(|l| self.line(l)))
