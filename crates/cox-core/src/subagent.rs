@@ -35,8 +35,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 use cox_permission::narrower;
+use cox_protocol::ArchivePut;
 use cox_protocol::errors::{CoreError, ToolError};
-use cox_protocol::ids::{CallId, ItemId, SessionId, TaskId};
+use cox_protocol::ids::{ArchiveId, CallId, ItemId, SessionId, TaskId};
 use cox_protocol::traits::{ExternalAgent, Relay, Tool, ToolCx, Worktree};
 use cox_protocol::types::{
     Concurrency, Content, DecidedBy, Decision, Event, HookEvent, HookOutcome, Job, Level, Message,
@@ -52,7 +53,7 @@ use crate::budget;
 use crate::hooks;
 use crate::rollout::History;
 use crate::session::Session;
-use crate::tasks::{Queued, cost_detail, message_line};
+use crate::tasks::{Queued, agent_detail, message_line};
 
 /// A subagent shape: which job it reports as, which tools it may use, how
 /// long it may run and how big its answer may be.
@@ -608,7 +609,7 @@ impl Tool for AgentTool {
                 result_item: ItemId::new(),
                 cost_usd,
                 exit_code: None,
-                archive: None,
+                archive: outcome.as_ref().ok().and_then(|o| o.archive),
             })
             .await;
         let _ = hooks::fire(
@@ -729,6 +730,8 @@ struct TaskOutcome {
     cost_usd: f64,
     turns: u32,
     summarised: bool,
+    /// The full answer's archive row, written only when the cap shortened it.
+    archive: Option<ArchiveId>,
 }
 
 /// Everything a child needs to run again after it finished (SM§2): the
@@ -814,9 +817,9 @@ async fn drive(parent: Session, task: TaskId, mut child: Session, text: String, 
     let mut text = text;
     loop {
         let session = child.id();
-        let (answer, cost_usd) = match run_task(&parent, child, text, &mut io).await {
-            Ok(o) => (o.answer, o.cost_usd),
-            Err(e) => (format!("task failed: {e}"), 0.0),
+        let (answer, cost_usd, archive) = match run_task(&parent, child, text, &mut io).await {
+            Ok(o) => (o.answer, o.cost_usd, o.archive),
+            Err(e) => (format!("task failed: {e}"), 0.0, None),
         };
         let label = io.spec.label.clone();
         let _ = parent
@@ -825,11 +828,11 @@ async fn drive(parent: Session, task: TaskId, mut child: Session, text: String, 
                 result_item: ItemId::new(),
                 cost_usd,
                 exit_code: None,
-                archive: None,
+                archive,
             })
             .await;
         let _ = parent
-            .publish_task_result(task, &label, &answer, &cost_detail(cost_usd))
+            .publish_task_result(task, &label, &answer, &agent_detail(cost_usd, archive))
             .await;
         let stop = json!({"task": task.to_string(), "label": label});
         let _ = hooks::fire(&parent, HookEvent::SubagentStop, stop).await;
@@ -1140,14 +1143,32 @@ async fn run_task(
         })
         .unwrap_or_else(|| "(the subagent produced no answer)".to_string());
     let mut summarised = false;
+    let mut archive = None;
     let cap = io.spec.result_cap_tokens;
     if result.len() / 4 > cap {
+        // The row comes first: the parent must never see the short form
+        // before the full answer can be fetched (lossless rule). A failed
+        // write only costs the trailer; the cap still applies.
+        archive = parent
+            .archive
+            .put(ArchivePut {
+                session: parent.id,
+                call: CallId::new(),
+                tool: "agent".into(),
+                subject: Some(io.spec.label.clone()),
+                bytes: result.as_bytes().to_vec(),
+            })
+            .await
+            .ok();
         if let Some(short) = summarize(parent, &result, cap).await {
             result = short;
             summarised = true;
         } else {
             result.truncate(cap * 4);
             result.push_str("\n[cut at the result cap]");
+        }
+        if let Some(id) = archive {
+            result.push_str(&format!("\nfull answer: expand {id}"));
         }
     }
     // After the cap, so the trailer the parent merges from is never cut.
@@ -1163,6 +1184,7 @@ async fn run_task(
         cost_usd,
         turns,
         summarised,
+        archive,
     })
 }
 

@@ -139,7 +139,13 @@ async fn subagent_explore_uses_cheap_tier_and_read_only_tools() {
 #[tokio::test]
 async fn subagent_result_over_cap_is_summarised_on_the_summarize_job() {
     let (events, store, _) = run_with("subagent_summary", cox_protocol::Config::default()).await;
-    assert_eq!(tool_results(&events), [(true, "short summary".to_string())]);
+    let results = tool_results(&events);
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0].1.starts_with("short summary\n"),
+        "{}",
+        results[0].1
+    );
     let summary: Vec<_> = store
         .usage_rows()
         .into_iter()
@@ -147,6 +153,41 @@ async fn subagent_result_over_cap_is_summarised_on_the_summarize_job() {
         .collect();
     assert_eq!(summary.len(), 1);
     assert_eq!(summary[0].tier, Tier::Cheap);
+}
+
+/// The lossless rule for a child: an answer over the cap is a row in the
+/// archive before the parent sees the short form, and the short form names it.
+#[tokio::test]
+async fn over_cap_child_answer_is_archived_before_the_parent_sees_it() {
+    let (events, store, _) = run_with("subagent_summary", cox_protocol::Config::default()).await;
+    let full = scenario("subagent_summary")
+        .lines()
+        .find_map(|l| l.strip_prefix("text = \"xxx"))
+        .map(|l| format!("xxx{}", l.trim_end_matches('"')))
+        .expect("the child's long answer");
+    let archived = events
+        .iter()
+        .find_map(|e| match e {
+            Event::TaskCompleted { archive, .. } => *archive,
+            _ => None,
+        })
+        .expect("the completed task names the archive row");
+    let results = tool_results(&events);
+    assert_eq!(
+        results,
+        [(
+            true,
+            format!("short summary\nfull answer: expand {archived}")
+        )]
+    );
+    let bytes = cox_protocol::traits::Archive::get(&*store, &archived)
+        .await
+        .expect("archive row");
+    assert_eq!(
+        bytes,
+        full.as_bytes(),
+        "expand gives the answer byte for byte"
+    );
 }
 
 /// Collects turn events plus late background completions: `TaskCompleted`
