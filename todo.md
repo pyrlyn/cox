@@ -104,7 +104,6 @@
 - T63.4.2. The stores read `@Dependency` (`CoxModel`)
 - T63.4.3. App wiring (`App/`)
 - T66.1. Compaction lists the archive ids that still expand
-- T66.2. A subagent's over-cap answer is archived before the parent sees the short form
 - T66.3. `agent` collect: a status and a capped preview by task id
 - T66.4. Store: the `refine_events` table
 - T66.5. Harness entries on disk: apply, backup, rollback, fingerprint
