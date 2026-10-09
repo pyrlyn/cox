@@ -10,8 +10,8 @@
 use diesel::prelude::*;
 
 use crate::schema::{
-    archive, checkpoints, cloud_runs, mcp_tool_trust, memory, plugin_grants, plugin_kv, sessions,
-    usage,
+    archive, checkpoints, cloud_runs, mcp_tool_trust, memory, memory_files, plugin_grants,
+    plugin_kv, sessions, usage,
 };
 
 #[derive(Insertable)]
@@ -98,6 +98,14 @@ pub(crate) struct NewMemory {
     pub path: String,
     pub kind: String,
     pub updated_at: String,
+}
+
+/// One `memory_files` link (T59.10): a memory entry names this path.
+#[derive(Insertable)]
+#[diesel(table_name = memory_files)]
+pub(crate) struct NewMemoryFile {
+    pub memory_id: i32,
+    pub path: String,
 }
 
 /// Both directions of the `checkpoints` table (T26.1): written by

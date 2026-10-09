@@ -1,5 +1,6 @@
 ---
 source: crates/cox-store/src/lib.rs
+assertion_line: 1218
 expression: rendered
 ---
 -- archive
@@ -49,6 +50,16 @@ CREATE TABLE memory (
   id INTEGER PRIMARY KEY, project_slug TEXT NOT NULL, name TEXT NOT NULL, path TEXT NOT NULL,
   kind TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(project_slug, name)
 );
+
+-- memory_files
+CREATE TABLE memory_files (
+  memory_id INTEGER NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  PRIMARY KEY (memory_id, path)
+);
+
+-- memory_files_path
+CREATE INDEX memory_files_path ON memory_files(path);
 
 -- memory_fts
 CREATE VIRTUAL TABLE memory_fts USING fts5(name, body, project_slug UNINDEXED);
