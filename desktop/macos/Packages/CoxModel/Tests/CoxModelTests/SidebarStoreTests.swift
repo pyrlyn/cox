@@ -9,6 +9,7 @@
 // footer counts the usable providers (A110) with the checklist's key health as its dot.
 
 import CoxClient
+import Dependencies
 import Foundation
 import Testing
 
@@ -68,7 +69,7 @@ private let workspace = FixtureWorkspace(
 @MainActor
 private func listed() -> SidebarStore {
   let store = SidebarStore(
-    workspace: workspace, inbox: nil, locale: Locale(identifier: "en_US_POSIX"))
+    workspace: workspace, locale: Locale(identifier: "en_US_POSIX"))
   store.refresh(now: now)
   return store
 }
@@ -90,7 +91,7 @@ private func listed() -> SidebarStore {
 @MainActor
 @Test func filterAndFoldedAreForwardedToTheWorkspace() {
   let client = Recording()
-  let store = SidebarStore(workspace: client, inbox: nil)
+  let store = SidebarStore(workspace: client)
   store.refresh()
   store.toggle("/src/acme-web")
   store.filter = "sitemap"
@@ -105,7 +106,11 @@ private func listed() -> SidebarStore {
     session: "s1", source: nil,
     need: .approval(call: "c1", tool: "write", subject: "a.rs", why: .risk(risk: .write)),
     expired: false, seq: 1, title: "write a.rs", subtitle: "approval waiting", status: .waiting)
-  let store = SidebarStore(workspace: nil, inbox: InboxStore(client: FixedInbox(items: [item])))
+  let store = withDependencies {
+    $0.inboxClient = FixedInbox(items: [item])
+  } operation: {
+    SidebarStore(workspace: nil)
+  }
   store.refresh()
   let needs = store.sections.first
   #expect(needs?.id == "needs-you")
@@ -226,7 +231,7 @@ private final class Recording: WorkspaceClient, @unchecked Sendable {
 /// A113: a sidebar rename reads the list again, so the row and the toolbar show the new title.
 @MainActor
 @Test func aRenameShowsTheNewTitleInTheRowAndTheToolbar() {
-  let store = SidebarStore(workspace: Titled(), inbox: nil)
+  let store = SidebarStore(workspace: Titled())
   store.refresh()
   #expect(store.sections.first?.rows.first?.title == "Untitled session")
   store.rename("s1", to: "Fix the ledger")
@@ -236,7 +241,7 @@ private final class Recording: WorkspaceClient, @unchecked Sendable {
 
 @MainActor
 @Test func theListReadsAgainEachTimeTheWorkspaceChanged() async {
-  let store = SidebarStore(workspace: Growing(), inbox: nil)
+  let store = SidebarStore(workspace: Growing())
   let watching = Task { await store.watch() }
   defer { watching.cancel() }
   let deadline = Date(timeIntervalSinceNow: 10)

@@ -9,3 +9,8 @@ anything superseded. Write at most 2048 tokens under exactly these headings:
 ## Open todo
 ## Errors seen
 ## Next step
+---
+The `## Files touched`, `## Errors seen` and `## Last request` sections are
+already written from the transcript and come before your text, so do not write
+them. Write only `## Goal`, `## Decisions`, `## Open todo` and `## Next step`,
+and name a path or an error in them only when a decision depends on it.
