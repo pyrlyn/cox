@@ -25,6 +25,7 @@ import CoxClient
 import CoxModel
 import CoxTranscript
 import CoxUI
+import Dependencies
 import SwiftUI
 
 struct SessionWindow: View {
@@ -304,8 +305,10 @@ struct SessionWindow: View {
       if let resume, let joined = model.registry.join(resume, window: windowID) {
         shared = joined
       } else {
+        // The core this launch registered (`LaunchCore.prepare`), unless a remote host's.
+        @Dependency(\.coreClient) var launched
         let core: any CoreClient
-        if let remote { core = remote.workspace } else { core = try model.launch.core.get() }
+        if let remote { core = remote.workspace } else { core = launched }
         let client = try await core.open(
           OpenSession(cwd: cwd, resume: resume, theme: Self.syntaxTheme, agent: agent))
         shared = model.registry.adopt(client, window: windowID)

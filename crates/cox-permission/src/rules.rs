@@ -36,12 +36,40 @@ pub struct Rule {
     pub subject: Subject,
 }
 
+/// The canonical name of the off-machine cloud agent subject (T56.4,
+/// `CloudAgent(<owner>/<repo>)`). `Engine` gives it its own decision path
+/// because it sends the repository's code to a third party.
+pub const CLOUD_AGENT: &str = "cloud_agent";
+
+/// Whether `s` is a GitHub `owner/repo` pair: the only shape a cloud agent
+/// subject may take. Strict on purpose, so a subject cannot carry
+/// whitespace, extra path segments or control characters into a rule match
+/// or an approval line.
+pub fn is_github_repo(s: &str) -> bool {
+    let Some((owner, repo)) = s.split_once('/') else {
+        return false;
+    };
+    let owner_ok = (1..=39).contains(&owner.len())
+        && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    let repo_ok = (1..=100).contains(&repo.len())
+        && !matches!(repo, "." | "..")
+        && repo
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    owner_ok && repo_ok
+}
+
 /// Claude Code's tool names mapped onto cox's (plan.md §1.8); everything
-/// else is lower-cased as-is.
+/// else is lower-cased as-is. `project` (T59.5) is a shell command run by
+/// `bash`'s executor, so it shares `bash`'s rules and session grants: a deny
+/// rule `Bash(rm:*)` must not be bypassable by the same command arriving
+/// under another tool name.
 pub fn canonical_tool(name: &str) -> String {
     let lower = name.trim().to_ascii_lowercase();
     match lower.as_str() {
+        "project" => "bash".into(),
         "webfetch" => "web_fetch".into(),
+        "cloudagent" => CLOUD_AGENT.into(),
         "websearch" => "web_search".into(),
         "multiedit" | "notebookedit" => "edit".into(),
         _ => lower,
@@ -73,6 +101,14 @@ impl Rule {
         let tool = canonical_tool(tool);
         let subject = match inner.map(str::trim) {
             None | Some("") => Subject::Any,
+            // A prefix or domain says nothing about one repository, so a rule
+            // that could not be exact is refused rather than half-honoured.
+            Some(s) if tool == CLOUD_AGENT => {
+                if !is_github_repo(s) {
+                    return Err("CloudAgent takes a GitHub <owner>/<repo>".into());
+                }
+                Subject::Exact(s.into())
+            }
             Some(s) => {
                 if let Some(prefix) = s.strip_suffix(":*") {
                     Subject::Prefix(prefix.trim_end().into())
@@ -92,6 +128,29 @@ impl Rule {
         })
     }
 
+    /// Whether the rule names one exact subject. A cloud agent allow only
+    /// counts when it does: a bare `CloudAgent` would approve every repository.
+    pub fn is_exact(&self) -> bool {
+        matches!(self.subject, Subject::Exact(_))
+    }
+
+    /// Whether this rule is a `read` path rule. The cross-tool guard in
+    /// `Engine::decide` matches these against the paths a read-only bash
+    /// command names, so `Read(~/.ssh/**)` also stops `cat ~/.ssh/id_rsa`
+    /// (T62.3).
+    pub fn read_path_rule(&self) -> bool {
+        self.tool == "read" && matches!(self.subject, Subject::Path(_))
+    }
+
+    /// Whether the rule's path globs cover `path` (already `~`-expanded,
+    /// absolute). Only path rules can answer.
+    pub fn covers_file(&self, path: &str) -> bool {
+        match &self.subject {
+            Subject::Path(globs) => globs.iter().any(|g| g.is_match(path)),
+            _ => false,
+        }
+    }
+
     /// Whether this rule covers `(tool, subject)`.
     pub fn matches(&self, tool: &str, subject: &str) -> bool {
         if !tool_matches(&self.tool, tool) {
@@ -99,6 +158,9 @@ impl Rule {
         }
         match &self.subject {
             Subject::Any => true,
+            // GitHub names are case-insensitive, so a deny for `Acme/Widgets`
+            // must also stop `acme/widgets`.
+            Subject::Exact(s) if self.tool == CLOUD_AGENT => s.eq_ignore_ascii_case(subject),
             Subject::Exact(s) => s == subject,
             Subject::Prefix(p) => p.is_empty() || word_prefix(p, subject),
             Subject::Domain(d) => {
@@ -196,5 +258,27 @@ mod tests {
         assert!(rule("read").matches("Read", "/x"));
         assert!(Rule::parse("Bash(", None, &PathBuf::from("/")).is_err());
         assert!(Rule::parse("", None, &PathBuf::from("/")).is_err());
+    }
+
+    #[test]
+    fn cloud_agent_rules_take_a_bare_tool_or_one_repository() {
+        assert!(rule("CloudAgent").matches("cloud_agent", "acme/widgets"));
+        assert!(rule("CloudAgent(Acme/Widgets)").matches("cloud_agent", "acme/widgets"));
+        assert!(!rule("CloudAgent(acme/widgets)").matches("cloud_agent", "acme/other"));
+        assert!(rule("CloudAgent(acme/widgets)").is_exact());
+        assert!(!rule("CloudAgent").is_exact());
+        for bad in [
+            "CloudAgent(acme)",
+            "CloudAgent(acme/widgets/x)",
+            "CloudAgent(acme/..)",
+            "CloudAgent(acme/wid gets)",
+            "CloudAgent(acme/:*)",
+            "CloudAgent(domain:github.com)",
+        ] {
+            assert!(
+                Rule::parse(bad, None, Path::new("/")).is_err(),
+                "{bad} must not parse"
+            );
+        }
     }
 }

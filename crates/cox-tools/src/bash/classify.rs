@@ -369,13 +369,15 @@ fn command_risk(words: &[String]) -> Risk {
         "rm" if short('r') || short('R') || has("--recursive") => Risk::Destructive,
         "chmod" | "chown" | "chgrp" if short('R') || has("--recursive") => Risk::Destructive,
         "git" => git_risk(args),
+        // `cargo check|test|build|clippy|doc` compile and run build scripts,
+        // and the npm/pnpm/yarn test hooks run package scripts: a model that
+        // just edited `build.rs` or `pretest` must not get its own code
+        // executed under a read-only label (T62.4). `metadata` and `tree`
+        // only read manifests and stay read-only.
         "cargo" => match args.first().map(String::as_str) {
-            Some("check" | "test" | "build" | "clippy" | "metadata" | "tree" | "doc") => {
-                Risk::ReadOnly
-            }
+            Some("metadata" | "tree") => Risk::ReadOnly,
             _ => Risk::Exec,
         },
-        "npm" | "pnpm" | "yarn" if args == ["test"] || args == ["run", "test"] => Risk::ReadOnly,
         "find" if has("-delete") || has("-exec") || has("-execdir") || has("-ok") => Risk::Exec,
         "find" => Risk::ReadOnly,
         n if READ_ONLY.contains(&n) => Risk::ReadOnly,

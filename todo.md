@@ -1,7 +1,6 @@
 # Todo
 
 - T33.14.2. Filesystem preopens
-- T33.18. Providers, ABI form (`PluginProvider`)
 - T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
 - T33.40.1. ABI: two-phase decide, own-provider call-out, batched questions
@@ -21,7 +20,6 @@
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
 - T33.43. Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
-- T33.45.1. Manifest and grant: surfaces and surface tables
 - T33.45.2. ABI: surface payloads
 - T33.45.3. Host: load filter, granted filter, `cox:desktop/v1`
 - T33.45.4. TUI: links, image `alt`, surfaces in listings
@@ -103,3 +101,14 @@
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
 - T61.11. No feature-unification rebuilds between `just test` and `just check-all`
+- T62.6. pid-reuse race in the bash kill path
+- T62.7. Duplicated repo-root resolution
+- T62.8. `checkpoint changes()` silently truncates on root-count mismatch
+- T62.9. Small fixes: `confine` colon ban and retry jitter
+- T63.1. Property-based tests for `SessionStore`
+- T63.2. CI: re-run only the Swift packages a change can affect
+- T63.3. Lint: no AppKit or SwiftUI in `CoxModel` and `CoxCore`
+- T63.4. Dependency injection through swift-dependencies
+- T63.4.1. Keys and values (`CoxClient`, `CoxPlatform`)
+- T63.4.2. The stores read `@Dependency` (`CoxModel`)
+- T63.4.3. App wiring (`App/`)

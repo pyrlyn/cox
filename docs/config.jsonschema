@@ -133,6 +133,13 @@
         "repomap_budget_tokens": 0
       }
     },
+    "compaction": {
+      "description": "`[compaction]`",
+      "$ref": "#/$defs/CompactionConfig",
+      "default": {
+        "strategy": "state+llm"
+      }
+    },
     "permissions": {
       "description": "`[permissions]`",
       "$ref": "#/$defs/PermissionsConfig",
@@ -227,6 +234,8 @@
         "enabled": true,
         "timeout_s": 30,
         "quiet_ms": 500,
+        "after_edit": false,
+        "after_edit_ms": 1500,
         "servers": {
           "go": {
             "command": "gopls",
@@ -264,6 +273,23 @@
             ]
           }
         }
+      }
+    },
+    "tools": {
+      "description": "`[tools]`",
+      "$ref": "#/$defs/ToolsConfig",
+      "default": {
+        "project": false
+      }
+    },
+    "project": {
+      "description": "`[project]`",
+      "$ref": "#/$defs/ProjectConfig",
+      "default": {
+        "check": "",
+        "test": "",
+        "lint": "",
+        "fmt": ""
       }
     },
     "voice": {
@@ -1152,6 +1178,33 @@
       },
       "additionalProperties": false
     },
+    "CompactionConfig": {
+      "description": "`[compaction]` (T59.1).",
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "description": "`compaction.strategy`: who writes the summary's file and error\nsections.",
+          "$ref": "#/$defs/CompactionStrategy",
+          "default": "state+llm"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CompactionStrategy": {
+      "description": "`compaction.strategy` (T59.1). `state+llm` is the default because the\ncreator chose it on 2026-10-07, before the bench; `llm` stays available as\nan opt-out.",
+      "oneOf": [
+        {
+          "description": "The model writes every section from the transcript.",
+          "type": "string",
+          "const": "llm"
+        },
+        {
+          "description": "Files touched, errors seen and the last request are read off the\ntranscript; the model writes only the narrative sections.",
+          "type": "string",
+          "const": "state+llm"
+        }
+      ]
+    },
     "PermissionsConfig": {
       "description": "`[permissions]` (plan.md §1.6/§1.8).",
       "type": "object",
@@ -1656,6 +1709,18 @@
           "minimum": 0,
           "default": 500
         },
+        "after_edit": {
+          "description": "Whether `edit` and `write` end with the diagnostics they introduced,\nasked of a language server only when one already runs (T59.3).",
+          "type": "boolean",
+          "default": false
+        },
+        "after_edit_ms": {
+          "description": "Longest wait, in milliseconds, for those diagnostics after a change.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 1500
+        },
         "servers": {
           "description": "`[lsp.servers.<name>]` entries.",
           "type": "object",
@@ -1727,6 +1792,45 @@
             "type": "string"
           },
           "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "ToolsConfig": {
+      "description": "`[tools]` (T59.5): built-in tools that stay out of the tool list until\nswitched on, because each one adds a schema to the cache-stable prefix.",
+      "type": "object",
+      "properties": {
+        "project": {
+          "description": "Whether the `project` tool (run the project's own check, test, lint\nor format-check command) is offered.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProjectConfig": {
+      "description": "`[project]` (T59.5): the commands the `project` tool runs. An empty\nstring means \"detect it from the manifests\"; a command set here runs\nthrough the same sandbox and permission path as `bash`, so a project\nconfig may set it without a guard.",
+      "type": "object",
+      "properties": {
+        "check": {
+          "description": "Command for `action = check` (type-check or build).",
+          "type": "string",
+          "default": ""
+        },
+        "test": {
+          "description": "Command for `action = test`.",
+          "type": "string",
+          "default": ""
+        },
+        "lint": {
+          "description": "Command for `action = lint`.",
+          "type": "string",
+          "default": ""
+        },
+        "fmt": {
+          "description": "Command for `action = fmt` (a format check; it must not rewrite files).",
+          "type": "string",
+          "default": ""
         }
       },
       "additionalProperties": false

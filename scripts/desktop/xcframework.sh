@@ -11,7 +11,7 @@
 #   mise exec -- bash scripts/desktop/xcframework.sh
 #
 # Plain `cargo` here, so the caller picks the toolchain: the recipe through
-# `mise exec`, CI through .github/actions/rust (the same mise.toml pin).
+# `mise exec`, CI through pyrlyn/ci's setup-rust action (the same mise.toml pin).
 #
 # Output, all gitignored under desktop/macos/build/:
 #   CoxFFI.xcframework/   the library, its C header and module.modulemap

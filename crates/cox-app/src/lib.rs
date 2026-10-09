@@ -51,8 +51,8 @@ pub mod wire;
 pub mod workspace;
 
 pub use best_of::{
-    BestOf, BestOfError, BestOfId, BestOfRequest, Candidate, CandidateState, CandidateView, Launch,
-    Launched, Picked,
+    BestOf, BestOfError, BestOfId, BestOfMerge, BestOfRequest, Candidate, CandidateState,
+    CandidateView, Launch, Launched, Picked,
 };
 pub use browser::{Browser, BrowserError, PageText};
 pub use changes::{ChangedFile, Changes, Checkpoint, FileChange, TurnFiles};
@@ -87,6 +87,7 @@ pub use workspace::{Project, SearchHit, SessionEntry, Workspace, WorkspaceError}
 // other workspace crate (T37.39, DT§4.2).
 pub use cox_render::diffmodel;
 pub use cox_render::doc;
+pub use cox_render::pointer;
 pub use cox_store::fts::SessionInfo;
 pub use cox_store::lock::Holder;
 pub use cox_tools::git::Linked;

@@ -29,8 +29,7 @@ private func row(_ field: String, _ value: String, _ kind: SettingKind) -> Setti
 @MainActor
 @Test func theTextSizeAndLineHeightReadBackAsStored() async {
   let store = SettingsStore(
-    client: FixtureSettingsClient(view: transcriptView), secrets: MemorySecretStore(),
-    cwd: "/project")
+    client: FixtureSettingsClient(view: transcriptView), cwd: "/project")
   #expect(store.transcript == nil)
   await store.load()
   #expect(

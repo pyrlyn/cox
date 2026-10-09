@@ -371,6 +371,31 @@ impl App {
         Ok(picked)
     }
 
+    /// Merges the finished candidates `merge.from` of group `merge.id` with
+    /// `merge.by` (T52.24, A142): a new worktree, a session sent their
+    /// answers and diffs, joined to the group as one more candidate. The
+    /// person pressing Merge is A75's consent to the worktree. Refused
+    /// before anything starts for fewer than two, one not finished, or a
+    /// picked group. Call on a tokio runtime, as for [`App::open`].
+    pub async fn best_of_merge(
+        self: &Arc<Self>,
+        merge: crate::best_of::BestOfMerge,
+        theme: String,
+    ) -> Result<crate::best_of::Launch, AppError> {
+        let launch = crate::best_of::merge(self, merge, theme).await?;
+        self.listed.notify_waiters();
+        Ok(launch)
+    }
+
+    /// The candidates of group `id` a merge may take (T52.24): finished and
+    /// not pruned, decided here so every client offers the same choice.
+    pub fn mergeable(&self, id: &crate::best_of::BestOfId) -> Result<Vec<u32>, AppError> {
+        Ok(crate::best_of::mergeable(
+            self,
+            &self.workspace.best_of(id)?,
+        ))
+    }
+
     /// The Settings screen for a session in `cwd` (DT§5.7), with each MCP
     /// server's login read from the token store.
     pub async fn settings(&self, cwd: &Path) -> Result<SettingsView, AppError> {

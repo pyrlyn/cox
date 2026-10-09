@@ -153,6 +153,9 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `deferred_tools` = `true`
 - `system_prompt` = `"default"` — default | minimal (T30.1); `core.profile = "minimal"` implies it
 - `repomap_budget_tokens` = `0` — repo map in system[2] (P43); 0 = off until the T43.6 bench
+## `[compaction]`
+
+- `strategy` = `"state+llm"` — state+llm | llm (T59.1): state+llm writes files touched and errors seen from the transcript; llm is the opt-out
 ## `[permissions]`
 
 - `mode` = `"default"` — default | plan | auto | bypass (bypass only via flag)
@@ -199,7 +202,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `timeout_ms` = `2000` — a run that takes longer is killed and the row goes blank (100 to 10000)
 ## `[hooks]`
 
-- `timeout_s` = `60` — seconds per [[hooks.<Event>]] process (a hook's own timeout_s overrides); stdin carries the Claude Code JSON payload, exit 2 blocks, stdout may carry updatedInput or additionalContext
+- `timeout_s` = `60` — seconds per [[hooks.<Event>]] process (a hook's own timeout_s overrides); stdin carries the Claude Code JSON payload, exit 2 blocks, stdout may carry updatedInput or additionalContext; a project config or a repository .claude file cannot add or change hook commands (T64.1) — they are reverted; user config and ~/.claude can
 - `fail_open` = `true` — a hook that crashes, times out or has an invalid matcher regex is warned about and skipped, never fatal (D14). matcher is an exact tool name, or — when it carries a regex metacharacter — a regex over the tool name (T22.3). Events: UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, Stop, PreCompact, PostCompact, SessionStart (payload source: startup | resume | clear; stdout additionalContext joins the volatile system block), SessionEnd, PermissionRequest, SubagentStart, SubagentStop, Notification (observe-only kind/message/title payload on ApprovalRequired, TurnDone and ask_user)
 ## `[mcp]`
 
@@ -211,6 +214,8 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `enabled` = `true` — the deferred ReadOnly `diagnostics` tool (P41): one sandboxed stdio LSP server per language per session, killed when the session ends
 - `timeout_s` = `30` — seconds per diagnostics request
 - `quiet_ms` = `500` — after the last pushed publishDiagnostics, wait this long before taking the result as complete
+- `after_edit` = `false` — edit and write end their result with the diagnostics they introduced, asked only of a language server that already runs (an edit never starts one)
+- `after_edit_ms` = `1500` — longest wait for those diagnostics after a change; a slow or dead server adds nothing
 ## `[lsp.servers.rust]`
 
 - `command` = `"rust-analyzer"` — program to spawn, found on PATH, under the same sandbox wrap as an MCP stdio server; [lsp.servers.<name>] is user config only — a project config cannot set lsp.servers (a repository must not choose a program cox runs)
@@ -231,6 +236,15 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `command` = `"gopls"`
 - `args` = `[]`
 - `extensions` = `["go"]`
+## `[tools]`
+
+- `project` = `false` — offer the `project` tool: one call runs the project's own check, test, lint or format-check command (detected from justfile, Cargo.toml, package.json, go.mod or pyproject.toml) through the same sandbox and approval path as `bash`, so it asks exactly as `bash` does for that command (T59.5)
+## `[project]`
+
+- `check` = `""` — command for `project` action check; empty detects it from the manifests. Runs under `bash`'s sandbox and permission rules, so a project config may set it
+- `test` = `""` — command for `project` action test; empty detects it
+- `lint` = `""` — command for `project` action lint; empty detects it
+- `fmt` = `""` — command for `project` action fmt, a format check that must not rewrite files; empty detects it
 ## `[voice]`
 
 - `enabled` = `false` — push-to-talk dictation in the TUI (P54), transcribed on this machine with whisper; only in a cox built with the `voice` feature. User config only: a project config cannot set any voice.* key (a repository must not switch the microphone on or choose the model file)

@@ -130,6 +130,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    /// `00000000000008_mcp_tool_trust` (T64.24): the approved hash of one
+    /// MCP tool's name, description and input schema. `status` is only
+    /// `approved`; a missing row or a different hash is decided by the
+    /// caller, which does not overwrite a changed contract.
+    mcp_tool_trust (server, tool) {
+        server -> Text,
+        tool -> Text,
+        hash -> Text,
+        status -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
     /// `00000000000007_cloud_runs` (T56.5, P56): one row per hosted
     /// cloud-agent run, keyed by backend and the backend's run id.
     cloud_runs (backend, run_id) {

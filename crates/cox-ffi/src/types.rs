@@ -28,6 +28,7 @@ use cox_app::intent::{DraftIntent, DraftKind, SendWhen};
 use cox_app::onboarding::{CheckId, CheckRow, CheckStatus};
 use cox_app::patch::TaskState;
 use cox_app::patch::{Block, BlockId, BlockKind, Status, TimelinePatch, ToolState};
+use cox_app::pointer::{Edge, Interaction, Pointer};
 use cox_app::review::LineComment;
 use cox_app::workspace::{SidebarKind, SidebarRow, SidebarSection, SidebarStatus, SubtitlePart};
 use cox_app::{
@@ -143,6 +144,32 @@ pub struct Suggestion {
     pub title: String,
     pub detail: String,
     pub prompt: String,
+}
+
+/// T37.50 (A141): what is under the pointer; `pointer` decides the shape.
+#[uniffi::remote(Record)]
+pub struct Interaction {
+    pub clickable: bool,
+    pub selectable: bool,
+    pub pressed: bool,
+    pub blocked: bool,
+}
+
+/// Which way a drag handle moves.
+#[uniffi::remote(Enum)]
+pub enum Edge {
+    Vertical,
+    Horizontal,
+}
+
+/// The pointer shape a client draws.
+#[uniffi::remote(Enum)]
+pub enum Pointer {
+    Default,
+    Action,
+    Text,
+    NotAllowed,
+    Resize(Edge),
 }
 
 /// T60.2: why a turn can or cannot start; the text is `readiness_message`.
@@ -1431,6 +1458,7 @@ pub struct Launched {
     pub failed: Option<String>,
     pub started_ms: u64,
     pub pruned: bool,
+    pub merged_from: Option<Vec<u32>>,
 }
 
 #[uniffi::remote(Record)]

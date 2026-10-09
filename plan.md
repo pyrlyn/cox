@@ -4,10 +4,43 @@ https://github.com/pyrlyn/cox
 
 A modular terminal coding agent in Rust (coxswain: steers work while models, tools, and extensions row). TUI, headless, ACP, MCP.
 
+## Cloud review findings (2026-10-08)
+
+New bugs, dead code and moves from a read-only Cursor cloud review of clean `main` (agent `bc-31eef317-b77c-5beb-976e-00002188574d`; full report: `cloud/cox.md` in the private `listepo/roadmap` repo). They form phase P64: T64.1–T64.23, ordered P0, P1, P2. **confirmed** means seen in the tree; **suspected** means plausible from the code but not proven. Crate paths are under `crates/`; line numbers are as of the review. None of these is in the task table yet: to take one, add its row and write a card the usual way (§2).
+
+| ID | Priority | Kind | Status | Where | Fix |
+| --- | --- | --- | --- | --- | --- |
+| T64.1 | P0 | bug | done | `cox-config/src/load.rs` project guards | Project and `.claude` hooks ran unsandboxed. Project hook commands are reverted; user config and `~/.claude` hooks stay. |
+| T64.2 | P0 | bug | confirmed | `load.rs:453-470`; `cox-session/src/lib.rs:231-235`; `cox-core/src/turn.rs:505` | A project `core.workspace_roots` is not guarded and becomes `ToolCx.roots` for `confine`. Revert project roots outside the git root and the user's roots. |
+| T64.3 | P0 | bug | confirmed | `cox-protocol/src/config.rs:515-517`; `GUARDED_KEYS` at `load.rs:453-470` | A project can set `providers.*.base_url` or add providers, and the user's API keys follow that URL. Revert project `base_url`, `api_key_env` and new `[providers.*]` tables. |
+| T64.4 | P1 | bug | confirmed | `load.rs:197-206`; `cox-permission/src/lib.rs:317-318` | A project may set `permissions.mode = auto` (only `bypass` is reverted). Revert any project mode wider than the user layer. |
+| T64.5 | P1 | bug | confirmed | `load.rs:228-237`; `cox-sandbox/src/sandbox/mod.rs:199-207` | A project may set `sandbox.network = true` and extra `sandbox.writable`. Revert them unless the user layer already allows them. |
+| T64.6 | P1 | bug | confirmed | `cox-permission/src/policy.rs:33-37`; no approval check in the project guards | A project may set `permissions.approval = on-failure`, which auto-runs confined `Exec`. Refuse a project approval looser than the user layer. |
+| T64.7 | P1 | bug | confirmed | `load.rs:1085-1120` (test keeps `mcp.servers["new"]`); LSP revert at `:295-323` | A project may add MCP stdio servers. Revert project-added or changed `mcp.servers` the way `lsp.servers` is reverted. |
+| T64.8 | P1 | bug | confirmed (no test run) | `cox-core/src/turn.rs:286-291`; `cox-tools/src/write.rs:102-107`; `cox-tools/src/edit.rs:80-85` | `write`/`edit` are `Concurrency::Parallel`, so same-path calls in one batch race and the last rename wins. Group the parallel batch by `touches()` path. |
+| T64.9 | P1 | bug | confirmed (documented design) | `cox-sandbox/src/sandbox/landlock.rs:53-65` | Landlock grants read of `/`, so read-only and workspace-write sandboxes can read the whole disk. Narrow reads to the workspace roots, or refuse Landlock where read isolation is required. |
+| T64.10 | P1 | bug | confirmed | `cox-session/src/mcp.rs:122-130`, `:158-165`; `cox-session/src/sandbox.rs:89-97` | An MCP stdio server that cannot be wrapped under Landlock runs with host privileges plus a notice. Refuse or quarantine it. |
+| T64.11 | P1 | bug | confirmed | `.github/workflows/ci.yml:3-11`, `:470-481` | `revert-on-failure` needs a push to `main`, but `ci.yml` has no `push` trigger, so the job never runs. Add the trigger or delete the job. |
+| T64.12 | P2 | bug | confirmed | `cox-web/src/lib.rs:48-66` | The `web_fetch` client fallback drops `.timeout(TIMEOUT)`. Fail closed, or set the timeout on the fallback. |
+| T64.13 | P2 | bug | confirmed | `cox-mcp/src/auth.rs:228-256` | The OAuth loopback forwards the first TCP connection's query; `state` is checked only later. Accept only `GET /callback` and keep listening until `state` matches. |
+| T64.14 | P2 | bug | confirmed | `cox-store/src/lock.rs:100-105` | An unreadable or corrupt session lock file becomes `Holder::default()` (pid 0). Treat it as busy with an unknown holder. |
+| T64.15 | P2 | bug | suspected | `cox-sandbox/src/path.rs:41-76`; `cox-tools/src/read.rs:89-96` | `confine` then `std::fs::read`/`write` leaves a symlink-swap window. Open with `O_NOFOLLOW`/`openat`, or serialize readers and writers per path. |
+| T64.16 | P2 | bug | suspected (a comment says it is intentional) | `cox-permission/src/lib.rs:256-268` | The Bash read-deny skips relative tokens: `deny Read(~/.ssh/**)` misses `cat id_rsa` run inside `~/.ssh`. Resolve relative tokens against the session cwd. |
+| T64.17 | P2 | bug | confirmed | `cox-protocol/src/config.rs:1416-1417`; `cox-session/src/lib.rs:552-559` | A project may point `memory.dir` anywhere. Guard it like the other path keys. |
+| T64.18 | P2 | dead code | confirmed | `cox-core/src/session.rs:53-55` (`#[allow(dead_code)]`); set at `compact.rs:413` | `State::Compacting` is written but never matched. Match it in the UI/status, or drop it and its allow. |
+| T64.19 | P2 | dead code | confirmed | `crates/cox/Cargo.toml:106-107` | `crates/cox` depends on `keyring`, but `cox/src` has no `keyring::` (unused since T37.31). Remove the dependency. |
+| T64.20 | P2 | dead code | confirmed | `cox-protocol/src/agent.rs:57` | `AgentDef::restrict` has only test callers. Call it where `cox-core`/`cox-session` open a child, or make it `pub(crate)`. |
+| T64.21 | P2 | dead code | confirmed | `report.html` (39,581 bytes, tracked, not ignored); `AGENTS.md:7` | Gitignore it if it is generated, or move it under `docs/` and update `AGENTS.md`. |
+| T64.22 | P2 | move | confirmed | `cox-provider-http/src/http.rs:84-88` and `cox-mcp/src/auth.rs:69-100` → one keyring helper | Share `keyring_enabled` and the `Entry::new("cox", …)` policy (~20 lines). Extract a `secret-store` crate only when a third consumer appears. |
+| T64.23 | P2 | move | confirmed | `brand/build.mjs:1-18` → `@pyrlyn/brand` | Upstream only the generic merge/table code. `tokens.json` and the logos stay here. |
+
+Already tracked here, not added again: `cox-cursor-cloud` with no workspace dependents and `Store::cloud_run_*` used only in `cloud_runs.rs` (dead code D2/D3, move M7) are P56 work (T56.x).
+
+Not added: the provider stack and the permission/sandbox/sanitize/mcp/config crates are already extracted (T32), so moves M1/M2 are only renames; the release workflow already lives in `pyrlyn/ci`, and `scripts/release.sh` should stay (M5); the 10 `#[allow(dead_code)]` sites are test- or feature-gated apart from T64.18; the Jev client is not dead.
+
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
 | T33.14.2 | todo | P2 | 3 | 0% | |
-| T33.18 | todo | P2 | 5 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.1 | todo | P1 | 5 | 0% | |
@@ -27,7 +60,6 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.43 | todo | P1 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
-| T33.45.1 | todo | P2 | 3 | 0% | |
 | T33.45.2 | todo | P2 | 3 | 0% | |
 | T33.45.3 | todo | P2 | 4 | 0% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
@@ -96,10 +128,7 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T58.28 | todo | P2 | 3 | 0% | |
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
-| T59.1 | todo | P1 | 4 | 0% | |
-| T59.3 | todo | P1 | 4 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T59.5 | todo | P2 | 3 | 0% | |
 | T59.6 | todo | P3 | 3 | 0% | |
 | T59.7 | todo | P3 | 4 | 0% | |
 | T59.8 | todo | P3 | 2 | 0% | |
@@ -118,6 +147,17 @@ A modular terminal coding agent in Rust (coxswain: steers work while models, too
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
+| T62.6 | todo | P3 | 1 | 0% | |
+| T62.7 | todo | P3 | 1 | 0% | |
+| T62.8 | todo | P3 | 1 | 0% | |
+| T62.9 | todo | P3 | 1 | 0% | |
+| T63.1 | todo | P2 | 2 | 0% | |
+| T63.2 | todo | P2 | 3 | 0% | |
+| T63.3 | todo | P1 | 1 | 0% | |
+| T63.4 | todo | P2 | 4 | 0% | |
+| T63.4.1 | todo | P2 | 2 | 0% | |
+| T63.4.2 | todo | P2 | 3 | 0% | |
+| T63.4.3 | todo | P2 | 3 | 0% | |
 
 ## Reference
 
@@ -141,7 +181,7 @@ How to read this file: §0 decisions are settled; §1 is the design every task m
 | D10 | **TUI = ratatui 0.30 + crossterm 0.29 in TEA form, inline viewport.** `State`, `update(State, Msg) -> State`, `view(&State, Frame)`. Inline (non-alternate-screen) rendering so native scrollback keeps the transcript. Every widget has an `insta` snapshot through `TestBackend`; end-to-end through `portable-pty` + `vt100`. | Codex made the same choices and tests them the same way (R§1.6). TEA makes `update` a pure function that a test can drive without a terminal. |
 | D11 | **Four surfaces from day one: `cox` (TUI), `cox run -p` (headless; `text`/`json`/`stream-json`), `cox acp` (Agent Client Protocol 2.0 for Zed/JetBrains/neovim), `cox mcp` (built-in tools as an MCP server).** Each is ≤ 300 LOC over the event stream. A fifth, the macOS app (P37, A67), consumes the same stream through `cox-app`; `cox-ffi` holds no logic: every exported function or method is a one-expression forward into `cox-app`, with type mapping only through `types.rs`'s `#[uniffi::remote]` declarations, and a test enforces it (A90, which replaces the 300-LOC limit and A88's count), while the view model lives in `cox-app` and the Swift code outside the Cargo workspace. | D2 makes them cheap; ACP is what gets a terminal agent into editors without an extension per IDE (R§3.2); `cox mcp` lets Claude Code or Codex borrow cox's tools. |
 | D12 | **No test touches the network or needs an API key.** `Provider` has `Scripted` (fixtures) and `Replay` (recorded cassettes, re-recorded on demand with `cox record`) implementations; tools run in `tempfile` trees; the patch parser and `str_replace` have `proptest` suites; transcripts and TUI frames are `insta` snapshots; the real binary is driven by `assert_cmd` against `COX_HOME`. Evals (Terminal-Bench adapter) are a separate, opt-in `just eval`. | A coding agent is a distributed system with a nondeterministic component; the only cheap regression suite is one that replays events instead of models (R§5). |
-| D13 | **One config file; every flag is a key.** `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `COX_<SECTION>_<KEY>` < flags, via clap 4 (derive) + figment + toml_edit. `cox config show --sources` reports provenance. `.claude/settings.json` permissions and hooks are *imported* (read-only) when present. `.env` / `.env.local` (dotenvy, T0.7) are not a config layer: they inject unset process env before figment reads `COX_*`, and never override variables already set (CI, `COX_HOME=...` tests). | Same rule as rtok D12/D14; it worked. Headless and ACP runs are launched with fixed command lines, so flags alone cannot configure them. Local API keys live in `.env`, which gitignores. |
+| D13 | **One config file; every flag is a key.** `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `COX_<SECTION>_<KEY>` < flags, via clap 4 (derive) + figment + toml_edit. `cox config show --sources` reports provenance. `.claude/settings.json` permissions are *imported* (read-only) when present, as are hooks from the user's `~/.claude`; a repository's hook commands are reverted (T64.1). `.env` / `.env.local` (dotenvy, T0.7) are not a config layer: they inject unset process env before figment reads `COX_*`, and never override variables already set (CI, `COX_HOME=...` tests). | Same rule as rtok D12/D14; it worked. Headless and ACP runs are launched with fixed command lines, so flags alone cannot configure them. Local API keys live in `.env`, which gitignores. |
 | D14 | **Everything not written by cox is untrusted, and extensions fail open.** Model output, tool results, MCP responses, hook stdout, skill files and repository instruction files pass the guards in `AGENTS.md` → Trust boundaries. A broken hook, server or skill is warned about and skipped. | Aider's credential leak and Claude Code's escape-sequence incidents are both "trusted text from the wrong side" bugs (R§2.2). |
 | D15 | **Each component is designed against the field before it is built.** Every P-phase's first task is a ≤ 1-page `docs/design/<component>.md`: the problem in one measurable number, what Claude Code / Codex / Pi / OpenCode / aider do, what cox does and why it is at least as good, and what would falsify it. Written by the `code` tier; reviewed, not written, by `think`. | rtok D15. Copying a competitor caps cox at that competitor. |
 | D16 | **Observability is `tracing` with an optional OpenTelemetry GenAI exporter.** Spans carry `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.*`. Off by default; `cox stats` reads the ledger locally. | Codex ships opentelemetry 0.31 (R§1.3); the GenAI semconv is still experimental, so it stays behind a feature flag. |
@@ -175,7 +215,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents; login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell) |
 | `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
 | `cox-ffi` | the macOS app's UniFFI surface (T37.14): one tokio runtime, `App` and `SessionHandle` objects, the foreign `AppHost` trait, `#[uniffi::remote]` mirrors of cox-app types, a fixture recorder. `staticlib` + `lib`; the only crate that depends on uniffi | uniffi 0.32.2 (proc-macros, no UDL; default features off); dev: syn 3.0.5 (`full`, `parsing`; T37.39.1: `tests/forward_only.rs` parses the FFI sources); async-trait (MIT OR Apache-2.0): the async `AppHost` methods UniFFI exports (P51, P52) |
-| `desktop/` | the macOS app (P37, not a Cargo crate): Swift packages under `desktop/macos/Packages/`, the design tokens and their generator under `desktop/design/` | node 24.21.0 (mise) with npm `style-dictionary` 5.5.5 (T37.17: DTCG tokens → Swift, asset colours, CSS); SwiftLint 0.65.1 (mise, aqua; T37.18: DS§9 no-literal rules) and SwiftLintPlugins at the same version in each package; `swift-format` from the Xcode toolchain; swift-collections 1.7.1 (T37.16: `OrderedDictionary` timeline store); swift-snapshot-testing 1.19.6 (T37.19: `CoxUI` snapshot tests) |
+| `desktop/` | the macOS app (P37, not a Cargo crate): Swift packages under `desktop/macos/Packages/`, the design tokens and their generator under `desktop/design/` | node 24.21.0 (mise) with npm `style-dictionary` 5.5.5 (T37.17: DTCG tokens → Swift, asset colours, CSS); SwiftLint 0.65.1 (mise, aqua; T37.18: DS§9 no-literal rules) and SwiftLintPlugins at the same version in each package; `swift-format` from the Xcode toolchain; swift-collections 1.7.1 (T37.16: `OrderedDictionary` timeline store); swift-dependencies 1.17.1 (the stores' launch-wide services as `@Dependency` values, DT§4.6); swift-snapshot-testing 1.19.6 (T37.19: `CoxUI` snapshot tests) |
 | `desktop/windows/` | the Windows app (P58, A127; planned, not a Cargo crate): a WinUI 3 + C# solution over `cox-ffi`'s C# bindings, logic in `cox-app` | planned by A127: .NET SDK 10.0 LTS (10.0.12), Windows App SDK 2.5.1, uniffi-bindgen-cs on uniffi 0.32 (blocked, T58.1); candidates CommunityToolkit.Mvvm 8.4.2, xunit.v3 4.0.1, FlaUI.UIA3 5.0.0, Verify.XunitV3 33.1.5 (`research.md` §10) |
 | `cox-protocol` | `Submission`, `Event`, `Item`, `ToolCall`, `ToolResult`, `Usage`, `Config`, traits `Provider`, `Tool`, `Store`, `Hook` | serde, serde_json, schemars 1, thiserror 2, base64 0.23 (`image`, T40.1) |
 | `cox-core` | `Session` state machine, turn loop, context assembly, cache breakpoints, `Router` (job → tier → model), compaction, budget, subagent spawning | tokio 1, tracing 0.1, base64 0.23 (T37.6: attached text files) |
@@ -183,18 +223,18 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-provider` | the provider registry and `from_env`; `Scripted` and `Replay` (the `Provider` glue over `cox-provider-testkit`); usage extraction; re-exports the wires at the old `anthropic` and `openai` paths | reqwest 0.12 (rustls) |
 | `cox-provider-anthropic` | the Anthropic Messages wire (T32.13; split out of `cox-provider`): request building, stream parsing, wire types from the vendored spec, `schema/` | reqwest 0.12, typify 0.8 (build.rs, T30.10/T30.12) |
 | `cox-provider-openai` | the OpenAI Responses and Chat wires (T32.14; split out of `cox-provider`) | reqwest 0.12, async-openai 0.42 (`response-types` only, T30.11) |
-| `cox-tools` | `read`, `grep`, `glob`, `edit`, `apply_patch`, `write`, `bash`, `todo`, `ask_user`, `agent`, `tool_search`, `web_fetch`, `expand`; the LSP stdio JSON-RPC client (`lsp::client`, T41.2) | similar 3.2, nix, thiserror (`LspError`, T41.2), url 2.5 (LSP `file://` URIs, T41.3) |
+| `cox-tools` | `read`, `grep`, `glob`, `edit`, `apply_patch`, `write`, `bash`, `todo`, `ask_user`, `agent`, `tool_search`, `web_fetch`, `expand`, `docs_resolve` / `docs_query` / `docs_fetch` (T65.1); the LSP stdio JSON-RPC client (`lsp::client`, T41.2) | similar 3.2, nix, thiserror (`LspError`, T41.2), url 2.5 (LSP `file://` URIs, T41.3), sha2 0.11 (docs cache digest, T65.1; already a workspace dependency), zstd 0.13 (docs.rs `json.zst`, T65.1; already in the lockfile via wasmtime) |
 | `cox-sandbox` | `path::confine`, `sandbox::{seatbelt,bwrap,landlock}` (T32.3; split out of `cox-tools`): path confinement to the workspace roots and the platform sandbox front door. `cox-tools` re-exports both as `path` and `sandbox` | landlock 0.4.7, seccompiler 0.5, nix |
 | `cox-patch` | the V4A patch engine (T32.6; split out of `cox-tools`): `parse` text ↔ AST, `stage` progressive hunk matching. Pure: no filesystem, no `ToolCx`; the `apply_patch` `Tool` impl stays in `cox-tools` (`v4a::tool`) so `path::confine` keeps one call site. `cox-tools` re-exports it as `v4a` | proptest 1.11 (dev) |
 | `cox-syntax` | tree-sitter and its grammars (T32.4; split out of `cox-tools`): `outline` (signature extraction for `read`'s outline mode) and `parse_bash` (the parser behind `bash`'s risk classifier). `cox-tools` re-exports `outline` at its old path | tree-sitter 0.27 + bash/rust/typescript/python/go grammars |
 | `cox-tokens` | token counting (T32.10; split out of `cox-provider`): `estimate`, `count_openai` (tiktoken), `count_anthropic` (the count-tokens endpoint). `cox-provider` re-exports it at the old `tokens` path | tiktoken-rs 0.12, reqwest 0.12 |
-| `cox-permission` | the permission `Engine` (T32.8; split out of `cox-core`): `Outcome`, the rule grammar, path rules. Pure; `cox-core` re-exports it at the old `permission` path | globset (path rules, T2.2) |
+| `cox-permission` | the permission `Engine` (T32.8; split out of `cox-core`): `Outcome`, the rule grammar, path rules. Pure; `cox-core` re-exports it at the old `permission` path | globset (path rules, T2.2); dev only: `cox-config`, `tempfile` (T56.4's A122 test) |
 | `cox-search` | the grep and glob engines (T32.5; split out of `cox-tools`): `grep::search`, `glob::find`, `rank_by_query`, `workspace_files`. Pure; the `GrepTool`/`GlobTool` impls stay in `cox-tools` so `path::confine` keeps one call site | ignore 0.4.33, grep-searcher 0.1.17, grep-regex 0.1.14, globset, nucleo 0.5 |
 | `cox-web` | the `web_fetch` engine (T32.7; split out of `cox-tools`): client, streaming GET with cancellation and a byte cap, HTML → text. `WebFetchTool` stays in `cox-tools` | reqwest 0.12 |
 | `cox-telemetry` | tracing setup and the OpenTelemetry stack behind the `otel` feature (T32.9; split out of `cox`); `init` takes plain values, not `Config` | tracing-subscriber, tracing-appender 0.2, opentelemetry 0.32 (+ sdk, otlp, tracing bridge, appender), thiserror |
 | `cox-provider-http` | HTTP plumbing shared by every wire (T32.12; split out of `cox-provider`): `http` (client, `resolve_key`, `resolve_key_with`, error mapping), `retry`, `sse`. `cox-provider` re-exports all three at their old paths | reqwest 0.12, keyring 4, eventsource-stream 0.2.3 |
 | `cox-provider-testkit` | the pure scenario and cassette helpers behind `Scripted`/`Replay` (T32.11; split out of `cox-provider`): scenario parsing, event building, cassette hashing, secret redaction, cassette writing | figment, sha2 |
-| `cox-mcp` | MCP client (stdio, Streamable HTTP, OAuth), server discovery (`.mcp.json`, config), tool namespacing `mcp__<server>__<tool>`, `cox mcp` server | rmcp 3.2 (`client`, `server`, `auth`, `transport-io`, `transport-child-process`, `transport-streamable-http-client-reqwest`), async-trait (server tools as `Tool` impls, T7.6), keyring 4 (OAuth tokens as `cox/mcp/<server>`, T22.5), reqwest 0.13 (the version rmcp implements its HTTP client trait for; the workspace row stays 0.12 for the providers) |
+| `cox-mcp` | MCP client (stdio, Streamable HTTP, OAuth), server discovery (`.mcp.json`, config), tool namespacing `mcp__<server>__<tool>`, `cox mcp` server, tool-contract quarantine (T64.24) | rmcp 3.2 (`client`, `server`, `auth`, `transport-io`, `transport-child-process`, `transport-streamable-http-client-reqwest`), async-trait (server tools as `Tool` impls, T7.6), keyring 4 (OAuth tokens as `cox/mcp/<server>`, T22.5), reqwest 0.13 (the version rmcp implements its HTTP client trait for; the workspace row stays 0.12 for the providers), sha2 (the tool-contract hash, already a workspace dependency, T64.24) |
 | `cox-store` | `~/.cox/cox.db` Diesel models, `schema.rs`, embedded migrations, rollout writer/reader, archive, FTS5 search (`sql_query`), ledger queries | diesel 2.2 (`sqlite`, `returning_clauses_for_sqlite_3_35`, `r2d2` off), diesel_migrations 2.2, libsqlite3-sys 0.30 (`bundled`), directories 6, keyring 4 |
 | `cox-ext` | instruction-file hierarchy, `SKILL.md`, commands, subagent definitions, hook runner (Claude JSON protocol), `.claude/settings.json` import | serde_yaml (frontmatter), shlex, tokio + nix `signal` (hook runner: `sh -c` with a process-group kill on timeout, T7.4), regex 1 (hook `matcher` regexes, T22.3) |
 | `cox-sanitize` | `sanitize`, `sanitize_with`, `truncate` (T5.6; split out of `cox-tui` by T32.1): strips escape sequences, C0 controls, bidi overrides and zero-width runs from untrusted text before it reaches the terminal; width-aware truncation. `cox-tui` re-exports it as `text` | unicode-width 0.2 |
@@ -203,7 +243,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-tui` | TEA app, composer (tui-textarea-2 0.13, the ratatui-0.30 fork of tui-textarea 0.7), transcript cells, streaming markdown (pulldown-cmark 0.13 → spans; the plan said 0.10, same Tag/TagEnd API), syntect 5 highlighting, diff view, approval modal, status line, `/` commands, `@` file picker, `text::sanitize`, OSC 11 background detection for `tui.theme = "auto"` (T22.6), theme files and `/theme` (T24.2) | ratatui 0.30.2 (`scrolling-regions`, T23.2), crossterm 0.29, nucleo 0.5, pulldown-cmark 0.13, syntect 5.3 (fancy-regex, no onig), two-face 0.3 (`syntect-fancy`; ~250 syntaxes, +0.33 MiB — T24.3), unicode-width 0.2, arboard 3, terminal-colorsaurus 1.0, toml_edit 0.25, similar 3.2 (word diffs, the approval modal's proposed edit — T24.5), base64 0.23 (the OSC 52 payload, A81) |
 | `cox-acp` | Agent Client Protocol 2.0 server: session/prompt, permission requests, client fs/terminal | agent-client-protocol 2.0 |
 | `cox-plugin-api` | plugin manifest (`plugin.toml`), ABI v1 payloads, TUI widget tree, capability names; schemas `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` with drift tests. Pure; builds for `wasm32-unknown-unknown` so the guest SDK can use it; `cox-protocol` re-exports it as `plugin` (A52, P33) | serde, serde_json, schemars 1, thiserror |
-| `cox-plugin` | the WASM host: discovery, package digest, grant check, one worker per plugin, host functions (`cox:host/v1`), and the protocol-trait adapters `PluginHooks`, `WasmTool`, `PluginProvider`, `EventTap`, `Advisor` (A52, P33) | extism 1.30.0 (`default-features = false`: no ureq, no URL or file loading; `wasmtime-exceptions` on, A61), wasmtime 43 (declared only for the `anyhow` feature extism needs without its defaults), sha2 (package digest), figment (`plugin.toml`), reqwest 0.12 (`cox_http`, T33.14.1); linked into `crates/cox` behind the default-on `plugins` feature (A55) |
+| `cox-plugin` | the WASM host: discovery, package digest, grant check, one worker per plugin, host functions (`cox:host/v1`), and the protocol-trait adapters `PluginHooks`, `WasmTool`, `PluginProvider`, `EventTap`, `Advisor` (A52, P33) | extism 1.30.0 (`default-features = false`: no ureq, no URL or file loading; `wasmtime-exceptions` on, A61), wasmtime 43 (declared only for the `anyhow` feature extism needs without its defaults), sha2 (package digest), figment (`plugin.toml`), reqwest 0.12 (`cox_http`, T33.14.1), tokio-util (`Provider` cancellation, T33.18); linked into `crates/cox` behind the default-on `plugins` feature (A55) |
 | `cox-plugin-sdk` (`plugins/sdk`, the separate guest workspace, never a `crates/*` member) | the Rust guest SDK (T33.27): typed wrappers for every PL§4 export and `cox:host/v1` host function, the `register!` macro, and the wire (`{"Ok"\|"Err"}` host replies) that other-language guests copy; builds for `wasm32-unknown-unknown` | extism-pdk 1.4.1 (`default-features = false`: no extism `http`, no msgpack), cox-plugin-api (path) |
 | `cox-voice` | push-to-talk dictation (P54, A123): `Transcriber` (whisper.cpp through `whisper-rs`, model loaded once), `Recorder` (default input device, mono, resampled to 16 kHz, capped length), and the `Dictation` impl the TUI receives. Its own crate under D1: a heavy C++ build and platform audio. Behind `crates/cox`'s `voice` feature, off by default; audio never leaves the process | whisper-rs 0.16.0 (Unlicense; whisper.cpp MIT; cmake), cpal 0.18.2 (Apache-2.0), rubato 5.0.0 (MIT OR Apache-2.0) |
 | `cox-cursor-cloud` | the Cursor Cloud Agents API client (P56, A123; P56 under way, terms go-ahead given 2026-10-03): hand-written wire types (A40 step 3, never generated from or copied out of Cursor's unlicensed OpenAPI file), create/run/stream/cancel/usage. The one place a socket to `api.cursor.com` opens; not a `Provider`; the host driver that maps runs to task events lives in `cox-session` | cox-provider-http (reqwest, eventsource-stream), serde; no new dependency |
@@ -496,7 +536,7 @@ endpoint = ""
 redact = true
 ```
 
-Precedence (D13): embedded defaults < `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `.claude/settings.json` (permissions/hooks/env only, imported) < `COX_<SECTION>_<KEY>` (e.g. `COX_TIERS_CODE_MODEL`) < CLI flags. Before figment runs, `dotenvy` loads `.env` then `.env.local` walking up from cwd (T0.7); missing files are ignored; already-set variables are left alone, so a key that arrived only via `.env` still shows as `env` in `cox config show --sources`. Project config may not raise `budget.*`, set `permissions.mode = "bypass"`, set `sandbox.mode = "danger-full-access"` or set `tiers.think.confirm = false`; violations are reported by `cox config show` and ignored. `cox config show --sources` prints every effective key with its origin; `cox config set <key> <value>` edits the user file with `toml_edit` preserving comments.
+Precedence (D13): embedded defaults < `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `.claude/settings.json` (permissions/hooks/env only, imported) < `COX_<SECTION>_<KEY>` (e.g. `COX_TIERS_CODE_MODEL`) < CLI flags. Before figment runs, `dotenvy` loads `.env` then `.env.local` walking up from cwd (T0.7); missing files are ignored; already-set variables are left alone, so a key that arrived only via `.env` still shows as `env` in `cox config show --sources`. Project config may not raise `budget.*`, set `permissions.mode = "bypass"`, set `sandbox.mode = "danger-full-access"`, set `tiers.think.confirm = false` or add hook commands (T64.1); violations are reported by `cox config show` and ignored. `cox config show --sources` prints every effective key with its origin; `cox config set <key> <value>` edits the user file with `toml_edit` preserving comments.
 
 ### 1.7 Storage schema (`cox-store`)
 
@@ -544,6 +584,11 @@ CREATE TABLE memory (
 );
 CREATE VIRTUAL TABLE memory_fts USING fts5(name, body, project_slug UNINDEXED);
 CREATE VIRTUAL TABLE rollout_fts USING fts5(session_id UNINDEXED, turn UNINDEXED, text);
+CREATE TABLE mcp_tool_trust (
+  server TEXT NOT NULL, tool TEXT NOT NULL, hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('approved')), updated_at TEXT NOT NULL,
+  PRIMARY KEY (server, tool)
+);
 ```
 
 ORM rules (D9): the DDL above is `migrations/<stamp>_init/up.sql` + `down.sql`, embedded with `diesel_migrations::embed_migrations!` and applied on `Store::open`; `schema.rs` is generated by `diesel print-schema` and committed (a test asserts it matches the migrations); each table has a `Queryable`/`Insertable` model in `cox-store/src/models.rs`; FTS5 tables are created and queried with `diesel::sql_query` and `QueryableByName` structs; one `SqliteConnection` behind a `Mutex` (no pool — a single-process CLI), `PRAGMA`s set on open. No other crate may depend on `diesel`; the direction test in T0.1 also asserts that.
@@ -552,7 +597,7 @@ Rollout line format: `{"seq":17,"ts":"2026-09-02T10:11:12.345Z","event":{"type":
 
 ### 1.8 Permission rules and the decision algorithm (`cox_core::permission::Engine`)
 
-Rule grammar (Claude Code's, verbatim): `Tool`, `Tool(subject)`, `Tool(prefix:*)`; file tools take a glob (`Read(~/.ssh/**)`, `Edit(src/**)`), `Bash` takes a command prefix (`Bash(npm run test:*)`, `Bash(git commit:*)`), MCP tools match `mcp__<server>__<tool>` or `mcp__<server>__*`, `WebFetch(domain:example.com)`. Tool names are matched case-insensitively against cox's names and their Claude aliases (`Read`=`read`, `Edit`=`edit`, `Write`=`write`, `Bash`=`bash`, `Grep`=`grep`, `Glob`=`glob`, `WebFetch`=`web_fetch`, `Agent`=`agent`).
+Rule grammar (Claude Code's, verbatim): `Tool`, `Tool(subject)`, `Tool(prefix:*)`; file tools take a glob (`Read(~/.ssh/**)`, `Edit(src/**)`), `Bash` takes a command prefix (`Bash(npm run test:*)`, `Bash(git commit:*)`), MCP tools match `mcp__<server>__<tool>` or `mcp__<server>__*`, `WebFetch(domain:example.com)`, `CloudAgent(<github owner>/<repo>)` (T56.4: asks in every mode including `auto` and `bypass`, denied in `plan`, lifted only by an exact allow rule in the user's own config; a bare `CloudAgent` allow, a session grant and a project `allow` never lift it). Tool names are matched case-insensitively against cox's names and their Claude aliases (`Read`=`read`, `Edit`=`edit`, `Write`=`write`, `Bash`=`bash`, `Grep`=`grep`, `Glob`=`glob`, `WebFetch`=`web_fetch`, `Agent`=`agent`).
 
 Decision order for a `ToolCall` with `risk` and `subject`:
 
@@ -613,11 +658,15 @@ Microcompaction (no model call): when building a request, tool results older tha
 | `todo` | `items: [{id, text, state}]` | ReadOnly | rendered list | state drives the TUI todo panel |
 | `expand` | `id` (archive id); `lines: "a-b"` | ReadOnly | archived bytes (capped, further pointers) | deferred: false (always present, tiny schema) |
 | `ask_user` | `question`; `options: [..]` | ReadOnly | the answer | blocks the turn; headless → error unless `--answer` |
-| `tool_search` | `query` | ReadOnly | up to 5 matching deferred tool specs, appended to `system[0]` | BM25 over name + description |
+| `tool_search` | `query`; `detail: "summary"\|"full"` (default `summary`) | ReadOnly | up to 5 hits as `{name, description}`, or the full spec when `detail` is `full`; `structured.discovered` is always the names | BM25 over name + description; a summary carries no `input_schema` (T65.2) |
+| `mcp_exec` | `code`; `timeout_s` (clamped to 1–30, default 30) | Write | the program's final print only, capped at 8 000 bytes | deferred false, with `bash` and `tool_search`; one new sandboxed `python3 -I -u` per call; `describe` is name and description, never `input_schema` (T65.1) |
 | `web_fetch` | `url`; `max_bytes` | ReadOnly (network) | readable text | Anthropic server tool passthrough when available; else reqwest + readability; domain rules |
 | `diagnostics` | `path` | Exec until its language server runs, then ReadOnly | `path:line:col: severity: message [source code]`, sorted, summary last | deferred; one lazily started LSP server per language under the session sandbox, killed at session end; with no server an is_error result that points to `bash` (T41.6) |
 | `agent` | `task`; `preset: "explore"\|"shell"\|<name>`; `tier`; `tools: [..]`; `budget_usd`; `background: bool` | inherits max of its tools | result text ≤ cap, summarised on cheap if over | subagent = nested `Session` with its own rollout, parent id set |
 | `memory_save` / `memory_search` | `name, body` / `query` | Write / ReadOnly | id / hits | P10 |
+| `docs_resolve` | `name` | ReadOnly | `cargo/<name>/<version>` | deferred; `Cargo.lock` text, no `cargo` subprocess (T65.1) |
+| `docs_query` | `name`, `query`; `version` | ReadOnly | at most 5 snippets, 400 characters each | deferred; `~/.rtok/docs/<name>/<version>` if that directory exists, else `~/.cox/docs`; `name=llms` searches a root `llms.txt` and downloads nothing (T65.1) |
+| `docs_fetch` | `name`; `version` | ReadOnly | cache summary | deferred; one GET of `https://docs.rs/crate/<name>/<version>/json.zst`, no `Authorization` header, 30 s timeout; subject is that URL; version comes from the lockfile, never `latest`, unless the lockfile has no entry (T65.1) |
 | `mcp__<server>__<tool>` | server's schema | from server annotations, default Write | server result, archived like any tool | deferred by default |
 
 Every tool's `subject()` is what rules match on: the confined path, the command line, the URL, or the namespaced MCP name.
@@ -636,6 +685,8 @@ cox config show [--sources] | get <key> | set <key> <value> | path
 cox doctor [--json]
 cox record <name> -p <prompt> [--redact] [--provider ...] re-record a cassette with a real key
 cox mcp [--allow-write] [--tools a,b]                serve built-in tools over MCP stdio
+cox mcp login|logout <server>                        HTTP server OAuth token (T22.5)
+cox mcp trust [<server>]                             approve one server's tool definitions, or list pending and changed (T64.24)
 cox acp                                              Agent Client Protocol server on stdio
 cox ext list [--json]                                instruction files, skills, commands, agents, hooks, MCP servers in effect
 cox self update [--version v]
@@ -834,13 +885,6 @@ Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43;
 Depends: T33.9, T33.43 (preopens stay off until wasmtime ≥ 48, A55) · Size: ~120 · Files: `crates/cox-plugin/src/fs.rs`
 Goal: WASI preopens come only from `fs` and pass `confine`; reads mount `ro:`; `.git` and `.cox` are never writable. WASI is on only when `wasi = true` or `fs` is set.
 Check: `fs_write_to_dot_git_is_refused`, `wasi_ctx_has_no_env`.
-
-#### T33.18 Providers, ABI form (`PluginProvider`)
-
-Depends: T33.14.1, T33.17 · Size: ~190 · Files: `crates/cox-plugin/src/provider.rs`, `src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox/src/session.rs`
-Goal: with `api = "plugin"`, `stream()` calls `cox_provider_stream` and forwards `ProviderEvent`s. The guest's `cox_http` is limited to `base_url`'s host, and the host injects the `auth` header from `resolve_key`, so the key never enters wasm memory. Missing usage is estimated; usage below half of cox's estimate is replaced by the estimate with one warning.
-Plan (amended 2026-09-26 for the Jev use case, R§4.3.6 J§4.3): `Router::pick` and `backend_for_with` register ABI provider sections by name, so a tier — including a legacy `typesafe` tier — resolves to them, not only to `providers.custom`. The ledger gets a `ProviderId::Plugin` bucket whose provider string is the section name, the same shape `Local` uses for compatible providers; `provider_name` returns it. `COX_PROVIDER=scripted`/`replay`, which short-circuits provider construction for the main turn, still builds plugin providers, so a scripted-main e2e can reach a real (wiremocked) plugin provider.
-Check: `provider_key_never_reaches_guest` (the WAT guest echoes its request headers, and the test asserts the key is absent); `underreported_usage_is_replaced_by_estimate`; `every_request_has_a_usage_row` with a plugin provider; `plugin_provider_section_resolves_by_name`; `scripted_provider_mode_still_builds_plugin_providers`.
 
 #### T33.34 Go: SDK wrapper, template, example
 
@@ -1110,12 +1154,6 @@ Steps:
 Check: the API structure section is in `docs/design/plugins.md` with its §6 amendment; manifest and ABI drift tests (`docs/plugin.schema.json`, `docs/plugin-abi.schema.json`) pass with the new fields; a `cox-plugin` test loads the example in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice (or `NotOnThisSurface`) on the other; `docs/plugins.md`, `docs/ru/` and `docs/uk/` cover all three parts; `just test` green.
 
 Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and amendment A134, approved by the creator; the build is T33.45.1–T33.45.10 below. This card closes when they are done.
-
-#### T33.45.1 Manifest and grant: surfaces and surface tables
-
-Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/plugin.schema.json` · Design: `docs/design/plugins.md` §15, A134
-
-Check: `surfaces_default_to_every_surface`, `surface_table_outside_its_surfaces_is_rejected`, `ui_keys_is_an_alias_of_terminal_keys`, `stored_ui_keys_grant_covers_terminal_keys` and the manifest schema drift test pass.
 
 #### T33.45.2 ABI: surface payloads
 
@@ -1935,7 +1973,7 @@ Check: the spike's test passes or the card records the failure with its cause.
 
 Rationale in §6 A132. Idea-only, clean-room: Empryo is BSL 1.1, no code copied. Source: the study of [proxysoul/Empryo](https://github.com/proxysoul/Empryo) (formerly SoulForge) at `669ff91`; each card cites Empryo files for the idea only, and the implementation is written from the card. Line numbers are at `ef07970`.
 
-**Order.** T59.1, T59.2 and T59.3 first, in parallel. Then T59.4 (after T43.6 lands its numbers), T59.5, T59.6, T59.7. Then T59.8, T59.9 and T59.10 last.
+**Order.** T59.1, T59.2 and T59.3 first, in parallel. Then T59.4 (after T43.6 lands its numbers), T59.5, T59.6, T59.7. Then T59.8, T59.9 and T59.10 last. T59.11 (outline spans) is done; T59.8 depends on it.
 
 Where each of the 14 portable ideas from the study lands in cox:
 
@@ -1953,62 +1991,6 @@ Where each of the 14 portable ideas from the study lands in cox:
 12. Memory RRF / file affinity — T59.10.
 13. Edit robustness — already there: `edit` has the whitespace-insensitive line-window fallback (`crates/cox-tools/src/edit.rs:162-227`); no card.
 14. Shell compress / tee — T59.2 (fold repeated lines); the "tee" half is the existing archive (`cx.archive`).
-
-#### T59.1 Deterministic working state pre-fills compaction
-
-Model: opus · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 4
-
-Goal: after `compact`, the summary lists every file the session read, edited or created, every failing command and the open task, built from the transcript and not from the model's recall, and the model's summary costs at least 40 % fewer output tokens.
-
-Files:
-- `crates/cox-core/src/compact.rs`
-- `crates/cox-core/src/prompts/compact.md`
-- `crates/cox-protocol/src/config.rs`
-
-Steps:
-1. A pure `working_state(messages: &[Message]) -> WorkingState` next to `transcript` (`compact.rs:127`): walk tool calls and results (content types in `crates/cox-protocol/src/types.rs:1502-1532`) and collect `(path, action)` with action read / edited / created (edit, write, `apply_patch`), failing `bash` commands with their exit code and last error line, and the last user request. Ordered by first appearance, so it is deterministic (Empryo idea: `src/core/compaction/working-state.ts`, `extractor.ts`).
-2. `summarise` (`compact.rs:341`) renders the state as the "Files touched" and "Errors seen" sections that `prompts/compact.md` already asks for, and tells the model to write only the narrative sections; the final summary is state block + model text. The model text stays under `MAX_SUMMARY_TOKENS` (`compact.rs:23`).
-3. `compaction.strategy = "llm" | "state+llm"` in `config.rs`, default `llm` until the Check numbers are in `research.md`; regenerate schemas.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: a unit test over a scripted transcript asserts every touched path and the failing command appear in the summary with `state+llm`; a `just bench` compaction replay records path recall (100 % with `state+llm`), compact output tokens (−40 %) and pass rate against `llm` in `research.md`; the default flips only if the pass rate does not drop.
-
-Out of scope: per-file line ranges, dropping the model call entirely, the TUI view of the state.
-
-#### T59.3 `edit` and `write` report the diagnostics they introduced
-
-Model: opus · Status: open · Depends: T41.6 · Size: ~190 · Priority: P1 · Complexity: 4
-
-Goal: when a language server for the file is already running, `edit`/`write` end their result with the diagnostics that are new since before the change (at most 10 lines, errors first), so the model does not spend a `bash` check call to find its own error; bench check-call count −20 %.
-
-Files:
-- `crates/cox-tools/src/lsp/mod.rs`
-- `crates/cox-tools/src/edit.rs`
-- `crates/cox-session/src/tools.rs`
-
-Steps:
-1. Move the server pool out of `DiagnosticsTool` (`lsp/mod.rs:40-49`) into a shared `Arc<LspPool>` with `running_for(path) -> Option<Arc<Server>>` that never spawns (the §1 `diagnostics` row, `plan.md:591`, starts a server lazily from `diagnostics` only; an edit must never start one). Build it once in the registry (`cox-session/src/tools.rs:27`) and hand it to `diagnostics`, `edit` and `write` (`WriteTool`, `write.rs:65`, gets the same 3-line hook).
-2. In `EditTool` (`edit.rs:33`): before writing, take the server's last diagnostics for the file; after writing, call `Server::diagnostics` (`server.rs:253`) with a short wait (`lsp.after_edit_ms`, default 1500) and append only the set difference keyed by (range start line, code, message). A dead or slow server adds nothing — never an error and never a retry.
-3. `[lsp] after_edit = false` by default in `cox-protocol` config; the fake launcher (`lsp/mod.rs:65`) drives the tests.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: tests with the fake server show the new error after an edit that introduces it, nothing when the server is not running, and nothing extra for errors that existed before; `research.md` has the bench row (bash check calls −20 %, pass rate not lower).
-
-Out of scope: starting servers, code actions, diagnostics for files the edit did not touch.
 
 #### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
 
@@ -2037,34 +2019,6 @@ mise exec -- cargo fmt --check
 Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
 
 Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
-
-#### T59.5 `project` tool: run the project's own check command
-
-Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
-
-Goal: one `project` tool call with `action = check | test | lint | fmt` runs the detected command (`just check`, `cargo test`, `npm test`, `go test ./...`, …) through the normal `bash` sandbox and approval path and returns the folded result, replacing the model's guess of the command; bench mean tool calls per task −5 %.
-
-Files:
-- `crates/cox-tools/src/project.rs` (new)
-- `crates/cox-session/src/tools.rs`
-- `crates/cox-protocol/src/config.rs`
-
-Steps:
-1. Detection in order: `[project]` config, `justfile` recipes, `Cargo.toml`, `package.json` scripts, `go.mod`, `pyproject.toml` (Empryo idea: `src/core/tools/project.ts`, `toolchain.ts`).
-2. Run through the existing `bash` tool's executor so `Engine` approval and the sandbox are unchanged; output passes T59.2's folding.
-3. Register behind `tools.project = false`.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: detection table tests for each manifest; an approval test shows `project` asks exactly like `bash` for the same command; bench row in `research.md`.
-
-Out of scope: installing toolchains, parsing test output into structures.
 
 #### T59.6 LSP `definition` and `references` tools on the running servers
 
@@ -2122,7 +2076,7 @@ Out of scope: rename without a server, file moves.
 
 #### T59.8 `read` by symbol name
 
-Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
+Model: sonnet · Status: open · Depends: T59.11 · Size: ~120 · Priority: P3 · Complexity: 2
 
 Goal: `read(path, symbol = "Foo::bar")` returns only that definition's lines from the `cox-syntax` outline, so the model stops reading a whole file to see one function.
 
@@ -2131,7 +2085,7 @@ Files:
 - `crates/cox-syntax/src/outline.rs`
 
 Steps:
-1. Optional `symbol` input in `read`'s spec (`read.rs:48`) and handling in its call path (`read.rs:81`); resolve via `outline` spans; on several matches list them with lines, on none fall back to the existing "closest" message (Empryo idea: `read-file.ts`).
+1. Optional `symbol` input in `read`'s spec (`read.rs:48`) and handling in its call path (`read.rs:81`); resolve via `outline` spans (each row is already `start-end: signature`, T59.11); on several matches list them with lines, on none fall back to the existing "closest" message (Empryo idea: `read-file.ts`).
 2. The line range then goes through the existing ranged-read path, so caps and archives are unchanged.
 
 Check:
@@ -2508,6 +2462,710 @@ Out of scope: changing which crates depend on which.
 
 ---
 
+### P63 — Desktop architecture and test hardening (goal: SessionStore's patch rules are checked against generated inputs, not only hand-picked cases; a pull request re-runs only the Swift packages its change can affect; `CoxModel` and `CoxCore` cannot import AppKit or SwiftUI; the stores get their clients from one dependency system instead of initializer plumbing)
+
+Rationale in §6 A141. Found by reading `desktop/macos` (2026-10-07): `SessionStore.apply` (`Packages/CoxModel/Sources/CoxModel/SessionStore.swift`) is covered by fixture replays and a few hand-written patch lists in `SessionStoreTests.swift`; `desktop-macos` runs `swift test` in all six packages on every Swift or Rust change, 1,109 reference images included (1,083 in `CoxUI`, 26 in `CoxTranscript`); no rule stops a UI framework import in `CoxModel` or `CoxCore`, although neither has one today; `AppModel` (`App/CoxApp.swift`) passes `LaunchCore`'s clients into every store by hand.
+
+Each card is written so an agent can do it from the card alone: what to install, where, the files, the code and the check. Libraries were checked on 2026-10-07 against their GitHub repositories and releases:
+
+| Asked for | Found | Used instead |
+| --- | --- | --- |
+| `swift-check` | No Swift property-testing package by that name. `github.com/IronVelo/swift-check` is a Rust crate for searching bytes. | [x-sheep/swift-property-based](https://github.com/x-sheep/swift-property-based) 2.0.1 (2026-09-25; product `PropertyBased`; Swift Testing native, Swift 6.2+, shrinking, `.fixedSeed`; MIT) |
+| `swift-testing-expectations` | No such package. The nearest, [dfed/swift-testing-expectation](https://github.com/dfed/swift-testing-expectation) 0.1.4 (2025-05-20), is an async `Expectation` for Swift Testing, not property testing. | as above |
+| SwiftCheck | [typelift/SwiftCheck](https://github.com/typelift/SwiftCheck): last release 0.12.0 (2019-03-28), last push 2022-04-03, XCTest-era. Dead, so not added. | as above |
+| swift-gen | [pointfreeco/swift-gen](https://github.com/pointfreeco/swift-gen): generators only, no runner and no shrinking. PropertyBased ships a fork of it. | as above |
+| `swift-architecture-check` | No such package. Real architecture linters exist — [Harmonize](https://github.com/perrystreetsoftware/Harmonize), [SolidLikeARock](https://github.com/nenadvulic/solid-like-a-rock) — but each adds SwiftSyntax or another binary. | a SwiftLint `custom_rules` entry: SwiftLint 0.65.1 is already pinned (`mise.toml`) and its build-tool plugin already runs on every package target |
+| swift-dependencies | [pointfreeco/swift-dependencies](https://github.com/pointfreeco/swift-dependencies) 1.17.1 (2026-08-28), `swift-tools-version: 6.4`, so it needs Xcode 27's Swift 6.4 — the toolchain CI pins and the one in use locally. MIT. | itself |
+
+**Order.** T63.3 first (one config change). T63.1 any time. T63.2 after T61.4 if that card is still open, since both edit the `desktop-macos` job; if T61.9 lands first, T63.2 selects scheme test targets instead of packages (step 6). T63.4 is being implemented on branch `feature/swift-dependencies` in its own pull request with tests; that pull request claims and closes the card.
+
+#### T63.1 Property-based tests for `SessionStore`
+
+Model: sonnet · Status: open · Depends: — · Size: ~10 (manifest) + ~180 tests · Priority: P2 · Complexity: 2
+
+Goal: `SessionStore`'s patch rules — `upsert` ordering and in-place replace, `remove`, `reset` deduplication, batching, and the `lastLines` tail — hold for hundreds of generated patch sequences per run, compared with a plain-array reference model of `cox_app::coalesce::apply`.
+
+Why: the rules are mirrored by hand from Rust, and today's tests pin about ten hand-picked sequences. Collisions (an `upsert` to an id that exists, an anchor that was removed, a `remove` of a missing id) multiply quickly; a generator finds the combination nobody wrote down and shrinks it to the shortest failing list. Risk if skipped: a Swift-side ordering drift shows up only as a transcript in the wrong order for a user, not as a test failure.
+
+Install (no global tool; SwiftPM fetches it):
+- `desktop/macos/Packages/CoxModel/Package.swift`: the package dependency `https://github.com/x-sheep/swift-property-based`, `exact: "2.0.1"` (the repository pins test libraries exactly, as swift-snapshot-testing is), on the test target only.
+
+Files:
+- `desktop/macos/Packages/CoxModel/Package.swift`
+- `desktop/macos/Packages/CoxModel/Package.resolved` (regenerated by `swift package resolve`)
+- `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/SessionStorePropertyTests.swift` (new)
+- `toolchain.md` (a row in the SwiftPM table) and `plan.md` §1 (the dependency row `AGENTS.md` asks for)
+
+Steps:
+1. Manifest — the two changed lists in `Packages/CoxModel/Package.swift`:
+
+   ```swift
+   dependencies: [
+     .package(url: "https://github.com/apple/swift-collections", from: "1.7.1"),
+     .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
+     // T63.1: generated inputs and shrinking for the store's patch rules; tests only.
+     .package(url: "https://github.com/x-sheep/swift-property-based", exact: "2.0.1"),
+   ],
+   ```
+
+   ```swift
+   .testTarget(
+     name: "CoxModelTests",
+     dependencies: [
+       "CoxModel",
+       .product(name: "PropertyBased", package: "swift-property-based"),
+     ],
+     plugins: [swiftLint]
+   ),
+   ```
+
+2. `cd desktop/macos/Packages/CoxModel && swift package resolve`, then check whether `Package.resolved` of `CoxCore`, `CoxPlatform`, `CoxTranscriptText` and `CoxTranscript` changed too (a test-only dependency should not reach them; CI's "Swift pins unchanged by the build" step fails if one changed and was not committed).
+3. The test file. `propertyCheck` takes `isolation: isolated (any Actor)? = #isolation`, so in a `@MainActor` test its closure runs on the main actor and may call the store directly. Ids come from a pool of five so upserts collide; anchors include ids that never exist; text is short so failures shrink to something readable:
+
+   ```swift
+   // Copyright (c) 2026 Ivan Tugay
+   // SPDX-License-Identifier: GPL-3.0-or-later
+   // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
+   // SessionStore's patch rules against generated patch lists (T63.1): the store must order
+   // blocks as a plain-array model of `cox_app::coalesce::apply` does, for any mix of upserts
+   // and removes, not only the lists SessionStoreTests spells out.
+
+   import CoxClient
+   import PropertyBased
+   import Testing
+
+   @testable import CoxModel
+
+   /// One timeline edit; `description` keeps a shrunk failure readable.
+   enum Edit: Sendable, CustomStringConvertible {
+     case upsert(BlockID, text: String, after: BlockID?)
+     case remove(BlockID)
+
+     var patch: TimelinePatch {
+       switch self {
+       case .upsert(let id, let text, let after):
+         .upsert(block: Block(id: id, turn: 1, kind: .thinking(text: text)), after: after)
+       case .remove(let id):
+         .remove(id: id)
+       }
+     }
+
+     var description: String {
+       switch self {
+       case .upsert(let id, let text, let after): "upsert(\(id), \(text), after: \(after ?? "nil"))"
+       case .remove(let id): "remove(\(id))"
+       }
+     }
+   }
+
+   /// Five ids so edits collide; anchors b5 and b6 never exist, so those blocks append.
+   func editLists() -> Generator<[Edit], some Sequence> {
+     let id = Gen.int(in: 0...4).map { "b\($0)" }
+     let anchor = Gen.int(in: -1...6).map { n -> BlockID? in n < 0 ? nil : "b\(n)" }
+     let text = Gen.letter.string(of: 0...3)
+     let edit = Gen<Edit>.oneOf(
+       zip(id, text, anchor).map { Edit.upsert($0, text: $1, after: $2) },
+       id.map { Edit.remove($0) })
+     return edit.array(of: 0...40)
+   }
+
+   /// The ordering rule over a plain array: an existing id is replaced in place, `nil` inserts
+   /// first, a known anchor inserts after it, an unknown one appends.
+   func reference(_ edits: [Edit]) -> [(id: BlockID, text: String)] {
+     var rows: [(id: BlockID, text: String)] = []
+     for edit in edits {
+       switch edit {
+       case .upsert(let id, let text, let after):
+         if let at = rows.firstIndex(where: { $0.id == id }) {
+           rows[at].text = text
+           continue
+         }
+         let index =
+           after.map { anchor in rows.firstIndex { $0.id == anchor }.map { $0 + 1 } ?? rows.count }
+           ?? 0
+         rows.insert((id, text), at: index)
+       case .remove(let id):
+         rows.removeAll { $0.id == id }
+       }
+     }
+     return rows
+   }
+
+   @MainActor
+   func emptyStore() -> SessionStore {
+     SessionStore(session: FixtureSession(fixture: Fixture(batches: [], snapshot: [])))
+   }
+
+   @MainActor
+   @Suite struct SessionStoreProperties {
+     @Test func ordersBlocksAsTheReferenceModel() async {
+       await propertyCheck(count: 300, input: editLists()) { edits in
+         let store = emptyStore()
+         store.apply(edits.map(\.patch))
+         let expected = reference(edits)
+         #expect(Array(store.blocks.keys) == expected.map(\.id))
+         #expect(store.blocks.values.map(\.kind) == expected.map { .thinking(text: $0.text) })
+       }
+     }
+
+     @Test func repeatingTheLastEditChangesNothing() async {
+       await propertyCheck(input: editLists(), editLists().filter { !$0.isEmpty }) { edits, tail in
+         let once = emptyStore()
+         once.apply((edits + tail).map(\.patch))
+         let twice = emptyStore()
+         twice.apply((edits + tail + [tail[tail.count - 1]]).map(\.patch))
+         #expect(once.blocks == twice.blocks)
+       }
+     }
+
+     @Test func splittingABatchDoesNotChangeTheResult() async {
+       await propertyCheck(input: editLists(), Gen.int(in: 0...40)) { edits, cut in
+         let whole = emptyStore()
+         whole.apply(edits.map(\.patch))
+         let split = emptyStore()
+         let at = min(cut, edits.count)
+         split.apply(edits[..<at].map(\.patch))
+         split.apply(edits[at...].map(\.patch))
+         #expect(whole.blocks == split.blocks)
+       }
+     }
+
+     @Test func resetKeepsTheFirstPositionAndTheLastValue() async {
+       await propertyCheck(input: editLists()) { edits in
+         let blocks = edits.compactMap { edit -> Block? in
+           guard case .upsert(let id, let text, _) = edit else { return nil }
+           return Block(id: id, turn: 1, kind: .thinking(text: text))
+         }
+         let store = emptyStore()
+         store.apply([.reset(blocks: blocks)])
+         var firstSeen: [BlockID] = []
+         for block in blocks where !firstSeen.contains(block.id) { firstSeen.append(block.id) }
+         #expect(Array(store.blocks.keys) == firstSeen)
+         for id in firstSeen {
+           #expect(store.blocks[id] == blocks.last { $0.id == id })
+         }
+       }
+     }
+
+     @Test func lastLinesKeepsAtMostFiveLinesOfTheEnd() async {
+       let text = Gen.int(in: 0...2).map { ["a", "\n", "\r\n"][$0] }.array(of: 0...60)
+         .map { $0.joined() }
+       await propertyCheck(count: 500, input: text) { text in
+         let tail = lastLines(text)
+         let body = tail.utf8.last == UInt8(ascii: "\n") ? tail.utf8.dropLast() : tail.utf8[...]
+         #expect(text.hasSuffix(tail))
+         #expect(body.filter { $0 == UInt8(ascii: "\n") }.count < tailLines)
+       }
+     }
+   }
+   ```
+
+4. Run it, then make it fail on purpose once to see the shrunk output: change `?? rows.count` to `?? 0` in `reference`, run, read the "shrunk down from" line and the printed `.fixedSeed("…")`, revert.
+5. A failure found later: add the printed `.fixedSeed(...)` trait to that test while fixing, then turn the shrunk input into a plain regression test in `SessionStoreTests.swift` (the `AGENTS.md` rule for bug fixes) and drop the seed.
+6. `toolchain.md`, SwiftPM table: `| swift-property-based | local (CoxModel tests) | https://github.com/x-sheep/swift-property-based | T63.1: generated patch lists and shrinking for SessionStore's rules |`.
+
+Check:
+```bash
+cd desktop/macos/Packages/CoxModel
+swift test --no-parallel --build-system swiftbuild --filter SessionStoreProperties
+swift test --no-parallel --build-system swiftbuild
+```
+
+Done when: the five properties pass with their default counts; the deliberate break in step 4 fails `ordersBlocksAsTheReferenceModel` with a shrunk list of at most a few edits; no other package's `Package.resolved` changed; the `desktop-macos` job stays green.
+
+Risks: a property that is false by design (read the Rust consumer before "fixing" the store to satisfy a test); random seeds make a rare failure appear on an unrelated PR — the failure prints its seed, so it is reproducible, and it is a real bug either way.
+
+Out of scope: properties for the other stores; fuzzing `TimelineDecoding.swift`.
+
+#### T63.2 CI: re-run only the Swift packages a change can affect
+
+Model: sonnet · Status: open · Depends: T61.4 (shared job; not a code dependency) · Size: ~120 (script, workflow) · Priority: P2 · Complexity: 3
+
+Goal: on a pull request, a package whose test inputs are byte-identical to a run that already passed on `main` (or earlier on the same pull request) is not tested again; everything else runs as today. A change to `CoxUI` alone re-runs `CoxUI` and `CoxTranscript`, not `CoxModel`, `CoxCore`, `CoxPlatform` or `CoxTranscriptText`; a Rust-only change skips the 1,109 snapshot images entirely.
+
+What is and is not feasible: SwiftPM has no per-test result cache and swift-snapshot-testing compares freshly rendered images by design, so "only the changed snapshots" cannot be done inside one package. The unit that can be skipped soundly is a package whose whole input — its sources, tests, reference images, local dependencies, pins and toolchain — did not change since a passing run. Build outputs (`.build`, the SwiftPM cache, `CoxFFI.xcframework`) are cached by T61.4, not here.
+
+Why: the snapshot packages dominate the job's time and most pull requests touch neither them nor what they import. Risk if skipped: every Rust or unrelated Swift change keeps paying for 1,109 renders on the `xcode-27` runners. The job comment in `ci.yml` ("Always the full build … never only the changed ones") is a deliberate rule; this card changes it for pull requests only, by A141 — the app target is still built on every run.
+
+Install: nothing new. `actions/cache/restore` and `actions/cache/save` v6.1.0, pinned by commit SHA `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` (`gh api repos/actions/cache/git/ref/tags/v6.1.0`; re-check for a newer release when claiming).
+
+Files:
+- `scripts/desktop/swift_test.sh` (new): the per-package loop now inline in `ci.yml`, plus the input hash and the pass markers
+- `.github/workflows/ci.yml` (`desktop-macos`: the marker restore and save around the `swift test` step, and the trigger in step 5)
+- `justfile` (`just desktop-test` calls the script with `COX_SWIFT_TEST_ALL=1`, so local runs stay full)
+
+Steps:
+1. Inputs per package (the local dependency graph from the six manifests, plus what the tests read):
+
+   | Package | Hashed paths besides its own directory |
+   | --- | --- |
+   | `CoxModel` | `desktop/macos/Fixtures` |
+   | `CoxUI` | — (no local dependency; tokens are generated into the package) |
+   | `CoxCore` | `CoxModel`, `crates/`, `Cargo.toml`, `Cargo.lock`, `scripts/desktop/xcframework.sh` (the XCFramework it links) |
+   | `CoxPlatform` | `CoxModel` |
+   | `CoxTranscriptText` | `CoxModel` |
+   | `CoxTranscript` | `CoxModel`, `CoxTranscriptText`, `CoxUI` |
+
+   Every package also hashes `desktop/macos/.swiftlint.yml`, `mise.toml`, `scripts/desktop/swift_test.sh`, `.github/workflows/ci.yml`, and the toolchain identity: `xcodebuild -version` and `sw_vers -productVersion` (a new image re-renders snapshots differently, so it must re-run them). A package directory includes `Tests/**/__Snapshots__`, so a re-recorded image re-runs its package.
+2. The script. Hash tracked content through git, which is exact and fast on a clean checkout:
+
+   ```bash
+   #!/usr/bin/env bash
+   # The Swift package tests for CI and `just desktop-test` (T63.2): each package runs unless a
+   # pass marker for the exact hash of its inputs exists. COX_SWIFT_TEST_ALL=1 runs every
+   # package; markers live in $COX_SWIFT_TEST_MARKERS, restored and saved by ci.yml.
+   set -euo pipefail
+   shopt -s nullglob
+   cd "$(git rev-parse --show-toplevel)"
+   pkgs=desktop/macos/Packages
+   markers=${COX_SWIFT_TEST_MARKERS:-desktop/macos/build/swift-test-pass}
+   mkdir -p "$markers"
+
+   inputs() {
+     case "$1" in
+       CoxModel) echo "$pkgs/CoxModel desktop/macos/Fixtures" ;;
+       CoxUI) echo "$pkgs/CoxUI" ;;
+       CoxCore) echo "$pkgs/CoxCore $pkgs/CoxModel crates Cargo.toml Cargo.lock scripts/desktop/xcframework.sh" ;;
+       CoxPlatform) echo "$pkgs/CoxPlatform $pkgs/CoxModel" ;;
+       CoxTranscriptText) echo "$pkgs/CoxTranscriptText $pkgs/CoxModel" ;;
+       CoxTranscript) echo "$pkgs/CoxTranscript $pkgs/CoxModel $pkgs/CoxTranscriptText $pkgs/CoxUI" ;;
+       *) echo "swift_test.sh: no input list for $1; add one" >&2; return 1 ;;
+     esac
+   }
+
+   toolchain=$(xcodebuild -version; sw_vers -productVersion)
+   shared="desktop/macos/.swiftlint.yml mise.toml scripts/desktop/swift_test.sh .github/workflows/ci.yml"
+   failed=()
+   for manifest in "$pkgs"/*/Package.swift; do
+     package=$(dirname "$manifest")
+     name=$(basename "$package")
+     paths=$(inputs "$name") || exit 1
+     # shellcheck disable=SC2086 # the path lists are split on purpose
+     hash=$({ git ls-files -s -- $paths $shared; echo "$toolchain"; } | git hash-object --stdin)
+     if [ "${COX_SWIFT_TEST_ALL:-0}" != 1 ] && [ -e "$markers/$name-$hash" ]; then
+       echo "$name: inputs unchanged since a passing run ($hash), skipped"
+       touch "$markers/$name-$hash"  # still in use: keep it past the pruning below
+       continue
+     fi
+     # swiftbuild: see SwiftPM #9655 (ColorResource symbols for Colors.xcassets).
+     if swift test --no-parallel --build-system swiftbuild --package-path "$package"; then
+       touch "$markers/$name-$hash"
+     else
+       failed+=("$name")
+     fi
+   done
+   # Keep the marker cache small: a hash older than two weeks will not match again soon.
+   find "$markers" -type f -mtime +14 -delete
+   if [ ${#failed[@]} -gt 0 ]; then
+     echo "swift test failed in: ${failed[*]}" >&2
+     exit 1
+   fi
+   ```
+
+   An unknown package fails loudly (fail closed): a seventh package must get an input list before CI can pass.
+3. `ci.yml`, `desktop-macos`: the restore before `swift test`, the step calling the script, the save after it. `actions/cache` keys are immutable, so each run saves a new key and restores the newest by prefix:
+
+   ```yaml
+      - name: swift test pass markers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: desktop/macos/build/swift-test-pass
+          key: swift-test-pass-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: swift-test-pass-v1-
+
+      - name: swift test
+        timeout-minutes: 60
+        env:
+          SNAPSHOT_ARTIFACTS: ${{ runner.temp }}/snapshots
+          # Only a pull request may skip; any other trigger tests every package.
+          COX_SWIFT_TEST_ALL: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+        run: bash scripts/desktop/swift_test.sh
+
+      - name: save swift test pass markers
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: desktop/macos/build/swift-test-pass
+          key: swift-test-pass-v1-${{ github.run_id }}-${{ github.run_attempt }}
+   ```
+
+   The save also runs after a failure, so the packages that passed keep their markers; a failed package never writes one.
+4. Replace the job comment's "Always the full build: every package and the app, never only the changed ones" with the new rule: every package on `main` and on manual runs; on a pull request, only packages whose inputs changed since a passing run; the app target always.
+5. Cache scope: a pull request reads caches from its own ref and from `main`, never from another pull request. `ci.yml` runs on `pull_request`, `workflow_dispatch` and `workflow_call` only, so no run on `main` writes markers today and the gain would be limited to re-pushes of one pull request. Add `push: branches: [main]` to `ci.yml` with `paths: ['desktop/**', 'crates/**', 'Cargo.lock', 'scripts/desktop/**']`, and make sure only `desktop-macos` (and the jobs it `needs`) runs on that event; ask the creator first, since it adds a macOS run per merge.
+6. If T61.9 has landed (one `xcodebuild test -scheme CoxTests`), keep the same hashes and markers but pass `-only-testing:<Package>Tests` for the packages that need a run instead of looping `swift test`.
+7. `justfile`: `desktop-test` runs `COX_SWIFT_TEST_ALL=1 bash scripts/desktop/swift_test.sh`.
+
+Check:
+- On this card's pull request: a first push runs all six packages and the save step stores a key. Then push a commit that touches only `crates/cox-tools/src/git.rs`: the log shows five packages "skipped" and `CoxCore` tested. Then one touching only a `CoxUI` source: `CoxUI` and `CoxTranscript` run, four skip.
+- Locally: `just desktop-test` runs every package.
+
+Done when: §4.3.9 (T61.1's table) has the `desktop-macos` job time for a Rust-only and a `CoxUI`-only pull request before and after; the failing-snapshot artifact still uploads when `CoxUI` fails.
+
+Risks: an input the hash misses lets a broken package skip — the list is explicit and `main` always runs everything, so a miss is caught on the next `main` run (step 5) and fixed by adding the path; a flaky test that passed once stays green until its inputs change.
+
+Out of scope: caching `.build` and DerivedData (T61.4, T61.9); splitting the job per package across runners.
+
+#### T63.3 Lint: no AppKit or SwiftUI in `CoxModel` and `CoxCore`
+
+Model: haiku · Status: open · Depends: — · Size: ~30 (config, fixtures, one CI line) · Priority: P1 · Complexity: 1
+
+Goal: a UI-framework import or AppKit type in `Packages/CoxModel/Sources` (`CoxClient` and `CoxModel`) or `Packages/CoxCore/Sources` fails the build of that package and the `desktop-macos-lint` job.
+
+State today (checked 2026-10-07 on `origin/main` d5b1570d): neither package imports AppKit, SwiftUI, UIKit or Cocoa, and neither names an AppKit type. `CoxModel`'s imports are `CoxClient`, `Foundation`, `Observation`, `OrderedCollections`, `Synchronization` and `UniformTypeIdentifiers`; `CoxCore`'s are `CoxClient`, `CoxFFIBindings` and `Foundation`. The rule therefore starts green and only guards.
+
+Why: DT§4.6 keeps these two packages UI-free so the stores and the core client run in tests and previews without a window, and so the Windows client (P58) can follow the same split. Nothing enforces it, and one `import AppKit` for an `NSWorkspace` call would compile and pass review. Risk if skipped: the split erodes quietly, and the first sign is a store test that needs a running `NSApplication`.
+
+Install: nothing. SwiftLint 0.65.1 is pinned in `mise.toml` (CI) and through SwiftLintPlugins 0.65.1 in every package (build). `swift-architecture-check` does not exist (see the table above).
+
+Files:
+- `desktop/macos/.swiftlint.yml` (two custom rules)
+- `desktop/macos/LintFixtures/Rejected/no_ui_import_in_core.swift` and `no_appkit_type_in_core.swift` (new)
+- `.github/workflows/ci.yml` (`desktop-macos-lint`: lint the two packages' sources directly)
+
+Steps:
+1. Add to `custom_rules` in `desktop/macos/.swiftlint.yml`. The rules sit in the root config, which every package reaches through `parent_config`, and are scoped by path with `included`, so no package's own config changes. The fixture paths are included so CI can prove each rule fires:
+
+   ```yaml
+     # DT§4.6: CoxModel (CoxClient, CoxModel) and CoxCore hold state and the core client only;
+     # they never import a UI framework, so tests and previews need no window (T63.3).
+     no_ui_import_in_core:
+       name: No UI framework in CoxModel or CoxCore
+       included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_ui_import_in_core\.swift$)'
+       regex: '^\s*(?:@[\w()]+\s+)*import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(?:AppKit|SwiftUI|UIKit|Cocoa)\b'
+       message: 'CoxModel and CoxCore stay UI-free: move this to CoxPlatform or CoxUI (DT§4.6)'
+       severity: error
+       excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+
+     no_appkit_type_in_core:
+       name: No AppKit type in CoxModel or CoxCore
+       included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_appkit_type_in_core\.swift$)'
+       regex: '\bNS(?:App|Application|Window|WindowController|View|ViewController|HostingView|Color|Image|Font|Pasteboard|Workspace|Event|Screen|Responder|Menu|MenuItem|Alert|Cursor|Sound|StatusBar|StatusItem|TextView|TextField|Button)\b'
+       message: 'An AppKit type in CoxModel or CoxCore: move it behind a protocol in CoxClient (DT§4.6)'
+       severity: error
+       excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+   ```
+
+   The type list names AppKit classes only; Foundation's `NS` names (`NSHomeDirectory`, `NSLock`, `NSRegularExpression`) stay allowed.
+2. Fixtures, one violation each, named after the rule as the existing `swiftlint fixtures` step expects:
+
+   ```swift
+   // LintFixtures/Rejected/no_ui_import_in_core.swift
+   import AppKit
+   ```
+
+   ```swift
+   // LintFixtures/Rejected/no_appkit_type_in_core.swift
+   func openLink() { NSWorkspace.shared.open(URL(filePath: "/")) }
+   ```
+
+3. `ci.yml`, `desktop-macos-lint`: after "swiftlint app", a step that lints the two packages' sources itself, so the rule still gates pull requests if T61.10 turns the build-tool plugin off during builds:
+
+   ```yaml
+      - name: swiftlint UI-free packages
+        working-directory: desktop/macos
+        run: swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources
+   ```
+
+4. Enforcement points: locally, `swift build` or `swift test` in `CoxModel` or `CoxCore` fails through the SwiftLintBuildToolPlugin (error severity); in Xcode, the same plugin marks the line; in CI, `desktop-macos` fails while building the package and `desktop-macos-lint` fails in the new step and proves the rules with the fixtures.
+5. DS§9 in `desktop/design/DESIGN.md` lists the custom rules: add the two names and one line on why.
+
+Check:
+```bash
+cd desktop/macos
+swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_ui_import_in_core.swift    # fails (no_ui_import_in_core)
+swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_appkit_type_in_core.swift  # fails (no_appkit_type_in_core)
+swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources  # passes
+(cd Packages/CoxModel && swift build --build-system swiftbuild)
+```
+Then add `import AppKit` to `Packages/CoxModel/Sources/CoxModel/SessionStore.swift` locally: `swift build` fails with the rule's message; revert.
+
+Done when: both fixtures fail with their rule, both packages lint clean, and a temporary `import SwiftUI` in `CoxCore` fails `swift build` there.
+
+Risks: SwiftLint matches `included` against the file's absolute path, both from the build plugin and from `swiftlint lint <relative path>`; the fixture check and the temporary import confirm the pattern reaches both. A regex rule is textual; a type reached through a typealias from another module is not caught (none exists today).
+
+Out of scope: rules for the other packages; a semantic linter (Harmonize, SolidLikeARock) — revisit only if a textual rule misses a real case.
+
+#### T63.4 Dependency injection through swift-dependencies
+
+Model: sonnet · Status: open · Depends: — · Size: ~350 across T63.4.1–T63.4.3 below (`AGENTS.md` task size) · Priority: P2 · Complexity: 4
+
+In progress on branch `feature/swift-dependencies`, in its own pull request with tests; that pull request claims this card, keeps the table and `todo.md` in sync, and moves the card to `done.md`.
+
+Goal: the stores in `CoxModel` read `CoreClient`, `InboxClient` and `SecretStore` through `@Dependency` instead of initializer arguments threaded from `AppModel`; `LaunchCore` still makes the one live-or-fixture choice and hands it over once with `prepareDependencies`; tests override a client per test with a trait; Xcode previews get fixture values without a core.
+
+Why: today every new store or client means another initializer argument in `AppModel.init` (`App/CoxApp.swift`) and in every test that builds the store; `SettingsStore(client:secrets:cwd:)`, `SidebarStore(workspace:inbox:)` and `InboxStore(client:)` already carry them. With one `DependencyValues` registry, a store names what it needs, a test overrides only that, and previews fall back to `previewValue`. Risk if skipped: the plumbing grows with each store (P58's Windows client copies the pattern from DT§4.6), and a test that forgets an argument fails at compile time across many files instead of at one override.
+
+What does not change: `SessionClient` is per-session state, not a service — each `SessionStore` owns the one `CoreClient.open` returned, so `SessionStore.init(session:)` stays. Its key below exists for previews and tests only and has no live value. `LiveCoreClient` needs `MacHost` from `CoxPlatform`, so `CoxCore` declares no live value; the app sets it.
+
+Install (SwiftPM; no global tool), `https://github.com/pointfreeco/swift-dependencies`, `exact: "1.17.1"` (latest release, 2026-08-28; `swift-tools-version: 6.4`, so Xcode 27 / Swift 6.4, which CI and local already use). Products: `Dependencies` in library targets, `DependenciesTestSupport` in test targets. Never `DependenciesMacros`: it is the only product that builds swift-syntax.
+- `desktop/macos/Packages/CoxModel/Package.swift`: package pin; `Dependencies` on `CoxClient` and `CoxModel`; `DependenciesTestSupport` on `CoxModelTests`.
+- `desktop/macos/Packages/CoxPlatform/Package.swift`: the same pin; `Dependencies` on `CoxPlatform` (it owns `SecretStore`'s live value).
+- `desktop/macos/Packages/CoxCore/Package.swift`: no direct pin unless a `CoxCore` type starts reading `@Dependency`; it resolves the package through `CoxModel` anyway.
+- `desktop/macos/project.yml`: the package and the `Dependencies` product on the `Cox` target (`prepareDependencies` is called from `App/`).
+- Every `Package.resolved` of a package that depends on `CoxModel` (`CoxCore`, `CoxPlatform`, `CoxTranscriptText`, `CoxTranscript`) gains swift-dependencies and its transitive pins (swift-concurrency-extras, swift-issue-reporting, swift-clocks, combine-schedulers, swift-syntax): commit them all, or CI's "Swift pins unchanged by the build" fails.
+- `toolchain.md` (SwiftPM table row) and `plan.md` §1 (dependency row).
+
+##### T63.4.1 Keys and values (`CoxClient`, `CoxPlatform`)
+
+Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
+
+Files:
+- `desktop/macos/Packages/CoxModel/Package.swift`, `desktop/macos/Packages/CoxPlatform/Package.swift`, the five `Package.resolved`
+- `desktop/macos/Packages/CoxModel/Sources/CoxClient/Dependencies.swift` (new)
+- `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/Dependencies+Live.swift` (new)
+- `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/DependenciesTests.swift` (new)
+
+Manifest (`CoxModel`):
+
+```swift
+dependencies: [
+  .package(url: "https://github.com/apple/swift-collections", from: "1.7.1"),
+  .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
+  // T63.4: one registry for the stores' clients; Dependencies only, never the macros.
+  .package(url: "https://github.com/pointfreeco/swift-dependencies", exact: "1.17.1"),
+],
+targets: [
+  .target(
+    name: "CoxClient",
+    dependencies: [.product(name: "Dependencies", package: "swift-dependencies")],
+    plugins: [swiftLint]),
+  .target(
+    name: "CoxModel",
+    dependencies: [
+      "CoxClient",
+      .product(name: "OrderedCollections", package: "swift-collections"),
+      .product(name: "Dependencies", package: "swift-dependencies"),
+    ],
+    plugins: [swiftLint]),
+  .testTarget(
+    name: "CoxModelTests",
+    dependencies: [
+      "CoxModel",
+      .product(name: "DependenciesTestSupport", package: "swift-dependencies"),
+    ],
+    plugins: [swiftLint]),
+]
+```
+
+Keys in `CoxClient` (the interface module), as `TestDependencyKey`s so the live values can live where the live types are:
+
+```swift
+import Dependencies
+
+/// Where sessions open. Live: what `LaunchCore` picked, set once by `prepareDependencies`.
+public enum CoreClientKey: TestDependencyKey {
+  public static let testValue: any CoreClient = UnimplementedCoreClient()
+  public static let previewValue: any CoreClient =
+    FixtureCoreClient(fixture: Fixture(batches: [], snapshot: []))
+}
+
+/// What needs the person, across sessions. Live: the launch's core when it is an inbox.
+public enum InboxClientKey: TestDependencyKey {
+  public static let testValue: any InboxClient = NoInbox()
+  public static let previewValue: any InboxClient = NoInbox()
+}
+
+/// Provider keys. Live: `CoxPlatform` (the Keychain, or memory under `COX_KEYRING=off`).
+public enum SecretStoreKey: TestDependencyKey {
+  public static let testValue: any SecretStore = MemorySecretStore()
+  public static let previewValue: any SecretStore = MemorySecretStore()
+}
+
+/// Previews and tests only: a live session always comes from `CoreClient.open`.
+public enum SessionClientKey: TestDependencyKey {
+  public static var testValue: any SessionClient {
+    FixtureSession(fixture: Fixture(batches: [], snapshot: []))
+  }
+  public static var previewValue: any SessionClient { testValue }
+}
+
+extension DependencyValues {
+  public var coreClient: any CoreClient {
+    get { self[CoreClientKey.self] }
+    set { self[CoreClientKey.self] = newValue }
+  }
+  public var inboxClient: any InboxClient {
+    get { self[InboxClientKey.self] }
+    set { self[InboxClientKey.self] = newValue }
+  }
+  public var secretStore: any SecretStore {
+    get { self[SecretStoreKey.self] }
+    set { self[SecretStoreKey.self] = newValue }
+  }
+  public var sessionClient: any SessionClient {
+    get { self[SessionClientKey.self] }
+    set { self[SessionClientKey.self] = newValue }
+  }
+}
+
+/// A test that opens a session must say which core it opens on.
+struct UnimplementedCoreClient: CoreClient {
+  func open(_ request: OpenSession) async throws -> any SessionClient {
+    reportIssue("CoreClient.open: no core set; override \\.coreClient in this test")
+    throw CancellationError()
+  }
+}
+
+struct NoInbox: InboxClient {
+  func inbox() -> [InboxItem] { [] }
+}
+```
+
+`reportIssue` comes from IssueReporting, which `Dependencies` re-exports. A `TestDependencyKey` read in the live app without `prepareDependencies` setting it is itself reported as an issue, which is the wanted failure: the app must set the core.
+
+Live value in `CoxPlatform` (`Dependencies+Live.swift`), moving the `COX_KEYRING` rule out of `LaunchCore`:
+
+```swift
+import CoxClient
+import Dependencies
+import Foundation
+
+extension SecretStoreKey: DependencyKey {
+  /// `COX_KEYRING=off`, as cargo sets it for every development run, keeps keys out of the
+  /// Keychain (A49, A51).
+  public static let liveValue: any SecretStore =
+    ProcessInfo.processInfo.environment["COX_KEYRING"] == "off"
+    ? MemorySecretStore() : KeychainSecretStore()
+}
+```
+
+Check: `swift test` in `CoxModel` and `CoxPlatform`; `DependenciesTests.swift` proves that the test values are the stand-ins (`withDependencies` reads `\.secretStore` as a `MemorySecretStore`) and that `UnimplementedCoreClient.open` is reported (`withKnownIssue`).
+
+##### T63.4.2 The stores read `@Dependency` (`CoxModel`)
+
+Model: sonnet · Status: open · Depends: T63.4.1 · Size: ~80 + tests · Priority: P2 · Complexity: 3
+
+Files:
+- `Packages/CoxModel/Sources/CoxModel/InboxStore.swift`, `SettingsStore.swift`, `SidebarStore.swift`
+- their tests in `Packages/CoxModel/Tests/CoxModelTests/`
+
+In an `@Observable` class the wrapper must be `@ObservationIgnored`; it captures the dependency context when the store is created:
+
+```swift
+@Observable
+@MainActor
+public final class InboxStore {
+  @ObservationIgnored @Dependency(\.inboxClient) private var client
+  public init() {}
+  // the rest unchanged
+}
+```
+
+`SettingsStore` keeps `client` (a `SettingsClient`, the live core, not one of the four) and `cwd` as arguments and drops `secrets`:
+
+```swift
+@ObservationIgnored @Dependency(\.secretStore) private var secrets
+public init(client: any SettingsClient, cwd: String) { (self.client, self.cwd) = (client, cwd) }
+```
+
+`SidebarStore` takes `inbox: InboxStore?` as today; the inbox store builds its own client. Keep each old initializer as a deprecated forwarding one until T63.4.3 moves the call sites, then delete it in the same pull request.
+
+Tests override per test with the `DependenciesTestSupport` trait:
+
+```swift
+import CoxClient
+import DependenciesTestSupport
+import Testing
+
+@testable import CoxModel
+
+struct OneApproval: InboxClient {
+  let item: InboxItem
+  func inbox() -> [InboxItem] { [item] }
+}
+
+@MainActor
+@Test(.dependency(\.secretStore, MemorySecretStore(["anthropic": "k"])))
+func settingsReadsTheKeyFromTheStore() throws {
+  let store = SettingsStore(client: FakeSettingsClient(), cwd: "/")
+  // the assertions the existing SettingsStoreTests make, with no `secrets:` argument
+}
+```
+
+Check: `swift test` in `CoxModel`; no test builds a store with a client argument that the store now reads from `DependencyValues`.
+
+##### T63.4.3 App wiring (`App/`)
+
+Model: sonnet · Status: open · Depends: T63.4.2 · Size: ~80 · Priority: P2 · Complexity: 3
+
+Files:
+- `desktop/macos/App/CoxApp.swift`, `desktop/macos/App/LaunchCore.swift`, `desktop/macos/project.yml`
+- `docs/design/desktop.md` (DT§4.6: how a client reaches a store, written platform-neutral for P58)
+
+`CoxApp` prepares the dependencies once, before any store exists; `LaunchCore.pick()` is still the one place that chooses fixture or live:
+
+```swift
+import Dependencies
+
+@main
+struct CoxApp: App {
+  @State private var model: AppModel
+
+  init() {
+    let launch = LaunchCore.pick()
+    // Once per launch, before the first store reads a client (DT§4.1).
+    prepareDependencies {
+      if let core = try? launch.core.get() {
+        $0.coreClient = core
+        if let inbox = core as? any InboxClient { $0.inboxClient = inbox }
+      }
+    }
+    _model = State(initialValue: AppModel(launch: launch))
+  }
+  // body unchanged
+}
+```
+
+`LaunchCore` loses its `secrets` field: `MacHost` and `SettingsStore` read `\.secretStore` (live value from T63.4.1). `AppModel.init` then builds `SettingsStore(client: launch.live.get(), cwd: LaunchCore.project())` and `SidebarStore(workspace: …, inbox: (try? launch.core.get()) is any InboxClient ? InboxStore() : nil)`. A fixture launch still replays through `FixtureCoreClient`, because `LaunchCore.pick()` put it in `launch.core` and `prepareDependencies` set it.
+
+`project.yml`:
+
+```yaml
+packages:
+  swift-dependencies:
+    url: https://github.com/pointfreeco/swift-dependencies
+    exactVersion: 1.17.1
+targets:
+  Cox:
+    dependencies:
+      - package: swift-dependencies
+        product: Dependencies
+```
+
+Name clash: AppIntents has its own `@Dependency` property wrapper, used in `App/Intents/AskCoxIntent.swift` and `App/Intents/Entities.swift` (`@Dependency private var model: AppModel`, registered in `App/Intents/Shortcuts.swift` through `AppDependencyManager`). Those files must not `import Dependencies`. A file that needs both spells them `@AppIntents.Dependency` and `@Dependencies.Dependency`; the intents keep AppIntents' wrapper for `AppModel`.
+
+Check: `just desktop-app`; launch with `-CoxFixture desktop/macos/Fixtures/edit.json` and without; Shortcuts still lists the App Intents (T51.17); `COX_KEYRING=off` still never touches the Keychain.
+
+Done when (T63.4 as a whole): no store in `CoxModel` takes `CoreClient`, `InboxClient` or `SecretStore` as an initializer argument; `AppModel.init` passes no client to a store that reads it from `DependencyValues`; every package's tests and `desktop-macos` pass; `swift-syntax` is resolved but not built (the build log has no `SwiftSyntax` target); a fixture launch and a live launch behave as before.
+
+Risks: `prepareDependencies` called twice or after a store read a value is reported by the library — keep it as the first statement of `CoxApp.init`; a store created inside a `Task` or a callback captures that context's values, so stores are made on the main actor at launch or in a view, as today; one more dependency tree (five transitive packages) to keep current, each needs its `toolchain.md` row.
+
+Out of scope: `SettingsClient`, `WorkspaceClient` and the `RemoteHosts` connector as dependencies (follow-up cards if T63.4 proves out); the Windows client (P58).
+
+#### P63 acceptance criteria
+
+| Card | Accepted when |
+| --- | --- |
+| T63.1 | `swift-property-based` 2.0.1 is a `CoxModelTests`-only dependency with a `toolchain.md` row; `SessionStorePropertyTests.swift` has the five properties (reference ordering, repeated last edit, split batch, reset, `lastLines`) and they pass in `desktop-macos`; a deliberately broken reference model fails with a shrunk input and a printed seed; no other package's pins changed |
+| T63.2 | `scripts/desktop/swift_test.sh` runs every package locally and on non-pull-request runs; on a pull request a Rust-only change skips the five packages that do not link `CoxFFI` and a `CoxUI`-only change runs `CoxUI` and `CoxTranscript` only; pass markers are restored and saved by SHA-pinned `actions/cache` v6.1.0 steps; the job comment states the new rule; §4.3.9 has before/after job times; the app target still builds on every run |
+| T63.3 | `no_ui_import_in_core` and `no_appkit_type_in_core` are error-severity custom rules in `desktop/macos/.swiftlint.yml`, scoped to `CoxModel` and `CoxCore` sources; their `LintFixtures/Rejected` files fail with the right rule; `desktop-macos-lint` lints both packages' sources with `--strict`; a temporary `import AppKit` in `CoxModel` fails `swift build`; DS§9 lists both rules |
+| T63.4 | swift-dependencies 1.17.1 (`Dependencies`, `DependenciesTestSupport`) is pinned in `CoxModel`, `CoxPlatform` and `project.yml`, all `Package.resolved` files committed; `CoreClient`, `InboxClient`, `SecretStore` and `SessionClient` have keys with test and preview values, `SecretStore` a live value in `CoxPlatform`; the stores read them with `@ObservationIgnored @Dependency`; `CoxApp.init` sets the launch's choice through `prepareDependencies` and `LaunchCore` still makes it; the AppIntents `@Dependency` files are unchanged and build; tests override clients with `.dependency`/`.dependencies` traits; DT§4.6 documents it; delivered by the `feature/swift-dependencies` pull request |
+
+### P65 — MCP results stay off the prompt until a program prints them
+
+One sandboxed Python program may `search`, `describe` and `call` MCP tools and print one small JSON result. The host keeps every schema and every raw tool payload. `tool_search` defaults to the same summary. No new crate, no Podman, no persistent interpreter, no `save_tool`, no JSON memory directory, and nothing copied from the GPL code-execution server. Suggested id T63 is already P63 (A141), so these cards are T65.
+
+T65.1 and T65.2 are in `done.md`.
+
+---
+
+### P65 — Crate docs (goal: deferred lockfile lookup of cached rustdoc, no third-party docs API)
+
+Rationale in §6 A142. T65.1 is in `done.md`.
+
+---
+
 ## 4. Definition of done for v0.1
 
 1. `cox` runs a multi-turn coding session against Anthropic, OpenAI Responses and a local Ollama model with the same tool set, with the sandbox on, on macOS and Linux.
@@ -2710,6 +3368,13 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A138 §3 P22 (T22.12) — by the creator (2026-10-07): `cox config set` (and the desktop's `set_json_in`, which shares `set_value_in`) checks the edited user file by deserializing `Config` from the `default` layer plus the edited text, through the loader's own figment and error mapping, and writes nothing when that fails. Why: `set` wrote out-of-range and unknown-variant values (`desktop.appearance.depth 1.5`) that every later load rejected, so one command left the user's config unloadable. Effect: `ConfigError` gains `Rejected(CoreError)`; the check leaves out the project, env, flag and Claude layers, so `set` never refuses a valid edit because of another layer, and the desktop's write-then-rollback in `cox_app::settings::set` stays for the full layered view.
 - A139 §3 (new P60: T60.1–T60.10), `roadmap.md` — by the creator (2026-10-07), after a Best of run where every candidate failed with "provider auth failed": (1) the app never starts a turn or a Best of candidate on a provider it cannot use — the provider comes from `tiers.code.provider` and must be in `usable_providers` (A110), and the user can also pick another provider's model in the window before the first turn; (2) the provider is shown in the model chip as an icon, its name and a problem badge; (3) the toolbar's model capsule and Ask/Plan/Auto control move into the composer, whose chips already show them; (4) a glare slider (`desktop.appearance.specular`, a 0–1 scale on the material's sweep) joins Appearance; (5) the Best of compare shows the real failure reason, never `$-0.00`, and no actions on a failed candidate; (6) choosing Bypass from the composer's mode menu asks for a confirmation first, since the menu puts it one click away (the old toolbar control offered it only while it was on); the Bypass strip stays (creator, 2026-10-07: "do what is best"); (7) every desktop improvement updates the shared docs (DT§, DS§, `docs/config.md`) so the Windows and any later Linux client can repeat it. Why: the creator's request. Effect: P60; switching provider mid-session goes to `roadmap.md`. No §0 decision changes.
 - A140 §3 (new P61: T61.1–T61.11), by the creator (2026-10-07): build speed for Rust and Swift — a fast profile for the XCFramework outside a release, the bindings generator on the host dev profile and skipped when the library is unchanged, CI caches for the XCFramework, SwiftPM and DerivedData, one integration-test binary per crate, one feature set per CI target, sccache locally and in the in-repository CI jobs, one Xcode build graph for the Swift package tests, the SwiftLint plugin off during builds (after the creator confirms DS§9), and two measured experiments (`build-override`, feature unification). Why: an analysis of the build configuration (2026-10-07) found the XCFramework always linked with fat LTO, 79 integration-test binaries, workspace members never cached on CI, the workspace compiled twice per CI target and `CoxModel` up to five times per Swift test run. Effect: thirteen cards; A15 still holds — what ships is `dist`; every card records before/after timings in `research.md` §4.3.9 and is reverted if it gains nothing. No decision in §0 changes; sccache and, if T61.11 chooses it, cargo-hakari are tools added by their cards with `toolchain.md` rows.
+- A141 §3 (new P63: T63.1–T63.4), by the creator (2026-10-07): four improvements for the macOS app's architecture and tests — property-based tests for `SessionStore` with x-sheep/swift-property-based (the asked-for `swift-check` and `swift-testing-expectations` do not exist as property-testing libraries, and SwiftCheck is unmaintained); pull requests re-run only the Swift packages whose inputs changed since a passing run, through content-hash pass markers in `actions/cache` (snapshots cannot be skipped one by one inside a package); SwiftLint custom rules that keep AppKit and SwiftUI out of `CoxModel` and `CoxCore` (the asked-for `swift-architecture-check` does not exist, and SwiftLint 0.65.1 is already pinned); and the stores' clients through pointfreeco/swift-dependencies 1.17.1, implemented on branch `feature/swift-dependencies`. Why: the creator's request, after a review of the desktop stack (SwiftUI with Observation stores, manual initializer injection, 1,109 snapshot images re-rendered on every desktop CI run). Effect: four cards (T63.4 in three parts); `ci.yml`'s "always the full build" rule for `desktop-macos` changes for pull requests only (T63.2) — `main`, manual runs and `just desktop-test` still run every package, and the app target is built on every run. No decision in §0 changes; each new SwiftPM dependency gets its `toolchain.md` row in its card.
+- A142 §3 P59 (new T59.11) — an outline row carries an inclusive end line (`start-end: signature`), so a follow-up `read` with `lines` does not guess where the item stops (2026-10-08). Why: `collect` kept only the start line. Effect: one card; no symbol index, no new `read` parameter, no new dependency. T59.8 resolves symbols from that span and otherwise stays as written.
+- A143 §1.11, §3 (new P65: T65.1, T65.2) — one sandboxed program fans out MCP calls, and `tool_search` can answer with names and descriptions. Why: a tool result of thousands of bytes should reach the model only when the program prints a summary, and a search hit should not carry `input_schema` until the caller asks for the full spec. Suggested id T63 is already P63 (A141), so the cards are T65. Effect: no new crate and no new dependency; `describe` is name and description only; each call starts a new `python3 -I -u` under `sandbox::command` with network off and one fresh temp directory as its only writable root; session registration of the tool waits for a later card because T65.1 is at its file cap. Nothing is copied from the GPL code-execution server. No decision in §0 changes.
+- A144 §3 P59 (T59.11, done 2026-10-08) — a JSON tool result folds to one line per node before the visible cut. Why: a single-line design or AST dump larger than `tool_output_visible_bytes` collapsed to the archive trailer. Effect: one card, in `done.md`; `compact.rs`, `dedup.rs` and `fold_repeats` stay as they are. No §0 decision changes. The fold, its call site and the tests are one Check, so they landed together past the ~200 line cap (`json_tree.rs` is the pure function; splitting it would leave neither half able to pass).
+- A145 §1.1, §1.11, §3 (new P65: T65.1) — deferred crate-doc tools, claimed 2026-10-08. `docs_resolve`, `docs_query` and `docs_fetch` stay out of the default prompt (`deferred: true`, D6d). The lockfile names the version; a local `items.jsonl` answers the query; only `docs_fetch` GETs `https://docs.rs/crate/<name>/<version>/json.zst` (no `Authorization` header, no Context7 URL, no API key). `docs_query` with `name = "llms"` searches an `llms.txt` already inside a workspace root and downloads nothing. Why: crate documentation is the same shape as memory — useful, not core, found through `tool_search`. Effect: T65.1. `cox-tools` depends on `sha2` (already a workspace dependency) and `zstd` 0.13 (already in the lockfile via wasmtime) to digest and decompress that download. No §0 decision changes. The card exceeds the 200-line guide because the query, the fetch and the `llms.txt` path share one cache format; splitting them would leave a reader with nothing to read.
+
+- A146 §1.7, §1.12, T64.24 — quarantine untrusted MCP tool definitions. A server's tool description and `readOnlyHint` are untrusted input. `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). Migration `00000000000008_mcp_tool_trust` stores the approved hash (`status` is only `approved`). A missing row is `Pending` for a server from project `.mcp.json` or a plugin, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A stored hash that differs is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses the fixed sentence `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` (so `readOnlyHint` cannot skip approval) and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` already indexes `spec().description`, so there is no second filter. `cox mcp trust <server>` connects and writes every current hash; `cox mcp trust` lists pending and changed tools. Why: a project or plugin server can put instructions in a tool description, or set `readOnlyHint`, and both were reaching the model and the permission engine. Effect: `cox-mcp` links `sha2`, already a workspace dependency. T64.7 and T64.10 stay open — a project `[mcp.servers]` entry is still source `config` until T64.7 reverts it, and an unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
 
 ## 7. Risk register
 
@@ -2744,3 +3409,23 @@ Already covered: `assert_cmd`, `assert_fs`, `insta`, `predicates`, `pretty_asser
 `bolero`/`honggfuzz` unless fuzz gaps beyond libfuzzer; `vfs` optional for
 tools FS unit tests (compare with rtok T56 pattern); `testcontainers` YAGNI
 unless Docker e2e is required.
+
+### T62. Audit fixes (2026-10-07)
+
+Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-test `unwrap/expect/panic!` across ~150k LOC, parameterized SQL, hardened plugin install path (https-only, sha256-gated, tar ToC refusal), correct flock session lock. T62.1 (self-update 404) is closed in `done.md`.
+
+### T62.6. pid-reuse race in the bash kill path
+
+`cox-tools/src/bash/mod.rs:649-651`: after the child is reaped, the code still `killpg`s the group to catch grandchildren; a reused pid in that window signals an unrelated process group. Done means: a held group id (or pidfd-style reaping) removes the race.
+
+### T62.7. Duplicated repo-root resolution
+
+`crates/cox-tools/src/git.rs:518` (`--show-toplevel`) duplicates what `main_checkout` in the same file already resolves (`git.rs:367-384`, `--git-common-dir`), and `scripts/changed_tests.py:93` resolves it a third time. Done means: one root helper in `git.rs`, reused everywhere.
+
+### T62.8. `checkpoint changes()` silently truncates on root-count mismatch
+
+`crates/cox-tools/src/checkpoint.rs:166`: `before.trees.iter().zip(&after.trees)` drops unpaired roots instead of erroring — a snapshot pair from different root sets reports partial diffs. Done means: mismatched root sets are an error.
+
+### T62.9. Small fixes: `confine` colon ban and retry jitter
+
+`cox-sandbox/src/path.rs:87` rejects every path containing `:` (documented as a Windows-syntax ban, but it also refuses legitimate Unix filenames with colons) — revisit with an allowlist for workspace-local names or a clearer comment. `cox-provider-http/src/retry.rs:48-57` derives jitter from `subsec_nanos` of the wall clock — near-deterministic for aligned callers; mix in a bit more entropy.

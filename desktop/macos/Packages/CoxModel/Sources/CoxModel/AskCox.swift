@@ -8,6 +8,7 @@
 // App Intents. The registry holds the session for a hand-off token until a window joins it.
 
 import CoxClient
+import Dependencies
 import Foundation
 
 public struct AskCox: Equatable, Sendable {
@@ -22,12 +23,12 @@ public struct AskCox: Equatable, Sendable {
   /// The composer's Send, with no attachments.
   public var intent: Intent { .send(text: prompt, attachments: []) }
 
-  /// Opens the session on `core`, holds it in `registry` for `token` and sends the prompt. The
-  /// window that shows it joins, then releases `token`; a send that fails lets the session go.
+  /// Opens the session on `DependencyValues.coreClient`, holds it in `registry` for `token` and
+  /// sends the prompt. The window that shows it joins, then releases `token`; a send that fails
+  /// lets the session go.
   @MainActor
-  public func run(
-    on core: any CoreClient, registry: AppStore, token: UUID, theme: String
-  ) async throws -> AppStore.Shared {
+  public func run(registry: AppStore, token: UUID, theme: String) async throws -> AppStore.Shared {
+    @Dependency(\.coreClient) var core
     let client = try await core.open(request(theme: theme))
     let shared = registry.adopt(client, window: token)
     do {

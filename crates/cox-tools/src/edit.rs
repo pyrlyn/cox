@@ -205,14 +205,27 @@ fn apply_replace(
 
     let old_line_count = old.split('\n').count();
     let content_lines: Vec<&str> = content.split('\n').collect();
-    let targets = if replace_all { starts } else { vec![starts[0]] };
 
-    // ponytail: fallback windows aren't de-overlapped — replacing from the
-    // rightmost start backward keeps byte offsets valid for non-overlapping
-    // windows (the normal case); a pathological `replace_all` where two
-    // fallback windows overlap can still panic on the byte splice. Add
-    // overlap filtering if repetitive-whitespace-variant content makes this
-    // a real problem.
+    // Fallback windows can overlap when lines normalise identically: three
+    // `A` lines match a two-line `old` at starts 0 and 1. Splicing every
+    // start against the original byte offsets panics once a shorter `new`
+    // has shrunk the string, so keep only windows starting at or after the
+    // previous kept window's end — the dropped window's overlap is already
+    // replaced by the kept one.
+    let targets: Vec<usize> = if replace_all {
+        let mut kept: Vec<usize> = Vec::new();
+        for start in starts {
+            if kept.last().is_none_or(|&k| start >= k + old_line_count) {
+                kept.push(start);
+            }
+        }
+        kept
+    } else {
+        vec![starts[0]]
+    };
+
+    // Right-to-left keeps every remaining splice's byte offsets valid: an
+    // edit at a higher position never moves a lower one.
     let mut result = content.to_string();
     for &start_line in targets.iter().rev() {
         let (start_byte, end_byte) = line_span_bytes(&content_lines, start_line, old_line_count);

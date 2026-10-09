@@ -29,9 +29,9 @@ struct AskCoxIntent: AppIntent {
     // As a window's first session does: the login shell's environment before the core opens one.
     await model.loadLoginEnv()
     let token = UUID()
+    // On the core this launch registered (`LaunchCore.prepare`); a failed one throws its error.
     let shared = try await AskCox(project: project.id, prompt: prompt).run(
-      on: model.launch.core.get(), registry: model.registry, token: token,
-      theme: SessionWindow.syntaxTheme)
+      registry: model.registry, token: token, theme: SessionWindow.syntaxTheme)
     model.show(PopOut(session: shared.store.session.id, handoff: token))
     return .result()
   }

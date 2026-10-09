@@ -1,4 +1,200 @@
 
+#### T33.18 Providers, ABI form (`PluginProvider`)
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-09 · Depends: T33.14.1, T33.17 · Size: ~190 (landed larger; see Not done) · Priority: P2 · Complexity: 5 · Files: `crates/cox-plugin/src/provider.rs`, `crates/cox-plugin/src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-session/src/provider.rs`
+Goal: with `api = "plugin"`, `stream()` calls `cox_provider_stream` and forwards `ProviderEvent`s. The guest's `cox_http` is limited to `base_url`'s host, and the host injects the `auth` header from `resolve_key`, so the key never enters wasm memory. Missing usage is estimated; usage below half of cox's estimate is replaced by the estimate with one warning.
+What landed:
+- `PluginProvider::stream` calls `cox_provider_stream` on a worker thread and forwards `ProviderEvent`s. A missing usage event is filled (`estimated: true`, input = the injected estimate, output = 0) and forwarded, because the session prefers the streamed usage. Reported input below half the estimate is replaced once, with one `tracing` warning; output tokens stay. At half, the guest's figure stands.
+- `cox_http` may reach a provider host only while that section's `cox_provider_stream` is active. The host injects `Authorization: Bearer` or `x-api-key` on the reqwest request and drops a guest header of the same name. The key is not copied into wasm. A missing key builds the section without auth and warns. A duplicate section name keeps the lower plugin id. A bad `base_url` is skipped.
+- `Router::pick` resolves a name in `providers.abi` to `ProviderId::Plugin` before built-ins, including a legacy `typesafe` tier, and does not pin `jev-latest`. `provider_name` returns the section name. The ledger tag is `plugin:<section>`.
+- Session open builds the ABI map before the scripted/replay short-circuit, prices it, and keeps it beside the main-turn provider. When no test double is set and the code tier names a section in the map, that priced plugin is the main provider. Child sessions share the map.
+Not done: the card named five files and ~190 lines. Session assembly now lives in `cox-session`, and `ProviderId` is no longer `Copy`, so the change also touches `hostfn.rs`, `live.rs`, `plugin_model.rs`, `config.rs`, `cox/src/sessions.rs`, and the `tokio-util` dependency on `cox-plugin` (already a workspace crate; `Provider::stream` takes `CancellationToken`). `docs/design/plugins.md` already described this path, so no user-doc translation changed. T33.40.1's decide call-out is still open.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib provider_key_never_reaches_guest
+provider::tests::provider_key_never_reaches_guest ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib underreported_usage_is_replaced_by_estimate
+provider::tests::underreported_usage_is_replaced_by_estimate ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib every_request_has_a_usage_row
+provider::tests::every_request_has_a_usage_row ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-core --lib plugin_provider_section_resolves_by_name
+router::tests::plugin_provider_section_resolves_by_name ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-session --lib scripted_provider_mode_still_builds_plugin_providers
+provider::tests::scripted_provider_mode_still_builds_plugin_providers ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-protocol --lib
+117 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib
+96 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-core --lib
+156 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-session --lib
+59 passed
+$ mise exec rust@1.98.1 -- cargo fmt --all -- --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-protocol -p cox-plugin -p cox-core -p cox-session -p cox --all-targets -- -D warnings
+clean
+```
+`cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
+
+#### T64.1 Revert project hook commands
+
+Model: Grok 4.7 · Status: done 2026-10-09 · Depends: — · Size: ~140 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox/src/config_load.rs`, `crates/cox-protocol/default.toml`
+Goal: a repository `.cox/config.toml` or `.claude` file cannot add or change hook commands. Those commands run as `/bin/sh -c` with tool JSON on stdin and no sandbox. User config and `~/.claude` hooks stay.
+Plan:
+1. `apply_project_guards` reverts `hooks.events` to the layers without the project when they differ, and reports one `GuardViolation` (`hooks`).
+2. `timeout_s` and `fail_open` stay project-settable. `source_of` does not treat those scalars as reverted.
+3. The Claude-settings import test expects a repository hook to be dropped. A new test keeps the `~/.claude` command and drops the repository one.
+What landed: the guard, the two tests, the `default.toml` comment (and generated `docs/config.md`), plus the compatibility notes in `docs/compat.md`, `docs/design/extensions.md` and plan D13 / §1.6.
+Not done: hooks are still unsandboxed when the user configured them (the status-line sandbox alternative). T64.2 and later stay open.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config
+37 tests run: 37 passed
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config -p cox-protocol -p cox -E 'test(/project_config_cannot_set_hook_commands|user_claude_hooks_survive|config_claude_settings_import|every_guarded_key_has_its_own_reason|config_docs_config_md_matches|project_claude_settings_allow|user_claude_settings_allow/)'
+7 tests run: 7 passed
+$ mise exec rust@1.98.1 -- cargo fmt --all -- --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-config -p cox-protocol -p cox --all-targets -- -D warnings
+clean
+```
+`mise` is not on the default PATH in this environment; the commands used `~/.local/bin/mise` after `mise install rust`. A full `cargo nextest run -p cox` also ran two `external_agents_cursor` tests that fail here because Landlock cannot wrap the fixture agent's argv (`cannot run under the sandbox`). That warning is unrelated to hook loading; CI's sandbox host is the check for it.
+
+#### T59.11 Fold a JSON tool result into one line per node
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: T59.2 · Size: ~580 (`json_tree.rs` past the ~200 cap; see A144) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/json_tree.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-core/src/lib.rs`
+Goal: a single-line JSON design or AST dump larger than `tool_output_visible_bytes` is folded before the line cut, so the model keeps a template line and an `expand` trailer instead of losing the middle; the archive row stays the raw bytes. `read` and `grep` stay unfolded.
+Plan:
+1. `fold_json`: skip a uniform scalar table (an array of objects with the same scalar keys and at least three columns); hoist values used at least twice; template object bodies used at least twice, omitting `id` and `name` (and `children`, which stay nested lines); one positional line per node; deterministic key order; `None` when the folded text is not shorter than `serde_json::to_string` of the input.
+2. In `turn.rs`, inside the `unwrap_or_else` that calls `visible` / `visible_folding`, before shorten: if the tool is not `read` or `grep` and the output is one JSON value and `fold_json` returns a shorter text, shorten that text. The archive `put` stays first and keeps the raw bytes.
+3. Tests: repeated bodies become one template; a single-use field stays inline; a 3-column scalar table returns `None`; two calls return equal strings; identical nodes stay one line each; a `bash` JSON result over the visible budget shows a template line and an expand trailer, and the archive bytes equal the raw output.
+What landed: `crates/cox-core/src/json_tree.rs` (`fold_json`) and `json_source` in `turn.rs`. Nodes are not hoisted (a repeated node stays a positional line); only field values are. `compact.rs`, `dedup.rs` and `fold_repeats` are unchanged. No Figma client, no new dependency.
+Check:
+```text
+$ mise exec -- cargo test -p cox-core json_tree -- --test-threads=8
+test json_tree::tests::identical_nodes_stay_one_line_each ... ok
+test json_tree::tests::repeated_bodies_become_one_template ... ok
+test json_tree::tests::single_use_field_stays_inline ... ok
+test json_tree::tests::two_calls_return_equal_strings ... ok
+test json_tree::tests::three_column_scalar_table_is_not_folded ... ok
+5 passed
+$ mise exec -- cargo test -p cox-core turn
+turn::tests::bash_json_over_budget_shows_a_template_and_keeps_the_raw_archive ... ok
+(the `turn` filter: 20 unit + 17 integration tests passed)
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
+#### T65.2 tool_search summary mode
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: T65.1 · Size: ~50 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/tool_search.rs`
+Goal: `tool_search` returns `{name, description}` unless the caller asks for the full spec, and discovery still returns names.
+What landed: optional `detail` is `summary` (the default) or `full`. Summary serializes `{name, description}` for each hit. `full` keeps the pretty `ToolSpec`. `structured.discovered` is still the names. `context.rs` is unchanged.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools tool_search
+test tool_search::tests::tool_search_ranks_the_matching_deferred_tool_first ... ok
+test tool_search::tests::tool_search_returns_at_most_five_and_nothing_for_no_match ... ok
+test tool_search::tests::tool_search_reports_discovered_names_in_structured_output ... ok
+test tool_search::tests::tool_search_summary_omits_input_schema ... ok
+4 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
+#### T65.1 mcp_exec: one sandboxed program fans out MCP calls
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: — · Size: 616 lines in `mcp_exec.rs` plus one `pub mod` · Priority: P0 · Complexity: 3 · Files: `crates/cox-tools/src/mcp_exec.rs`, `crates/cox-tools/src/lib.rs`
+Goal: a unit test where two tool results are 10_000 bytes each and the model-visible string is only the program's final print.
+What landed: `McpExecTool` (`deferred: false`, `Risk::Write`) runs an original Python driver in a new process on every call. `cox_sandbox::sandbox::command` builds it with network off and one fresh temp directory as the only writable root (also a root, so bubblewrap still mounts a path under its private `/tmp`). `sandbox::command` inserts `-c`, so the shell `exec`s `python3 -I -u <driver>`. The driver allows top-level await and speaks `search`, `describe` and `call`; any other stdout `type` is rejected. `describe` is name and description only. `ToolOutput.text` is the program's `result` text, cut at 8_000 bytes with `… truncated`. The tool does not archive. A non-zero exit or a timeout is `is_error` plus the stderr tail. A missing `python3` is `ToolError::Denied` with `python3 is missing`. No protocol change.
+Not done: `McpExecTool` is not registered on the session. That wiring is another file past this card's cap. `mcp_exec.rs` is 616 lines, over the ~200 line card: the driver, the sandbox spawn, the RPC loop and the acceptance test do not pass the Check as separate cards.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools mcp_exec
+test mcp_exec::tests::result_text_over_8000_bytes_ends_with_truncated_trailer ... ok
+test mcp_exec::tests::mcp_exec_is_a_present_write_tool_with_no_network ... ok
+test mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print ... ok
+3 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
+#### T65.1 Deferred lockfile doc lookup
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: `docs.rs` is past the 200-line guide because query, fetch and `llms.txt` share one cache format (A145) · Priority: P1 · Complexity: 3 · Files: `crates/cox-tools/src/docs.rs`, `crates/cox-tools/src/lib.rs`, `crates/cox-session/src/tools.rs`, `docs/tools.md`
+Goal: `docs_resolve`, `docs_query` and `docs_fetch` stay out of the default prompt. The lockfile names the version, a local `items.jsonl` answers the query, and only `docs_fetch` downloads rustdoc from docs.rs.
+Plan:
+1. `docs_resolve` reads `Cargo.lock` text from the workspace roots and returns `cargo/<name>/<version>`. No `cargo` subprocess. Missing name: `not in lockfile`.
+2. `docs_query` searches `~/.rtok/docs/<name>/<version>/items.jsonl` when that directory exists, otherwise `~/.cox/docs`. Case-folded term overlap, every term required, at most 5 hits of 400 characters. A missing cache returns `not cached` and does not construct `docs_fetch`. After a failed parse, `libraryName` and `question` rename to `name` and `query` inside this tool only. `name = "llms"` searches a root `llms.txt` and downloads nothing.
+3. `docs_fetch` GETs `https://docs.rs/crate/<name>/<version>/json.zst` with no `Authorization` header and a 30 s timeout. The version comes from the lockfile, never `latest`, unless the lockfile has no entry and the caller passed a version. Bytes, their sha256, and `items.jsonl` are written only after the body decodes. A failed GET leaves a previous file in place.
+Check: `docs_tools_are_deferred`, `query_deserialize_returns_the_matching_path_first`, `missing_cache_returns_not_cached_and_does_not_construct_fetch`, `tool_search_finds_docs_query`.
+What landed: `crates/cox-tools/src/docs.rs` (`DocsResolveTool`, `DocsQueryTool`, `DocsFetchTool`), `pub mod docs` in `lib.rs`, the three tools registered in `cox-session` before the `tool_search` rebuild, and the `docs/tools.md` rows. `cox-tools` depends on `sha2` 0.11 (already a workspace dependency) and `zstd` 0.13 (already in the lockfile via wasmtime). No Context7 URL, no API key, no change to `memory_save` or `memory_search`.
+Check:
+```text
+$ mise exec -- cargo test -p cox-tools docs::
+test result: ok. 13 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo test -p cox-session tools::
+test result: ok. 4 passed; 0 failed
+  tools::tests::tool_search_finds_docs_query ... ok
+$ mise exec -- cargo clippy -p cox-tools -p cox-session --all-targets -- -D warnings
+Finished `dev` profile; no warnings
+```
+
+#### T64.24 Quarantine untrusted MCP tool definitions
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: larger than the usual card (the prompt required the hash, the migration, the session wiring and the CLI together) · Priority: P0 · Files: `crates/cox-mcp/src/trust.rs`, `crates/cox-mcp/src/client.rs`, `crates/cox-mcp/tests/client.rs`, `crates/cox-store/migrations/00000000000008_mcp_tool_trust/`, `crates/cox-store/src/mcp_trust.rs`, `crates/cox-session/src/mcp.rs`, `crates/cox/src/mcp_cmd.rs`, `crates/cox/src/cli.rs`
+Goal: a server's tool description and `readOnlyHint` do not reach the model or skip approval until the stored contract hash matches.
+What landed: `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). `mcp_tool_trust` stores only an approved hash. A missing row is `Pending` for project `.mcp.json` and plugins, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A different stored hash is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` indexes `spec().description`, so a pending tool whose real description was `ignore previous instructions` is not returned. `cox mcp trust <server>` writes every current hash; `cox mcp trust` lists pending and changed tools. A store read error stays `Pending` (it must not look like a missing row and baseline). `cox-mcp` links `sha2`, already a workspace dependency.
+Not done: T64.7 and T64.10 stay open. A project `[mcp.servers]` entry is still source `config` until T64.7 reverts it. An unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
+Check:
+```text
+$ mise exec rust -- cargo nextest run -p cox-mcp -p cox-permission -p cox-store -p cox
+PASS cox-mcp::client untrusted_description_and_read_only_hint_do_not_reach_the_model
+PASS cox-store mcp_trust::tests::mcp_trust_approve_replaces_the_hash_and_get_misses_an_unknown_tool
+PASS cox-store tests::schema_snapshot_matches
+PASS cox-store tests::older_binary_refuses_newer_schema
+Summary [  23.360s] 279 tests run: 279 passed, 4 skipped
+$ mise exec rust -- cargo clippy --workspace --all-targets -- -D warnings
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 52.26s
+$ mise exec rust -- cargo fmt --all -- --check
+clean
+```
+`mise exec --` (every tool in `mise.toml`) cannot start on this Linux host: `aqua:yonaskolb/XcodeGen@2.46.0` is darwin-only. The commands above use `mise exec rust --`, which is the pinned Rust 1.98.1 the prompt's `mise exec -- cargo` is there to select.
+The Dart example (`plugin_example_dart`, ignored unless `just plugin-examples dart`) trusts `example-dart-count` before the scripted turn. A plugin grant covers the package, not the description the server reports when it starts.
+
+#### T59.11 Outline rows include the end line
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: ~40 · Priority: P0 · Complexity: 1 · Files: `crates/cox-syntax/src/outline.rs`, `crates/cox-tools/src/read.rs`, `crates/cox-tools/src/repomap.rs`
+Goal: an outline row is `start-end: signature` (1-based, inclusive), so the next `read` passes that span as `lines` instead of guessing where the item ends.
+Plan:
+1. Row type `(usize, usize, String)`: start line, end line, signature. End line is `child.end_position().row + 1`. Fallback rows use the same line for start and end.
+2. Render `{start}-{end}: {signature}`. The `bar` fixture row is `5-7: pub fn bar(x: u32) -> u32`.
+3. `ReadTool::spec` says the outline is `start-end: signature`; pass `lines` as that `start-end`. Tool name stays `read`. No new parameter.
+4. `read_outline_of_1000_line_rust_fixture_is_short_and_lists_every_pub_fn` still finds each `pub fn`, and that row matches `^[0-9]+-[0-9]+: `.
+What landed: `collect` keeps the inclusive end line; `render` prints `start-end`; markdown and keyword fallbacks use `n-n`; the `read` description tells the model to pass that span as `lines`; the repomap assertion matches a one-line function (`2-2`).
+Not done: no symbol index, no `check_edit_safe`, no token-savings counter, no provider call, no `symbol` parameter on `read` (T59.8). The ACP editor-buffer keyword outline (`crates/cox-acp/src/client_tools.rs`) still prints a start line only; it does not call `cox-syntax`.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo test -p cox-syntax -p cox-tools outline
+PASS cox-syntax outline::tests::outline_falls_back_to_markdown_headings
+PASS cox-syntax outline::tests::outline_falls_back_to_keyword_lines_for_unknown_extension
+PASS cox-syntax outline::tests::outline_rust_lists_pub_fn_and_struct
+PASS cox-tools read::tests::read_outline_of_1000_line_rust_fixture_is_short_and_lists_every_pub_fn
+4 tests run: 4 passed
+$ mise exec rust@1.98.1 -- cargo fmt --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-syntax -p cox-tools --all-targets -- -D warnings
+clean
+```
+A bare `mise exec --` on this Linux host stops while installing `aqua:yonaskolb/XcodeGen@2.46.0` (darwin-only) before cargo starts. The three commands above are the pinned Rust from `mise.toml` (`rust@1.98.1`).
+
 #### T33.14.1 `cox_http`
 
 Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43; the filesystem half is T33.14.2.
@@ -9866,3 +10062,188 @@ mise exec -- cargo nextest run -p cox-core -p cox-app -p cox: 777 tests run: 777
 mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings: clean
 mise exec -- cargo fmt --check: clean
 ```
+
+#### T59.5 `project` tool: run the project's own check command
+
+Model: sonnet · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: one `project` tool call with `action = check | test | lint | fmt` runs the detected command (`just check`, `cargo test`, `npm test`, `go test ./...`, …) through the normal `bash` sandbox and approval path and returns the folded result, replacing the model's guess of the command; bench mean tool calls per task −5 %.
+
+Files:
+- `crates/cox-tools/src/project.rs` (new)
+- `crates/cox-session/src/tools.rs`
+- `crates/cox-protocol/src/config.rs`
+
+Steps:
+1. Detection in order: `[project]` config, `justfile` recipes, `Cargo.toml`, `package.json` scripts, `go.mod`, `pyproject.toml` (Empryo idea: `src/core/tools/project.ts`, `toolchain.ts`).
+2. Run through the existing `bash` tool's executor so `Engine` approval and the sandbox are unchanged; output passes T59.2's folding.
+3. Register behind `tools.project = false`.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: detection table tests for each manifest; an approval test shows `project` asks exactly like `bash` for the same command; bench row in `research.md`.
+
+Out of scope: installing toolchains, parsing test output into structures.
+
+Status: done 2026-10-07
+Result: `cox_tools::project::ProjectTool` detects the command (`[project]` config, then `justfile` recipes with no required argument, `Cargo.toml`, `package.json` scripts from a fixed candidate list, `go.mod`, `pyproject.toml` `[tool.*]` tables) and hands it to `BashTool::call`, so the sandbox, PTY, timeout, archive and `sandbox_denied` handling are `bash`'s own. `subject`, `segments` and `risk` are `bash`'s for the detected command; `cox_permission::rules::canonical_tool` maps `project` to `bash`, so `Bash(...)` allow/ask/deny rules and session grants cover it and a command cannot dodge a rule by arriving as `project`. `call` re-detects under the session cwd and refuses unless the result equals the detection the call was judged on (a manifest edited in between, or a cwd that is not the session root, cannot swap the command). `fmt` is a format check and never rewrites. Registered by `cox_session::tools::with_project` behind `tools.project = false`; new `[tools]` and `[project]` config tables with `default.toml`, `docs/config.md` and `docs/config.jsonschema` updated. `package.json` script bodies are never copied into the command. Reused: `BashTool`, `bash::{classify, segments}`, the `Engine`. T59.2's output folding does not exist yet, so output takes the existing truncate/archive path.
+
+Check: `mise exec -- cargo nextest run -p cox-tools -p cox-session -p cox-protocol -p cox-config -p cox -p cox-core -p cox-permission`: 927 tests run, 927 passed (4 skipped), including `detection_table_picks_the_manifests_command` (15 rows), `detection_finds_nothing_without_a_matching_manifest_entry`, `project_asks_exactly_like_bash_for_the_same_command` (cox-core `tests/permission.rs`), `project_tool_is_registered_only_behind_its_flag`, and the config.md, config.jsonschema and deps drift tests. `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+Not done: `just bench` and the `research.md` bench row (the mean-tool-calls −5 % claim) were not run, by instruction. No insta snapshot changed. The real binary was not run against a scratch `COX_HOME`. No action-level `call` test runs a command end to end (the executor is `BashTool`'s, covered by its own tests). `package.json` detection assumes `npm`, not pnpm/yarn/bun.
+
+#### T62.1 self-update latest-release URL missed `/repos/`
+
+`crates/cox/src/self_update.rs`: the latest-release API URL lacked GitHub's mandatory `/repos/` segment, so every `cox self update` without `--version` aborted on 404; only explicit `--version` worked. Found by the 2026-10-07 audit (T62). Fix: the URL lives in `latest_url()` with a unit test asserting the endpoint shape, so a regression cannot ship silently again.
+Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 1 · Files: `crates/cox/src/self_update.rs`
+Check: `cargo test -p cox --lib self_update`.
+
+#### T62.3 a read-only bash command can no longer read a denied path
+
+The default `Read(~/.ssh/**)` / `Read(~/.aws/**)` denies guarded only the `read` tool: `bash: cat ~/.ssh/id_rsa` classifies as `Risk::ReadOnly` (auto-allowed, no approval) and the sandbox grants global file-read, so the key text entered the model's context — exactly what the deny existed to prevent. No Bash command rule can enumerate every reader (`cat`, `head`, `grep`, redirections, …). Found by the 2026-10-07 audit. Fix: `Engine::decide` now cross-checks read-path deny rules against the absolute paths a read-only call names — the whole subject and every simple command of a split line, `~` expanded, quotes and punctuation trimmed, opaque lines included via their raw text. `Write(...)`-scoped rules do not fire, so the guard answers exactly what a read rule denies.
+Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P0 · Complexity: 2 · Files: `crates/cox-permission/src/lib.rs`, `crates/cox-permission/src/rules.rs`
+Check: `cargo test -p cox-permission` — 8 passed (3 new: literal, tilde, quoted, chained and `~/.aws` variants; unaffected commands; opaque `eval` line); `cargo test -p cox-core --test permission` — 81 passed.
+#### T62.4 build and test commands are no longer classified read-only
+
+`bash/classify.rs` called `cargo check|test|build|clippy|doc` and `npm|pnpm|yarn test` `Risk::ReadOnly`, so in Default mode they auto-ran: the model could first edit `build.rs` or a `pretest` hook and then "run tests", executing its own code with no approval prompt — code execution approved as read-only, with only the sandbox limiting the blast radius. Found by the 2026-10-07 audit. Fix: the read-only cargo set narrows to `metadata` and `tree` (manifest readers that run nothing), and the npm/pnpm/yarn test arm is gone; everything else builds or executes, so it classifies `Exec` and meets the same approval path as any other execution. Under a confining sandbox the engine still auto-allows `Exec`, so the sandboxed flow is unchanged.
+Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-tools/tests/bash.rs`
+Check: `cargo test -p cox-tools --test bash` — 11 passed (table updated: `cargo metadata`/`cargo tree` ReadOnly; `cargo test`/`cargo check`/`npm test` Exec); `cargo test -p cox-core` — all suites green.
+#### T62.2 edit's whitespace fallback no longer panics on overlapping windows with replace_all
+`crates/cox-tools/src/edit.rs` `apply_replace` spliced every fallback window against the original byte offsets, right-to-left; two windows that overlap (lines that normalize identically) with a shorter `new` made the left window's `end_byte` run past the shrunken string — `replace_range` panicked with "range end index out of range", against the project's no-panic rule, and the code's own comment admitted it. Found by the 2026-10-07 audit. Fix: `replace_all` keeps only non-overlapping windows (a dropped window's lines sit inside the one already replaced); the single-match path is unchanged. The regression test seeds three lines that normalize identically and asserts the exact output; verified it panics on the pre-fix code.
+Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/edit.rs`, `crates/cox-tools/tests/edit.rs`
+Check: `cargo test -p cox-tools --test edit` — 6 passed (new: `edit_replace_all_overlapping_fallback_windows_do_not_panic`).
+#### T62.5 web_fetch refuses private, loopback and link-local addresses
+
+`web_fetch` is `Risk::ReadOnly` with a scheme check only, and `cox-web::fetch` followed five redirects with no address filtering: the model could read `169.254.169.254`, an internal `localhost` service or an RFC1918 host without any approval and see the body. Found by the 2026-10-07 audit. Fix, three layers: every connection resolves through a `PublicOnly` resolver (getaddrinfo on the blocking pool) that refuses loopback, link-local, RFC1918-private, unspecified and broadcast addresses, mapped IPv4 included, and strips refused addresses when the name has public ones; a custom redirect policy re-checks IP-literal redirect targets (literals skip DNS) and carries the old five-hop limit; and `WebFetchTool` checks the first URL's literal host (`refused_literal`), because the first request meets neither the resolver nor the policy. `fetch_error` surfaces the guard's words from reqwest's source chain. The tool spec now tells the model the refusal exists.
+Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`, `crates/cox-tools/src/web_fetch.rs`, `crates/cox-tools/tests/web_fetch.rs`
+Check: `cargo test -p cox-web` — 4 passed (address table + resolver refusal); `cargo test -p cox-tools --test web_fetch` — 3 passed (fixture tests now use `client_for_tests()`, the unguarded loopback client); `cargo clippy -p cox-web -p cox-tools --all-targets -- -D warnings` clean.
+
+#### T37.50 Pointer rule in Rust, shared by every client
+
+Depends: — · Size: ~120 · Files: `crates/cox-render/src/pointer.rs` (new), `crates/cox-app/src/lib.rs` (re-export), `crates/cox-ffi/src/types.rs` and `lib.rs` (export)
+Goal: one rule decides the pointer for every surface (A141), so the TUI, the macOS app and the Windows client cannot drift. `cox_render::pointer` holds `Interaction { clickable, selectable, pressed, blocked }` (`blocked` = disabled or locked), `Pointer { Default, Action, Text, NotAllowed, Resize(Edge) }` and `pointer(Interaction) -> Pointer` with this order: blocked → `NotAllowed`; pressed (the selected row, the active segment or tab, a button whose action is running) → `Default`; clickable → `Action`; selectable (text that can be selected and copied) → `Text`; otherwise `Default`. `Pointer::css_name()` gives the CSS cursor name (`pointer`, `text`, `default`, `not-allowed`, `ns-resize`/`ew-resize`) that OSC 22 uses (T5.9). It sits in `cox-render` because both `cox-tui` and `cox-app` already depend on it, and it builds without the `ratatui` feature. `cox-app` re-exports it; `cox-ffi` exports the types as `#[uniffi::remote]` and `pointer` as a one-expression forward (D11). Each client maps `Pointer` to its own API and keeps no rule of its own.
+Check: `mise exec -- cargo nextest run -p cox-render pointer`: blocked wins over pressed and clickable, pressed wins over clickable, clickable wins over selectable, nothing set gives `Default`, every `Pointer` has a CSS name; `cox-ffi`'s `tests/forward_only.rs` passes; the regenerated Swift bindings contain `Pointer` and `pointer`.
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-07
+Result: `cox_render::pointer` (no `ratatui` feature needed) holds `Interaction`, `Edge { Vertical, Horizontal }` (`Vertical` is a drag along the vertical axis, `ns-resize`), `Pointer`, `pointer()` in the card's order and `Pointer::css_name()`; `cox-app` re-exports the module as `cox_app::pointer`; `cox-ffi` declares the three types with `#[uniffi::remote]` in `types.rs` and exports `pointer` as a one-expression forward in `lib.rs`. `pointer()` never returns `Resize`; a client that draws a drag handle names it directly.
+
+Check: `mise exec -- cargo nextest run -p cox-render pointer`: 6 tests run, 6 passed (`blocked_wins_over_pressed_and_clickable`, `pressed_wins_over_clickable`, `clickable_wins_over_selectable`, `selectable_alone_gives_text`, `nothing_set_gives_default`, `every_pointer_has_its_css_name`). `cargo nextest run -p cox-render -p cox-app -p cox-ffi`: 330 tests run, 330 passed, including `forward_only::every_ffi_body_is_one_forward_expression`. `cargo build -p cox-render --no-default-features` builds; `cargo clippy -p cox-render -p cox-app -p cox-ffi --all-targets -- -D warnings` clean; `cargo fmt --check` clean. `uniffi-bindgen generate --library target/debug/libcox_ffi.a --language swift` output contains `struct Interaction`, `enum Edge`, `enum Pointer` and `func pointer(interaction: Interaction) -> Pointer`.
+
+Not done: the whole-workspace nextest and clippy were not run; the committed Swift bindings and XCFramework were not regenerated (the app build does that); the macOS mapping (T37.51) and the TUI's OSC 22 (T5.9) are separate tasks.
+
+#### T52.24 `cox-app` merges chosen best-of candidates with a chosen model or agent
+
+Depends: — (T52.9–T52.12 are done) · Size: ~200 · Files: `crates/cox-app/src/best_of.rs`, `crates/cox-app/src/app.rs`, `crates/cox-app/src/workspace.rs`
+Goal: after a best-of-n run, the person can merge two or more results into one (A142). `App::best_of_merge(BestOfMerge { id, from: Vec<u32>, by: Candidate })` takes the candidates the person chose and who does the merge: `Candidate::Cox { model }` (provider and model, from the same list the composer offers) or `Candidate::Agent { name }` (an external ACP agent, the same list the best-of control offers) — the existing enum, so no second list of mergers. It refuses before anything starts when fewer than two candidates are chosen, when a chosen one is not `Done`, or when the group was already picked. It cuts a new worktree from the group's base commit (A75's consent: the person pressed Merge), opens a session for the merger there the way `best_of` opens a candidate (cox on the chosen model, or the external agent under T35.2's sandbox), and sends one prompt built in Rust: the original prompt, then for each chosen candidate its label, its final answer and its diff against the base (the same diff model Review and `compare` use), each fenced as data, asking for one change set that keeps the best of each. The merge joins the group as a new candidate: a `Launched` row for the merger with a new `merged_from: Option<Vec<u32>>` field, so `compare` and `pick` handle it unchanged and its sidebar row sits in the group. A cox merger's usage is its own ledger rows and counts in the group total; an agent's is its own billing, with no row invented (P52's rule). A failed merge is a `Failed` candidate and leaves the others as they were (fail open). `mergeable(id) -> Vec<u32>` lists the candidates that may be chosen (`Done`, not pruned), so no client decides that on its own.
+Check: `mise exec -- cargo nextest run -p cox-app best_of_merge_refuses_fewer_than_two best_of_merge_refuses_a_candidate_not_done best_of_merge_refuses_after_a_pick best_of_merge_prompt_holds_each_chosen_diff_and_only_those best_of_merge_runs_on_the_chosen_model best_of_merge_runs_on_the_chosen_agent best_of_merge_is_a_candidate_compare_and_pick_see best_of_merge_usage_is_its_own_ledger_rows best_of_merge_by_an_agent_writes_no_usage_row best_of_mergeable_lists_only_done_candidates` (fake `Worktrees`, scripted provider, fake ACP agent).
+Out of scope: merging by git (`git merge` of the branches) instead of a model.
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-07
+Result: landed in two PRs, because the card is about 245 lines of production code. Part 1: `App::best_of_merge(BestOfMerge { id, from, by }, theme)` takes the existing `Candidate` enum as the merger, refuses before any worktree exists (`TooFewToMerge`, `NotDone { index }`, `Picked`), cuts `best-<id>-<n+1>` from the group's base under its cox owner, reserves the merger's row under the group lock (so two merges never share an index), and adds it as a `Launched` row with `merged_from: Some(from)`, so `compare`, `pick`, the sidebar group and `best_of_cost` handle it unchanged; a cox merger's usage is its own ledger rows, an agent's writes none, a merger that cannot start is `Failed`. `App::mergeable(id)` lists `Done` candidates whose worktree exists in an unpicked group. `launch`'s loop body moved into `run_one` and `blocked`, shared by launch and merge. The prompt is built in Rust: the original task, then each chosen candidate's label and final answer (the last assistant reply folded through `Timeline`). Part 2: each candidate's diff against the commit its worktree was cut from, for the files `compare` lists, through Review's `diffmodel::between`; `Worktrees::base_text` (default `None`) answered by `GitWorktrees` with `git show`, sharing `worktree_diffstat`'s merge-base lookup; the tree side read through `path::confine`; a side over 256 KiB or not text is named only. Every answer and diff is fenced as data, in a backtick fence longer than any run inside it. `cox-ffi` gains `merged_from` in the `Launched` remote declaration; Swift wiring is T52.25.
+
+Check: `mise exec -- cargo nextest run -p cox-app best_of`: 21 tests run, 21 passed, among them every test the card names plus `best_of_merge_prompt_holds_each_chosen_answer_and_only_those`; `cox-tools` `worktree_base_text_reads_the_commit_the_tree_was_cut_from` passes.
+
+Not done: the whole-workspace nextest was not run locally (CI runs it); benchmarks were not run.
+```
+mise exec -- cargo nextest run -p cox-app best_of: 21 tests run: 21 passed
+mise exec -- cargo clippy -p cox-app -p cox-tools --all-targets -- -D warnings: clean
+mise exec -- cargo fmt --check: clean
+```
+
+#### T59.1 Deterministic working state pre-fills compaction
+
+Model: opus + grok-4.7 · Status: done 2026-10-07 · Depends: — · Size: ~180 · Priority: P1 · Complexity: 4
+
+Goal: after `compact`, the summary lists every file the session read, edited or created, every failing command and the open task, built from the transcript and not from the model's recall, and the model's summary costs at least 40 % fewer output tokens.
+
+Files:
+- `crates/cox-core/src/compact.rs`
+- `crates/cox-core/src/prompts/compact.md`
+- `crates/cox-protocol/src/config.rs`
+
+Steps:
+1. A pure `working_state(messages: &[Message]) -> WorkingState` next to `transcript` (`compact.rs:127`): walk tool calls and results (content types in `crates/cox-protocol/src/types.rs:1502-1532`) and collect `(path, action)` with action read / edited / created (edit, write, `apply_patch`), failing `bash` commands with their exit code and last error line, and the last user request. Ordered by first appearance, so it is deterministic (Empryo idea: `src/core/compaction/working-state.ts`, `extractor.ts`).
+2. `summarise` (`compact.rs:341`) renders the state as the "Files touched" and "Errors seen" sections that `prompts/compact.md` already asks for, and tells the model to write only the narrative sections; the final summary is state block + model text. The model text stays under `MAX_SUMMARY_TOKENS` (`compact.rs:23`).
+3. `compaction.strategy = "llm" | "state+llm"` in `config.rs`, default `llm` until the Check numbers are in `research.md`; regenerate schemas.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a unit test over a scripted transcript asserts every touched path and the failing command appear in the summary with `state+llm`; a `just bench` compaction replay records path recall (100 % with `state+llm`), compact output tokens (−40 %) and pass rate against `llm` in `research.md`; the default flips only if the pass rate does not drop.
+
+Out of scope: per-file line ranges, dropping the model call entirely, the TUI view of the state.
+
+Plan (Claude Code / opus-5.5): (1) `compact.rs`: pure `working_state(messages)` pairs each `ToolUse` with its `ToolResult` by call id and keeps only successful calls: `read`/`outline` → read, `edit` → edited, `write` → created (edited when the path was already seen), `apply_patch` → its own `A`/`M`/`D`/`R` result lines; failing `bash` → command, `[exit …]` status and the last output line; the last user request. A prior summary's state sections are carried forward so a second compaction keeps the first one's paths. (2) `summarise` renders the state block ("Files touched", "Errors seen", "Last request") under `state+llm`, appends the narrative-only note from `prompts/compact.md` to the system prompt and returns state block + model text. (3) `config.rs`: `[compaction] strategy = "llm" | "state+llm"`, default `llm`; `default.toml`, `docs/config.md` and `docs/config.jsonschema` regenerated by their drift tests. Verify: unit tests over a scripted transcript (every path and the failing command in the summary), a `Scripted`-provider session test for `state+llm`, nextest/clippy/fmt on `cox-core`, `cox-protocol`, `cox-config`. `just bench` is not run in this pass.
+
+Status: done 2026-10-07
+Result: combines PR #151 (Claude Code / opus-5.5) and PR #160 (Cursor / grok-4.7); the code is PR #151's, plus PR #160's config test. `compact::working_state(messages)` pairs each `ToolUse` with its `ToolResult` and, for successful calls only, records `(path, action)` in first-appearance order: `read`/`outline` → read, `edit` → edited, `write` → created (edited when the path was already seen), `apply_patch` → its own `A`/`M`/`D`/`R` result lines (created/edited/deleted); failing `bash` → command, `[exit …]` status without timing and the last output line; the last user request (first text block of the last user message, whitespace-collapsed, 500 chars). An earlier summary's state sections are carried forward, so a second compaction keeps the first one's paths. Under `[compaction] strategy = "state+llm"` `summarise` appends the narrative-only note from `prompts/compact.md` (after its `---` line) and returns the rendered block (`## Files touched`, `## Errors seen`, `## Last request`) followed by the model text; `llm` (the opt-out) sends the prompt byte-identical to before. `default.toml`, `docs/config.md` and `docs/config.jsonschema` regenerated by their drift tests. `state+llm` is the default by the creator's decision (2026-10-07), before the bench. PR #160's parts not taken: it parsed `apply_patch` input instead of the tool's result lines (so a delete was listed as edited), took any user text block as the request (hook context, attached files, an earlier summary), did not carry a prior summary's state forward, and changed the `llm` prompt as well.
+
+Check: `mise exec -- cargo nextest run -p cox-core -p cox-protocol -p cox-session -p cox-config`: 560 tests run, 560 passed, 1 skipped (T59.1 tests: `working_state_lists_every_touched_path_failing_command_and_request`, `working_state_renders_the_same_block_for_the_same_transcript`, `second_compaction_keeps_the_paths_only_the_first_summary_names`, `llm_prompt_is_unchanged_and_the_state_note_is_separate`, `compact_default_strategy_is_state_llm_and_adds_the_narrative_only_note`, `compact_llm_strategy_still_sends_exactly_the_old_prompt`, `compact_state_llm_summary_lists_touched_paths_and_failing_command`, `compaction_strategy_defaults_to_state_llm_and_llm_opts_out`, and the updated `handoff_seeds_summary`). `cargo clippy -p cox-core -p cox-protocol -p cox-session -p cox-config --all-targets -- -D warnings` clean; `cargo fmt --check` clean. PR #151 alone ran `cargo nextest run --workspace`: 2063 passed, 8 skipped.
+
+Not done: `just bench` was not run (no benchmarks in this pass), so the path-recall, −40 % output-token and pass-rate numbers are not in `research.md` although the creator made `state+llm` the default without them (2026-10-07); the session-level tests prove the behaviour instead. The real binary was not run against a scratch `COX_HOME`.
+
+#### T33.45.1 Manifest and grant: surfaces and surface tables
+
+Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/plugin.schema.json` · Design: `docs/design/plugins.md` §15, A134
+
+Check: `surfaces_default_to_every_surface`, `surface_table_outside_its_surfaces_is_rejected`, `ui_keys_is_an_alias_of_terminal_keys`, `stored_ui_keys_grant_covers_terminal_keys` and the manifest schema drift test pass.
+
+Plan: add `Surface`, `surfaces`, `TerminalCaps` and `DesktopCaps` to the manifest with the two validation errors; make `grant::capability_list` emit `terminal.keys` and `desktop.*` lines and read a stored `ui.keys` as `terminal.keys`; point the one reader of the key line (`live.rs`) and the `plugin list` flag at the alias-aware `Capabilities::terminal_keys`; regenerate the schema through its drift test.
+Status: done 2026-10-07
+Result: `PluginManifest.surfaces: Option<Vec<Surface>>` (absent = every surface, `[]` = `ManifestError::NoSurfaces`), `Capabilities.terminal`/`.desktop` tables that deny unknown keys, and `ManifestError::SurfaceTable` for a table (or `ui.keys`) whose surface `surfaces` leaves out. `Capabilities::terminal_keys()` ORs `ui.keys` and `terminal.keys`. `grant::capability_list` writes `terminal.keys` and `desktop.inspector|toolbar|palette|notify`; `check` reads a stored `ui.keys` as `terminal.keys`, so an old grant neither asks again nor reports `removed`. `Live::granted_keys` now tests `terminal.keys`; `plugin list` shows `keys` for either spelling. `docs/plugin.schema.json` regenerated by its drift test. Also touched, only mechanically: `lib.rs` re-exports and the `surfaces: None` field in two test struct literals (`grant.rs`, `hostfn.rs`).
+
+Check: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-session -p cox`: 375 tests run, 375 passed, 2 skipped (including the Check's five tests and `plugin_schema_matches_committed_file`). `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `cargo build -p cox-plugin-api --target wasm32-unknown-unknown` builds. No insta snapshot changed.
+
+Not done: `plugins/templates/rust/plugin.toml.tmpl` still writes `ui.keys` (the new spelling goes into `cox plugin new` with the SDK/example card, T33.45.8); the load filter, `InitIn.granted` filtering and listing of surfaces are T33.45.3/T33.45.4.
+
+### T59.3. `edit` and `write` report the diagnostics they introduced
+
+Model: Claude Code / opus-5.5, Cursor / grok-4.7 · Status: done 2026-10-07 · Depends: T41.6 · Size: ~190 · Priority: P1 · Complexity: 4
+
+Goal: when a language server for the file is already running, `edit`/`write` end their result with the diagnostics that are new since before the change (at most 10 lines, errors first), so the model does not spend a `bash` check call to find its own error; bench check-call count −20 %.
+
+Files:
+- `crates/cox-tools/src/lsp/mod.rs`
+- `crates/cox-tools/src/edit.rs`
+- `crates/cox-session/src/tools.rs`
+
+Steps:
+1. Move the server pool out of `DiagnosticsTool` (`lsp/mod.rs:40-49`) into a shared `Arc<LspPool>` with `running_for(path) -> Option<Arc<Server>>` that never spawns (the §1 `diagnostics` row, `plan.md:591`, starts a server lazily from `diagnostics` only; an edit must never start one). Build it once in the registry (`cox-session/src/tools.rs:27`) and hand it to `diagnostics`, `edit` and `write` (`WriteTool`, `write.rs:65`, gets the same 3-line hook).
+2. In `EditTool` (`edit.rs:33`): before writing, take the server's last diagnostics for the file; after writing, call `Server::diagnostics` (`server.rs:253`) with a short wait (`lsp.after_edit_ms`, default 1500) and append only the set difference keyed by (range start line, code, message). A dead or slow server adds nothing — never an error and never a retry.
+3. `[lsp] after_edit = false` by default in `cox-protocol` config; the fake launcher (`lsp/mod.rs:65`) drives the tests.
+
+Check:
+```bash
+just bench
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: tests with the fake server show the new error after an edit that introduces it, nothing when the server is not running, and nothing extra for errors that existed before; `research.md` has the bench row (bash check calls −20 %, pass rate not lower).
+
+Out of scope: starting servers, code actions, diagnostics for files the edit did not touch.
+
+Execution plan (Claude Code / opus-5.5):
+1. `lsp/mod.rs`: move the pool, start and evict logic into `LspPool` (`running_for` never spawns); `DiagnosticsTool` keeps its constructors and holds an `Arc<LspPool>`. `lsp/server.rs` gets `Server::last(path)`, the cached report for a synced file.
+2. `lsp/mod.rs`: an `AfterEdit` wrapper around any `Tool` instead of hooks inside `edit.rs`/`write.rs`, so `EditTool`/`WriteTool` stay unit structs and both share one hook: baseline (last report, or one sync of the old text), inner call, sync of the new text within `lsp.after_edit_ms`, set difference by (start line, code, message), at most 10 lines errors first, text through an injected sanitizer. Any LSP failure or timeout adds nothing.
+3. `cox-protocol` config: `lsp.after_edit = false`, `lsp.after_edit_ms = 1500`; regenerate `default.toml` docs and `docs/config.jsonschema`. `cox-session/src/tools.rs`: build one pool in `with_lsp`, wrap `edit`/`write` when `after_edit`, pass `cox_sanitize::sanitize`.
+4. Fake-server tests: new error shown, nothing when no server runs, nothing for pre-existing errors, dead server adds nothing. Verify with nextest (cox-tools, cox-session, cox, cox-config, cox-protocol), clippy, fmt. No bench (not run in this pass).
+
+- Result: `LspPool` (`crates/cox-tools/src/lsp/mod.rs`) now owns the per-language servers that `DiagnosticsTool` held; `diagnostics` still starts them, and `running_for(path)` hands a running one to anyone else without ever spawning. `Server::last(path)` (`lsp/server.rs`) returns the cached report for a file cox already synced. `AfterEdit` wraps a `Tool`: before the inner call it confines the path (`path::confine`, the same writable roots as `edit`/`write`), takes the running server and the baseline (the last report, or one sync of the old text for a file the server never saw; empty for a new file); after a successful call it syncs the new text within `lsp.after_edit_ms` and appends the diagnostics whose (start line, code, message) is not in the baseline, in `diag::format`'s errors-first order, at most ten lines plus a "more" pointer to `diagnostics`, all through the injected sanitizer. No running server, a dead or slow one, a report the server had not settled by the deadline (baseline or after; such a report holds whatever arrived, so diffing it would invent or hide errors), a timeout (twice `after_edit_ms` overall) or a cancel adds nothing and never turns the edit into an error. `cox-session`'s `with_lsp` builds one pool, wraps the local `edit` and `write` when `lsp.after_edit` (matched by name and description, so ACP's client-backed `edit`/`write`, which write the editor buffer rather than the file the server reads, are left alone), and hands both the pool and `cox_sanitize::sanitize` in (`cox-tools` may not depend on `cox-sanitize`). Config: `lsp.after_edit = false`, `lsp.after_edit_ms = 1500`; `docs/config.md` and `docs/config.jsonschema` regenerated by their drift tests; `docs/tools.md` describes it.
+- Merge: this combines two implementations of the card, PR #156 (Claude Code) and PR #161 (Cursor). PR #156 is the base: one hook for both `edit` and `write`, the config keys, the sanitizer, `Server::last` instead of a second per-file cache in the pool, and the old-text sync for a file the server never saw (PR #161 diffed such a file against an empty baseline, so its old errors came back as new). From PR #161: a report cut off by the deadline is not diffed, and ACP's client-backed tools are not wrapped. PR #161's `LspEdit` in `edit.rs` and its `AFTER_EDIT` constants were dropped; `edit.rs` is unchanged.
+- Deviation: a wrapper (`AfterEdit`) in `lsp/mod.rs` instead of code in `edit.rs` and `write.rs`, so both tools share one hook and stay unit structs (their call sites in `cox-core` and the tests are unchanged). Files touched: `lsp/mod.rs`, `lsp/server.rs`, `cox-session/src/tools.rs`, `cox-protocol/src/config.rs` and `default.toml`, plus generated docs: more than the card's three, about 190 non-comment code lines outside tests.
+- Tests (`lsp::tests`, fake server through the launcher): `edit_reports_the_error_it_introduced`, `edit_adds_nothing_when_no_server_runs` (and nothing is started), `errors_that_existed_before_are_not_reported` (a synced file via `last`, and an unsynced file through `write` via the old-text sync), `introduced_lists_at_most_ten`, `dead_server_adds_nothing`, `a_baseline_cut_off_by_the_deadline_adds_nothing` (from the merge: fails when a deadline report is diffed).
+- Check output summary after the merge: `mise exec -- cargo nextest run -p cox-tools -p cox-session -p cox-protocol -p cox-config --no-fail-fast`: 371 run, 371 passed, 1 skipped; `cargo clippy -p cox-tools -p cox-session -p cox-protocol -p cox-config --all-targets -- -D warnings` clean; `cargo fmt --check` clean. Before the merge (PR #156 alone): `mise exec -- cargo nextest run --workspace --no-fail-fast`: 2063 run, 2062 passed, 1 failed — `cox-plugin hostfn::tests::http_to_allowed_host_round_trips`, untouched by this change, passed when rerun alone. `cargo nextest run -p cox-tools -p cox-session -p cox -p cox-protocol -p cox-config --no-fail-fast`: 562 run, 562 passed (an earlier fail-fast run had `cox::plain plain_has_no_csi_cursor_moves` and `plain_transcript_snapshot` time out waiting for the first prompt while the workspace was still compiling; both passed on the rerun). `cargo nextest run -p cox-tools -E 'test(lsp)'`: 32 passed. `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean. No insta snapshot changed.
+- Not done: `just bench` and the `research.md` bench row (bash check calls −20 %) were not run in this pass (no benchmarks by rule for this run); the default stays `after_edit = false` until they are. The real binary was not run against a scratch `COX_HOME`: the disk filled during that build, so the target dir was cleaned instead; the config keys are covered by the config drift tests.
