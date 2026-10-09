@@ -123,6 +123,22 @@ pub struct HostEnv {
     tool_invoker: Option<Arc<dyn ToolInvoker>>,
     // T33.14.1: `cox_http`'s allow-list, from the same grant as `granted`.
     net: Net,
+    /// Held for the whole `cox_provider_stream` so two sections of one
+    /// plugin cannot interleave their active host (T33.18).
+    provider_gate: Mutex<()>,
+}
+
+/// Holds the provider-call gate and clears the active section on drop,
+/// including when the guest traps (T33.18).
+pub(crate) struct ProviderGuard<'a> {
+    env: &'a HostEnv,
+    _gate: MutexGuard<'a, ()>,
+}
+
+impl Drop for ProviderGuard<'_> {
+    fn drop(&mut self) {
+        self.env.net.deactivate();
+    }
 }
 
 /// The running `cox_tool_call`'s end of its `ToolCx` (T33.12): where
@@ -150,6 +166,7 @@ impl HostEnv {
             tool: Mutex::new(None),
             tool_invoker: None,
             net: Net::new(&BTreeSet::new()),
+            provider_gate: Mutex::new(()),
         }
     }
 
@@ -191,6 +208,34 @@ impl HostEnv {
         self.tool_invoker = Some(invoker);
         self.runtime = Some(runtime);
         self
+    }
+
+    /// The runtime `cox_http` blocks on. Session open sets it via
+    /// `with_model_caller`; tests that call `PluginProvider` directly set
+    /// it here.
+    #[cfg(test)]
+    pub(crate) fn set_runtime(&mut self, runtime: tokio::runtime::Handle) {
+        self.runtime = Some(runtime);
+    }
+
+    /// Remembers an ABI section's host and auth header (T33.18).
+    pub(crate) fn bind_provider(
+        &self,
+        name: &str,
+        base_url: &str,
+        header: Option<(String, String)>,
+    ) -> bool {
+        self.net.bind_section(name, base_url, header)
+    }
+
+    /// Makes `name` the section `cox_http` may call, until the guard drops.
+    pub(crate) fn activate_provider<'a>(&'a self, name: &str) -> ProviderGuard<'a> {
+        let gate = lock(&self.provider_gate);
+        self.net.activate(name);
+        ProviderGuard {
+            env: self,
+            _gate: gate,
+        }
     }
 
     /// The plugin id.

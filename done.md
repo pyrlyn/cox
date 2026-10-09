@@ -1,4 +1,41 @@
 
+#### T33.18 Providers, ABI form (`PluginProvider`)
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-09 · Depends: T33.14.1, T33.17 · Size: ~190 (landed larger; see Not done) · Priority: P2 · Complexity: 5 · Files: `crates/cox-plugin/src/provider.rs`, `crates/cox-plugin/src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-session/src/provider.rs`
+Goal: with `api = "plugin"`, `stream()` calls `cox_provider_stream` and forwards `ProviderEvent`s. The guest's `cox_http` is limited to `base_url`'s host, and the host injects the `auth` header from `resolve_key`, so the key never enters wasm memory. Missing usage is estimated; usage below half of cox's estimate is replaced by the estimate with one warning.
+What landed:
+- `PluginProvider::stream` calls `cox_provider_stream` on a worker thread and forwards `ProviderEvent`s. A missing usage event is filled (`estimated: true`, input = the injected estimate, output = 0) and forwarded, because the session prefers the streamed usage. Reported input below half the estimate is replaced once, with one `tracing` warning; output tokens stay. At half, the guest's figure stands.
+- `cox_http` may reach a provider host only while that section's `cox_provider_stream` is active. The host injects `Authorization: Bearer` or `x-api-key` on the reqwest request and drops a guest header of the same name. The key is not copied into wasm. A missing key builds the section without auth and warns. A duplicate section name keeps the lower plugin id. A bad `base_url` is skipped.
+- `Router::pick` resolves a name in `providers.abi` to `ProviderId::Plugin` before built-ins, including a legacy `typesafe` tier, and does not pin `jev-latest`. `provider_name` returns the section name. The ledger tag is `plugin:<section>`.
+- Session open builds the ABI map before the scripted/replay short-circuit, prices it, and keeps it beside the main-turn provider. When no test double is set and the code tier names a section in the map, that priced plugin is the main provider. Child sessions share the map.
+Not done: the card named five files and ~190 lines. Session assembly now lives in `cox-session`, and `ProviderId` is no longer `Copy`, so the change also touches `hostfn.rs`, `live.rs`, `plugin_model.rs`, `config.rs`, `cox/src/sessions.rs`, and the `tokio-util` dependency on `cox-plugin` (already a workspace crate; `Provider::stream` takes `CancellationToken`). `docs/design/plugins.md` already described this path, so no user-doc translation changed. T33.40.1's decide call-out is still open.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib provider_key_never_reaches_guest
+provider::tests::provider_key_never_reaches_guest ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib underreported_usage_is_replaced_by_estimate
+provider::tests::underreported_usage_is_replaced_by_estimate ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib every_request_has_a_usage_row
+provider::tests::every_request_has_a_usage_row ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-core --lib plugin_provider_section_resolves_by_name
+router::tests::plugin_provider_section_resolves_by_name ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-session --lib scripted_provider_mode_still_builds_plugin_providers
+provider::tests::scripted_provider_mode_still_builds_plugin_providers ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-protocol --lib
+117 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib
+96 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-core --lib
+156 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-session --lib
+59 passed
+$ mise exec rust@1.98.1 -- cargo fmt --all -- --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-protocol -p cox-plugin -p cox-core -p cox-session -p cox --all-targets -- -D warnings
+clean
+```
+`cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
+
 #### T64.1 Revert project hook commands
 
 Model: Grok 4.7 · Status: done 2026-10-09 · Depends: — · Size: ~140 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox/src/config_load.rs`, `crates/cox-protocol/default.toml`

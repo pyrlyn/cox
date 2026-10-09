@@ -175,6 +175,11 @@ pub struct Session {
     pub(crate) id: SessionId,
     pub(crate) config: cox_protocol::Config,
     pub(crate) provider: Arc<dyn Provider>,
+    /// ABI providers by section name (T33.18). The main turn stays on
+    /// `provider` — `COX_PROVIDER=scripted` short-circuits that — and a
+    /// route of `ProviderId::Plugin` reads this map, so a scripted main
+    /// turn can still reach a real plugin provider.
+    pub(crate) plugin_providers: Arc<StdMutex<HashMap<String, Arc<dyn Provider>>>>,
     pub(crate) tools: Vec<Arc<dyn Tool>>,
     pub(crate) store: Arc<dyn Store>,
     pub(crate) archive: Arc<dyn Archive>,
@@ -424,6 +429,9 @@ impl Session {
         // T38.2: ending this session also ends the child's detached shells.
         child.ended = self.ended.child_token();
         child.renew_cancel();
+        // `build` starts an empty map; a child reaches the same ABI
+        // providers the parent loaded (T33.18).
+        child.plugin_providers = Arc::clone(&self.plugin_providers);
         Ok(child)
     }
 
@@ -525,6 +533,7 @@ impl Session {
             id,
             config,
             provider,
+            plugin_providers: Arc::new(StdMutex::new(HashMap::new())),
             tools,
             store,
             archive,
@@ -693,6 +702,31 @@ impl Session {
 
     pub(crate) fn clone_handle(&self) -> Self {
         self.clone()
+    }
+
+    /// Replaces the ABI provider map session open built (T33.18). The
+    /// main-turn provider is unchanged.
+    pub fn set_plugin_providers(&self, map: HashMap<String, Arc<dyn Provider>>) {
+        *self
+            .plugin_providers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = map;
+    }
+
+    /// The provider a route should call. An ABI section uses the map;
+    /// every other route, including the scripted main turn, uses
+    /// [`Self::provider`].
+    pub(crate) fn plugin_backend(&self, route: &crate::router::Route) -> Arc<dyn Provider> {
+        if let ProviderId::Plugin(name) = &route.provider
+            && let Some(provider) = self
+                .plugin_providers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(name)
+        {
+            return Arc::clone(provider);
+        }
+        Arc::clone(&self.provider)
     }
 
     pub(crate) async fn emit(&self, ev: Event) -> Result<(), CoreError> {
@@ -1716,7 +1750,7 @@ impl Session {
             parent: &tracing::Span::current(),
             "chat",
             gen_ai.operation.name = "chat",
-            gen_ai.provider.name = provider_name(route.provider),
+            gen_ai.provider.name = provider_name(&route.provider),
             gen_ai.request.model = %route.model,
             gen_ai.response.model = tracing::field::Empty,
             gen_ai.response.finish_reasons = tracing::field::Empty,
@@ -1870,7 +1904,7 @@ impl Session {
         tracing::info!(
             parent: &provider_span,
             event.name = "cox.provider.completed",
-            gen_ai.provider.name = provider_name(route.provider),
+            gen_ai.provider.name = provider_name(&route.provider),
             gen_ai.request.model = %route.model,
             gen_ai.response.model = %response_model,
             input_tokens = usage.input_tokens,
@@ -2287,13 +2321,15 @@ pub(crate) fn stop_reason_name(stop: &StopReason) -> &'static str {
     }
 }
 
-fn provider_name(provider: ProviderId) -> &'static str {
+fn provider_name(provider: &ProviderId) -> String {
     match provider {
-        ProviderId::Anthropic => "anthropic",
-        ProviderId::OpenAi => "openai",
-        ProviderId::Local => "local",
-        ProviderId::Jev => "typesafe",
-        ProviderId::External => "external",
+        ProviderId::Anthropic => "anthropic".to_string(),
+        ProviderId::OpenAi => "openai".to_string(),
+        ProviderId::Local => "local".to_string(),
+        ProviderId::Jev => "typesafe".to_string(),
+        ProviderId::External => "external".to_string(),
+        // The section name, not the `plugin:` ledger tag (T33.18).
+        ProviderId::Plugin(name) => name.clone(),
     }
 }
 
@@ -2493,6 +2529,16 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+
+    #[test]
+    fn provider_name_of_a_plugin_section_is_the_section() {
+        use cox_protocol::types::ProviderId;
+        assert_eq!(
+            super::provider_name(&ProviderId::Plugin("acme".into())),
+            "acme"
+        );
+        assert_eq!(super::provider_name(&ProviderId::Jev), "typesafe");
+    }
 
     /// Records every hook call and always continues (T22.3's claims).
     #[derive(Default)]
