@@ -90,7 +90,7 @@ private let tierView = SettingsView(
 @MainActor
 @Test func aModelPopUpShowsTitlesAsSentAndAnyOtherPopUpAsSent() async throws {
   let store = SettingsStore(
-    client: FixtureSettingsClient(view: tierView), secrets: MemorySecretStore(), cwd: "/p")
+    client: FixtureSettingsClient(view: tierView), cwd: "/p")
   await store.load()
   let fields = try tables(store, .models).flatMap(\.fields)
   let control = { key in fields.first { $0.id == key }?.control }
@@ -109,7 +109,7 @@ private let tierView = SettingsView(
 @MainActor
 @Test func aPopUpPickWritesThroughTheSettingsSetPath() async throws {
   let client = FixtureSettingsClient(view: tierView)
-  let store = SettingsStore(client: client, secrets: MemorySecretStore(), cwd: "/p")
+  let store = SettingsStore(client: client, cwd: "/p")
   await store.load()
   await store.edit("tiers.code.model", .text("claude-opus-5-5"))
   await store.edit("tiers.code.effort", .text("xhigh"))

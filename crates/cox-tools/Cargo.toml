@@ -36,6 +36,10 @@ schemars = { workspace = true }
 similar = { workspace = true }
 # T41.3: path <-> `file://` URI conversion for the LSP wire (A81).
 url = { workspace = true }
+# T65.1: SHA-256 of the cached docs.rs download, written beside the bytes.
+sha2 = { workspace = true }
+# T65.1: decompress `https://docs.rs/crate/<name>/<version>/json.zst`.
+zstd = { workspace = true }
 
 # T57.7: `bash`'s pty, `setsid`, `killpg`, poll and termios are Unix-only;
 # Windows gets its own spawn path in T57.8.

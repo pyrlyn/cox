@@ -245,6 +245,12 @@ pub fn block_markdown(block: cox_app::doc::Block) -> Option<String> {
     block.markdown()
 }
 
+/// A141: the pointer over an element, one rule for every client.
+#[uniffi::export]
+pub fn pointer(interaction: cox_app::pointer::Interaction) -> cox_app::pointer::Pointer {
+    cox_app::pointer::pointer(interaction)
+}
+
 /// One per process: the workspace, the inbox across sessions, the host.
 #[derive(uniffi::Object)]
 pub struct App {

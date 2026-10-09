@@ -61,8 +61,10 @@ pub fn check(manifest: &PluginManifest, digest: &str, stored: Option<&PluginGran
     // A row whose capabilities are not a list of strings grants nothing:
     // a corrupt row must never widen what loads.
     let granted: BTreeSet<String> =
-        serde_json::from_value::<Vec<String>>(grant.capabilities.clone())
-            .map_or_else(|_| BTreeSet::new(), |caps| caps.into_iter().collect());
+        serde_json::from_value::<Vec<String>>(grant.capabilities.clone()).map_or_else(
+            |_| BTreeSet::new(),
+            |caps| caps.into_iter().map(read_line).collect(),
+        );
     let added: Vec<String> = requested
         .iter()
         .filter(|cap| !covered(cap, &granted))
@@ -93,6 +95,17 @@ fn is_linked(grant: &PluginGrant) -> bool {
 /// for the lower tier never re-asks.
 fn covered(cap: &str, granted: &BTreeSet<String>) -> bool {
     granted.contains(cap) || (cap == MODEL_CHEAP && granted.contains(MODEL_CODE))
+}
+
+/// A stored `ui.keys` line is the old spelling of `terminal.keys`
+/// (PL§15.5); reading it as the new one means a grant given before
+/// surfaces existed neither asks again nor shows as "removed".
+fn read_line(line: String) -> String {
+    if line == "ui.keys" {
+        "terminal.keys".to_string()
+    } else {
+        line
+    }
 }
 
 const MODEL_CHEAP: &str = "model:cheap";
@@ -129,7 +142,11 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
         ("ui.panel", caps.ui.panel),
         ("ui.overlay", caps.ui.overlay),
         ("ui.commands", caps.ui.commands),
-        ("ui.keys", caps.ui.keys),
+        ("terminal.keys", caps.terminal_keys()),
+        ("desktop.inspector", caps.desktop.inspector),
+        ("desktop.toolbar", caps.desktop.toolbar),
+        ("desktop.palette", caps.desktop.palette),
+        ("desktop.notify", caps.desktop.notify),
     ];
     out.extend(
         flags
@@ -212,6 +229,7 @@ mod tests {
     fn manifest(caps: Capabilities) -> PluginManifest {
         PluginManifest {
             api: 1,
+            surfaces: None,
             id: "demo".into(),
             version: "0.1.0".into(),
             name: "Demo".into(),
@@ -431,6 +449,49 @@ mod tests {
             Verdict::NeedsApproval {
                 added: Vec::new(),
                 removed: Vec::new(),
+            }
+        );
+    }
+
+    /// PL§15.5: `ui.keys` and `terminal.keys` are one approval line, so the
+    /// old spelling never asks again after the author switches.
+    #[test]
+    fn ui_keys_is_an_alias_of_terminal_keys() {
+        let mut old_spelling = Capabilities::default();
+        old_spelling.ui.keys = true;
+        let mut new_spelling = Capabilities::default();
+        new_spelling.terminal.keys = true;
+        assert_eq!(
+            capability_list(&manifest(old_spelling)),
+            capability_list(&manifest(new_spelling))
+        );
+    }
+
+    #[test]
+    fn stored_ui_keys_grant_covers_terminal_keys() {
+        let mut caps = Capabilities::default();
+        caps.terminal.keys = true;
+        let stored = grant("d1", &["ui.keys"]);
+        assert_eq!(
+            check(&manifest(caps), "d1", Some(&stored)),
+            Verdict::Granted
+        );
+    }
+
+    #[test]
+    fn desktop_parts_are_their_own_grant_lines() {
+        let mut caps = Capabilities::default();
+        caps.desktop.inspector = true;
+        caps.desktop.notify = true;
+        let m = manifest(caps);
+        assert_eq!(capability_list(&m), ["desktop.inspector", "desktop.notify"]);
+        // A terminal-only grant does not cover the desktop parts.
+        let stored = grant("d1", &["terminal.keys"]);
+        assert_eq!(
+            check(&m, "d1", Some(&stored)),
+            Verdict::NeedsApproval {
+                added: vec!["desktop.inspector".into(), "desktop.notify".into()],
+                removed: vec!["terminal.keys".into()],
             }
         );
     }
