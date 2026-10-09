@@ -107,20 +107,27 @@ struct SnapshotHost<Sample: View> {
     return image
   }
 
-  /// The first frame that survives a later turn unchanged. SwiftUI commits a text field's
-  /// font, line box and focus on the main queue after the first layout, and `cacheDisplay`
-  /// sometimes drains that queue and sometimes does not. Drawing until two consecutive
-  /// frames match takes the committed one. The budget is short so a spinner that ignored
-  /// Reduce Motion cannot travel; past it, the last frame is returned and the caller's
-  /// expectation fails on it.
+  /// The committed text-field frame. SwiftUI applies the token font, line box and
+  /// focus on the main queue after the first layout, and `cacheDisplay` sometimes
+  /// drains that queue and sometimes does not. Two frames taken before that block
+  /// runs are identical and still the uncommitted baseline — the permissions-rules
+  /// flake. A repeated frame counts only after a later turn, or after the pixels
+  /// have actually changed. The budget stays under a second so a spinner that
+  /// ignored Reduce Motion cannot travel; past it, the last frame is returned and
+  /// the caller's expectation fails on it.
   func settledBitmap() throws -> NSBitmapImageRep {
     SnapshotRendering.arm()
     var previous = try bitmap()
-    for _ in 0..<8 {
-      RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 60.0))
+    var sawChange = false
+    for turn in 0..<24 {
+      RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 30.0))
       host.layoutSubtreeIfNeeded()
       let next = try bitmap()
-      if let before = previous.tiffRepresentation, before == next.tiffRepresentation {
+      let same = previous.tiffRepresentation == next.tiffRepresentation
+      if !same { sawChange = true }
+      // Four turns is long enough for the deferred commit on a busy runner.
+      // Once the pixels have moved, the next repeated frame is the committed one.
+      if same && (sawChange || turn >= 4) {
         return next
       }
       previous = next
