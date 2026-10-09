@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// SettingsStore over the fixture client and an in-memory secret store: a
+// SettingsStore over the fixture client and an in-memory secret store dependency: a
 // field the project layer overrides stays read-only with its layer, edits
 // reach Rust as JSON, and keys never touch the real Keychain (A49).
 
 import CoxClient
+import Dependencies
 import Testing
 
 @testable import CoxModel
@@ -49,7 +50,11 @@ typealias Loaded = (store: SettingsStore, client: FixtureSettingsClient)
 @MainActor
 func loadedStore(secrets: any SecretStore = MemorySecretStore()) async -> Loaded {
   let client = FixtureSettingsClient(view: fixtureView)
-  let store = SettingsStore(client: client, secrets: secrets, cwd: "/project")
+  let store = withDependencies {
+    $0.secretStore = secrets
+  } operation: {
+    SettingsStore(client: client, cwd: "/project")
+  }
   await store.load()
   return (store, client)
 }

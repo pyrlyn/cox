@@ -58,6 +58,16 @@ impl Live {
         &self.host
     }
 
+    /// The environment `cox_http` and the ABI provider share (T33.18).
+    pub fn env(&self) -> &Arc<HostEnv> {
+        &self.env
+    }
+
+    /// `[[provider]]` rows, declarative and ABI.
+    pub fn provider_decls(&self) -> &[cox_plugin_api::ProviderDecl] {
+        &self.manifest.provider
+    }
+
     /// `grant::capability_list` of the granted manifest.
     pub fn granted(&self) -> &[String] {
         &self.granted
@@ -90,10 +100,11 @@ impl Live {
             .map_or(Vec::new(), |i| i.commands.clone())
     }
 
-    /// `InitOut.keys`, or empty when `ui.keys` was not granted (PL§2, PL§4:
-    /// anything not granted is dropped).
+    /// `InitOut.keys`, or empty when `terminal.keys` (or its alias `ui.keys`,
+    /// which `grant::capability_list` already folds into it) was not granted
+    /// (PL§2, PL§4: anything not granted is dropped).
     pub fn granted_keys(&self) -> Vec<KeyDecl> {
-        if !self.granted.iter().any(|g| g == "ui.keys") {
+        if !self.granted.iter().any(|g| g == "terminal.keys") {
             return Vec::new();
         }
         self.init.as_ref().map_or(Vec::new(), |i| i.keys.clone())
@@ -529,7 +540,7 @@ mod tests {
             }],
             ..InitOut::default()
         });
-        // `ui.commands` was granted, `ui.keys` was not: keys drop, commands
+        // `ui.commands` was granted, `terminal.keys` was not: keys drop, commands
         // don't (PL§2, PL§4).
         assert_eq!(live.plugins()[0].granted_commands().len(), 1);
         assert!(live.plugins()[0].granted_keys().is_empty());

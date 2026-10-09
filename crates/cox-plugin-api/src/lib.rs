@@ -24,9 +24,10 @@ pub use abi::{
 };
 
 pub use manifest::{
-    API_MAJOR, AgentDecl, AgentMode, Capabilities, CloudAgentDecl, CloudBackend, ExternalAgentDecl,
-    FsCaps, Limits, ManifestError, McpDecl, ModelDecl, ModelTier, PluginManifest, PriceDecl,
-    ProviderApi, ProviderAuth, ProviderDecl, UiCaps, is_plugin_id,
+    API_MAJOR, AgentDecl, AgentMode, Capabilities, CloudAgentDecl, CloudBackend, DesktopCaps,
+    ExternalAgentDecl, FsCaps, Limits, ManifestError, McpDecl, ModelDecl, ModelTier,
+    PluginManifest, PriceDecl, ProviderApi, ProviderAuth, ProviderDecl, Surface, TerminalCaps,
+    UiCaps, is_plugin_id,
 };
 
 pub use ui::{StyleToken, Widget};

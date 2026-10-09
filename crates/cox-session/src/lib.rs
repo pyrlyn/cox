@@ -286,32 +286,56 @@ pub async fn open_reporting(
     // T30.16: ask LM Studio what it runs before the provider is built, so
     // the loaded context becomes the session's window. The key resolved
     // here is reused for the chat client: one keyring read, not two.
+    // T33.18: ABI sections are built before the scripted/replay
+    // short-circuit inside `assemble`, and their keys use the normal
+    // env/keyring path — not the LM Studio served key.
+    #[cfg(feature = "plugins")]
+    let (abi_raw, abi_warnings) = {
+        let estimate = Arc::new(|req: &cox_protocol::types::Request| {
+            cox_provider::tokens::estimate(req).tokens
+        });
+        let resolve = |var: &str, section: &str| match &keys {
+            Some(keys) => cox_provider::http::resolve_key_with(var, section, |s| keys(s)),
+            None => cox_provider::http::resolve_key(var, section),
+        };
+        cox_plugin::provider::backends(&plugins.live, &resolve, estimate)
+    };
+    #[cfg(not(feature = "plugins"))]
+    let abi_raw = std::collections::HashMap::new();
     let served = provider::lmstudio_served(&config).await?;
-    let provider = match &served {
+    let (provider, abi) = match &served {
         Some(s) => {
             let key = s.api_key.clone();
-            provider::provider_for_served(
+            provider::assemble(
                 &config,
                 move |_, _| key.ok_or(ProviderError::Auth),
                 Some(&s.model),
                 &plugin_models,
+                abi_raw,
             )?
         }
         None => match keys {
-            Some(keys) => provider::provider_for_served(
+            Some(keys) => provider::assemble(
                 &config,
                 |var, section| cox_provider::http::resolve_key_with(var, section, |s| keys(s)),
                 None,
                 &plugin_models,
+                abi_raw,
             )?,
-            None => provider::provider_for_served(
+            None => provider::assemble(
                 &config,
                 cox_provider::http::resolve_key,
                 None,
                 &plugin_models,
+                abi_raw,
             )?,
         },
     };
+    // `plugin_models` borrows `plugins` until `assemble` returns, so the
+    // warnings land after that borrow ends.
+    #[cfg(feature = "plugins")]
+    plugins.notices.extend(abi_warnings);
+    config.providers.abi = abi.keys().cloned().collect();
     let mdir = memory_dir_for(&base, &home, cwd);
     // T27.3: a worktree session's project is still the main checkout, so
     // the sessions of one repository see each other whatever tree they edit.
@@ -370,8 +394,16 @@ pub async fn open_reporting(
     // D14); `with_tool_search_index` below makes it discoverable.
     all.push(Arc::new(cox_ext::skills::SkillTool::new(found.skills)));
     if config.mcp.enabled {
-        let (mcp, notices) =
-            mcp::mcp_tools(&config, cwd, mcp_login, asker, plugins.mcp, &writable).await;
+        let (mcp, notices) = mcp::mcp_tools(
+            &config,
+            cwd,
+            mcp_login,
+            asker,
+            plugins.mcp,
+            &writable,
+            &store,
+        )
+        .await;
         all.extend(mcp);
         warnings.extend(notices.into_iter().map(Warning::Mcp));
     }
@@ -412,6 +444,7 @@ pub async fn open_reporting(
             cwd.to_path_buf(),
         )?,
     };
+    session.set_plugin_providers(abi);
     if worktree_main.is_some() {
         session.set_writable_roots(vec![cwd.to_path_buf()]);
     }

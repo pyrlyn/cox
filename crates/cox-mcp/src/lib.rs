@@ -18,3 +18,4 @@ pub mod client;
 pub mod discovery;
 pub mod elicit;
 pub mod server;
+pub mod trust;
