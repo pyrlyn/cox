@@ -39,8 +39,7 @@ final class OpenRecorder: PlatformHost {
           detail: "Runs locally from .mcp.json; no login", action: nil),
       ])
     return SettingsStore(
-      client: FixtureSettingsClient(view: view, host: host), secrets: MemorySecretStore(),
-      cwd: "/p")
+      client: FixtureSettingsClient(view: view, host: host), cwd: "/p")
   }
 
   @Test func aServerShowsLoggedOutThenLoggedInAfterTheCallback() async {
@@ -74,8 +73,7 @@ final class OpenRecorder: PlatformHost {
           log: ["skipped: spawn uvx: not found"])
       ])
     let store = SettingsStore(
-      client: FixtureSettingsClient(view: view, host: host), secrets: MemorySecretStore(),
-      cwd: "/p")
+      client: FixtureSettingsClient(view: view, host: host), cwd: "/p")
     await store.load()
     #expect(store.logins.first?.status == .failed)
     #expect(store.logins.first?.log == ["skipped: spawn uvx: not found"])
