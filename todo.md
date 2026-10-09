@@ -1,7 +1,6 @@
 # Todo
 
 - T33.14.2. Filesystem preopens
-- T33.18. Providers, ABI form (`PluginProvider`)
 - T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
 - T33.40.1. ABI: two-phase decide, own-provider call-out, batched questions

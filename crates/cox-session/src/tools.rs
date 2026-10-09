@@ -15,6 +15,7 @@ use cox_protocol::traits::Tool;
 use cox_store::Store;
 use cox_tools::ask_user::{Answers, AskUserTool};
 use cox_tools::bash::BashTool;
+use cox_tools::docs::{DocsFetchTool, DocsQueryTool, DocsResolveTool};
 use cox_tools::edit::EditTool;
 use cox_tools::expand::ExpandTool;
 use cox_tools::glob::GlobTool;
@@ -47,6 +48,11 @@ pub fn tools(answer: Option<String>, store: &Arc<Store>, mdir: PathBuf) -> Vec<A
         Arc::new(AskUserTool::new(Answers::Fixed(answer))),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemorySearchTool::new(mem, mdir)),
+        // Deferred, like memory: `tool_search` indexes them because this
+        // insert is before the spec rebuild below (T65.1, D6d).
+        Arc::new(DocsResolveTool),
+        Arc::new(DocsQueryTool::from_home()),
+        Arc::new(DocsFetchTool::from_home()),
     ];
     let specs: Vec<_> = tools.iter().map(|t| t.spec()).collect();
     tools.push(Arc::new(ToolSearchTool::new(specs)));
@@ -342,5 +348,59 @@ mod tests {
         config.lsp.enabled = false;
         let without = with_lsp(tools(None, &store, tmp.path().join("memory")), &config, &[]);
         assert!(without.iter().all(|t| t.spec().name != "diagnostics"));
+    }
+
+    /// T65.1: crate docs stay out of the prompt (`deferred`) and
+    /// `tool_search` for "crate documentation" still returns `docs_query`.
+    #[tokio::test]
+    async fn tool_search_finds_docs_query() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open(tmp.path()).expect("open store"));
+        let built = tools(None, &store, tmp.path().join("memory"));
+        let prompt_names: Vec<_> = built
+            .iter()
+            .map(|tool| tool.spec())
+            .filter(|spec| !spec.deferred)
+            .map(|spec| spec.name)
+            .collect();
+        assert!(
+            prompt_names
+                .iter()
+                .all(|name| name != "docs_resolve" && name != "docs_query" && name != "docs_fetch")
+        );
+        let search = built
+            .iter()
+            .find(|tool| tool.spec().name == "tool_search")
+            .expect("tool_search")
+            .clone();
+        let (out_tx, _out_rx) = tokio::sync::mpsc::channel(1);
+        let cx = cox_tools::tool_cx(
+            vec![tmp.path().to_path_buf()],
+            tmp.path().to_path_buf(),
+            cox_protocol::SandboxPolicy {
+                mode: cox_protocol::types::SandboxMode::ReadOnly,
+                network: false,
+                writable: vec![],
+                readonly_in_workspace: vec![],
+                linux_backend: Default::default(),
+            },
+            Arc::new(NoopArchive) as Arc<dyn cox_protocol::Archive>,
+            tokio_util::sync::CancellationToken::new(),
+            out_tx,
+            SessionId::new(),
+            cox_protocol::ids::CallId::new(),
+        );
+        let out = search
+            .call(serde_json::json!({"query": "crate documentation"}), &cx)
+            .await
+            .expect("search");
+        let found = out.structured.expect("discovered names");
+        let names = found["discovered"].as_array().expect("names");
+        assert!(names.len() <= 5, "{}", out.text);
+        assert!(
+            names.iter().any(|name| name == "docs_query"),
+            "{}",
+            out.text
+        );
     }
 }

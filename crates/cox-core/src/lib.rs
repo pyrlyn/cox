@@ -17,6 +17,7 @@ mod dedup;
 pub mod external_agent;
 mod hooks;
 pub mod init;
+mod json_tree;
 pub mod memory_extract;
 pub mod mode;
 mod monotone;
