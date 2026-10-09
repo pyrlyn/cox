@@ -98,3 +98,21 @@ custom_rules:
     severity: error
     excluded: '/(?:Tokens|Foundations)/'
     excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+
+  # DT§4.6: CoxModel (CoxClient, CoxModel) and CoxCore hold state and the core client only;
+  # they never import a UI framework, so tests and previews need no window (T63.3).
+  no_ui_import_in_core:
+    name: No UI framework in CoxModel or CoxCore
+    included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_ui_import_in_core\.swift$)'
+    regex: '^\s*(?:@[\w()]+\s+)*import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(?:AppKit|SwiftUI|UIKit|Cocoa)\b'
+    message: 'CoxModel and CoxCore stay UI-free: move this to CoxPlatform or CoxUI (DT§4.6)'
+    severity: error
+    excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+
+  no_appkit_type_in_core:
+    name: No AppKit type in CoxModel or CoxCore
+    included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_appkit_type_in_core\.swift$)'
+    regex: '\bNS(?:App|Application|Window|WindowController|View|ViewController|HostingView|Color|Image|Font|Pasteboard|Workspace|Event|Screen|Responder|Menu|MenuItem|Alert|Cursor|Sound|StatusBar|StatusItem|TextView|TextField|Button)\b'
+    message: 'An AppKit type in CoxModel or CoxCore: move it behind a protocol in CoxClient (DT§4.6)'
+    severity: error
+    excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
