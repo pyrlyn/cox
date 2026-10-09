@@ -2,8 +2,9 @@
 # push there deploys https://pyrlyn.github.io/landing/ via GitHub Pages:
 #   - docs/site.md (the project card) -> content/projects/<this repo's name>.md; its front matter
 #     follows CONTENT_CONTRACT.md in pyrlyn/landing.
-#   - every other docs/**/*.md -> content/docs/<this repo's name>/ (mirrored: files removed here are
-#     removed there), plus _source.json with the source repo, commit and ref. The site renders
+#   - every other user-facing docs/**/*.md -> content/docs/<this repo's name>/ (internal pages
+#     are left out, see `internal` below; mirrored: files removed or left out here are removed
+#     there), plus _source.json with the source repo, commit and ref. The site renders
 #     them as /landing/<name>/docs/<page>/ and links other relative paths back to this repo at
 #     that commit. Page order and titles live in src/data/docs-nav.json in pyrlyn/landing.
 #
@@ -89,8 +90,25 @@ jobs:
           set -euo pipefail
           dest="site/content/docs/${PROJECT}"
           mkdir -p "$dest"
+          # Only user-facing docs are published. Internal pages stay in this repository and are
+          # left out here: research, QA audits, design notes and ADRs, proposals, plans and to-do,
+          # done and roadmap notes, agent instructions, maintainer runbooks and asset notes, plus
+          # this repository's own list (the last lines). The patterns carry no leading / so they
+          # match at any depth; --delete-excluded removes any copy already on the site.
+          internal=(
+            --exclude='research/' --exclude='research*.md'
+            --exclude='qa/' --exclude='*audit*.md'
+            --exclude='design/' --exclude='brand/' --exclude='assets/' --exclude='adr/' --exclude='notes/'
+            --exclude='proposals/' --exclude='*proposal*.md'
+            --exclude='plan*.md' --exclude='PLAN*.md' --exclude='todo*.md' --exclude='TODO*.md'
+            --exclude='next*.md' --exclude='done*.md' --exclude='roadmap*.md' --exclude='ideas.md'
+            --exclude='AGENTS.md' --exclude='CLAUDE.md' --exclude='agency.md'
+            --exclude='sonarcloud-setup.md' --exclude='release.md' --exclude='release-*.md'
+            --exclude='compat.md' --exclude='i18n.md'
+          )
           rsync -a --delete --delete-excluded --prune-empty-dirs \
             --exclude='/site.md' \
+            "${internal[@]}" \
             --include='*/' --include='*.md' --exclude='*' \
             source/docs/ "$dest/"
           printf '{\n  "repo": "%s",\n  "sha": "%s",\n  "ref": "%s"\n}\n' \
