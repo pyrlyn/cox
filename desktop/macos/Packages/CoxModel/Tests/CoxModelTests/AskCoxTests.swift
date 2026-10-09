@@ -6,6 +6,7 @@
 // the prompt as the composer's Send, and the session stays held until a window joins it.
 
 import CoxClient
+import Dependencies
 import Foundation
 import Synchronization
 import Testing
@@ -26,7 +27,11 @@ private final class OpeningCore: CoreClient {
 @Test func askingOpensASessionInTheProjectThenSendsThePrompt() async throws {
   let (core, registry, token) = (OpeningCore(), AppStore(), UUID())
   let ask = AskCox(project: "/work/cox", prompt: "Why does the build fail?")
-  let shared = try await ask.run(on: core, registry: registry, token: token, theme: "t")
+  let shared = try await withDependencies {
+    $0.coreClient = core
+  } operation: {
+    try await ask.run(registry: registry, token: token, theme: "t")
+  }
   #expect(core.requests.withLock { $0 } == [OpenSession(cwd: "/work/cox", theme: "t")])
   #expect(core.session.sent == [.send(text: "Why does the build fail?", attachments: [])])
   #expect(shared.store.session === core.session)
@@ -35,10 +40,32 @@ private final class OpeningCore: CoreClient {
 @MainActor
 @Test func theAskedSessionStaysOpenUntilItsWindowJoins() async throws {
   let (core, registry, token, window) = (OpeningCore(), AppStore(), UUID(), UUID())
-  _ = try await AskCox(project: "/work/cox", prompt: "hi").run(
-    on: core, registry: registry, token: token, theme: "t")
+  _ = try await withDependencies {
+    $0.coreClient = core
+  } operation: {
+    try await AskCox(project: "/work/cox", prompt: "hi").run(
+      registry: registry, token: token, theme: "t")
+  }
   #expect(registry.isOpen("fixture"))
   _ = registry.join("fixture", window: window)
   registry.release("fixture", window: token)
   #expect(registry.isOpen("fixture"))
+}
+
+@MainActor
+@Test func askingWhenTheCoreFailedToStartThrowsItsErrorAndHoldsNoSession() async {
+  struct NoCore: Error {}
+  let registry = AppStore()
+  do {
+    _ = try await withDependencies {
+      $0.coreClient = UnavailableCoreClient(NoCore())
+    } operation: {
+      try await AskCox(project: "/work/cox", prompt: "hi").run(
+        registry: registry, token: UUID(), theme: "t")
+    }
+    Issue.record("a core that failed to start opened a session")
+  } catch {
+    #expect(error is NoCore)
+  }
+  #expect(!registry.isOpen("fixture"))
 }

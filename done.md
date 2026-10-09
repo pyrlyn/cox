@@ -1,4 +1,174 @@
 
+#### T33.18 Providers, ABI form (`PluginProvider`)
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-09 · Depends: T33.14.1, T33.17 · Size: ~190 (landed larger; see Not done) · Priority: P2 · Complexity: 5 · Files: `crates/cox-plugin/src/provider.rs`, `crates/cox-plugin/src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-session/src/provider.rs`
+Goal: with `api = "plugin"`, `stream()` calls `cox_provider_stream` and forwards `ProviderEvent`s. The guest's `cox_http` is limited to `base_url`'s host, and the host injects the `auth` header from `resolve_key`, so the key never enters wasm memory. Missing usage is estimated; usage below half of cox's estimate is replaced by the estimate with one warning.
+What landed:
+- `PluginProvider::stream` calls `cox_provider_stream` on a worker thread and forwards `ProviderEvent`s. A missing usage event is filled (`estimated: true`, input = the injected estimate, output = 0) and forwarded, because the session prefers the streamed usage. Reported input below half the estimate is replaced once, with one `tracing` warning; output tokens stay. At half, the guest's figure stands.
+- `cox_http` may reach a provider host only while that section's `cox_provider_stream` is active. The host injects `Authorization: Bearer` or `x-api-key` on the reqwest request and drops a guest header of the same name. The key is not copied into wasm. A missing key builds the section without auth and warns. A duplicate section name keeps the lower plugin id. A bad `base_url` is skipped.
+- `Router::pick` resolves a name in `providers.abi` to `ProviderId::Plugin` before built-ins, including a legacy `typesafe` tier, and does not pin `jev-latest`. `provider_name` returns the section name. The ledger tag is `plugin:<section>`.
+- Session open builds the ABI map before the scripted/replay short-circuit, prices it, and keeps it beside the main-turn provider. When no test double is set and the code tier names a section in the map, that priced plugin is the main provider. Child sessions share the map.
+Not done: the card named five files and ~190 lines. Session assembly now lives in `cox-session`, and `ProviderId` is no longer `Copy`, so the change also touches `hostfn.rs`, `live.rs`, `plugin_model.rs`, `config.rs`, `cox/src/sessions.rs`, and the `tokio-util` dependency on `cox-plugin` (already a workspace crate; `Provider::stream` takes `CancellationToken`). `docs/design/plugins.md` already described this path, so no user-doc translation changed. T33.40.1's decide call-out is still open.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib provider_key_never_reaches_guest
+provider::tests::provider_key_never_reaches_guest ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib underreported_usage_is_replaced_by_estimate
+provider::tests::underreported_usage_is_replaced_by_estimate ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib every_request_has_a_usage_row
+provider::tests::every_request_has_a_usage_row ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-core --lib plugin_provider_section_resolves_by_name
+router::tests::plugin_provider_section_resolves_by_name ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-session --lib scripted_provider_mode_still_builds_plugin_providers
+provider::tests::scripted_provider_mode_still_builds_plugin_providers ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-protocol --lib
+117 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib
+96 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-core --lib
+156 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-session --lib
+59 passed
+$ mise exec rust@1.98.1 -- cargo fmt --all -- --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-protocol -p cox-plugin -p cox-core -p cox-session -p cox --all-targets -- -D warnings
+clean
+```
+`cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
+
+#### T64.1 Revert project hook commands
+
+Model: Grok 4.7 · Status: done 2026-10-09 · Depends: — · Size: ~140 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox/src/config_load.rs`, `crates/cox-protocol/default.toml`
+Goal: a repository `.cox/config.toml` or `.claude` file cannot add or change hook commands. Those commands run as `/bin/sh -c` with tool JSON on stdin and no sandbox. User config and `~/.claude` hooks stay.
+Plan:
+1. `apply_project_guards` reverts `hooks.events` to the layers without the project when they differ, and reports one `GuardViolation` (`hooks`).
+2. `timeout_s` and `fail_open` stay project-settable. `source_of` does not treat those scalars as reverted.
+3. The Claude-settings import test expects a repository hook to be dropped. A new test keeps the `~/.claude` command and drops the repository one.
+What landed: the guard, the two tests, the `default.toml` comment (and generated `docs/config.md`), plus the compatibility notes in `docs/compat.md`, `docs/design/extensions.md` and plan D13 / §1.6.
+Not done: hooks are still unsandboxed when the user configured them (the status-line sandbox alternative). T64.2 and later stay open.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config
+37 tests run: 37 passed
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config -p cox-protocol -p cox -E 'test(/project_config_cannot_set_hook_commands|user_claude_hooks_survive|config_claude_settings_import|every_guarded_key_has_its_own_reason|config_docs_config_md_matches|project_claude_settings_allow|user_claude_settings_allow/)'
+7 tests run: 7 passed
+$ mise exec rust@1.98.1 -- cargo fmt --all -- --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-config -p cox-protocol -p cox --all-targets -- -D warnings
+clean
+```
+`mise` is not on the default PATH in this environment; the commands used `~/.local/bin/mise` after `mise install rust`. A full `cargo nextest run -p cox` also ran two `external_agents_cursor` tests that fail here because Landlock cannot wrap the fixture agent's argv (`cannot run under the sandbox`). That warning is unrelated to hook loading; CI's sandbox host is the check for it.
+
+#### T59.11 Fold a JSON tool result into one line per node
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: T59.2 · Size: ~580 (`json_tree.rs` past the ~200 cap; see A144) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/json_tree.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-core/src/lib.rs`
+Goal: a single-line JSON design or AST dump larger than `tool_output_visible_bytes` is folded before the line cut, so the model keeps a template line and an `expand` trailer instead of losing the middle; the archive row stays the raw bytes. `read` and `grep` stay unfolded.
+Plan:
+1. `fold_json`: skip a uniform scalar table (an array of objects with the same scalar keys and at least three columns); hoist values used at least twice; template object bodies used at least twice, omitting `id` and `name` (and `children`, which stay nested lines); one positional line per node; deterministic key order; `None` when the folded text is not shorter than `serde_json::to_string` of the input.
+2. In `turn.rs`, inside the `unwrap_or_else` that calls `visible` / `visible_folding`, before shorten: if the tool is not `read` or `grep` and the output is one JSON value and `fold_json` returns a shorter text, shorten that text. The archive `put` stays first and keeps the raw bytes.
+3. Tests: repeated bodies become one template; a single-use field stays inline; a 3-column scalar table returns `None`; two calls return equal strings; identical nodes stay one line each; a `bash` JSON result over the visible budget shows a template line and an expand trailer, and the archive bytes equal the raw output.
+What landed: `crates/cox-core/src/json_tree.rs` (`fold_json`) and `json_source` in `turn.rs`. Nodes are not hoisted (a repeated node stays a positional line); only field values are. `compact.rs`, `dedup.rs` and `fold_repeats` are unchanged. No Figma client, no new dependency.
+Check:
+```text
+$ mise exec -- cargo test -p cox-core json_tree -- --test-threads=8
+test json_tree::tests::identical_nodes_stay_one_line_each ... ok
+test json_tree::tests::repeated_bodies_become_one_template ... ok
+test json_tree::tests::single_use_field_stays_inline ... ok
+test json_tree::tests::two_calls_return_equal_strings ... ok
+test json_tree::tests::three_column_scalar_table_is_not_folded ... ok
+5 passed
+$ mise exec -- cargo test -p cox-core turn
+turn::tests::bash_json_over_budget_shows_a_template_and_keeps_the_raw_archive ... ok
+(the `turn` filter: 20 unit + 17 integration tests passed)
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
+#### T65.2 tool_search summary mode
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: T65.1 · Size: ~50 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/tool_search.rs`
+Goal: `tool_search` returns `{name, description}` unless the caller asks for the full spec, and discovery still returns names.
+What landed: optional `detail` is `summary` (the default) or `full`. Summary serializes `{name, description}` for each hit. `full` keeps the pretty `ToolSpec`. `structured.discovered` is still the names. `context.rs` is unchanged.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools tool_search
+test tool_search::tests::tool_search_ranks_the_matching_deferred_tool_first ... ok
+test tool_search::tests::tool_search_returns_at_most_five_and_nothing_for_no_match ... ok
+test tool_search::tests::tool_search_reports_discovered_names_in_structured_output ... ok
+test tool_search::tests::tool_search_summary_omits_input_schema ... ok
+4 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
+#### T65.1 mcp_exec: one sandboxed program fans out MCP calls
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: — · Size: 616 lines in `mcp_exec.rs` plus one `pub mod` · Priority: P0 · Complexity: 3 · Files: `crates/cox-tools/src/mcp_exec.rs`, `crates/cox-tools/src/lib.rs`
+Goal: a unit test where two tool results are 10_000 bytes each and the model-visible string is only the program's final print.
+What landed: `McpExecTool` (`deferred: false`, `Risk::Write`) runs an original Python driver in a new process on every call. `cox_sandbox::sandbox::command` builds it with network off and one fresh temp directory as the only writable root (also a root, so bubblewrap still mounts a path under its private `/tmp`). `sandbox::command` inserts `-c`, so the shell `exec`s `python3 -I -u <driver>`. The driver allows top-level await and speaks `search`, `describe` and `call`; any other stdout `type` is rejected. `describe` is name and description only. `ToolOutput.text` is the program's `result` text, cut at 8_000 bytes with `… truncated`. The tool does not archive. A non-zero exit or a timeout is `is_error` plus the stderr tail. A missing `python3` is `ToolError::Denied` with `python3 is missing`. No protocol change.
+Not done: `McpExecTool` is not registered on the session. That wiring is another file past this card's cap. `mcp_exec.rs` is 616 lines, over the ~200 line card: the driver, the sandbox spawn, the RPC loop and the acceptance test do not pass the Check as separate cards.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools mcp_exec
+test mcp_exec::tests::result_text_over_8000_bytes_ends_with_truncated_trailer ... ok
+test mcp_exec::tests::mcp_exec_is_a_present_write_tool_with_no_network ... ok
+test mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print ... ok
+3 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
+#### T65.1 Deferred lockfile doc lookup
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: `docs.rs` is past the 200-line guide because query, fetch and `llms.txt` share one cache format (A145) · Priority: P1 · Complexity: 3 · Files: `crates/cox-tools/src/docs.rs`, `crates/cox-tools/src/lib.rs`, `crates/cox-session/src/tools.rs`, `docs/tools.md`
+Goal: `docs_resolve`, `docs_query` and `docs_fetch` stay out of the default prompt. The lockfile names the version, a local `items.jsonl` answers the query, and only `docs_fetch` downloads rustdoc from docs.rs.
+Plan:
+1. `docs_resolve` reads `Cargo.lock` text from the workspace roots and returns `cargo/<name>/<version>`. No `cargo` subprocess. Missing name: `not in lockfile`.
+2. `docs_query` searches `~/.rtok/docs/<name>/<version>/items.jsonl` when that directory exists, otherwise `~/.cox/docs`. Case-folded term overlap, every term required, at most 5 hits of 400 characters. A missing cache returns `not cached` and does not construct `docs_fetch`. After a failed parse, `libraryName` and `question` rename to `name` and `query` inside this tool only. `name = "llms"` searches a root `llms.txt` and downloads nothing.
+3. `docs_fetch` GETs `https://docs.rs/crate/<name>/<version>/json.zst` with no `Authorization` header and a 30 s timeout. The version comes from the lockfile, never `latest`, unless the lockfile has no entry and the caller passed a version. Bytes, their sha256, and `items.jsonl` are written only after the body decodes. A failed GET leaves a previous file in place.
+Check: `docs_tools_are_deferred`, `query_deserialize_returns_the_matching_path_first`, `missing_cache_returns_not_cached_and_does_not_construct_fetch`, `tool_search_finds_docs_query`.
+What landed: `crates/cox-tools/src/docs.rs` (`DocsResolveTool`, `DocsQueryTool`, `DocsFetchTool`), `pub mod docs` in `lib.rs`, the three tools registered in `cox-session` before the `tool_search` rebuild, and the `docs/tools.md` rows. `cox-tools` depends on `sha2` 0.11 (already a workspace dependency) and `zstd` 0.13 (already in the lockfile via wasmtime). No Context7 URL, no API key, no change to `memory_save` or `memory_search`.
+Check:
+```text
+$ mise exec -- cargo test -p cox-tools docs::
+test result: ok. 13 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo test -p cox-session tools::
+test result: ok. 4 passed; 0 failed
+  tools::tests::tool_search_finds_docs_query ... ok
+$ mise exec -- cargo clippy -p cox-tools -p cox-session --all-targets -- -D warnings
+Finished `dev` profile; no warnings
+```
+
+#### T64.24 Quarantine untrusted MCP tool definitions
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: larger than the usual card (the prompt required the hash, the migration, the session wiring and the CLI together) · Priority: P0 · Files: `crates/cox-mcp/src/trust.rs`, `crates/cox-mcp/src/client.rs`, `crates/cox-mcp/tests/client.rs`, `crates/cox-store/migrations/00000000000008_mcp_tool_trust/`, `crates/cox-store/src/mcp_trust.rs`, `crates/cox-session/src/mcp.rs`, `crates/cox/src/mcp_cmd.rs`, `crates/cox/src/cli.rs`
+Goal: a server's tool description and `readOnlyHint` do not reach the model or skip approval until the stored contract hash matches.
+What landed: `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). `mcp_tool_trust` stores only an approved hash. A missing row is `Pending` for project `.mcp.json` and plugins, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A different stored hash is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` indexes `spec().description`, so a pending tool whose real description was `ignore previous instructions` is not returned. `cox mcp trust <server>` writes every current hash; `cox mcp trust` lists pending and changed tools. A store read error stays `Pending` (it must not look like a missing row and baseline). `cox-mcp` links `sha2`, already a workspace dependency.
+Not done: T64.7 and T64.10 stay open. A project `[mcp.servers]` entry is still source `config` until T64.7 reverts it. An unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
+Check:
+```text
+$ mise exec rust -- cargo nextest run -p cox-mcp -p cox-permission -p cox-store -p cox
+PASS cox-mcp::client untrusted_description_and_read_only_hint_do_not_reach_the_model
+PASS cox-store mcp_trust::tests::mcp_trust_approve_replaces_the_hash_and_get_misses_an_unknown_tool
+PASS cox-store tests::schema_snapshot_matches
+PASS cox-store tests::older_binary_refuses_newer_schema
+Summary [  23.360s] 279 tests run: 279 passed, 4 skipped
+$ mise exec rust -- cargo clippy --workspace --all-targets -- -D warnings
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 52.26s
+$ mise exec rust -- cargo fmt --all -- --check
+clean
+```
+`mise exec --` (every tool in `mise.toml`) cannot start on this Linux host: `aqua:yonaskolb/XcodeGen@2.46.0` is darwin-only. The commands above use `mise exec rust --`, which is the pinned Rust 1.98.1 the prompt's `mise exec -- cargo` is there to select.
+The Dart example (`plugin_example_dart`, ignored unless `just plugin-examples dart`) trusts `example-dart-count` before the scripted turn. A plugin grant covers the package, not the description the server reports when it starts.
+
 #### T59.11 Outline rows include the end line
 
 Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: ~40 · Priority: P0 · Complexity: 1 · Files: `crates/cox-syntax/src/outline.rs`, `crates/cox-tools/src/read.rs`, `crates/cox-tools/src/repomap.rs`

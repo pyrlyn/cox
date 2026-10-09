@@ -7,7 +7,8 @@
 // state or a key. Settings and the first-run checklist always read the live core, since a
 // recording has neither. Separate from the window so the one launch-time choice has one owner.
 // The one browser page the agent drives (T51.9) is made here too, so the host the core calls and
-// the pane the person watches (T51.10) hold the same page.
+// the pane the person watches (T51.10) hold the same page. The choice reaches the stores as
+// swift-dependencies values (`prepare`), registered once at launch by `AppModel`.
 //
 //   Cox.app/Contents/MacOS/Cox -CoxFixture desktop/macos/Fixtures/edit.json
 //   COX_HOME=/tmp/cox-scratch Cox.app/Contents/MacOS/Cox -CoxProject ~/src/repo
@@ -15,6 +16,7 @@
 import CoxClient
 import CoxCore
 import CoxPlatform
+import Dependencies
 import Foundation
 
 struct LaunchCore {
@@ -63,4 +65,17 @@ struct LaunchCore {
   }
 
   static let projectKey = "CoxProject"
+
+  /// This launch's choice as the dependencies the stores and the windows read: sessions open on
+  /// `core` (a core that failed to start throws its error on open, so a window says why), keys
+  /// live in `secrets`, and the inbox is the core's when it keeps one.
+  func prepare(_ values: inout DependencyValues) {
+    values.coreClient =
+      switch core {
+      case .success(let core): core
+      case .failure(let error): UnavailableCoreClient(error)
+      }
+    values.secretStore = secrets
+    values.inboxClient = try? core.get() as? any InboxClient
+  }
 }

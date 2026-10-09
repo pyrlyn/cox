@@ -58,6 +58,16 @@ impl Live {
         &self.host
     }
 
+    /// The environment `cox_http` and the ABI provider share (T33.18).
+    pub fn env(&self) -> &Arc<HostEnv> {
+        &self.env
+    }
+
+    /// `[[provider]]` rows, declarative and ABI.
+    pub fn provider_decls(&self) -> &[cox_plugin_api::ProviderDecl] {
+        &self.manifest.provider
+    }
+
     /// `grant::capability_list` of the granted manifest.
     pub fn granted(&self) -> &[String] {
         &self.granted

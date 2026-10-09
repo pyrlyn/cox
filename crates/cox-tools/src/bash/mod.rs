@@ -20,6 +20,8 @@ use std::os::fd::{AsRawFd, BorrowedFd, OwnedFd, RawFd};
 #[cfg(unix)]
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::process::Child;
 use std::process::Command;
 #[cfg(unix)]
 use std::process::Stdio;
@@ -534,7 +536,7 @@ async fn run(
     let pty = openpty(&size, None::<&Termios>).map_err(|_| ToolError::Io)?;
     let mut child = command_for(cmd, cwd, workspace.read, workspace.write, sandbox)?;
     attach_pty(&mut child, &pty.slave)?;
-    let mut child = child.spawn().map_err(|_| ToolError::Io)?;
+    let child = child.spawn().map_err(|_| ToolError::Io)?;
     let pid = child.id();
     let mut reader = File::from(pty.master.try_clone().map_err(|_| ToolError::Io)?);
     let fd = pty.master.as_raw_fd();
@@ -552,7 +554,7 @@ async fn run(
     // runtime's shutdown open.
     let mut abandoned = Abandoned {
         phase: phase.clone(),
-        group: Some(pid),
+        leader: Some(child),
     };
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
     let reader_phase = phase.clone();
@@ -579,7 +581,7 @@ async fn run(
         drop(slave);
         drop(master);
     });
-    let mut wait = tokio::task::spawn_blocking(move || child.wait());
+    let mut wait = tokio::task::spawn_blocking(move || wait_unreaped(pid));
 
     let timer = tokio::time::sleep(timeout);
     tokio::pin!(timer);
@@ -606,13 +608,8 @@ async fn run(
                     }
                 }
             },
-            status = &mut wait, if !exited => {
+            _ = &mut wait, if !exited => {
                 exited = true;
-                run.code = status
-                    .ok()
-                    .and_then(Result::ok)
-                    .and_then(|s| s.code().or_else(|| s.signal().map(|n| 128 + n)))
-                    .map(|c| c as u32);
                 phase.store(DRAINING, Ordering::Relaxed);
                 if drained {
                     break;
@@ -649,28 +646,83 @@ async fn run(
     if !exited || run.ended.is_some() {
         signal(pid, Signal::SIGKILL);
     }
-    // Finished: the group may be reaped, and its id reused, from here on.
-    abandoned.group = None;
+    // Reaping frees the pid, and with it the group id, so it comes after the
+    // last signal to the group. A leader that exited is a zombie, so the wait
+    // returns at once; one still alive was just SIGKILLed and is reaped later.
+    if let Some(mut leader) = abandoned.leader.take() {
+        if exited {
+            run.code = leader
+                .wait()
+                .ok()
+                .and_then(|s| s.code().or_else(|| s.signal().map(|n| 128 + n)))
+                .map(|c| c as u32);
+        } else {
+            reap_detached(leader);
+        }
+    }
     run.elapsed = start.elapsed();
     Ok(run)
 }
 
 /// What `run` undoes if it is dropped before it finishes: the PTY reader
-/// goes to `STOP` and the process group, while `Some`, is SIGKILLed.
+/// goes to `STOP`, and while the leader is held its group is SIGKILLed and
+/// the leader reaped after that kill.
 #[cfg(unix)]
 struct Abandoned {
     phase: Arc<AtomicU8>,
-    group: Option<u32>,
+    leader: Option<Child>,
 }
 
 #[cfg(unix)]
 impl Drop for Abandoned {
     fn drop(&mut self) {
         self.phase.store(STOP, Ordering::Relaxed);
-        if let Some(pid) = self.group {
-            signal(pid, Signal::SIGKILL);
+        if let Some(leader) = self.leader.take() {
+            signal(leader.id(), Signal::SIGKILL);
+            reap_detached(leader);
         }
     }
+}
+
+/// Blocks until the leader exits, leaving it unreaped. Its zombie keeps the
+/// pid, and so the group id `signal` targets, reserved until `reap_detached`
+/// or the wait in `run` takes it. Plain `wait` would reap first, leaving a
+/// window where a reused pid makes `killpg` hit an unrelated group.
+#[cfg(unix)]
+// why: `waitid` with `WNOWAIT` is the only wait that reports the exit without
+// reaping, and nix wraps it only on Linux and the BSDs, not on macOS.
+#[allow(unsafe_code)]
+fn wait_unreaped(pid: u32) -> io::Result<()> {
+    // SAFETY: `siginfo_t` is a plain C struct and all-zero bytes are valid.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    loop {
+        // SAFETY: `info` is valid for `waitid` to write, and `pid` is our own
+        // unreaped child, so the call cannot touch another process.
+        let rc = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if rc == 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        if err.kind() != io::ErrorKind::Interrupted {
+            return Err(err);
+        }
+    }
+}
+
+/// Reaps on a thread of its own: a run dropped mid-way must not block on a
+/// leader that is still going, and that thread is what collects it.
+#[cfg(unix)]
+fn reap_detached(mut leader: Child) {
+    std::thread::spawn(move || {
+        let _ = leader.wait();
+    });
 }
 
 #[cfg_attr(
@@ -778,6 +830,21 @@ mod tests {
         );
         assert_eq!(tool.risk(&serde_json::json!({})), Risk::Exec);
         assert_eq!(tool.subject(&serde_json::json!({"command": "ls"})), "ls");
+    }
+
+    /// Regression: the leader was reaped before its group was signalled, so
+    /// a reused pid could catch the `killpg`. Seeing the exit must leave the
+    /// status for the later reap; a pid race itself cannot be forced in a test.
+    #[cfg(unix)]
+    #[test]
+    fn leader_stays_unreaped_after_its_exit_is_seen() {
+        let mut leader = Command::new("/bin/sh")
+            .args(["-c", "exit 3"])
+            .spawn()
+            .expect("spawn sh");
+        wait_unreaped(leader.id()).expect("wait for the leader to exit");
+        let status = leader.try_wait().expect("reap").expect("status");
+        assert_eq!(status.code(), Some(3));
     }
 
     /// Regression: a run dropped mid-way left its PTY reader polling forever
