@@ -23,34 +23,9 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::manifest::ModelTier;
-
-/// A place a plugin can run: who drives the session (PL§15.1).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum Surface {
-    /// The TUI and `cox --plain`.
-    Terminal,
-    /// The macOS app, local or over `cox app-server`.
-    Desktop,
-    /// `cox run -p`.
-    Headless,
-    /// `cox acp`.
-    Acp,
-}
-
-impl Surface {
-    /// The manifest and approval-line spelling.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Terminal => "terminal",
-            Self::Desktop => "desktop",
-            Self::Headless => "headless",
-            Self::Acp => "acp",
-        }
-    }
-}
+// The manifest owns `Surface` (PL§15.1). Re-exported so ABI payloads and the
+// manifest name the same set of places a plugin can run.
+pub use crate::manifest::Surface;
 
 /// `cox_init` input: once per session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
