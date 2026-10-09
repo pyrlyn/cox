@@ -553,6 +553,15 @@ pub trait Worktrees: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// The text `file`, relative to the worktree at `path`, had in the
+    /// commit `diffstat` counts against (T52.24), so a best-of merge shows
+    /// each candidate's diff from the same base; `None` when that commit
+    /// has no such file. The default knows no base: every file reads as new.
+    async fn base_text(&self, path: &Path, file: &Path) -> Result<Option<String>, WorktreeError> {
+        let _ = (path, file);
+        Ok(None)
+    }
+
     /// Removes the worktree at `path`, which must be locked for `owner`
     /// (T52.10). A tree with uncommitted or untracked files is refused
     /// (`WorktreeError::Dirty`) unless `discard`, which the person gives

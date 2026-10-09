@@ -58,12 +58,12 @@ impl Tool for ReadTool {
                 prefixes and always reports the file's total line count. Pass `lines: \"a-b\"` \
                 (1-based, inclusive) to read only that range once you know what you need — from \
                 a prior `grep` hit or an `outline` result — instead of paying for the whole \
-                file. Pass `mode: \"outline\"` to get a compact `line: signature` listing of the \
-                file's top-level functions/types/classes/impls (tree-sitter for \
-                .rs/.ts/.tsx/.py/.go; markdown headings or definition-keyword lines for \
-                everything else). Use outline first on any file you have not read yet, \
-                especially a large one, then follow up with `lines=` on the range that actually \
-                matters. A PNG, JPEG, GIF or WebP file (up to 3.75 MB) comes back as the \
+                file. Pass `mode: \"outline\"` for the file's top-level \
+                functions/types/classes/impls (tree-sitter for .rs/.ts/.tsx/.py/.go; markdown \
+                headings or definition-keyword lines for everything else). The outline is \
+                `start-end: signature`; pass `lines` as that `start-end`. Use outline first on \
+                any file you have not read yet, especially a large one. A PNG, JPEG, GIF or WebP \
+                file (up to 3.75 MB) comes back as the \
                 image itself, which you can see; `lines` and `mode` do not apply to it. Refuses \
                 other binary files."
                 .to_string(),
@@ -433,11 +433,29 @@ mod tests {
         );
 
         for name in &expected_pub_fns {
+            let row = out
+                .text
+                .lines()
+                .find(|line| line.contains(&format!("pub fn {name}")))
+                .unwrap_or_else(|| panic!("outline missing `pub fn {name}`:\n{}", out.text));
             assert!(
-                out.text.contains(&format!("pub fn {name}")),
-                "outline missing `pub fn {name}`:\n{}",
-                out.text
+                outline_row_has_span(row),
+                "pub fn {name} row has no end line: {row}"
             );
         }
+    }
+
+    /// `^[0-9]+-[0-9]+: ` — the end line sits on the same row as the signature.
+    fn outline_row_has_span(line: &str) -> bool {
+        let Some((span, _)) = line.split_once(": ") else {
+            return false;
+        };
+        let Some((start, end)) = span.split_once('-') else {
+            return false;
+        };
+        !start.is_empty()
+            && !end.is_empty()
+            && start.bytes().all(|b| b.is_ascii_digit())
+            && end.bytes().all(|b| b.is_ascii_digit())
     }
 }

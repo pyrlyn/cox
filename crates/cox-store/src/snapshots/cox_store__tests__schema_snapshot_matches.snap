@@ -35,6 +35,16 @@ CREATE TABLE cloud_runs (
 -- cloud_runs_session
 CREATE INDEX cloud_runs_session ON cloud_runs (session_id);
 
+-- mcp_tool_trust
+CREATE TABLE mcp_tool_trust (
+  server TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('approved')),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (server, tool)
+);
+
 -- memory
 CREATE TABLE memory (
   id INTEGER PRIMARY KEY, project_slug TEXT NOT NULL, name TEXT NOT NULL, path TEXT NOT NULL,

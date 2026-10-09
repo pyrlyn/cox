@@ -10,8 +10,8 @@
 use diesel::prelude::*;
 
 use crate::schema::{
-    archive, checkpoints, cloud_runs, memory, memory_files, plugin_grants, plugin_kv, sessions,
-    usage,
+    archive, checkpoints, cloud_runs, mcp_tool_trust, memory, memory_files, plugin_grants,
+    plugin_kv, sessions, usage,
 };
 
 #[derive(Insertable)]
@@ -150,6 +150,18 @@ pub(crate) struct PluginKvDbRow {
     pub plugin_id: String,
     pub key: String,
     pub value: Vec<u8>,
+    pub updated_at: String,
+}
+
+/// Both directions of `mcp_tool_trust` (T64.24).
+#[derive(Insertable, Queryable, Selectable)]
+#[diesel(table_name = mcp_tool_trust)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub(crate) struct McpToolTrustRow {
+    pub server: String,
+    pub tool: String,
+    pub hash: String,
+    pub status: String,
     pub updated_at: String,
 }
 

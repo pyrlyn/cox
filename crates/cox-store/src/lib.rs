@@ -16,6 +16,7 @@
 pub mod cloud_runs;
 pub mod fts;
 pub mod lock;
+mod mcp_trust;
 mod memory;
 mod models;
 pub mod queries;
@@ -1176,7 +1177,7 @@ mod tests {
             err,
             StoreError::SchemaNewer {
                 db: "99991231000000".into(),
-                binary: "00000000000008".into(),
+                binary: "00000000000009".into(),
             }
         );
     }

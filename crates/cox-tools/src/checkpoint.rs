@@ -162,6 +162,20 @@ impl Checkpointer for GitCheckpointer {
     }
 
     async fn changes(&self, before: &Snapshot, after: &Snapshot) -> Result<Vec<Change>, ToolError> {
+        // The loop pairs trees by position; a pair taken over different roots
+        // would diff unrelated trees and drop the unpaired ones silently.
+        if before.trees.len() != after.trees.len()
+            || before
+                .trees
+                .iter()
+                .zip(&after.trees)
+                .any(|((a, _), (b, _))| a != b)
+        {
+            return Err(ToolError::RootsMismatch {
+                before: before.trees.iter().map(|(root, _)| root.clone()).collect(),
+                after: after.trees.iter().map(|(root, _)| root.clone()).collect(),
+            });
+        }
         let mut out = Vec::new();
         for ((root, old), (_, new)) in before.trees.iter().zip(&after.trees) {
             if old == new {
@@ -332,6 +346,38 @@ mod tests {
             })
             .count();
         assert!(blobs <= 3, "expected only tree objects, found {blobs}");
+    }
+
+    #[tokio::test]
+    async fn changes_errors_when_root_sets_differ() {
+        let (dir, root, cp) = workspace();
+        let other = dir.path().join("other");
+        fs::create_dir_all(&other).expect("mkdir");
+        let other = other.canonicalize().expect("canonicalize");
+        let one = cp
+            .snapshot(std::slice::from_ref(&root))
+            .await
+            .expect("snapshot");
+        let two = cp
+            .snapshot(&[root.clone(), other.clone()])
+            .await
+            .expect("snapshot");
+        let swapped = cp
+            .snapshot(std::slice::from_ref(&other))
+            .await
+            .expect("snapshot");
+
+        assert_eq!(
+            cp.changes(&one, &two).await,
+            Err(ToolError::RootsMismatch {
+                before: vec![root.clone()],
+                after: vec![root.clone(), other.clone()],
+            })
+        );
+        assert!(matches!(
+            cp.changes(&one, &swapped).await,
+            Err(ToolError::RootsMismatch { .. })
+        ));
     }
 
     #[tokio::test]
