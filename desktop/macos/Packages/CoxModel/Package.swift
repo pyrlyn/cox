@@ -24,18 +24,34 @@ let package = Package(
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-collections", from: "1.7.1"),
+    .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.17.1"),
     .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
+    // T63.1: generated inputs and shrinking for the store's patch rules; tests only.
+    .package(url: "https://github.com/x-sheep/swift-property-based", exact: "2.0.1"),
   ],
   targets: [
-    .target(name: "CoxClient", plugins: [swiftLint]),
+    .target(
+      name: "CoxClient",
+      dependencies: [.product(name: "Dependencies", package: "swift-dependencies")],
+      plugins: [swiftLint]
+    ),
     .target(
       name: "CoxModel",
       dependencies: [
         "CoxClient",
+        .product(name: "Dependencies", package: "swift-dependencies"),
         .product(name: "OrderedCollections", package: "swift-collections"),
       ],
       plugins: [swiftLint]
     ),
-    .testTarget(name: "CoxModelTests", dependencies: ["CoxModel"], plugins: [swiftLint]),
+    .testTarget(
+      name: "CoxModelTests",
+      dependencies: [
+        "CoxModel",
+        .product(name: "Dependencies", package: "swift-dependencies"),
+        .product(name: "PropertyBased", package: "swift-property-based"),
+      ],
+      plugins: [swiftLint]
+    ),
   ]
 )

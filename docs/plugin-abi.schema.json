@@ -25,6 +25,18 @@
         },
         "granted": {
           "description": "The granted subset of the manifest's `[capabilities]`, same keys.\nJSON rather than `Capabilities`, which denies unknown keys: a\ncapability added in a later minor must not break an older guest."
+        },
+        "surface": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Surface"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who drives the session, so a plugin returns only its surface's parts.\nAbsent from a cox older than PL§15; a guest reads absence as\n`terminal`, the only surface plugins were written for.",
+          "default": null
         }
       },
       "required": [
@@ -53,6 +65,31 @@
         "cwd"
       ],
       "description": "The session a plugin is initialised for."
+    },
+    "Surface": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "terminal",
+          "description": "The TUI and `cox --plain`."
+        },
+        {
+          "type": "string",
+          "const": "desktop",
+          "description": "The macOS app, local or over `cox app-server`."
+        },
+        {
+          "type": "string",
+          "const": "headless",
+          "description": "`cox run -p`."
+        },
+        {
+          "type": "string",
+          "const": "acp",
+          "description": "`cox acp`."
+        }
+      ],
+      "description": "A place a plugin can run: who drives the session (PL§15.1)."
     },
     "InitOut": {
       "type": "object",
@@ -112,6 +149,15 @@
           },
           "description": "`Event` serde tags it wants in `cox_on_event`.",
           "default": []
+        },
+        "desktop": {
+          "$ref": "#/$defs/DesktopOut",
+          "description": "Desktop-only contributions; dropped with a notice on any other\nsurface (PL§15.6).",
+          "default": {
+            "inspector": null,
+            "toolbar": [],
+            "palette": []
+          }
         }
       },
       "description": "`cox_init` output: what the plugin contributes. Anything not granted is\ndropped by the host with a notice; every field may be omitted."
@@ -178,9 +224,89 @@
           "type": "string",
           "const": "overlay",
           "description": "Full-screen overlay."
+        },
+        {
+          "type": "string",
+          "const": "desktop.inspector",
+          "description": "The desktop inspector tab (PL§15.4); asked for only after the plugin\ndeclared `InitOut.desktop.inspector`, so an older guest never sees it."
         }
       ],
       "description": "A TUI slot (PL§8)."
+    },
+    "DesktopOut": {
+      "type": "object",
+      "properties": {
+        "inspector": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TabDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "One inspector tab, filled by `cox_render` with `Slot::DesktopInspector`.",
+          "default": null
+        },
+        "toolbar": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionDecl"
+          },
+          "description": "Toolbar items, at most [`MAX_TOOLBAR_ACTIONS`].",
+          "default": []
+        },
+        "palette": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionDecl"
+          },
+          "description": "Command-palette actions.",
+          "default": []
+        }
+      },
+      "description": "What `InitOut.desktop` carries (PL§15.4). The app draws each one natively\nfrom this data; a plugin never supplies UI code."
+    },
+    "TabDecl": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The tab's title."
+        },
+        "symbol": {
+          "type": "string",
+          "description": "An SF Symbol name; see [`is_symbol_name`]."
+        }
+      },
+      "required": [
+        "title",
+        "symbol"
+      ],
+      "description": "The inspector tab a plugin adds."
+    },
+    "ActionDecl": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "One of the plugin's `InitOut.commands` names."
+        },
+        "title": {
+          "type": "string",
+          "description": "The label, or the tooltip for a toolbar icon."
+        },
+        "symbol": {
+          "type": "string",
+          "description": "An SF Symbol name; see [`is_symbol_name`]."
+        }
+      },
+      "required": [
+        "command",
+        "title",
+        "symbol"
+      ],
+      "description": "A toolbar item or palette action. A click goes through `cox_command`, so\nit cannot submit anything a command could not."
     },
     "EventBatch": {
       "type": "object",
@@ -382,6 +508,19 @@
             "kind"
           ],
           "description": "Open the plugin's overlay."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "open_inspector"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "Select the plugin's inspector tab: the desktop counterpart of\n`OpenOverlay`, dropped with a notice on the terminal."
         },
         {
           "$ref": "#/$defs/PluginNotice",
@@ -782,6 +921,24 @@
         {
           "type": "object",
           "properties": {
+            "surface": {
+              "$ref": "#/$defs/Surface",
+              "description": "The surface the session runs on."
+            },
+            "kind": {
+              "type": "string",
+              "const": "not_on_this_surface"
+            }
+          },
+          "required": [
+            "kind",
+            "surface"
+          ],
+          "description": "A surface-only host function called on another surface. Checked\nbefore the grant: \"not granted\" would mislead for something that can\nnever work here (PL§15.6)."
+        },
+        {
+          "type": "object",
+          "properties": {
             "capability": {
               "type": "string",
               "description": "The missing capability."
@@ -1053,7 +1210,8 @@
                     "text": "",
                     "style": "text",
                     "bold": false,
-                    "italic": false
+                    "italic": false,
+                    "link": null
                   }
                 }
               },
@@ -1108,6 +1266,33 @@
           ],
           "additionalProperties": false,
           "description": "Children side by side or stacked; a child without a size shares the rest."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "description": "Path inside the plugin package.",
+                  "type": "string"
+                },
+                "alt": {
+                  "description": "Accessibility label and the terminal fallback.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "alt"
+              ]
+            }
+          },
+          "required": [
+            "image"
+          ],
+          "additionalProperties": false,
+          "description": "A package-relative PNG the desktop draws (PL§15.4); the terminal draws\n`alt` as one dim line. A path, never a URL, so the host never fetches\nfor a plugin."
         },
         {
           "type": "object",
@@ -1167,6 +1352,14 @@
           "type": "boolean",
           "description": "Italic.",
           "default": false
+        },
+        "link": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "An `https://` URL or a workspace-relative path; the host drops\nanything else to plain text and opens a link only on a click.",
+          "default": null
         }
       },
       "required": [
@@ -1193,6 +1386,55 @@
         "selection"
       ],
       "description": "A `Theme` field. The permission-mode tints are left out on purpose: the\ncomposer's mode colour is a trust signal a plugin must not imitate."
+    },
+    "DesktopNotice": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/NoticeLevel",
+          "description": "Severity, capped at `warn` like every plugin notice."
+        },
+        "title": {
+          "type": "string",
+          "description": "The headline."
+        },
+        "body": {
+          "type": "string",
+          "description": "The detail.",
+          "default": ""
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NoticeAction"
+          },
+          "description": "Buttons, at most [`MAX_NOTICE_ACTIONS`].",
+          "default": []
+        }
+      },
+      "required": [
+        "level",
+        "title"
+      ],
+      "description": "`cox_desktop_notify` input (`cox:desktop/v1`, PL§15.4): a notification\nwhose buttons run the plugin's own commands."
+    },
+    "NoticeAction": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "The button's label."
+        },
+        "command": {
+          "type": "string",
+          "description": "One of the plugin's `InitOut.commands` names."
+        }
+      },
+      "required": [
+        "label",
+        "command"
+      ],
+      "description": "A button on a [`DesktopNotice`]."
     }
   }
 }

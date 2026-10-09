@@ -17,6 +17,7 @@ import CoxCore
 import CoxModel
 import CoxPlatform
 import CoxUI
+import Dependencies
 import SwiftUI
 import UserNotifications
 
@@ -70,7 +71,9 @@ struct CoxApp: App {
 
 /// What every window of this launch shares: the core, one `SettingsStore` for the project, the
 /// session list, the login shell's environment read once, and the notification centre's
-/// delegate, which routes an action to the session it names and Open to its window.
+/// delegate, which routes an action to the session it names and Open to its window. The launch's
+/// core, secret store and inbox are registered as dependencies before any store is made, so
+/// every store reads the ones `LaunchCore` picked.
 @MainActor
 final class AppModel {
   let launch: LaunchCore
@@ -95,14 +98,12 @@ final class AppModel {
 
   init(launch: LaunchCore) {
     self.launch = launch
+    prepareDependencies { launch.prepare(&$0) }
     // A reply's doc is written as Markdown by the core (T58.4.28); a fixture run has no core,
     // so it keeps the plain stand-in. Set before any window can copy.
     if !launch.isFixture { DocMarkdown.writer = CoreDocWriter() }
-    settings = try? SettingsStore(
-      client: launch.live.get(), secrets: launch.secrets, cwd: LaunchCore.project())
-    sidebar = SidebarStore(
-      workspace: launch.isFixture ? nil : try? launch.live.get(),
-      inbox: (try? launch.core.get() as? any InboxClient).map { InboxStore(client: $0) })
+    settings = try? SettingsStore(client: launch.live.get(), cwd: LaunchCore.project())
+    sidebar = SidebarStore(workspace: launch.isFixture ? nil : try? launch.live.get())
     remotes = RemoteHosts(
       connector: launch.isFixture ? nil : try? launch.live.get(), settings: settings)
     let responder = NotificationResponder(

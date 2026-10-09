@@ -2079,6 +2079,15 @@ fn plugin_command_out(state: &mut State, plugin: &str, out: Option<CommandOut>) 
             notice(state, level, crate::text::sanitize(&n.text));
             Vec::new()
         }
+        // PL§15.6 case 5: the inspector only exists in the desktop app.
+        Some(CommandOut::OpenInspector) => {
+            notice(
+                state,
+                Level::Info,
+                format!("plugin {plugin}: the inspector is desktop-only"),
+            );
+            Vec::new()
+        }
         Some(CommandOut::Nothing) | None => Vec::new(),
     }
 }

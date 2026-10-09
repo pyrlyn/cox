@@ -17,13 +17,12 @@ use cox_protocol::ToolError;
 
 /// Confines `input` (a path argument from the model) to one of `roots`.
 ///
-/// 1. Rejects NUL bytes and Windows drive/UNC/ADS syntax (`C:`, `\\?\`,
-///    `file:stream`) outright — none of that is meaningful on the Unix
-///    filesystems cox runs on, so any occurrence is treated as an escape
-///    attempt. `ponytail:` this bans literal `:` in every path outright
-///    (simplest rule that also blocks ADS on any future Windows target)
-///    rather than pattern-matching each syntax; revisit only if a real
-///    Unix path legitimately needs a colon.
+/// 1. Rejects NUL bytes, UNC/device prefixes (`\\server`, `\\?\`) and a
+///    drive prefix (`C:\x`, `C:/x`, `C:`) outright. On Windows every `:` is
+///    refused too (drive, device and `file:stream` syntax). On Unix a colon
+///    inside a name (`a:b.txt`) is an ordinary character: banning it would
+///    refuse real workspace files and add no safety, because steps 3-4 decide
+///    containment for whatever characters the path holds.
 /// 2. Expands a leading `~` to `$HOME`, then joins relative to `cwd`.
 /// 3. Lexically normalises `.`/`..` and checks containment against `roots`
 ///    — a cheap, filesystem-free rejection of a plain `..` escape.
@@ -79,16 +78,30 @@ pub fn confine(roots: &[PathBuf], cwd: &Path, input: &str) -> Result<PathBuf, To
     }
 }
 
-/// Rejects syntax that only means something on Windows filesystems (drive
-/// letters, `\\?\` device paths, `:stream` alternate data streams) and NUL,
-/// which terminates a C string and would truncate the path the OS actually
-/// sees.
+/// Rejects NUL, which terminates a C string and would truncate the path the
+/// OS actually sees, plus the Windows prefixes that a Unix workspace never
+/// means. A colon is refused only where it is Windows syntax: every colon on
+/// Windows, and a drive prefix everywhere so a Windows-shaped path cannot be
+/// replayed onto a Windows checkout as a drive.
 fn reject_unsafe_syntax(input: &str, roots: &[PathBuf]) -> Result<(), ToolError> {
-    let suspicious = input.contains('\0') || input.contains(':') || input.starts_with("\\\\");
+    let suspicious = input.contains('\0')
+        || input.starts_with("\\\\")
+        || has_drive_prefix(input)
+        || (cfg!(windows) && input.contains(':'));
     if suspicious {
         Err(confined(Path::new(input), roots))
     } else {
         Ok(())
+    }
+}
+
+/// `C:` alone, or `C:` followed by a separator: the drive form. A letter, a
+/// colon and more name (`a:b.txt`) is an ordinary file name, not a drive.
+fn has_drive_prefix(input: &str) -> bool {
+    match input.as_bytes() {
+        [drive, b':'] => drive.is_ascii_alphabetic(),
+        [drive, b':', sep, ..] => drive.is_ascii_alphabetic() && matches!(sep, b'\\' | b'/'),
+        _ => false,
     }
 }
 
@@ -235,5 +248,70 @@ mod tests {
         let outside = real.join("b.txt").to_string_lossy().into_owned();
         let err = confine(std::slice::from_ref(&root), &root, &outside).expect_err("outside");
         assert!(matches!(err, ToolError::Confined { .. }));
+    }
+
+    /// A colon is an ordinary name character on Unix, so a workspace file
+    /// with one is reachable, existing or not.
+    #[cfg(unix)]
+    #[test]
+    fn colon_inside_a_unix_name_is_confined_to_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(dir.path()).expect("canonicalize tempdir");
+        std::fs::write(root.join("a:b.txt"), b"hi").expect("write fixture");
+
+        let roots = std::slice::from_ref(&root);
+        assert_eq!(
+            confine(roots, &root, "a:b.txt").expect("existing colon name"),
+            root.join("a:b.txt")
+        );
+        assert_eq!(
+            confine(roots, &root, "sub:new/x:y.txt").expect("new colon name"),
+            root.join("sub:new/x:y.txt")
+        );
+    }
+
+    /// Allowing colons must not reopen an escape: a `..` hidden behind a
+    /// colon-named component, or a colon-named symlink to outside, is still
+    /// confined.
+    #[cfg(unix)]
+    #[test]
+    fn colon_names_do_not_open_an_escape() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = std::fs::canonicalize(dir.path()).expect("canonicalize tempdir");
+        let root = base.join("root");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        std::fs::write(outside.join("secret.txt"), b"nope").expect("write secret");
+        std::os::unix::fs::symlink(&outside, root.join("ln:out")).expect("symlink");
+
+        let roots = std::slice::from_ref(&root);
+        for input in [
+            "ln:out/secret.txt",
+            "a:/../../outside/secret.txt",
+            "ln:out/../../outside/secret.txt",
+        ] {
+            let err = confine(roots, &root, input).expect_err(input);
+            assert!(
+                matches!(err, ToolError::Confined { .. }),
+                "{input}: {err:?}"
+            );
+        }
+    }
+
+    /// The drive and UNC prefixes are refused on every platform, because a
+    /// Windows-shaped path must not be accepted on Unix and replayed later.
+    #[test]
+    fn drive_and_unc_prefixes_are_confined_on_every_platform() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(dir.path()).expect("canonicalize tempdir");
+
+        for input in [r"C:\x", "C:/x", "C:", r"\\server\share", r"\\?\C:\x"] {
+            let err = confine(std::slice::from_ref(&root), &root, input).expect_err(input);
+            assert!(
+                matches!(err, ToolError::Confined { .. }),
+                "{input}: {err:?}"
+            );
+        }
     }
 }

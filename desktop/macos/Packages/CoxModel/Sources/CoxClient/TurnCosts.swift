@@ -4,7 +4,8 @@
 
 // The Context tab's cost history (T37.29.3.2, DT§5.1), field for field as cox-ffi exports
 // `cox_app::TurnCosts`: the ledger's rows by turn, subagents under their turn, the session
-// total, the project's spend today and this week and the budget caps against the spend, every figure formatted by the core.
+// total, the project's spend today and this week and the budget caps against the spend,
+// every figure formatted by the core.
 // Separate from the timeline because it answers a call, not a patch.
 
 public struct TurnCosts: Equatable, Sendable {

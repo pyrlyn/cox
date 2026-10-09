@@ -3,16 +3,13 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    # Draft PRs get standard CI: docs-only changes finish in ~2 min and the
-    # signal (fmt/clippy/nextest green) is what promotes a draft to ready.
+    # Draft PRs run no CI: every job below is skipped on a draft, and marking the PR
+    # ready for review (`ready_for_review`) runs the full set.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
-  # Dependabot pull requests: dependabot.yml calls this workflow so they get the
-  # same jobs before its patch-only auto-merge.
-  workflow_call:
 
 # Build and test jobs need only to read the repository; a job that needs more
-# (revert-on-failure) declares its own. This also caps these jobs when
-# dependabot.yml calls this workflow with wider permissions.
+# (revert-on-failure) declares its own.
 permissions:
   contents: read
 
@@ -21,30 +18,35 @@ env:
 
 # Every job installs Rust from mise.toml, the single source of the Rust
 # version: the `rust` job through the shared pyrlyn/ci workflow, the others
-# through .github/actions/rust. Both fail when rustc is not that pin.
+# through pyrlyn/ci's setup-rust action. Both fail when rustc is not that pin.
 jobs:
   # infra's config action on .github/infra.yml: `docs-only` is "true" when every changed file
   # is documentation (fails open: "false" when unsure, e.g. a .github/ change). The jobs below
   # then do no work but still report under their names, so the required checks pass, and
   # `docs` runs the tests that read docs/. A failed `config` runs everything.
   config:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       docs-only: ${{ steps.config.outputs.docs-only }}
     steps:
       - id: config
-        uses: pyrlyn/ci/.github/actions/config@f880dee803f157cd4268a503418b4ecaf4da7078 # main
+        uses: pyrlyn/ci/.github/actions/config@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
   # The shared pyrlyn/ci workflow, pinned by commit (descendant of e6e376e, which
-  # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27):
+  # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27, and of
+  # pyrlyn/ci#47: with `skip` every target runs its no-op steps on ubuntu-latest, so a
+  # docs-only change starts no macOS runner for `rust / aarch64-apple-darwin`):
   # fmt once, then per target clippy (--all-targets --all-features), check, and
   # nextest on every target (Linux x86_64 and aarch64, macOS aarch64; macOS is
   # Apple Silicon only).
   rust:
     needs: config
-    if: ${{ !cancelled() }}
-    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
+    if: >-
+      !cancelled()
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
     # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
     # `actions: write` on the calling job.
     permissions:
@@ -80,14 +82,16 @@ jobs:
   # back to Landlock + seccomp and still hold the same guarantees.
   sandbox-landlock:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     env:
       COX_EXPECT_SANDBOX: landlock
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -116,7 +120,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -130,13 +134,15 @@ jobs:
   # it) plus the wasm32-unknown-unknown build every plugin ships as.
   plugins:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # wasm32-unknown-unknown comes with the mise.toml pin.
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -153,14 +159,16 @@ jobs:
   # go/kotlin join this job once T33.34/T33.36 land.
   plugin-examples:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # `cox`'s tests build cox-plugin-fixtures, whose build.rs compiles the
       # guest workspace for wasm32 (T33.28); the target comes with the pin.
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -187,7 +195,9 @@ jobs:
 
   deny:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -195,11 +205,13 @@ jobs:
 
   audit:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
       # cargo-audit does not read deny.toml, so its `[advisories] ignore` list
       # (each entry with its reason and review date) is passed as --ignore
       # flags: one list, one place to remove an entry.
@@ -214,30 +226,42 @@ jobs:
   # regresses more than 20% against scripts/footprint.json (keyed by
   # OS-arch plus `-ci`, so each runner compares against a baseline measured on
   # a runner, never against a laptop's; T30.4).
-  footprint:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [xcode-27, ubuntu-24.04]
-    # A matrix job skipped at job level reports one check under its raw name, so the required
-    # `footprint (<os>)` checks would wait: on a docs-only change every step is a no-op instead.
+  # One job per runner with a static name, not a matrix: a docs-only change skips both at job
+  # level (no runner starts, no macOS for `footprint (xcode-27)`), and a skipped job with a
+  # static name still reports under that name, so the required `footprint (<os>)` checks pass.
+  # A skipped matrix job would report one check under its raw name and leave them waiting.
+  footprint-macos:
+    name: footprint (xcode-27)
     needs: config
-    if: ${{ !cancelled() }}
-    runs-on: ${{ matrix.os }}
-    env:
-      RUN: ${{ needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: xcode-27
     steps:
-      - if: env.RUN == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - if: env.RUN == 'true'
-        uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
-      - if: env.RUN == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: footprint regression check
-        if: env.RUN == 'true'
+        run: bash scripts/footprint.sh --check
+
+  footprint-linux:
+    name: footprint (ubuntu-24.04)
+    needs: config
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: footprint regression check
         run: bash scripts/footprint.sh --check
 
   # Which suites this change needs, from the shared pyrlyn/ci classification
@@ -252,7 +276,8 @@ jobs:
   # skipping them. A skipped macOS job reports `skipped` under its own name,
   # which a required check treats as passed.
   changes:
-    uses: pyrlyn/ci/.github/workflows/changes.yml@f880dee803f157cd4268a503418b4ecaf4da7078 # main
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    uses: pyrlyn/ci/.github/workflows/changes.yml@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
     permissions:
       contents: read
     with:
@@ -273,11 +298,12 @@ jobs:
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pyrlyn/ci/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
         with:
           version: '27'
 
@@ -318,6 +344,12 @@ jobs:
         working-directory: desktop/macos
         run: swiftlint lint --strict --no-cache --quiet App
 
+      # The UI-free packages are linted here too, not only by the build-tool plugin, so the
+      # rules still gate a pull request if a build stops running the plugin (T63.3, DT§4.6).
+      - name: swiftlint UI-free packages
+        working-directory: desktop/macos
+        run: swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources
+
       - name: swift-format
         run: |
           set -euo pipefail
@@ -339,6 +371,7 @@ jobs:
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success'
       || needs.changes.outputs.swift == 'true' || needs.changes.outputs.rust == 'true')
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -403,7 +436,9 @@ jobs:
   # on any change, like the config-schema drift test. Node only, so Linux.
   desktop-tokens:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only != 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -434,7 +469,9 @@ jobs:
   # job runs the same tests.
   docs:
     needs: config
-    if: ${{ !cancelled() && needs.config.outputs.docs-only == 'true' }}
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only == 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
@@ -442,7 +479,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -460,7 +497,10 @@ jobs:
   revert-on-failure:
     name: revert-on-failure
     needs:
-      [rust, sandbox-landlock, plugins, plugin-examples, deny, audit, footprint, docs]
+      [
+        rust, sandbox-landlock, plugins, plugin-examples, deny, audit,
+        footprint-macos, footprint-linux, docs,
+      ]
     if: >-
       always()
       && github.event_name == 'push'
@@ -473,6 +513,6 @@ jobs:
       # The shared action skips new branches, bot and earlier auto-revert commits, bases
       # missing locally and pushes touching .github/ (GITHUB_TOKEN cannot push workflow
       # files). No re-apply PR, as before (that would need pull-requests: write).
-      - uses: pyrlyn/ci/.github/actions/revert-on-failure@863d8960601216eec62d4aa78924f84ce61d72b9
+      - uses: pyrlyn/ci/.github/actions/revert-on-failure@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
         with:
           reapply-pr: "false"

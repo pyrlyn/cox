@@ -1264,8 +1264,15 @@ dependencies = [
 name = "cox-cursor-cloud"
 version = "0.1.2"
 dependencies = [
+ "cox-protocol",
+ "cox-provider-http",
+ "futures",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]
@@ -1320,10 +1327,12 @@ version = "0.1.2"
 dependencies = [
  "async-trait",
  "cox-protocol",
+ "cox-tools",
  "keyring",
  "reqwest 0.13.5",
  "rmcp",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -1353,9 +1362,11 @@ dependencies = [
 name = "cox-permission"
 version = "0.1.2"
 dependencies = [
+ "cox-config",
  "cox-protocol",
  "globset",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1660,12 +1671,14 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "similar 3.2.0",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "url",
+ "zstd",
 ]
 
 [[package]]
@@ -5796,9 +5809,9 @@ dependencies = [
 
 [[package]]
 name = "rubato"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7cb1ffaf8738df50aab642a7f6465df81c6ba9e2818268053487165298114be"
+checksum = "cc1e951b9f5432ec1422f4dcfa5733fc501265902612edf5ef8bd8ecdd960930"
 dependencies = [
  "audioadapter",
  "audioadapter-buffers",

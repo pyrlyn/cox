@@ -16,15 +16,18 @@ pub mod manifest;
 pub mod ui;
 
 pub use abi::{
-    AbiError, Advice, Answer, CommandDecl, CommandIn, CommandOut, DecidePoint, Effects, EventBatch,
-    HookCall, HttpReq, HttpResp, InitIn, InitOut, KeyDecl, ModelCall, NoticeLevel, PluginNotice,
-    ProviderCall, Question, RenderIn, RenderItemIn, SessionInfo, Slot, ToolCallIn,
+    AbiError, ActionDecl, Advice, Answer, CommandDecl, CommandIn, CommandOut, DecidePoint,
+    DesktopNotice, DesktopOut, Effects, EventBatch, HookCall, HttpReq, HttpResp, InitIn, InitOut,
+    KeyDecl, MAX_NOTICE_ACTIONS, MAX_TOOLBAR_ACTIONS, ModelCall, NoticeAction, NoticeLevel,
+    PluginNotice, ProviderCall, Question, RenderIn, RenderItemIn, SessionInfo, Slot, TabDecl,
+    ToolCallIn, is_symbol_name,
 };
 
 pub use manifest::{
-    API_MAJOR, AgentDecl, AgentMode, Capabilities, CloudAgentDecl, CloudBackend, ExternalAgentDecl,
-    FsCaps, Limits, ManifestError, McpDecl, ModelDecl, ModelTier, PluginManifest, PriceDecl,
-    ProviderApi, ProviderAuth, ProviderDecl, UiCaps, is_plugin_id,
+    API_MAJOR, AgentDecl, AgentMode, Capabilities, CloudAgentDecl, CloudBackend, DesktopCaps,
+    ExternalAgentDecl, FsCaps, Limits, ManifestError, McpDecl, ModelDecl, ModelTier,
+    PluginManifest, PriceDecl, ProviderApi, ProviderAuth, ProviderDecl, Surface, TerminalCaps,
+    UiCaps, is_plugin_id,
 };
 
 pub use ui::{StyleToken, Widget};
@@ -95,6 +98,7 @@ mod tests {
             Advice,
             AbiError,
             Widget,
+            DesktopNotice,
         );
         let schema = json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
