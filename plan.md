@@ -2826,7 +2826,7 @@ Out of scope: a new event type, and any change to the `Content::Pointer` text or
 
 #### T66.2 A subagent's over-cap answer is archived before the parent sees the short form
 
-Model: sonnet · Status: open · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2
+Model: Claude Code / claude-sonnet · Status: in progress · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2
 
 Goal: when a child's answer is over `result_cap_tokens`, the full text becomes an archive row first. The summary or cut that the parent receives ends with `full answer: expand <id>`. Today the answer is summarised or cut with no archive row (`subagent.rs:1138-1151`), which breaks "Lossless by default".
 
