@@ -189,7 +189,7 @@ mod tests {
             position(&map, "b.rs"),
         );
         assert!(m < z && z < a && a < b, "{map}");
-        assert!(map.contains("  2: pub fn m2()"), "outline follows: {map}");
+        assert!(map.contains("  2-2: pub fn m2()"), "outline follows: {map}");
     }
 
     #[tokio::test]
