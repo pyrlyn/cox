@@ -10,7 +10,7 @@ New bugs, dead code and moves from a read-only Cursor cloud review of clean `mai
 
 | ID | Priority | Kind | Status | Where | Fix |
 | --- | --- | --- | --- | --- | --- |
-| T64.1 | P0 | bug | in progress | `cox-config/src/load.rs` project guards | Project and `.claude` hooks run unsandboxed (`/bin/sh -c`, tool JSON on stdin) with no trust prompt. Revert project hook entries in the project guards. |
+| T64.1 | P0 | bug | done | `cox-config/src/load.rs` project guards | Project and `.claude` hooks ran unsandboxed. Project hook commands are reverted; user config and `~/.claude` hooks stay. |
 | T64.2 | P0 | bug | confirmed | `load.rs:453-470`; `cox-session/src/lib.rs:231-235`; `cox-core/src/turn.rs:505` | A project `core.workspace_roots` is not guarded and becomes `ToolCx.roots` for `confine`. Revert project roots outside the git root and the user's roots. |
 | T64.3 | P0 | bug | confirmed | `cox-protocol/src/config.rs:515-517`; `GUARDED_KEYS` at `load.rs:453-470` | A project can set `providers.*.base_url` or add providers, and the user's API keys follow that URL. Revert project `base_url`, `api_key_env` and new `[providers.*]` tables. |
 | T64.4 | P1 | bug | confirmed | `load.rs:197-206`; `cox-permission/src/lib.rs:317-318` | A project may set `permissions.mode = auto` (only `bypass` is reverted). Revert any project mode wider than the user layer. |
@@ -40,7 +40,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T64.1 | in progress | P0 | 2 | 80% | Grok 4.7 |
 | T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.18 | todo | P2 | 5 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |

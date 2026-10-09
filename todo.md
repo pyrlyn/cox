@@ -1,6 +1,5 @@
 # Todo
 
-- T64.1. Revert project hook commands (in progress, Grok 4.7)
 - T33.14.2. Filesystem preopens
 - T33.18. Providers, ABI form (`PluginProvider`)
 - T33.34. Go: SDK wrapper, template, example
