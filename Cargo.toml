@@ -225,15 +225,10 @@ debug = "line-tables-only"
 debug = false
 opt-level = 1
 
-# The profile that 'dist' will build with
-[profile.dist]
-inherits = "release"
-# Fat LTO + one codegen unit lets the linker drop cross-crate dead code (tree-
-# sitter grammars, syntect, the provider matrix); strip removes symbols and
-# debug info. Slower to build, which is why it is the dist profile and not
-# `release`.
+# The profile that 'dist' will build with (scripts/package.sh, the release CLI
+# archives): `dev`, so every release is a dev build (unoptimized, line tables,
+# no LTO, not stripped), like the Debug macOS app it ships with.
 # `panic = "abort"` is deliberately absent: cox-mcp turns a panicking task into
 # a JoinError and keeps going (fail open on extensions), which abort removes.
-lto = "fat"
-codegen-units = 1
-strip = "symbols"
+[profile.dist]
+inherits = "dev"

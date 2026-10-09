@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-//! `read`'s `mode=outline`: a short `line: signature` listing of a file's
-//! top-level shape, so the model can decide what to `read`/`lines=` into
-//! full detail instead of paying for the whole file (plan.md T3.2 step 3;
+//! `read`'s `mode=outline`: a short `start-end: signature` listing of a
+//! file's top-level shape, so the model can pass that span as `lines`
+//! instead of guessing where the item ends (plan.md T3.2 step 3, T59.11;
 //! AGENTS.md D6c). Tree-sitter for rs/ts/tsx/py/go; everything else falls
 //! back to markdown headings or a `^(fn|def|class|func|pub|export)` grep.
 
@@ -88,7 +88,7 @@ fn tree_sitter_outline(
     language: tree_sitter::Language,
     kinds: &[&str],
     content: &str,
-) -> Option<Vec<(usize, String)>> {
+) -> Option<Vec<(usize, usize, String)>> {
     let mut parser = Parser::new();
     parser.set_language(&language).ok()?;
     let tree = parser.parse(content, None)?;
@@ -97,17 +97,21 @@ fn tree_sitter_outline(
     collect(tree.root_node(), content.as_bytes(), kinds, &mut rows);
     // Tree order is already source order (preorder), but nested items
     // (e.g. a fn inside an impl) are visited after their parent, so a
-    // plain stable sort by line keeps the listing readable top-to-bottom.
-    rows.sort_by_key(|(line, _)| *line);
+    // plain stable sort by start line keeps the listing readable top-to-bottom.
+    rows.sort_by_key(|(start, _, _)| *start);
     Some(rows)
 }
 
-fn collect(node: Node, source: &[u8], kinds: &[&str], out: &mut Vec<(usize, String)>) {
+fn collect(node: Node, source: &[u8], kinds: &[&str], out: &mut Vec<(usize, usize, String)>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if kinds.contains(&child.kind()) {
-            let line = child.start_position().row + 1;
-            out.push((line, signature(source, child)));
+            // Both ends are 1-based and inclusive. `end_position` is
+            // 0-based, so the next `lines` read can use the span as written
+            // instead of guessing where the item stops.
+            let start = child.start_position().row + 1;
+            let end = child.end_position().row + 1;
+            out.push((start, end, signature(source, child)));
         }
         collect(child, source, kinds, out);
     }
@@ -140,7 +144,7 @@ fn signature(source: &[u8], node: Node) -> String {
 
 /// Non-tree-sitter languages: markdown headings if any exist, else lines
 /// that open with a definition-shaped keyword (plan.md T3.2 step 3).
-fn fallback_outline(ext: &str, content: &str) -> Vec<(usize, String)> {
+fn fallback_outline(ext: &str, content: &str) -> Vec<(usize, usize, String)> {
     let is_markdown = matches!(ext, "md" | "markdown");
     let mut rows = Vec::new();
     for (idx, line) in content.lines().enumerate() {
@@ -153,18 +157,20 @@ fn fallback_outline(ext: &str, content: &str) -> Vec<(usize, String)> {
                 .any(|kw| trimmed.starts_with(kw))
         };
         if matches {
-            rows.push((idx + 1, trimmed.to_string()));
+            // A keyword line has no body span, so start and end are the same.
+            let line_no = idx + 1;
+            rows.push((line_no, line_no, trimmed.to_string()));
         }
     }
     rows
 }
 
-fn render(rows: &[(usize, String)]) -> String {
+fn render(rows: &[(usize, usize, String)]) -> String {
     if rows.is_empty() {
         return "(no outline entries found)".to_string();
     }
     rows.iter()
-        .map(|(line, sig)| format!("{line}: {sig}"))
+        .map(|(start, end, sig)| format!("{start}-{end}: {sig}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -177,15 +183,15 @@ mod tests {
     fn outline_rust_lists_pub_fn_and_struct() {
         let src = "pub struct Foo {\n    x: u32,\n}\n\npub fn bar(x: u32) -> u32 {\n    x + 1\n}\n";
         let out = outline(Path::new("x.rs"), src);
-        assert!(out.contains("1: pub struct Foo"), "{out}");
-        assert!(out.contains("5: pub fn bar(x: u32) -> u32"), "{out}");
+        assert!(out.contains("1-3: pub struct Foo"), "{out}");
+        assert!(out.contains("5-7: pub fn bar(x: u32) -> u32"), "{out}");
     }
 
     #[test]
     fn outline_falls_back_to_markdown_headings() {
         let src = "# Title\n\ntext\n\n## Section\n";
         let out = outline(Path::new("x.md"), src);
-        assert_eq!(out, "1: # Title\n5: ## Section");
+        assert_eq!(out, "1-1: # Title\n5-5: ## Section");
     }
 
     #[test]
