@@ -41,7 +41,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
 | T33.14.2 | todo | P2 | 3 | 0% | |
-| T33.18 | todo | P2 | 5 | 0% | |
+| T33.18 | in progress | P2 | 5 | 0% | Cursor / grok-4.7 |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.1 | todo | P1 | 5 | 0% | |
