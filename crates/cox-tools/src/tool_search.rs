@@ -63,6 +63,18 @@ fn tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// `summary` is the default so a hit does not carry `input_schema`.
+fn detail_full(input: &Value) -> Result<bool, ToolError> {
+    match input.get("detail") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::String(mode)) if mode == "summary" => Ok(false),
+        Some(Value::String(mode)) if mode == "full" => Ok(true),
+        Some(other) => Err(ToolError::Denied {
+            why: format!("detail must be \"summary\" or \"full\", not {other}"),
+        }),
+    }
+}
+
 /// Okapi BM25 scores of every document for `query`.
 fn bm25(query: &[String], docs: &[Vec<String>]) -> Vec<f64> {
     let n = docs.len() as f64;
@@ -98,12 +110,16 @@ impl Tool for ToolSearchTool {
             description: "Find tools that are not in your current tool list. Only the core \
                 tools are always present; MCP servers, `ask_user`, `web_fetch`, `agent` and \
                 other extras are found here. Pass a short `query` describing what you need \
-                (\"create github issue\", \"fetch a web page\"); up to 5 matching tool \
-                schemas are returned and become callable on your next turn."
+                (\"create github issue\", \"fetch a web page\"); up to 5 matching tools \
+                are returned and become callable on your next turn. `detail` is \
+                `summary` (name and description only; the default) or `full`."
                 .to_string(),
             input_schema: json!({
                 "type": "object",
-                "properties": {"query": {"type": "string"}},
+                "properties": {
+                    "query": {"type": "string"},
+                    "detail": {"type": "string", "enum": ["summary", "full"]}
+                },
                 "required": ["query"]
             }),
             deferred: false,
@@ -122,12 +138,19 @@ impl Tool for ToolSearchTool {
 
     async fn call(&self, input: Value, _cx: &ToolCx) -> Result<ToolOutput, ToolError> {
         let query = str_field(&input, "query")?;
+        let full = detail_full(&input)?;
         let hits = self.search(&query);
         let names: Vec<&str> = hits.iter().map(|s| s.name.as_str()).collect();
         let text = if hits.is_empty() {
             format!("no deferred tool matches {query:?}")
-        } else {
+        } else if full {
             serde_json::to_string_pretty(&hits).map_err(|_| ToolError::Io)?
+        } else {
+            let rows: Vec<_> = hits
+                .iter()
+                .map(|spec| json!({"name": spec.name, "description": spec.description}))
+                .collect();
+            serde_json::to_string_pretty(&rows).map_err(|_| ToolError::Io)?
         };
         Ok(ToolOutput {
             text,
@@ -222,6 +245,47 @@ mod tests {
             Some(json!({"discovered": ["mcp__slack__post"]}))
         );
         assert!(out.text.contains("\"name\": \"mcp__slack__post\""));
+        assert!(!out.text.contains("input_schema"));
+    }
+
+    #[tokio::test]
+    async fn tool_search_summary_omits_input_schema() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let cx = crate::tool_cx(
+            vec![],
+            std::path::PathBuf::from("/tmp"),
+            cox_protocol::SandboxPolicy {
+                mode: cox_protocol::SandboxMode::ReadOnly,
+                network: false,
+                writable: vec![],
+                readonly_in_workspace: vec![],
+                linux_backend: Default::default(),
+            },
+            std::sync::Arc::new(NoopArchive),
+            tokio_util::sync::CancellationToken::new(),
+            tx,
+            cox_protocol::SessionId::new(),
+            cox_protocol::CallId::new(),
+        );
+        let summary = index()
+            .call(json!({"query": "slack", "detail": "summary"}), &cx)
+            .await
+            .expect("summary");
+        assert!(!summary.text.contains("input_schema"), "{}", summary.text);
+        assert!(summary.text.contains("\"description\""));
+        assert_eq!(
+            summary.structured,
+            Some(json!({"discovered": ["mcp__slack__post"]}))
+        );
+        let full = index()
+            .call(json!({"query": "slack", "detail": "full"}), &cx)
+            .await
+            .expect("full");
+        assert!(full.text.contains("input_schema"), "{}", full.text);
+        assert_eq!(
+            full.structured,
+            Some(json!({"discovered": ["mcp__slack__post"]}))
+        );
     }
 
     struct NoopArchive;

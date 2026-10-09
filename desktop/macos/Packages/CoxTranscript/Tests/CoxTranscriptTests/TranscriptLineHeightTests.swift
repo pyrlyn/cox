@@ -68,7 +68,7 @@ struct TranscriptLineHeightTests {
   @Test func theStoredTextSizeAndLineHeightRestyleTheShownText() async throws {
     let store = SettingsStore(
       client: FixtureSettingsClient(view: settings(textSize: "16.0", lineHeight: "2.0")),
-      secrets: MemorySecretStore(), cwd: "/project")
+      cwd: "/project")
     await store.load()
     let transcript = try #require(store.transcript)
     let host = Host(blocks, size: size)

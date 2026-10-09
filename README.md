@@ -1,3 +1,6 @@
+> [!NOTE]
+> This project is under active development. We need "testing volunteers": try it and report what breaks.
+
 <img src="brand/logo/cox-mark.svg" width="96" height="96" alt="cox logo">
 
 # cox

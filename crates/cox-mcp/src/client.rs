@@ -43,6 +43,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::auth::{self, Secrets};
 use crate::elicit::{self, Asker, Opener};
+use crate::trust::{self, ToolTrust, TrustCtx, TrustStore};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -354,22 +355,74 @@ impl McpClient {
     }
 
     /// Every tool the server lists, namespaced and (by default) deferred.
+    /// No trust store: the caller is a test or a path that has not been
+    /// given one, and the definitions pass through. A session uses
+    /// [`Self::listed`].
     pub async fn tools(&self, deferred: bool) -> Result<Vec<Arc<dyn Tool>>, ClientError> {
+        Ok(self
+            .listed(deferred, None, false)
+            .await?
+            .into_iter()
+            .map(|row| row.tool)
+            .collect())
+    }
+
+    /// The same list as [`Self::tools`], plus the trust verdict for each
+    /// tool. `user_layer` is true when the server came from the user's own
+    /// config: a missing row is then written as the approved baseline.
+    /// A project `.mcp.json` or a plugin passes `false`, so a missing row
+    /// stays pending and nothing is written.
+    pub async fn listed(
+        &self,
+        deferred: bool,
+        store: Option<&dyn TrustStore>,
+        user_layer: bool,
+    ) -> Result<Vec<ListedTool>, ClientError> {
         let listed = self
             .service
             .list_all_tools()
             .await
             .map_err(ClientError::List)?;
-        Ok(listed
-            .into_iter()
-            .map(|tool| {
-                Arc::new(McpTool {
+        let mut out = Vec::with_capacity(listed.len());
+        for tool in listed {
+            let description = tool.description.as_deref().unwrap_or("");
+            let schema = Value::Object((*tool.input_schema).clone());
+            let hash = trust::contract_hash(tool.name.as_ref(), description, &schema);
+            let name = tool.name.to_string();
+            let verdict = match store {
+                None => trust::Verdict::Approved,
+                Some(store) => match store.mcp_trust_get(&self.name, &name) {
+                    Ok(stored) => trust::verdict(stored.as_deref(), &hash, user_layer),
+                    // A store that cannot be read must not look like "no
+                    // row" and then baseline a definition it failed to see.
+                    Err(_) => trust::Verdict::Pending,
+                },
+            };
+            let trust = match verdict {
+                trust::Verdict::Approved => ToolTrust::Approved,
+                trust::Verdict::Changed => ToolTrust::Changed,
+                trust::Verdict::Pending => ToolTrust::Pending,
+                trust::Verdict::Baseline => {
+                    match store.and_then(|s| s.mcp_trust_approve(&self.name, &name, &hash).ok()) {
+                        Some(()) => ToolTrust::Approved,
+                        None => ToolTrust::Pending,
+                    }
+                }
+            };
+            out.push(ListedTool {
+                server: self.name.clone(),
+                name,
+                hash,
+                trust,
+                tool: Arc::new(McpTool {
                     client: self.clone(),
                     tool,
                     deferred,
-                }) as Arc<dyn Tool>
-            })
-            .collect())
+                    trust,
+                }),
+            });
+        }
+        Ok(out)
     }
 
     pub fn name(&self) -> &str {
@@ -439,14 +492,33 @@ fn challenge_of(e: &ClientInitializeError) -> Option<String> {
 }
 
 /// Connects every server; one that fails is a notice, not an error (step 5).
+/// `trust` is the store and the origin of each server. Without it, tool
+/// definitions pass through (tests that are not about quarantine).
 pub async fn connect_all(
     servers: &HashMap<String, McpServerConfig>,
     timeout: Duration,
     deferred: bool,
     auth: &Auth,
+    trust: Option<&TrustCtx<'_>>,
 ) -> (Vec<McpClient>, Vec<Arc<dyn Tool>>, Vec<String>) {
+    let (clients, listed, notices) = connect_listed(servers, timeout, deferred, auth, trust).await;
+    (
+        clients,
+        listed.into_iter().map(|row| row.tool).collect(),
+        notices,
+    )
+}
+
+/// [`connect_all`] plus each tool's trust verdict, for `cox mcp trust`.
+pub async fn connect_listed(
+    servers: &HashMap<String, McpServerConfig>,
+    timeout: Duration,
+    deferred: bool,
+    auth: &Auth,
+    trust: Option<&TrustCtx<'_>>,
+) -> (Vec<McpClient>, Vec<ListedTool>, Vec<String>) {
     let mut clients = Vec::new();
-    let mut tools = Vec::new();
+    let mut listed = Vec::new();
     let mut notices = Vec::new();
     let mut names: Vec<&String> = servers.keys().collect();
     names.sort();
@@ -461,9 +533,12 @@ pub async fn connect_all(
             budget,
             McpClient::connect(name, &servers[name], timeout, auth),
         );
-        let listed = match connect.await {
-            Ok(Ok(client)) => client.tools(deferred).await.map(|t| (client, t)),
-            Ok(Err(e)) => Err(e),
+        let client = match connect.await {
+            Ok(Ok(client)) => client,
+            Ok(Err(e)) => {
+                notices.push(skipped(name, &e.to_string()));
+                continue;
+            }
             Err(_) => {
                 notices.push(skipped(
                     name,
@@ -472,15 +547,28 @@ pub async fn connect_all(
                 continue;
             }
         };
-        match listed {
-            Ok((client, list)) => {
-                tools.extend(list);
+        let user_layer = trust::user_config_layer(
+            trust.and_then(|ctx| ctx.sources.get(name).map(String::as_str)),
+        );
+        let store = trust.map(|ctx| ctx.store);
+        match client.listed(deferred, store, user_layer).await {
+            Ok(rows) => {
+                listed.extend(rows);
                 clients.push(client);
             }
             Err(e) => notices.push(skipped(name, &e.to_string())),
         }
     }
-    (clients, tools, notices)
+    (clients, listed, notices)
+}
+
+/// One listed MCP tool and the verdict that decided what the model sees.
+pub struct ListedTool {
+    pub server: String,
+    pub name: String,
+    pub hash: String,
+    pub trust: ToolTrust,
+    pub tool: Arc<dyn Tool>,
 }
 
 /// The notice [`connect_all`] leaves for a server it could not start;
@@ -503,6 +591,7 @@ pub struct McpTool {
     client: McpClient,
     tool: rmcp::model::Tool,
     deferred: bool,
+    trust: ToolTrust,
 }
 
 impl McpTool {
@@ -514,11 +603,13 @@ impl McpTool {
 #[async_trait]
 impl Tool for McpTool {
     fn spec(&self) -> ToolSpec {
-        // Step 4: annotations are hints from an untrusted server, so only
-        // `readOnlyHint` lowers the risk; `destructiveHint` raises it and
-        // silence means `Write`.
+        // Annotations are hints from an untrusted server. Only an approved
+        // contract may let `readOnlyHint` lower the risk; `destructiveHint`
+        // raises it and silence means `Write`. A pending or changed
+        // contract is `Write` even when the server says it is read-only,
+        // so the hint cannot skip approval.
         let ann = self.tool.annotations.as_ref();
-        let risk = match (
+        let hinted = match (
             ann.and_then(|a| a.read_only_hint),
             ann.and_then(|a| a.destructive_hint),
         ) {
@@ -526,16 +617,24 @@ impl Tool for McpTool {
             (_, Some(true)) => Risk::Destructive,
             _ => Risk::Write,
         };
-        ToolSpec {
-            name: self.qualified(),
-            description: self
-                .tool
+        let approved = self.trust == ToolTrust::Approved;
+        let risk = if approved { hinted } else { Risk::Write };
+        let description = if approved {
+            self.tool
                 .description
                 .as_deref()
                 .unwrap_or_default()
-                .to_string(),
+                .to_string()
+        } else {
+            trust::pending_description(&self.client.name)
+        };
+        ToolSpec {
+            name: self.qualified(),
+            description,
             input_schema: Value::Object((*self.tool.input_schema).clone()),
-            deferred: self.deferred,
+            // Stay deferred until the contract is approved, so the real
+            // schema is not in the initial tool list either.
+            deferred: self.deferred || !approved,
             risk,
             concurrency: if risk == Risk::ReadOnly {
                 Concurrency::Parallel
@@ -550,6 +649,14 @@ impl Tool for McpTool {
     }
 
     async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+        if self.trust != ToolTrust::Approved {
+            return Ok(ToolOutput {
+                text: trust::pending_description(&self.client.name),
+                is_error: true,
+                diff: None,
+                structured: None,
+            });
+        }
         let mut params = CallToolRequestParams::new(self.tool.name.clone());
         if let Some(args) = input.as_object() {
             params = params.with_arguments(args.clone());
@@ -752,8 +859,14 @@ mod tests {
             prompt: Some(browser()),
             ask: None,
         };
-        let (clients, tools, notices) =
-            connect_all(&servers(&server.uri()), Duration::from_secs(5), true, &auth).await;
+        let (clients, tools, notices) = connect_all(
+            &servers(&server.uri()),
+            Duration::from_secs(5),
+            true,
+            &auth,
+            None,
+        )
+        .await;
         assert_eq!(notices, Vec::<String>::new());
         assert_eq!(clients.len(), 1);
         assert_eq!(
@@ -795,7 +908,7 @@ mod tests {
         // into a "no handshake" notice (T22.8). The timeout is not the claim.
         let budget = Duration::from_secs(60);
         let (clients, tools, notices) =
-            connect_all(&servers(&server.uri()), budget, true, &auth).await;
+            connect_all(&servers(&server.uri()), budget, true, &auth, None).await;
         assert!(clients.is_empty() && tools.is_empty());
         assert_eq!(
             notices,

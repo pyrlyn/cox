@@ -99,7 +99,7 @@ private let retry = ReviewState(
     ],
     userFile: "/home/.cox/config.toml")
   let store = SettingsStore(
-    client: FixtureSettingsClient(view: view), secrets: MemorySecretStore(), cwd: "/project")
+    client: FixtureSettingsClient(view: view), cwd: "/project")
   #expect(store.reviewSend == .queue)
   await store.load()
   #expect(store.reviewSend == .now)

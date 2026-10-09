@@ -95,7 +95,7 @@ pub fn detail_of(info: &SessionInfo, usage: &[UsageRow]) -> Detail {
     let mut groups: BTreeMap<(String, String, String), ModelTotal> = BTreeMap::new();
     for row in usage {
         let key = (
-            serde_json::to_value(row.provider)
+            serde_json::to_value(&row.provider)
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string))
                 .unwrap_or_default(),

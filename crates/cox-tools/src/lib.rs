@@ -3,7 +3,7 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 //! Built-in tools: read, edit, write, bash, grep, glob, outline, web, todo,
-//! ask_user, agent, send_message. Separate from `cox-core` because every tool touches the
+//! ask_user, agent, send_message, docs. Separate from `cox-core` because every tool touches the
 //! filesystem or a process and must go through a trait, never called
 //! directly by the loop. The same rule puts the `/rewind` pre-image reader
 //! (`checkpoint`) here. The sandbox (Seatbelt, Landlock/bwrap) and
@@ -23,12 +23,14 @@
 pub mod ask_user;
 pub mod bash;
 pub mod checkpoint;
+pub mod docs;
 pub mod edit;
 pub mod expand;
 pub mod git;
 pub mod glob;
 pub mod grep;
 pub mod lsp;
+pub mod mcp_exec;
 pub mod memory;
 pub mod project;
 pub mod read;
