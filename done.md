@@ -10691,4 +10691,65 @@ Out of scope: any other remote-execution subject.
 Result: `cloud_agent` is a canonical tool name (alias `CloudAgent`); a rule `CloudAgent(owner/repo)` parses only for a strict GitHub pair and matches ignoring case, so a deny for `Acme/Widgets` also stops `acme/widgets`. `Engine::decide` routes the tool to one function after the deny rules and before `bypass`: a malformed subject is denied, `plan` denies, only an exact allow rule from the loaded config allows (a bare `CloudAgent` allow and session grants do not), every other case asks, and policy `never` denies like any ask. `cloud_agent_approval_text(call)` builds the approval text from the call's subject and its `remote` and `ref` input fields and strips control and bidi characters. The A122 test loads a real project config through `cox-config` (a dev-dependency; `deps.rs` counts only normal dependencies). Docs: `docs/how-it-works.md` and §1.8. Not done: the approval modal still renders the ask as `rule CloudAgent(owner/repo) asks` (a `Why::RuleAsk`); showing `cloud_agent_approval_text` there, and the driver that builds the call, belong to T56.6.
 Check output: `mise exec -- cargo nextest run -p cox-permission` — 14 passed, including cloud_agent_asks_in_auto_and_bypass, cloud_agent_is_denied_in_plan_mode, cloud_agent_user_allow_rule_matches_one_repo, cloud_agent_project_allow_is_reverted, cloud_agent_approval_text_names_repo_ref_and_off_machine; `mise exec -- cargo clippy -p cox-permission --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
+#### T66.1.1 Resume refills the archive map
 
+Model: Claude Code / claude-sonnet · Status: done 2026-10-09 · Depends: — · Size: ~60 · Priority: P1 · Complexity: 2
+
+Goal: a resumed session knows the archive id of every earlier tool call, as the live session did, so that compaction (T66.1) and `microcompact` can name them after a resume.
+
+Today `inner.archives` starts empty on resume (`session.rs:583`, `HashMap::new()`). `History::from_rollout` drops `result.archive` when it handles `Event::ToolCallDone` (`rollout.rs:217`), and the only insert is `remember_archive` (`session.rs:1273`, called from `turn.rs:722`).
+
+Files:
+- `crates/cox-core/src/rollout.rs`
+- `crates/cox-core/src/session.rs`
+- the resume test, inline in `rollout.rs`
+
+Steps:
+1. Add `archives: HashMap<CallId, ArchiveRef>` to `rollout::History` and fill it from `result.archive` at `ToolCallDone`.
+2. When a session is opened from a rollout, seed `inner.archives` from `history.archives` instead of an empty map.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core rollout
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `resume_refills_archive_refs_from_tool_results` passes and fails without step 1: a rollout with two archived tool results resumes with both ids in the map.
+
+Out of scope: the compaction notice, which is T66.1.
+Result: `History` gains `archives: HashMap<CallId, ArchiveRef>`, filled from `result.archive` at every `ToolCallDone`, including a call of an interrupted turn whose result the rebuild drops (the row exists and still expands). `Session::build` seeds `inner.archives` from it on resume, so `microcompact` now also pointers pre-restart results, which it could not before. One extra line outside the card's files: the `History` literal in a `cox-tui` test (`state.rs`) needed the new field. A child session resumed through `spawn_child` goes through the same path.
+Check output: `mise exec -- cargo nextest run -p cox-core rollout` — 13 passed, including resume_refills_archive_refs_from_tool_results (fails with the insert removed); `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T66.1 Compaction lists the archive ids that still expand
+
+Model: Claude Code / claude-sonnet · Status: done 2026-10-09 · Depends: T66.1.1 · Size: ~120 · Priority: P1 · Complexity: 3
+
+Goal: after any compaction, the summary item ends with a byte-stable, bounded `## Archived outputs` section. It names every archive id from the compacted turns, so the model can still `expand` evidence it no longer sees. No earlier turn is edited.
+
+Files:
+- `crates/cox-core/src/compact.rs`
+- `crates/cox-core/tests/compact.rs`
+
+Steps:
+1. `SurvivingHandles { kept: Vec<(ArchiveId, String)>, omitted: usize }` holds each archive id and its tool name. A function separate from the pure `working_state(messages)` builds it from `(history[..cut], &inner.archives)`, ordered by id. Only ids that `turn.rs:659-668` wrote before the model saw the short form count; nothing is named after the fact. `notice_text(&SurvivingHandles) -> String` stops at 32 entries or 2048 bytes and then writes `… and N more`. prime-agent's notice has no bound (idea: `pa-core/src/session_engine/ipython_state.rs` `notice_content`).
+2. `Session::compact` appends the section after `summarise` returns and before it builds the item text (`compact.rs` ~421). The section is then last under both `state+llm` and `llm` strategies, and lives in the `Summary` item that the rollout already replays (`rollout.rs:153-160`).
+3. On the next compaction the list is rebuilt from the archive map (amended in review: ids are never read back from summary text), re-sorted and re-capped.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core compaction
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the `compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim` insta snapshot passes:
+- three archived outputs in the dropped turns appear by id;
+- the last two turns are byte-identical before and after;
+- compacting the same history twice gives the same bytes;
+- a history with 40 ids shows 32 and `… and 8 more`;
+- `strategy = llm` also ends with the section.
+
+Out of scope: a new event type, and any change to the `Content::Pointer` text or to `microcompact`.
+Result: `compact.rs` gains `SurvivingHandles::collect(dropped, kept, archives)` and `notice_text`. The surviving set is every entry of `inner.archives` whose call is not in the kept turns `history[cut..]`. The map holds exactly the rows `turn.rs` wrote before the model saw the short form, compaction never prunes it, and since T66.1.1 resume refills it, so it already covers earlier compactions. No id or count is ever parsed from summary text, because that text is model-written (a fake `## Archived outputs` section with an unknown id and `… and 999 more` is ignored). Labels are the `ToolUse` names in `history[..cut]`; for an id from an older compaction the label may come from the earlier section, only for an id already in the set and only if it matches `[A-Za-z0-9_.:-]{1,64}`, else `tool`. Cap: the newest 32 ids within 2048 bytes (a ULID sorts by time), printed in ascending id order; `omitted` is the surviving total minus those shown, computed, so 40 ids show 32 and `… and 8 more`. `Session::compact` appends `## Archived outputs` after `summarise` returns, so it is last under `state+llm` and `llm`; no section is written when nothing was archived. Lines read `- #<id> <tool>`, the same `#<id>` form as the `Content::Pointer` text. Not in `WorkingState::render`, as the card first said: that block is prepended before the model's text and the section would not be last. A call that `/rewind` removed from history is still in the map and is listed; its row exists and expands. Tests: inline cap, byte-cap, map-sourced earlier ids, fake-section, unsafe-label and empty cases in `compact.rs`; the insta snapshot (three dropped outputs by id, kept-turn ids absent, kept turns byte-identical, `llm` ends with the section) and the 40-ids case in `tests/compact.rs`.
+Check output: `mise exec -- cargo nextest run -p cox-core compaction` — 14 passed, including compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim, compaction_notice_shows_the_newest_32_of_40_ids and compaction_notice_ignores_ids_written_in_summary_text; `mise exec -- cargo nextest run -p cox-core` — 373 passed; `mise exec -- cargo nextest run -p cox -p cox-session -p cox-app -p cox-tui` — 791 passed; clippy `--workspace --all-targets -D warnings` clean; `mise exec -- cargo fmt --check` clean.

@@ -2779,7 +2779,7 @@ Rationale in §6 A142. T65.1 is in `done.md`.
 
 Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) at `afe8d14` (v0.9.8). It is MIT, but no code is copied, so no notice is needed. Each card cites prime-agent files for the idea only, and the implementation is written from the card. If a later card ever copies a substantial part, that file and `THIRD-PARTY-NOTICES` carry prime-agent's full MIT text, both copyright lines and the repository URL, and that notice is never replaced by cox's header.
 
-**Order.** Start T66.1 and T66.2 in parallel; T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it.
+**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it.
 
 **Already in cox, so no card:**
 - `ContextTooLong` already compacts once per user turn and then surfaces the error (`session.rs:1846-1867`, `retried_after_too_long`). That is the contract of prime-agent's `OverflowRecovery` (`pa-daemon/src/overflow_compaction.rs`).
@@ -2792,37 +2792,6 @@ Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeI
 - Prime's prompt prose;
 - the `HarnessEntry` and `GoalState` schemas;
 - the `pa-daemon` JSONL socket dialect.
-
-#### T66.1 Compaction lists the archive ids that still expand
-
-Model: opus · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 3
-
-Goal: after any compaction, the summary item ends with a byte-stable, bounded `## Archived outputs` section. It names every archive id from the compacted turns, so the model can still `expand` evidence it no longer sees. No earlier turn is edited.
-
-Files:
-- `crates/cox-core/src/compact.rs`
-- `crates/cox-core/src/session.rs` (only if step 1 finds the gap)
-- the cox-core compaction test file
-
-Steps:
-1. Check whether `inner.archives` (`session.rs:90`) is refilled when a session resumes from its rollout; only one insert was found (`session.rs:1274`). If it is not refilled, refill it from the replayed tool results here, or split that into T66.1.1 if it breaks the size limit.
-2. `SurvivingHandles { kept: Vec<(ArchiveId, String)>, omitted: usize }` holds each archive id and its tool name. Build it from `inner.archives` for the call ids in `history[..cut]`, ordered by id. Only ids that `turn.rs:659-668` wrote before the model saw the short form count; nothing is named after the fact. `notice_text(&SurvivingHandles) -> String` stops at 32 entries or 2048 bytes and then writes `… and N more`. prime-agent's notice has no bound (idea: `pa-core/src/session_engine/ipython_state.rs` `notice_content`).
-3. Render it as the last section of `WorkingState::render` (T59.1). It then lives in the `Summary` item text, which the rollout already replays (`rollout.rs:153-160`). `WorkingState::carry` merges, re-sorts and re-caps it on the next compaction.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core compaction
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when the `compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim` insta snapshot passes:
-- three archived outputs in the dropped turns appear by id;
-- the last two turns are byte-identical before and after;
-- compacting the same history twice gives the same bytes;
-- a history with 40 ids shows 32 and `… and 8 more`.
-
-Out of scope: a new event type, and any change to the `Content::Pointer` text or to `microcompact`.
 
 #### T66.2 A subagent's over-cap answer is archived before the parent sees the short form
 
@@ -3402,6 +3371,10 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A146 §1.7, §1.12, T64.24 — quarantine untrusted MCP tool definitions. A server's tool description and `readOnlyHint` are untrusted input. `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). Migration `00000000000008_mcp_tool_trust` stores the approved hash (`status` is only `approved`). A missing row is `Pending` for a server from project `.mcp.json` or a plugin, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A stored hash that differs is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses the fixed sentence `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` (so `readOnlyHint` cannot skip approval) and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` already indexes `spec().description`, so there is no second filter. `cox mcp trust <server>` connects and writes every current hash; `cox mcp trust` lists pending and changed tools. Why: a project or plugin server can put instructions in a tool description, or set `readOnlyHint`, and both were reaching the model and the permission engine. Effect: `cox-mcp` links `sha2`, already a workspace dependency. T64.7 and T64.10 stay open — a project `[mcp.servers]` entry is still source `config` until T64.7 reverts it, and an unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
 
 - A147 §3 (new P66: T66.1–T66.14), by the creator (2026-10-09): prime-agent-derived improvements, from a study of PrimeIntellect-ai/prime-agent at `afe8d14c` (v0.9.8, 2026-10-08). Idea-only, clean-room. prime-agent is MIT ("Copyright (c) 2025-2026 Prime Intellect Ltd." and "Copyright (c) 2025 Mario Zechner"), which is compatible with cox's licence. Its Rust code, though, is a byte-level port of a TypeScript product that breaks cox's rules (camelCase JSON, `anyhow` outside `crates/cox`, `unwrap`, no Diesel), so nothing is copied and no notice is needed. A card that ever copies a substantial part adds prime-agent's full MIT text, both copyright lines and the URL to that file and to `THIRD-PARTY-NOTICES`, and the notice is never replaced by cox's header. Why: the study shows four gaps in cox. (1) Compaction does not tell the model which archived outputs still expand. (2) An over-cap subagent answer is summarised or cut with no archive row, against "Lossless by default", and a background answer cannot be collected later. (3) There is no reviewed, reversible way to adjust prompt notes, memory, skills and subagents. (4) `cox run -p` has no gate-driven loop with turn, token and time limits. Effect: fourteen cards in a new phase. `budget::decide` stays the USD cap; `prompt.md` and `prompt_minimal.md` stay immutable; a project config cannot set `[autonomous]`, because its gates are shell commands. T66.12 is a design gate: resident sessions and a supervisor change a crate boundary, so their implementation cards come in a later amendment after the creator approves `docs/design/serve.md`, and T66.13 and T66.14 wait for them. No new dependency; cox-ext links the workspace `sha2`. Overflow recovery already exists (`retried_after_too_long`), so it gets no card. Not taken, with reasons in P66: peer agent sockets, the Python kernel, state factories, per-model prompt blocks in the cached prefix, Prime's prompt prose, and the `HarnessEntry` and `GoalState` schemas. No §0 decision changes.
+- A148 §3 P66 (T66.1 split; new T66.1.1), by the creator (2026-10-09). Step 1 of T66.1 found that a resumed session starts with an empty archive map: `session.rs:583` creates it empty, and `rollout.rs:217` drops `result.archive`. Refilling the map adds `rollout.rs` to T66.1, which takes the card to four files. Why: the size rule. The refill is also a fix in its own right, because `microcompact` has the same gap after a resume. Effect:
+  - New card T66.1.1 refills the archive map on resume.
+  - T66.1 depends on T66.1.1 and now touches only `compact.rs` and its test.
+  - The `## Archived outputs` section is appended in `Session::compact` after `summarise`, not inside `WorkingState::render`. The old wording conflicted with "the summary ends with it", because the state block comes before the model text, and the `llm` strategy has no state block at all.
 
 ## 7. Risk register
 
