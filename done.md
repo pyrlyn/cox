@@ -1,4 +1,27 @@
 
+#### T64.1 Revert project hook commands
+
+Model: Grok 4.7 · Status: done 2026-10-09 · Depends: — · Size: ~140 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox/src/config_load.rs`, `crates/cox-protocol/default.toml`
+Goal: a repository `.cox/config.toml` or `.claude` file cannot add or change hook commands. Those commands run as `/bin/sh -c` with tool JSON on stdin and no sandbox. User config and `~/.claude` hooks stay.
+Plan:
+1. `apply_project_guards` reverts `hooks.events` to the layers without the project when they differ, and reports one `GuardViolation` (`hooks`).
+2. `timeout_s` and `fail_open` stay project-settable. `source_of` does not treat those scalars as reverted.
+3. The Claude-settings import test expects a repository hook to be dropped. A new test keeps the `~/.claude` command and drops the repository one.
+What landed: the guard, the two tests, the `default.toml` comment (and generated `docs/config.md`), plus the compatibility notes in `docs/compat.md`, `docs/design/extensions.md` and plan D13 / §1.6.
+Not done: hooks are still unsandboxed when the user configured them (the status-line sandbox alternative). T64.2 and later stay open.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config
+37 tests run: 37 passed
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config -p cox-protocol -p cox -E 'test(/project_config_cannot_set_hook_commands|user_claude_hooks_survive|config_claude_settings_import|every_guarded_key_has_its_own_reason|config_docs_config_md_matches|project_claude_settings_allow|user_claude_settings_allow/)'
+7 tests run: 7 passed
+$ mise exec rust@1.98.1 -- cargo fmt --all -- --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-config -p cox-protocol -p cox --all-targets -- -D warnings
+clean
+```
+`mise` is not on the default PATH in this environment; the commands used `~/.local/bin/mise` after `mise install rust`. A full `cargo nextest run -p cox` also ran two `external_agents_cursor` tests that fail here because Landlock cannot wrap the fixture agent's argv (`cannot run under the sandbox`). That warning is unrelated to hook loading; CI's sandbox host is the check for it.
+
 #### T59.11 Fold a JSON tool result into one line per node
 
 Model: Grok 4.7 · Status: done 2026-10-08 · Depends: T59.2 · Size: ~580 (`json_tree.rs` past the ~200 cap; see A144) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/json_tree.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-core/src/lib.rs`
@@ -27,6 +50,7 @@ clean
 $ mise exec -- cargo fmt --check
 clean
 ```
+
 #### T59.11 Outline rows include the end line
 
 Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: ~40 · Priority: P0 · Complexity: 1 · Files: `crates/cox-syntax/src/outline.rs`, `crates/cox-tools/src/read.rs`, `crates/cox-tools/src/repomap.rs`

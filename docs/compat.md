@@ -31,7 +31,7 @@ A checkout configured for Claude Code or Codex works with cox unchanged:
 |---|---|---|
 | `AGENTS.md` / `CLAUDE.md` hierarchy | yes | same lookup order |
 | `SKILL.md` agent skills | yes | same frontmatter |
-| `.claude/settings.json` permissions, hooks, env | yes, read-only | one config layer; never written back |
+| `.claude/settings.json` permissions, hooks, env | yes, read-only | one config layer; never written back. A repository's hook commands are reverted (T64.1); `~/.claude` hooks still run |
 | `.claude/commands/*.md`, `.claude/agents/*.md` | yes | same palette, `explore`/`shell` presets ship embedded |
 | `.mcp.json` servers | yes | stdio + Streamable HTTP; `${ENV}` expansion; a stdio server runs under the sandbox by default (T33.42) |
 | Codex `apply_patch` (V4A) | yes | Add/Update/Delete/Move, `@@` context |
