@@ -149,6 +149,19 @@ async fn subagent_result_over_cap_is_summarised_on_the_summarize_job() {
     assert_eq!(summary[0].tier, Tier::Cheap);
 }
 
+/// T66.15: with the summary failed, the cut lands inside a two-byte char;
+/// a byte-index `truncate` there panics the child task.
+#[tokio::test]
+async fn over_cap_non_ascii_answer_is_cut_on_a_char_boundary() {
+    let (events, _, _) = run_with("subagent_cut_non_ascii", cox_protocol::Config::default()).await;
+    let results = tool_results(&events);
+    assert_eq!(results.len(), 1);
+    let (ok, visible) = &results[0];
+    assert!(ok, "{visible}");
+    assert!(visible.starts_with("xя"), "{visible}");
+    assert!(visible.ends_with("[cut at the result cap]"), "{visible}");
+}
+
 /// Collects turn events plus late background completions: `TaskCompleted`
 /// may arrive after `TurnDone`, so keep receiving until `completed` pairs
 /// and their `finished` notices are all in (or time out).
