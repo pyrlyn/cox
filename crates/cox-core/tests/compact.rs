@@ -596,3 +596,150 @@ async fn compact_state_llm_summary_lists_touched_paths_and_failing_command() {
         "model text follows: {text}"
     );
 }
+
+/// A scenario of one tool-calling turn per entry of `turns`, each `(tool,
+/// calls)`, then the summariser's reply. A tool turn is two `[[turn]]`s:
+/// the calls, then the answer once the results are in.
+fn archived_scenario(turns: &[(&str, usize)], summary: &str) -> String {
+    let mut toml = String::new();
+    for (tool, calls) in turns {
+        let call = format!("  {{ name = \"{tool}\", input = {{ path = \"a.rs\" }} }},\n");
+        toml.push_str(&format!(
+            "[[turn]]\ntext = \"working\"\ntool_calls = [\n{}]\n[[turn]]\ntext = \"done\"\n",
+            call.repeat(*calls)
+        ));
+    }
+    toml.push_str(&format!("[[turn]]\ntext = \"{summary}\"\n"));
+    toml
+}
+
+/// Runs one user turn per entry of `turns`, compacts, and returns the
+/// history before and after with the archive ids each turn wrote.
+async fn compact_archived(
+    turns: &[(&str, usize)],
+    strategy: cox_protocol::config::CompactionStrategy,
+) -> (
+    Vec<cox_protocol::types::Message>,
+    Vec<cox_protocol::types::Message>,
+    Vec<Vec<String>>,
+) {
+    let mut config = cox_protocol::Config::default();
+    config.compaction.strategy = strategy;
+    let tools: Vec<Arc<dyn Tool>> = ["read", "grep", "edit"]
+        .into_iter()
+        .map(|name| Arc::new(Named(name, "output", false)) as Arc<dyn Tool>)
+        .collect();
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        config,
+        Arc::new(
+            Scripted::from_toml(&archived_scenario(turns, "## Goal\\nship"), "").expect("scenario"),
+        ),
+        tools,
+        store.clone(),
+        store.clone(),
+        PathBuf::from("/tmp/cox-turn"),
+    )
+    .expect("session");
+    let mut rx = session.events().expect("events");
+    let mut ids = Vec::new();
+    for t in 0..turns.len() {
+        let events = user_turn(&session, &mut rx, &format!("t{t}")).await;
+        ids.push(
+            events
+                .iter()
+                .filter_map(|e| match e {
+                    Event::ToolCallDone { result, .. } => result.archive.as_ref(),
+                    _ => None,
+                })
+                .map(|a| a.id.to_string())
+                .collect(),
+        );
+        // Archive ids are ULIDs: distinct milliseconds keep id order equal
+        // to turn order, which the snapshot depends on.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    let before = session.history().await;
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    (before, session.history().await, ids)
+}
+
+fn summary_text(history: &[cox_protocol::types::Message]) -> String {
+    let Content::Text { text } = &history[0].content[0] else {
+        panic!("summary first: {:?}", history[0]);
+    };
+    text.clone()
+}
+
+/// Archive ids are random; the snapshot names them by position instead.
+fn redact_ids(mut text: String, ids: &[String]) -> String {
+    for (n, id) in ids.iter().enumerate() {
+        text = text.replace(id, &format!("ID{}", n + 1));
+    }
+    text
+}
+
+#[tokio::test]
+async fn compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim() {
+    use cox_protocol::config::CompactionStrategy::{Llm, StateLlm};
+    // Turns 1-3 are dropped (three archived outputs), turns 4-5 are kept.
+    let turns = [
+        ("read", 1),
+        ("grep", 1),
+        ("edit", 1),
+        ("read", 1),
+        ("grep", 1),
+    ];
+    let (before, after, ids) = compact_archived(&turns, StateLlm).await;
+    let text = summary_text(&after);
+    let flat: Vec<String> = ids.concat();
+    for id in &flat[..3] {
+        assert!(text.contains(id.as_str()), "{id} missing from {text}");
+    }
+    for id in &flat[3..] {
+        assert!(
+            !text.contains(id.as_str()),
+            "kept turn's {id} named: {text}"
+        );
+    }
+    let kept = before.len() - after.len() + 1;
+    assert_eq!(
+        &after[1..],
+        &before[kept..],
+        "last two turns byte-identical"
+    );
+    insta::assert_snapshot!(redact_ids(text, &flat));
+
+    // The model's text is last under `strategy = llm` too.
+    let (_, after_llm, ids) = compact_archived(&turns, Llm).await;
+    let text = summary_text(&after_llm);
+    assert!(
+        text.contains("## Goal\nship\n\n## Archived outputs\n"),
+        "{text}"
+    );
+    assert!(
+        text.lines()
+            .last()
+            .is_some_and(|l| l.starts_with("- #") && l.ends_with(" edit")),
+        "{text}"
+    );
+    assert!(
+        ids.concat()[..3]
+            .iter()
+            .all(|id| text.contains(id.as_str()))
+    );
+}
+
+#[tokio::test]
+async fn compaction_notice_shows_32_of_40_ids() {
+    let turns = [("read", 40), ("grep", 1), ("edit", 1)];
+    let (_, after, _) =
+        compact_archived(&turns, cox_protocol::config::CompactionStrategy::Llm).await;
+    let text = summary_text(&after);
+    let listed = text.lines().filter(|l| l.starts_with("- #")).count();
+    assert_eq!(listed, 32, "{text}");
+    assert!(text.ends_with("\n… and 8 more"), "{text}");
+}

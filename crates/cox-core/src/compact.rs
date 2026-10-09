@@ -9,14 +9,14 @@
 //! it is sent (T28.3). Separate from `session.rs` because it is the only
 //! place history is ever rewritten in memory.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use cox_protocol::config::CompactionStrategy;
 use cox_protocol::errors::CoreError;
-use cox_protocol::ids::{CallId, ItemId};
+use cox_protocol::ids::{ArchiveId, CallId, ItemId};
 use cox_protocol::types::{
-    CompactReason, Content, Event, HookEvent, HookOutcome, ItemKind, Job, Level, Message,
-    ProviderEvent, RepoMapReason, Request, Role, SystemBlock,
+    ArchiveRef, CompactReason, Content, Event, HookEvent, HookOutcome, ItemKind, Job, Level,
+    Message, ProviderEvent, RepoMapReason, Request, Role, SystemBlock,
 };
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -37,6 +37,11 @@ const SUMMARY_HEAD: &str = "[Compacted summary of ";
 const FILES: &str = "## Files touched";
 const ERRORS: &str = "## Errors seen";
 const REQUEST: &str = "## Last request";
+const ARCHIVED: &str = "## Archived outputs";
+/// The section is bounded so a long session cannot grow its own summary
+/// without limit; the ids past either cap are only counted.
+const MAX_HANDLES: usize = 32;
+const MAX_NOTICE_BYTES: usize = 2048;
 /// A pasted log as the request would crowd out the rest of the state.
 const REQUEST_CHARS: usize = 500;
 
@@ -381,6 +386,90 @@ pub(crate) fn working_state(messages: &[Message]) -> WorkingState {
     state
 }
 
+/// T66.1: the archive ids of the compacted turns that `expand` still
+/// resolves, with the tool that wrote each, in id order.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct SurvivingHandles {
+    pub kept: Vec<(ArchiveId, String)>,
+    /// Ids the caps left out; they still expand, but the model is not told.
+    pub omitted: usize,
+}
+
+impl SurvivingHandles {
+    /// Every call in `messages` that has an archive row, plus the ids an
+    /// earlier compaction's section still lists, so a second compaction
+    /// loses none that fit. Separate from `working_state` because it needs
+    /// the session's archive map, not the transcript alone. A row counts
+    /// only if `archives` holds it, and `turn.rs` writes the row before the
+    /// model sees the short form, so nothing is named after the fact.
+    pub(crate) fn collect(messages: &[Message], archives: &HashMap<CallId, ArchiveRef>) -> Self {
+        let mut found: BTreeMap<ArchiveId, String> = BTreeMap::new();
+        let mut names: HashMap<CallId, &str> = HashMap::new();
+        let mut omitted = 0;
+        for c in messages.iter().flat_map(|m| &m.content) {
+            match c {
+                Content::Text { text } if text.starts_with(SUMMARY_HEAD) => {
+                    for line in section(text, ARCHIVED) {
+                        if let Some((id, tool)) = line
+                            .strip_prefix("- #")
+                            .and_then(|l| l.split_once(' '))
+                            .and_then(|(id, tool)| Some((id.parse().ok()?, tool)))
+                        {
+                            found.insert(id, tool.to_string());
+                        } else if let Some(n) = line
+                            .strip_prefix("… and ")
+                            .and_then(|l| l.strip_suffix(" more"))
+                        {
+                            omitted += n.parse().unwrap_or(0);
+                        }
+                    }
+                }
+                Content::ToolUse { id, name, .. } => {
+                    names.insert(*id, name);
+                }
+                Content::ToolResult { call_id, .. } => {
+                    if let Some(archive) = archives.get(call_id) {
+                        let tool = names.get(call_id).copied().unwrap_or("tool");
+                        found.insert(archive.id, tool.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut kept = Vec::new();
+        let mut bytes = ARCHIVED.len();
+        let mut found = found.into_iter();
+        for (id, tool) in found.by_ref() {
+            bytes += format!("\n- #{id} {tool}").len();
+            if kept.len() == MAX_HANDLES || bytes > MAX_NOTICE_BYTES {
+                omitted += 1;
+                break;
+            }
+            kept.push((id, tool));
+        }
+        Self {
+            kept,
+            omitted: omitted + found.count(),
+        }
+    }
+}
+
+/// The section that ends a summary; empty when no output was archived, so
+/// a summary of a session without tool calls is unchanged.
+pub(crate) fn notice_text(handles: &SurvivingHandles) -> String {
+    if handles.kept.is_empty() && handles.omitted == 0 {
+        return String::new();
+    }
+    let mut out = format!("{ARCHIVED}\nFull outputs the expand tool still retrieves:");
+    for (id, tool) in &handles.kept {
+        out.push_str(&format!("\n- #{id} {tool}"));
+    }
+    if handles.omitted > 0 {
+        out.push_str(&format!("\n… and {} more", handles.omitted));
+    }
+    out
+}
+
 impl Session {
     /// §1.10 steps 1–5. `Ok(true)` when history changed; every failure is a
     /// notice and `Ok(false)`, since a session that cannot compact still runs.
@@ -397,9 +486,14 @@ impl Session {
                 .compaction_notice(&format!("skipped by hook: {reason}"))
                 .await;
         }
-        let (history, marks, state) = {
+        let (history, marks, state, archives) = {
             let inner = self.inner.lock().await;
-            (inner.history.clone(), inner.turn_marks.clone(), inner.state)
+            (
+                inner.history.clone(),
+                inner.turn_marks.clone(),
+                inner.state,
+                inner.archives.clone(),
+            )
         };
         let Some((cut, dropped)) = split(&marks, self.config.context.keep_turns) else {
             return self
@@ -419,6 +513,13 @@ impl Session {
             return self.compaction_notice("summariser returned nothing").await;
         };
         let item = ItemId::new();
+        // Last under both strategies: the model's own text can end anywhere.
+        let notice = notice_text(&SurvivingHandles::collect(&history[..cut], &archives));
+        let summary = if notice.is_empty() {
+            summary
+        } else {
+            format!("{}\n\n{notice}", summary.trim_end())
+        };
         let text = format!(
             "{SUMMARY_HEAD}{} earlier turn(s)]\n\n{summary}",
             dropped.len()
@@ -797,6 +898,77 @@ mod tests {
         );
         assert_eq!(state.errors, first.errors);
         assert_eq!(state.request, first.request, "no newer request typed");
+    }
+
+    /// `n` calls of `tool`, each with an archive row, as `history` and the
+    /// session's map would hold them.
+    fn archived(n: usize, tool: &str) -> (Vec<Message>, HashMap<CallId, ArchiveRef>) {
+        let mut archives = HashMap::new();
+        let calls: Vec<(&str, Value, &str, bool)> =
+            (0..n).map(|_| (tool, json!({}), "out", false)).collect();
+        let messages = round(&calls);
+        for c in &messages[1].content {
+            if let Content::ToolResult { call_id, .. } = c {
+                let archive = ArchiveRef {
+                    id: ArchiveId::new(),
+                    bytes: 3,
+                };
+                archives.insert(*call_id, archive);
+            }
+        }
+        (messages.to_vec(), archives)
+    }
+
+    #[test]
+    fn compaction_notice_stops_at_32_ids_and_counts_the_rest() {
+        let (messages, archives) = archived(40, "read");
+        let handles = SurvivingHandles::collect(&messages, &archives);
+        assert_eq!((handles.kept.len(), handles.omitted), (32, 8));
+        let text = notice_text(&handles);
+        assert!(text.ends_with("\n… and 8 more"), "{text}");
+        assert!(text.len() <= MAX_NOTICE_BYTES + 32, "{}", text.len());
+        let ids: Vec<_> = handles.kept.iter().map(|(id, _)| *id).collect();
+        assert!(ids.is_sorted(), "ordered by id");
+        assert_eq!(
+            text,
+            notice_text(&SurvivingHandles::collect(&messages, &archives))
+        );
+    }
+
+    #[test]
+    fn compaction_notice_stops_at_2048_bytes_for_long_tool_names() {
+        let (messages, archives) = archived(20, &"t".repeat(150));
+        let handles = SurvivingHandles::collect(&messages, &archives);
+        assert!(handles.kept.len() < 20 && handles.omitted == 20 - handles.kept.len());
+        assert!(notice_text(&handles).len() <= MAX_NOTICE_BYTES + 32);
+    }
+
+    #[test]
+    fn compaction_notice_merges_ids_an_earlier_summary_still_lists() {
+        let (first, first_archives) = archived(2, "grep");
+        let earlier = SurvivingHandles::collect(&first, &first_archives);
+        let summary = format!(
+            "{SUMMARY_HEAD}1 earlier turn(s)]\n\n## Goal\nx\n\n{}",
+            notice_text(&SurvivingHandles {
+                kept: earlier.kept.clone(),
+                omitted: 5,
+            })
+        );
+        let (mut later, archives) = archived(1, "bash");
+        later.insert(0, user(&summary));
+        let merged = SurvivingHandles::collect(&later, &archives);
+        assert_eq!(merged.kept.len(), 3);
+        assert_eq!(merged.omitted, 5);
+        for entry in &earlier.kept {
+            assert!(merged.kept.contains(entry));
+        }
+    }
+
+    #[test]
+    fn compaction_notice_is_empty_without_archived_output() {
+        let messages = round(&[("read", json!({}), "out", false)]);
+        let handles = SurvivingHandles::collect(&messages, &HashMap::new());
+        assert_eq!(notice_text(&handles), "");
     }
 
     #[test]
