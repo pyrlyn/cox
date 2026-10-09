@@ -7,6 +7,8 @@
 //! instead of guessing where the item ends (plan.md T3.2 step 3, T59.11;
 //! AGENTS.md D6c). Tree-sitter for rs/ts/tsx/py/go; everything else falls
 //! back to markdown headings or a `^(fn|def|class|func|pub|export)` grep.
+//! The same walk also yields each definition's qualified name and line span
+//! (`definitions`), which `read`'s `symbol` input resolves against (T59.8).
 
 use std::path::Path;
 
@@ -84,37 +86,169 @@ pub fn outline(path: &Path, content: &str) -> String {
     render(&fallback_outline(ext, content))
 }
 
+/// One definition found by the tree-sitter walk: the single source both the
+/// outline listing and `read`'s symbol lookup derive from, so the two can
+/// never disagree about what a file defines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Def {
+    /// Qualified by the enclosing impl/trait/class (`Foo::bar`); empty when
+    /// the grammar gives the node no name, which lookup skips.
+    pub name: String,
+    /// 1-based inclusive line span of the whole definition, body included.
+    pub start: usize,
+    pub end: usize,
+    pub signature: String,
+}
+
+impl Def {
+    /// `query` may use `::` or `.` between segments, and may omit leading
+    /// ones: `bar` finds `Foo::bar` (the model rarely knows the container).
+    pub fn matches(&self, query: &str) -> bool {
+        let query = normalize(query);
+        !self.name.is_empty() && (self.name == query || self.name.ends_with(&format!("::{query}")))
+    }
+}
+
+fn normalize(name: &str) -> String {
+    name.trim().replace('.', "::")
+}
+
+/// Every named definition of `content`, in source order. `None` when the
+/// extension has no grammar or the parse fails, so a caller can tell
+/// "unsupported file" from "no such symbol".
+pub fn definitions(path: &Path, content: &str) -> Option<Vec<Def>> {
+    let ext = path.extension().and_then(|e| e.to_str())?;
+    let (language, kinds) = language_and_kinds(ext)?;
+    tree_sitter_defs(language, kinds, content)
+}
+
+/// The definitions `query` names. An exact qualified-name hit wins over
+/// suffix hits, so `bar` still resolves to a free `fn bar` when a method
+/// `Foo::bar` also exists.
+pub fn find_symbol<'a>(defs: &'a [Def], query: &str) -> Vec<&'a Def> {
+    let query = normalize(query);
+    let exact: Vec<&Def> = defs.iter().filter(|d| d.name == query).collect();
+    if exact.is_empty() {
+        defs.iter().filter(|d| d.matches(&query)).collect()
+    } else {
+        exact
+    }
+}
+
 fn tree_sitter_outline(
     language: tree_sitter::Language,
     kinds: &[&str],
     content: &str,
 ) -> Option<Vec<(usize, usize, String)>> {
+    let defs = tree_sitter_defs(language, kinds, content)?;
+    Some(
+        defs.into_iter()
+            .map(|d| (d.start, d.end, d.signature))
+            .collect(),
+    )
+}
+
+fn tree_sitter_defs(
+    language: tree_sitter::Language,
+    kinds: &[&str],
+    content: &str,
+) -> Option<Vec<Def>> {
     let mut parser = Parser::new();
     parser.set_language(&language).ok()?;
     let tree = parser.parse(content, None)?;
 
-    let mut rows = Vec::new();
-    collect(tree.root_node(), content.as_bytes(), kinds, &mut rows);
+    let mut defs = Vec::new();
+    collect(tree.root_node(), content.as_bytes(), kinds, "", &mut defs);
     // Tree order is already source order (preorder), but nested items
     // (e.g. a fn inside an impl) are visited after their parent, so a
-    // plain stable sort by start line keeps the listing readable top-to-bottom.
-    rows.sort_by_key(|(start, _, _)| *start);
-    Some(rows)
+    // plain stable sort by line keeps the listing readable top-to-bottom.
+    defs.sort_by_key(|d| d.start);
+    Some(defs)
 }
 
-fn collect(node: Node, source: &[u8], kinds: &[&str], out: &mut Vec<(usize, usize, String)>) {
+fn collect(node: Node, source: &[u8], kinds: &[&str], prefix: &str, out: &mut Vec<Def>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
+        let mut child_prefix = prefix;
+        let qualified;
         if kinds.contains(&child.kind()) {
+            let name = def_name(source, child);
+            qualified = match (prefix.is_empty(), name.is_empty()) {
+                (_, true) => String::new(),
+                (true, false) => name,
+                (false, false) => format!("{prefix}::{name}"),
+            };
             // Both ends are 1-based and inclusive. `end_position` is
             // 0-based, so the next `lines` read can use the span as written
             // instead of guessing where the item stops.
-            let start = child.start_position().row + 1;
-            let end = child.end_position().row + 1;
-            out.push((start, end, signature(source, child)));
+            out.push(Def {
+                name: qualified.clone(),
+                start: child.start_position().row + 1,
+                end: child.end_position().row + 1,
+                signature: signature(source, child),
+            });
+            if is_container(child.kind()) && !qualified.is_empty() {
+                child_prefix = &qualified;
+            }
         }
-        collect(child, source, kinds, out);
+        collect(child, source, kinds, child_prefix, out);
     }
+}
+
+/// Kinds whose name qualifies the definitions nested inside them.
+fn is_container(kind: &str) -> bool {
+    matches!(
+        kind,
+        "impl_item" | "trait_item" | "class_declaration" | "class_definition"
+    )
+}
+
+/// The definition's own name. An `impl` is named by the type it extends, and
+/// a Go method by its receiver type (Go declares methods outside the type),
+/// so both qualify like a method inside a class would.
+fn def_name(source: &[u8], node: Node) -> String {
+    let text = |n: Node| n.utf8_text(source).unwrap_or_default().to_string();
+    let bare = |s: String| s.split('<').next().unwrap_or_default().trim().to_string();
+    match node.kind() {
+        "impl_item" => node
+            .child_by_field_name("type")
+            .map(|n| bare(text(n)))
+            .unwrap_or_default(),
+        "method_declaration" => {
+            let name = node
+                .child_by_field_name("name")
+                .map(text)
+                .unwrap_or_default();
+            match node
+                .child_by_field_name("receiver")
+                .and_then(|r| first_of_kind(r, "type_identifier"))
+            {
+                Some(recv) => format!("{}::{name}", text(recv)),
+                None => name,
+            }
+        }
+        "type_declaration" => {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find(|c| c.kind() == "type_spec")
+                .and_then(|spec| spec.child_by_field_name("name"))
+                .map(text)
+                .unwrap_or_default()
+        }
+        _ => node
+            .child_by_field_name("name")
+            .map(text)
+            .unwrap_or_default(),
+    }
+}
+
+fn first_of_kind<'t>(node: Node<'t>, kind: &str) -> Option<Node<'t>> {
+    if node.kind() == kind {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find_map(|c| first_of_kind(c, kind))
 }
 
 /// The node's header: everything before its body (the first child whose
@@ -201,5 +335,59 @@ mod tests {
         // no tree-sitter grammar for lua and no "fn "/"func " match on this
         // particular fixture, so it's a legitimate empty outline.
         assert_eq!(out, "(no outline entries found)");
+    }
+
+    const RUST: &str = "struct Foo;\n\nimpl Foo {\n    fn bar(&self) -> u32 {\n        1\n    }\n}\n\nfn bar() {}\n\nimpl<T> Other for Wrap<T> {\n    fn run(&self) {}\n}\n";
+    const TS: &str =
+        "export class Box {\n  open(): void {\n    go();\n  }\n}\n\nfunction open() {}\n";
+
+    fn names(defs: &[Def]) -> Vec<&str> {
+        defs.iter().map(|d| d.name.as_str()).collect()
+    }
+
+    #[test]
+    fn definitions_qualify_rust_methods_by_their_impl_type() {
+        let defs = definitions(Path::new("x.rs"), RUST).expect("rust grammar");
+        assert_eq!(
+            names(&defs),
+            ["Foo", "Foo", "Foo::bar", "bar", "Wrap", "Wrap::run"]
+        );
+        let method = defs.iter().find(|d| d.name == "Foo::bar").expect("method");
+        assert_eq!((method.start, method.end), (4, 6));
+    }
+
+    #[test]
+    fn definitions_qualify_typescript_methods_by_their_class() {
+        let defs = definitions(Path::new("x.ts"), TS).expect("ts grammar");
+        assert_eq!(names(&defs), ["Box", "Box::open", "open"]);
+    }
+
+    #[test]
+    fn definitions_qualify_go_methods_by_their_receiver() {
+        let src = "package p\n\ntype Box struct{}\n\nfunc (b *Box) Open() {}\n";
+        let defs = definitions(Path::new("x.go"), src).expect("go grammar");
+        assert_eq!(names(&defs), ["Box", "Box::Open"]);
+    }
+
+    #[test]
+    fn definitions_is_none_without_a_grammar() {
+        assert!(definitions(Path::new("x.lua"), "function f() end").is_none());
+    }
+
+    #[test]
+    fn find_symbol_accepts_dot_and_colon_separators_and_a_bare_method_name() {
+        let defs = definitions(Path::new("x.ts"), TS).expect("ts grammar");
+        assert_eq!(find_symbol(&defs, "Box.open")[0].start, 2);
+        assert_eq!(find_symbol(&defs, "Box::open")[0].start, 2);
+        let rs = definitions(Path::new("x.rs"), RUST).expect("rust grammar");
+        assert_eq!(find_symbol(&rs, "run").len(), 1);
+    }
+
+    #[test]
+    fn find_symbol_prefers_the_exact_name_over_a_method_with_that_suffix() {
+        let defs = definitions(Path::new("x.rs"), RUST).expect("rust grammar");
+        let hits = find_symbol(&defs, "bar");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].start, 9);
     }
 }
