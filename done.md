@@ -1,7 +1,7 @@
 
 #### T59.11 Fold a JSON tool result into one line per node
 
-Model: Grok 4.7 · Status: done 2026-10-08 · Depends: T59.2 · Size: ~580 (`json_tree.rs` past the ~200 cap; see A143) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/json_tree.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-core/src/lib.rs`
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: T59.2 · Size: ~580 (`json_tree.rs` past the ~200 cap; see A144) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/json_tree.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-core/src/lib.rs`
 Goal: a single-line JSON design or AST dump larger than `tool_output_visible_bytes` is folded before the line cut, so the model keeps a template line and an `expand` trailer instead of losing the middle; the archive row stays the raw bytes. `read` and `grep` stay unfolded.
 Plan:
 1. `fold_json`: skip a uniform scalar table (an array of objects with the same scalar keys and at least three columns); hoist values used at least twice; template object bodies used at least twice, omitting `id` and `name` (and `children`, which stay nested lines); one positional line per node; deterministic key order; `None` when the folded text is not shorter than `serde_json::to_string` of the input.
