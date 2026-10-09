@@ -29,6 +29,7 @@ pub mod git;
 pub mod glob;
 pub mod grep;
 pub mod lsp;
+pub mod mcp_exec;
 pub mod memory;
 pub mod project;
 pub mod read;

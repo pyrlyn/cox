@@ -51,6 +51,43 @@ $ mise exec -- cargo fmt --check
 clean
 ```
 
+#### T65.2 tool_search summary mode
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: T65.1 · Size: ~50 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/tool_search.rs`
+Goal: `tool_search` returns `{name, description}` unless the caller asks for the full spec, and discovery still returns names.
+What landed: optional `detail` is `summary` (the default) or `full`. Summary serializes `{name, description}` for each hit. `full` keeps the pretty `ToolSpec`. `structured.discovered` is still the names. `context.rs` is unchanged.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools tool_search
+test tool_search::tests::tool_search_ranks_the_matching_deferred_tool_first ... ok
+test tool_search::tests::tool_search_returns_at_most_five_and_nothing_for_no_match ... ok
+test tool_search::tests::tool_search_reports_discovered_names_in_structured_output ... ok
+test tool_search::tests::tool_search_summary_omits_input_schema ... ok
+4 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
+#### T65.1 mcp_exec: one sandboxed program fans out MCP calls
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: — · Size: 616 lines in `mcp_exec.rs` plus one `pub mod` · Priority: P0 · Complexity: 3 · Files: `crates/cox-tools/src/mcp_exec.rs`, `crates/cox-tools/src/lib.rs`
+Goal: a unit test where two tool results are 10_000 bytes each and the model-visible string is only the program's final print.
+What landed: `McpExecTool` (`deferred: false`, `Risk::Write`) runs an original Python driver in a new process on every call. `cox_sandbox::sandbox::command` builds it with network off and one fresh temp directory as the only writable root (also a root, so bubblewrap still mounts a path under its private `/tmp`). `sandbox::command` inserts `-c`, so the shell `exec`s `python3 -I -u <driver>`. The driver allows top-level await and speaks `search`, `describe` and `call`; any other stdout `type` is rejected. `describe` is name and description only. `ToolOutput.text` is the program's `result` text, cut at 8_000 bytes with `… truncated`. The tool does not archive. A non-zero exit or a timeout is `is_error` plus the stderr tail. A missing `python3` is `ToolError::Denied` with `python3 is missing`. No protocol change.
+Not done: `McpExecTool` is not registered on the session. That wiring is another file past this card's cap. `mcp_exec.rs` is 616 lines, over the ~200 line card: the driver, the sandbox spawn, the RPC loop and the acceptance test do not pass the Check as separate cards.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools mcp_exec
+test mcp_exec::tests::result_text_over_8000_bytes_ends_with_truncated_trailer ... ok
+test mcp_exec::tests::mcp_exec_is_a_present_write_tool_with_no_network ... ok
+test mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print ... ok
+3 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
 #### T59.11 Outline rows include the end line
 
 Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: ~40 · Priority: P0 · Complexity: 1 · Files: `crates/cox-syntax/src/outline.rs`, `crates/cox-tools/src/read.rs`, `crates/cox-tools/src/repomap.rs`
