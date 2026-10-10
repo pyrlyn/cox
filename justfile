@@ -1,3 +1,6 @@
+# ptools (pyrlyn/tools) is pinned in mise.toml; PTOOLS overrides it if mise is already activated.
+ptools := env("PTOOLS", "mise exec -- ptools")
+
 # cox — task runner. Every target runs through `mise exec` so the pinned
 # toolchain (mise.toml) is used, never whatever `cargo` happens to be on PATH.
 
@@ -95,10 +98,7 @@ plugin-examples lang:
 
 # Lossless cleanup of ./target (compress + dedupe); never deletes. A no-op without swarfr.
 swarfr:
-    #!/usr/bin/env sh
-    command -v swarfr >/dev/null || { echo "swarfr not found; install it with: ketch install swarfr"; exit 0; }
-    [ -d target ] || exit 0
-    swarfr run target || test $? -eq 2
+    {{ptools}} swarfr
 
 snap:
     mise exec -- cargo insta review
@@ -189,12 +189,11 @@ brand-icons *args:
 
 # $CARGO_HOME sizes (no deletes) and ./target
 cache:
-    mise exec -- cargo-cache
-    du -sh target 2>/dev/null || echo "target: (missing)"
+    {{ptools}} cache
 
 # drop extracted crate/git checkouts; keep archives
 cache-autoclean:
-    mise exec -- cargo-cache --autoclean
+    {{ptools}} cache --autoclean
 
 # Re-render docs/screenshots/*.svg from the whole-screen snapshot tests
 # (crates/cox-tui/tests/screenshots.rs); the same frames insta compares.
