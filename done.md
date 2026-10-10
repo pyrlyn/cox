@@ -10691,4 +10691,31 @@ Out of scope: any other remote-execution subject.
 Result: `cloud_agent` is a canonical tool name (alias `CloudAgent`); a rule `CloudAgent(owner/repo)` parses only for a strict GitHub pair and matches ignoring case, so a deny for `Acme/Widgets` also stops `acme/widgets`. `Engine::decide` routes the tool to one function after the deny rules and before `bypass`: a malformed subject is denied, `plan` denies, only an exact allow rule from the loaded config allows (a bare `CloudAgent` allow and session grants do not), every other case asks, and policy `never` denies like any ask. `cloud_agent_approval_text(call)` builds the approval text from the call's subject and its `remote` and `ref` input fields and strips control and bidi characters. The A122 test loads a real project config through `cox-config` (a dev-dependency; `deps.rs` counts only normal dependencies). Docs: `docs/how-it-works.md` and §1.8. Not done: the approval modal still renders the ask as `rule CloudAgent(owner/repo) asks` (a `Why::RuleAsk`); showing `cloud_agent_approval_text` there, and the driver that builds the call, belong to T56.6.
 Check output: `mise exec -- cargo nextest run -p cox-permission` — 14 passed, including cloud_agent_asks_in_auto_and_bypass, cloud_agent_is_denied_in_plan_mode, cloud_agent_user_allow_rule_matches_one_repo, cloud_agent_project_allow_is_reverted, cloud_agent_approval_text_names_repo_ref_and_off_machine; `mise exec -- cargo clippy -p cox-permission --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
+#### T66.15 Cut the subagent result cap on a char boundary
 
+Model: Claude Code / opus · Status: done 2026-10-09 · Depends: — · Size: ~30 · Priority: P1 · Complexity: 1
+
+Goal: a non-ASCII child answer over `result_cap_tokens` is cut, not a panic. When `summarize` returns `None`, `run_task` falls back to `result.truncate(cap * 4)` (`subagent.rs:1149`). `String::truncate` panics when that byte index is inside a char, so a Cyrillic, CJK or emoji answer over the cap crashes the parent session. Seen while implementing T66.2.
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/tests/subagent.rs`
+- `crates/cox-core/tests/scenarios/subagent_cut_non_ascii.toml` (fixture)
+
+Steps:
+1. Cut at `result.floor_char_boundary(cap * 4)` (stable since Rust 1.91; the workspace `rust-version` is 1.98). No workspace helper does this: `cox-tools/src/read.rs:229` and `cox-acp/src/terminal.rs:72` each walk `is_char_boundary` inline. The cut stays in place, one line, so it merges with T66.2's archive trailer around it.
+2. The scenario's child answers `x` followed by 5000 `я` (10001 bytes), so byte 4000 and byte 8000 both fall inside a char whichever preset cap applies. Its summarize turn is a scripted `error`, so `summarize` returns `None` and the cut runs.
+3. `over_cap_non_ascii_answer_is_cut_on_a_char_boundary` asserts the parent's tool result is ok, starts with `xя` and ends with `[cut at the result cap]`. Without step 1 the child task panics and the test fails.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the new test passes and fails with step 1 reverted.
+
+Out of scope: archiving the full answer, which is T66.2; the other inline boundary walks.
+
+Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
