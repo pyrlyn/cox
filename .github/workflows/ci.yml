@@ -95,6 +95,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
+      - uses: ./.github/actions/sccache
+        with:
+          access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          bucket: ${{ vars.SCCACHE_BUCKET }}
+          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          read-only: ${{ github.event_name == 'pull_request' }}
+
       - name: no bubblewrap
         run: |
           sudo apt-get remove -y bubblewrap || true
@@ -172,6 +180,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
+      - uses: ./.github/actions/sccache
+        with:
+          access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          bucket: ${{ vars.SCCACHE_BUCKET }}
+          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          read-only: ${{ github.event_name == 'pull_request' }}
+
       - name: plugin tests
         run: cargo test --manifest-path plugins/Cargo.toml --workspace
 
@@ -197,6 +213,14 @@ jobs:
       - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - uses: ./.github/actions/sccache
+        with:
+          access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          bucket: ${{ vars.SCCACHE_BUCKET }}
+          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          read-only: ${{ github.event_name == 'pull_request' }}
 
       - uses: taiki-e/install-action@23d41aa71228a2692ee31bb433f070fd4bdc6661 # nextest
 

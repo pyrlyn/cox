@@ -1,0 +1,71 @@
+# sccache with Cloudflare R2 as the shared cache. Without the R2 secrets and variables (a fork
+# pull request, Dependabot, a repository where they are not created yet) this step turns the
+# wrapper off and the build runs as before, so CI never fails because of the cache.
+# mise.toml sets RUSTC_WRAPPER to its own sccache wherever it installed one; this action
+# overrides that for the rest of the job: R2 when configured, nothing otherwise.
+# Needs the repository secrets R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and the variables SCCACHE_BUCKET and SCCACHE_ENDPOINT.
+name: sccache
+description: Use sccache with a Cloudflare R2 bucket, or do nothing when it is not configured
+
+inputs:
+  access-key-id:
+    description: R2 API token Access Key ID (secret R2_ACCESS_KEY_ID)
+    default: ''
+  secret-access-key:
+    description: R2 API token Secret Access Key (secret R2_SECRET_ACCESS_KEY)
+    default: ''
+  bucket:
+    description: R2 bucket name (variable SCCACHE_BUCKET)
+    default: ''
+  endpoint:
+    description: https://<ACCOUNT_ID>.r2.cloudflarestorage.com (variable SCCACHE_ENDPOINT)
+    default: ''
+  read-only:
+    description: "'true' reads the cache but never writes it (pull requests)"
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: sccache configuration
+      id: cfg
+      shell: bash
+      env:
+        ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        BUCKET: ${{ inputs.bucket }}
+        ENDPOINT: ${{ inputs.endpoint }}
+      run: |
+        if [ -n "$ACCESS_KEY_ID" ] && [ -n "$SECRET_ACCESS_KEY" ] && [ -n "$BUCKET" ] && [ -n "$ENDPOINT" ]; then
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          # mise may have exported its own sccache as the wrapper; without a backend, drop it.
+          echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          echo "::notice::sccache is off: the R2 secrets or variables are not available here"
+        fi
+
+    - if: steps.cfg.outputs.enabled == 'true'
+      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      with:
+        version: v0.18.0
+
+    - if: steps.cfg.outputs.enabled == 'true'
+      shell: bash
+      env:
+        ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        BUCKET: ${{ inputs.bucket }}
+        ENDPOINT: ${{ inputs.endpoint }}
+        READ_ONLY: ${{ inputs.read-only }}
+      run: |
+        {
+          echo "RUSTC_WRAPPER=sccache"
+          echo "CARGO_INCREMENTAL=0"
+          echo "SCCACHE_BUCKET=$BUCKET"
+          echo "SCCACHE_ENDPOINT=$ENDPOINT"
+          echo "SCCACHE_REGION=auto"
+          echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID"
+          echo "AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY"
+          if [ "$READ_ONLY" = "true" ]; then echo "SCCACHE_S3_RW_MODE=READ_ONLY"; fi
+        } >> "$GITHUB_ENV"
