@@ -21,6 +21,7 @@ cox-protocol = { path = "../cox-protocol", version = "0.1.2" }
 async-trait = { workspace = true }
 # T54.7: loading and transcribing run on `spawn_blocking`, off the TUI's runtime.
 tokio = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

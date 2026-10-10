@@ -8,6 +8,7 @@ Programs the project uses and the direct packages from its manifests.
 | --- | --- | --- | --- |
 | mise | brew / curl, then `mise install` | Pins tool versions | https://github.com/jdx/mise |
 | cargo-cache | mise | `just cache` / `just cache-autoclean`; the shared cargo home fills up | https://github.com/matthiaskrgr/cargo-cache |
+| cargo-hakari | mise (`cargo:cargo-hakari`) | Keeps the `workspace-hack` crate unified so shared dependencies build once; CI runs `cargo hakari verify` | https://github.com/guppy-rs/guppy |
 | rust | mise (with the `wasm32-unknown-unknown` target) | Compiler and std; the target builds the guest workspace `plugins/` (T33.27) and, through `cox-plugin-fixtures`' `build.rs`, the example plugin every `cargo nextest run --workspace` needs (T33.28) | https://github.com/rust-lang/rust |
 | rustc | mise (pin rust) | Rust compiler | https://github.com/rust-lang/rust |
 | cargo | mise (pin rust) | Rust builds and dependencies | https://github.com/rust-lang/cargo |

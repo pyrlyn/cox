@@ -45,6 +45,7 @@ tracing = { workspace = true }
 # Only to switch on wasmtime's `anyhow` feature, which extism needs and does
 # not enable with its default features off (workspace Cargo.toml).
 wasmtime = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 # T33.10: `tap_never_blocks_emit` runs a scripted session (`Session` over

@@ -9,6 +9,7 @@ license.workspace = true
 cox-protocol = { path = "../cox-protocol", version = "0.1.2" }
 # T2.2: permission rules compile path globs (`Read(~/.ssh/**)`) once.
 globset = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 # `Engine::decide`'s doctest builds a `ToolCall` input.

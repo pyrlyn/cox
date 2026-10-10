@@ -13,6 +13,7 @@ tiktoken-rs = { workspace = true }
 # `count_anthropic` calls the Anthropic `count_tokens` endpoint directly over
 # a caller-supplied `reqwest::Client`; no `cox-provider` type crosses in.
 reqwest = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 tokio = { workspace = true }

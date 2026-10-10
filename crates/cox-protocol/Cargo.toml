@@ -22,6 +22,7 @@ ulid = { workspace = true }
 # workspace's own declaration, so this inherits "full" in practice.
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 rstest = { workspace = true }

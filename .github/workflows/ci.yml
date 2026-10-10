@@ -229,6 +229,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: EmbarkStudios/cargo-deny-action@v2
 
+  # Fails when workspace-hack drifts from the dependency graph. cargo-hakari comes from
+  # mise.toml (only it and rust are installed here). Own job, so the required checks keep
+  # their names.
+  hakari:
+    needs: config
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: rust cargo:cargo-hakari
+      - run: cargo hakari generate --diff
+      - run: cargo hakari manage-deps --dry-run
+      - run: cargo hakari verify
+
   audit:
     needs: config
     if: >-

@@ -40,6 +40,7 @@ tokio-util = { workspace = true, features = ["rt"] }
 # T51.8: `AppHost`'s browser methods are async, and UniFFI's generated
 # foreign-trait impl names `::async_trait`; `cox-app`'s `Browser` is one too.
 async-trait = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 # `tests/forward_only.rs` parses the forwarding files as Rust (D11, A90);

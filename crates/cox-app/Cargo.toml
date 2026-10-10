@@ -61,6 +61,7 @@ schemars = { workspace = true }
 # T37.49: the welcome hero reads `Cargo.toml`'s `[workspace] members`;
 # already in the tree through cox-config.
 toml_edit = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 # The scenario tests run a real session over the Scripted provider and

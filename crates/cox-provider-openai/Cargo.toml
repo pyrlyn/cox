@@ -22,6 +22,7 @@ futures = { workspace = true }
 # T30.11: OpenAI Responses request/stream-event types (response-types
 # feature only — no HTTP client pulled in by this dependency).
 async-openai = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 insta = { workspace = true }

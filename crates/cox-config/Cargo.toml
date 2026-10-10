@@ -25,6 +25,7 @@ thiserror = { workspace = true }
 # Schema (was dev-only, for the drift test); already in the tree through
 # cox-protocol, which derives it.
 schemars = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
