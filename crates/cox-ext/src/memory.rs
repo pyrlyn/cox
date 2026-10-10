@@ -168,18 +168,53 @@ pub fn estimate_tokens(text: &str) -> u32 {
 }
 
 /// Index text for `system[3]`: as many entries as fit under
-/// `memory_budget_tokens`, in name order. Pure over the entries so the
-/// budget test needs no filesystem.
+/// `memory_budget_tokens`, in name order. Descriptions only — fact bodies
+/// stay out of this string. When the budget stops the list short, the
+/// result ends with one line naming how many entries were left out, and
+/// that line spends budget the same way an entry does. Pure over the
+/// entries so the budget test needs no filesystem.
 pub fn index_text(entries: &[Entry], budget_tokens: u32) -> String {
+    // A zero budget has always returned the header and nothing else: every
+    // candidate line fails the check immediately. Keep that result. The
+    // elision line is a signal that some allowance was spent, not a
+    // substitute for an empty one.
+    if budget_tokens == 0 {
+        return String::from("Memory index:\n");
+    }
     let mut out = String::from("Memory index:\n");
+    let mut kept = 0usize;
     for entry in entries {
         let line = format!("- {}: {}\n", entry.name, entry.description);
         if estimate_tokens(&out) + estimate_tokens(&line) > budget_tokens {
             break;
         }
         out.push_str(&line);
+        kept += 1;
     }
-    out
+    if kept == entries.len() {
+        return out;
+    }
+    // Whole entries only, same boundary the loop already uses. Append the
+    // elision line when it fits; otherwise give the last kept line's budget
+    // to it. The line can be longer than the entry it replaces, so keep
+    // peeling entries until it fits. If the header plus the line still
+    // exceeds the budget, the line is the whole result.
+    loop {
+        let line = format!(
+            "… {} more; memory_search to read them\n",
+            entries.len() - kept
+        );
+        if estimate_tokens(&out) + estimate_tokens(&line) <= budget_tokens {
+            out.push_str(&line);
+            return out;
+        }
+        if kept == 0 {
+            return line;
+        }
+        let end = out.trim_end_matches('\n').rfind('\n').map_or(0, |i| i + 1);
+        out.truncate(end);
+        kept -= 1;
+    }
 }
 
 fn git_root(cwd: &Path) -> Option<PathBuf> {
@@ -245,6 +280,90 @@ mod tests {
         let text = index_text(&entries, 100);
         assert!(estimate_tokens(&text) <= 100);
         assert!(!text.contains("fact-99"), "tail cut off");
+    }
+
+    // A line long enough that the elision banner is cheaper than a second entry.
+    fn wide(name: &str) -> Entry {
+        Entry {
+            name: name.into(),
+            description: format!("detail {name} {}", "x".repeat(180)),
+        }
+    }
+
+    fn entry_line(entry: &Entry) -> String {
+        format!("- {}: {}\n", entry.name, entry.description)
+    }
+
+    #[test]
+    fn memory_index_text_budget_fitting_one_of_three_names_the_two_left_out() {
+        let entries = [wide("alpha"), wide("bravo"), wide("charlie")];
+        let mut one = String::from("Memory index:\n");
+        one.push_str(&entry_line(&entries[0]));
+        let banner = "… 2 more; memory_search to read them\n";
+        let budget = estimate_tokens(&one) + estimate_tokens(banner);
+        let two = estimate_tokens(&one) + estimate_tokens(&entry_line(&entries[1]));
+        assert!(
+            budget < two,
+            "banner must fit where a second entry does not"
+        );
+        let text = index_text(&entries, budget);
+        assert!(text.contains(entry_line(&entries[0]).trim_end()));
+        assert!(!text.contains("- bravo:"), "{text}");
+        assert!(!text.contains("- charlie:"), "{text}");
+        assert!(text.ends_with(banner), "{text}");
+        assert!(estimate_tokens(&text) <= budget, "{text}");
+    }
+
+    #[test]
+    fn memory_index_text_budget_fitting_every_entry_has_no_more_line() {
+        let entries = [wide("alpha"), wide("bravo"), wide("charlie")];
+        let mut full = String::from("Memory index:\n");
+        let mut budget = 0u32;
+        for entry in &entries {
+            let line = entry_line(entry);
+            budget = estimate_tokens(&full) + estimate_tokens(&line);
+            full.push_str(&line);
+        }
+        let text = index_text(&entries, budget);
+        assert_eq!(text, full);
+        assert!(!text.contains("more; memory_search"), "{text}");
+    }
+
+    #[test]
+    fn memory_index_text_zero_budget_returns_the_header_and_a_sub_header_budget_is_banner_only() {
+        let entries = [wide("alpha"), wide("bravo"), wide("charlie")];
+        // Current zero-budget behavior: the header is emitted and the loop
+        // adds nothing. A zero allowance does not become the elision line
+        // and does not become empty.
+        assert_eq!(index_text(&entries, 0), "Memory index:\n");
+        let below_header = estimate_tokens("Memory index:\n") - 1;
+        assert_eq!(
+            index_text(&entries, below_header),
+            "… 3 more; memory_search to read them\n"
+        );
+    }
+
+    #[test]
+    fn memory_index_text_replaces_the_last_kept_line_when_the_banner_does_not_fit() {
+        let entries = [wide("alpha"), wide("bravo"), wide("charlie")];
+        let mut one = String::from("Memory index:\n");
+        one.push_str(&entry_line(&entries[0]));
+        let budget = estimate_tokens(&one) + estimate_tokens(&entry_line(&entries[1]));
+        let mut two = one.clone();
+        two.push_str(&entry_line(&entries[1]));
+        let beside_two = "… 1 more; memory_search to read them\n";
+        assert!(
+            estimate_tokens(&two) + estimate_tokens(beside_two) > budget,
+            "banner must miss beside both entries"
+        );
+        let text = index_text(&entries, budget);
+        assert!(text.contains(entry_line(&entries[0]).trim_end()), "{text}");
+        assert!(!text.contains("- bravo:"), "{text}");
+        assert!(
+            text.ends_with("… 2 more; memory_search to read them\n"),
+            "{text}"
+        );
+        assert!(estimate_tokens(&text) <= budget, "{text}");
     }
 
     #[test]
