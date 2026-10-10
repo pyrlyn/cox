@@ -3189,6 +3189,238 @@ Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size:
 
 Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
 
+### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
+
+Rationale in §6 A148. Idea-only: the source is the public Claude Code documentation of each feature, and no code is copied.
+
+**Workflow for every P67 card.** Each card is done by a Cursor model (`grok-4.7`) and lands through a pull request. Merge only after CI is green, with `gh pr merge <n> --squash --delete-branch --match-head-commit <head>`; never `--auto`, `--admin` or an API merge. If the model's quota runs out, stop, push the branch and open the PR with the title prefix `[#285]`. No `Co-Authored-By` or "Generated with" lines. Every card also runs `COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor` after its Check. Documentation is English only (`docs/` has no translations).
+
+**Order.** T67.1 → T67.2; T67.3 is independent. T67.4 → T67.5. T67.6 and T67.7 are independent. T67.8 is a design gate for T67.9. T67.10–T67.12 are spare cards, and T67.13 is design only.
+
+**Already in cox, so no card:**
+- the side-model call (`cox-core/src/side.rs` `Session::side_call`), which T67.2 and T67.4 reuse instead of a new `SideModel` trait;
+- the Plan permission mode (`PermissionMode::Plan`); T67.7 only adds the exit step.
+
+**Not taken yet:** hooks of type `agent` (a later amendment, after T67.2), and `/security-review` (no card until the creator asks for one).
+
+#### T67.1 Hook kinds in config and in the Claude settings import
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2
+
+Goal: a hook entry carries a `kind` (`command`, the default, `prompt` or `http`). The Claude settings import keeps `prompt` and `http` entries; today `cox-ext/src/claude_settings.rs:103` keeps only `type == "command"` and drops the rest silently. The import now warns about any other type and skips it.
+
+Files:
+- `crates/cox-protocol/src/config.rs`: `HookKind { #[default] Command, Prompt, Http }` (`snake_case`), and `HookConfig.kind` with `#[serde(default)]`. `command` holds the command, the prompt text or the URL, by kind.
+- `crates/cox-ext/src/claude_settings.rs`
+- `docs/config.md` and the regenerated `docs/config.jsonschema` (the schema drift test)
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-protocol -p cox-ext -p cox-config
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `old_hook_config_without_kind_parses_as_command` and `claude_settings_import_keeps_prompt_and_http_hooks` pass, and the schema drift test is green.
+
+#### T67.2 Run prompt and http hooks, failing open
+
+Model: grok-4.7 · Status: open · Depends: T67.1 · Size: ~180 · Priority: P1 · Complexity: 3
+
+Goal: a `prompt` hook sends its prompt and the hook input to the cheap tier through `Session::side_call` and parses `{"ok": bool, "reason": string}`; `ok: false` blocks like a command hook's deny. An `http` hook POSTs the hook input as JSON and reads the same answer shape. Any error, timeout or unparseable answer is a warning and lets the call through (D14).
+
+Files:
+- `crates/cox-core/src/hooks.rs`: the `prompt` branch. The core already holds the provider, so it opens no socket.
+- `crates/cox-ext/src/hooks.rs`: the `http` branch in the runner, with `timeout_s`.
+- `crates/cox-web/src/lib.rs`: a `post_json` beside the existing GET, so `reqwest` stays in the crate that opens the socket (`deps.rs`).
+
+Steps:
+1. The judge sees only the hook input and the prompt, with no tools. Its answer is untrusted: anything but a well-formed `ok: false` allows.
+2. The side call records a `usage` row like every other side call; confirm that `side_call` does, and fix it here if not.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core -p cox-ext -p cox-web
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `prompt_hook_blocks_when_judge_says_not_ok`, `prompt_hook_unparseable_answer_fails_open` and `http_hook_timeout_fails_open` (wiremock) pass.
+
+#### T67.3 Five more hook events
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P1 · Complexity: 2
+
+Goal: `HookEvent` gains `PostToolBatch` (after every tool call of one assistant message has a result), `PermissionDenied` (the engine or the user denied a call), `InstructionsLoaded` (instruction files were read at session open), `CwdChanged` and `StopFailure` (a turn ended in an error). Each fires at the existing point in the session, is observe-only, and has a Claude Code name in `HookEvent::name()`.
+
+Files:
+- `crates/cox-protocol/src/types.rs`
+- `crates/cox-core/src/session.rs`
+- `docs/config.md` (the hook event list and its doc test)
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core -p cox-protocol
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when one test per event proves it fires once at its point (`post_tool_batch_fires_after_last_result`, and so on) and the doc test lists all events.
+
+#### T67.4 `/goal`: a judged stop condition
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~190 · Priority: P1 · Complexity: 3
+
+Goal: `/goal <condition>` sets a goal, `/goal` shows it and `/goal clear` drops it. After every `TurnDone` while a goal is set, the cheap tier judges the condition through `Session::side_call`. `Met` stops; `NotMet` submits a continue turn; `Impossible` stops with the reason. The loop also stops at `max_turns` (default 20) or when `budget::decide` says so.
+
+Files:
+- `crates/cox-protocol/src/commands.rs`: the three commands, and `Event::GoalVerdict { verdict, reason, turns_used }`.
+- `crates/cox-core/src/goal.rs` (new, pure): `Goal { condition, turns_used, max_turns }`, `Verdict { Met(String), NotMet(String), Impossible(String) }`, `evaluator_request(&Goal, last_turn_summary) -> Side`, `parse_verdict(&str) -> Verdict`.
+- `crates/cox-core/src/session.rs`
+
+Steps:
+1. The judge sees only the transcript summary and the condition, with no tools. An answer it cannot parse is `NotMet`, never `Met`.
+2. If T66.9 has landed, reuse its turn and token limits instead of a separate `max_turns`.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core -p cox-protocol
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `goal_stops_when_met`, `goal_unparseable_verdict_continues`, `goal_respects_budget_cap` and `goal_stops_at_max_turns` pass with the scripted provider.
+
+#### T67.5 `/goal` in the TUI and stream-json
+
+Model: grok-4.7 · Status: open · Depends: T67.4 · Size: ~100 · Priority: P2 · Complexity: 2
+
+Goal: the TUI status line shows the goal and its turn count, and each `GoalVerdict` prints one line; stream-json writes one `goal_verdict` record per verdict. The judge's cost is already a `usage` row (T67.4).
+
+Files:
+- the TUI status line and transcript files in `crates/cox-tui/src/`
+- `crates/cox/src/run.rs` (stream-json)
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-tui -p cox
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the `goal_status_line` insta snapshot and a stream-json e2e test with a scripted `Met` verdict pass.
+
+#### T67.6 Path-scoped rules, loaded on demand
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~190 · Priority: P2 · Complexity: 3
+
+Goal: `.cox/rules/*.md` and `.claude/rules/*.md` with a frontmatter `paths:` glob list reach the model only when it reads or edits a matching file, once per rule per session. Instruction files keep loading as today.
+
+Files:
+- `crates/cox-ext/src/rules.rs` (new): `Rule { globs, body, source }`, `load_rules(roots) -> Vec<Rule>` (re-read each time; a broken file is a warning and is skipped), `rules_for(touched, rules) -> Vec<&Rule>` (pure). Reuse `frontmatter.rs` and the `globset` the workspace already links.
+- `crates/cox-core/src/context.rs`: after a `read`/`edit`/`write` result, append the new matching rules as an item after the last cache breakpoint, never in the system prefix.
+- `docs/config.md`
+
+Steps:
+1. A rule body is untrusted repository text: it goes through `cox_sanitize::sanitize` and is framed as a project rule, not as a system instruction.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-ext -p cox-core
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `rule_matches_only_its_globs`, `rule_injected_once` and `system_prefix_unchanged_by_rules` (byte-equal prefix with and without rules) pass.
+
+#### T67.7 Leaving Plan mode needs approval
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: in Plan mode the model calls `exit_plan { plan }` (`Risk::ReadOnly`). It asks the user through the `ask_user` modal: approve, or keep planning with feedback. Approval switches the mode to Default through the session, never from inside the tool. Headless runs and ACP without a client prompt decline it by construction.
+
+Files:
+- `crates/cox-protocol/src/types.rs`
+- `crates/cox-tools/src/plan.rs` (new)
+- `crates/cox-tui/src/modal.rs`
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-tools -p cox-core -p cox-tui
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `exit_plan_requires_approval`, `headless_declines_exit_plan` and the `exit_plan_modal` insta snapshot pass.
+
+#### T67.8 Design: an Auto-mode risk judge
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~150 (doc) · Priority: P2 · Complexity: 3
+
+Goal: `docs/design/auto-judge.md` describes a `RiskJudge` that can turn an `Ask` into an `Allow` in Auto mode and nothing else. It covers the order (deny rules and hard bans first, then the sandbox, then the judge), what the judge sees (the call and a bounded context, never raw tool output as instructions), timeouts and errors (they ask the user), cost and ledger rows, and the injection threats with a test for each. No code. The creator reviews its security before T67.9 starts.
+
+#### T67.9 Auto-mode risk judge
+
+Model: grok-4.7 · Status: open · Depends: T67.8 approved by the creator · Size: ~190 · Priority: P2 · Complexity: 4
+
+Goal: the design of T67.8, implemented. `RiskJudge::judge(&ToolCall, ctx) -> JudgeVerdict { Allow, Escalate(String) }`.
+
+Files:
+- `crates/cox-permission/src/lib.rs`
+- `crates/cox-permission/src/classifier.rs` (new, pure)
+- `crates/cox-core/src/session.rs`
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-permission -p cox-core
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `deny_rule_beats_classifier`, `classifier_error_asks`, `classifier_timeout_asks` and `injected_tool_output_cannot_widen` pass.
+
+#### T67.10 MCP resources and prompts
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Goal: the MCP client lists and reads resources (`resources/list`, `resources/read`) and lists prompts (`prompts/list`). The model reaches them through one deferred read-only tool found by `tool_search`. Their output is untrusted: sanitized, and archived when over the cap.
+
+Files: `crates/cox-mcp/src/*` (at most two files), `crates/cox-tools/src/tool_search.rs`
+
+Check: `mise exec -- cargo nextest run -p cox-mcp -p cox-tools`, then clippy and fmt as above.
+
+Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
+
+#### T67.11 `cox run -p --json-schema`
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
+
+Goal: `--json-schema <file>` validates the final answer against the schema. On failure cox sends one retry turn with the validation errors; a second failure exits non-zero and prints the errors.
+
+Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`
+
+Check: `mise exec -- cargo nextest run -p cox json_schema`, then clippy and fmt as above.
+
+Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
+
+#### T67.12 Output styles
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P3 · Complexity: 2
+
+Goal: `.cox/output-styles/*.md` and `~/.cox/output-styles/*.md` (and `.claude/output-styles/*.md`) define styles; `/style <name>` picks one and `/style` lists them. The style text goes after the last cache breakpoint (A148), so the cached prefix stays byte-stable.
+
+Files: `crates/cox-ext/src/styles.rs` (new), `crates/cox-protocol/src/commands.rs`, `crates/cox-core/src/context.rs`
+
+Check: `mise exec -- cargo nextest run -p cox-ext -p cox-core`, then clippy and fmt as above.
+
+Done when `style_text_after_cache_breakpoint` and `system_prefix_unchanged_by_style` pass.
+
+#### T67.13 Design: a GitHub Action and scheduled runs
+
+Model: grok-4.7 · Status: open · Depends: — · Size: ~150 (doc) · Priority: P3 · Complexity: 2
+
+Goal: `docs/design/github-action.md` and `docs/design/schedule.md`: how `cox run -p` runs in a GitHub workflow (inputs, key handling, sandbox, cost cap, what it may push) and on a schedule (where the schedule lives, locking, the ledger). No code until the creator approves; implementation cards come in a later amendment.
+
 ---
 
 ## 4. Definition of done for v0.1
@@ -3402,6 +3634,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A146 §1.7, §1.12, T64.24 — quarantine untrusted MCP tool definitions. A server's tool description and `readOnlyHint` are untrusted input. `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). Migration `00000000000008_mcp_tool_trust` stores the approved hash (`status` is only `approved`). A missing row is `Pending` for a server from project `.mcp.json` or a plugin, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A stored hash that differs is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses the fixed sentence `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` (so `readOnlyHint` cannot skip approval) and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` already indexes `spec().description`, so there is no second filter. `cox mcp trust <server>` connects and writes every current hash; `cox mcp trust` lists pending and changed tools. Why: a project or plugin server can put instructions in a tool description, or set `readOnlyHint`, and both were reaching the model and the permission engine. Effect: `cox-mcp` links `sha2`, already a workspace dependency. T64.7 and T64.10 stay open — a project `[mcp.servers]` entry is still source `config` until T64.7 reverts it, and an unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
 
 - A147 §3 (new P66: T66.1–T66.14), by the creator (2026-10-09): prime-agent-derived improvements, from a study of PrimeIntellect-ai/prime-agent at `afe8d14c` (v0.9.8, 2026-10-08). Idea-only, clean-room. prime-agent is MIT ("Copyright (c) 2025-2026 Prime Intellect Ltd." and "Copyright (c) 2025 Mario Zechner"), which is compatible with cox's licence. Its Rust code, though, is a byte-level port of a TypeScript product that breaks cox's rules (camelCase JSON, `anyhow` outside `crates/cox`, `unwrap`, no Diesel), so nothing is copied and no notice is needed. A card that ever copies a substantial part adds prime-agent's full MIT text, both copyright lines and the URL to that file and to `THIRD-PARTY-NOTICES`, and the notice is never replaced by cox's header. Why: the study shows four gaps in cox. (1) Compaction does not tell the model which archived outputs still expand. (2) An over-cap subagent answer is summarised or cut with no archive row, against "Lossless by default", and a background answer cannot be collected later. (3) There is no reviewed, reversible way to adjust prompt notes, memory, skills and subagents. (4) `cox run -p` has no gate-driven loop with turn, token and time limits. Effect: fourteen cards in a new phase. `budget::decide` stays the USD cap; `prompt.md` and `prompt_minimal.md` stay immutable; a project config cannot set `[autonomous]`, because its gates are shell commands. T66.12 is a design gate: resident sessions and a supervisor change a crate boundary, so their implementation cards come in a later amendment after the creator approves `docs/design/serve.md`, and T66.13 and T66.14 wait for them. No new dependency; cox-ext links the workspace `sha2`. Overflow recovery already exists (`retried_after_too_long`), so it gets no card. Not taken, with reasons in P66: peer agent sockets, the Python kernel, state factories, per-model prompt blocks in the cached prefix, Prime's prompt prose, and the `HarnessEntry` and `GoalState` schemas. No §0 decision changes.
+- A148 §3 (new P67: T67.1–T67.13), by the creator (2026-10-09): Claude Code parity, idea-only from Claude Code's public docs. Why: cox drops Claude settings hooks of type `prompt` and `http` without a word (`claude_settings.rs` keeps only `command`), has no judged stop condition, loads instructions only as the root-to-cwd chain, has no approval step out of Plan mode, lets Auto mode only allow writes, cannot read MCP resources or prompts, cannot check a headless answer against a schema, and has no output styles. Effect: thirteen cards in a new phase. Path rules (T67.6) and output styles (T67.12) add text only after the last cache breakpoint, so the system prompt, tool schemas and instruction files stay byte-stable; the cache invariant is unchanged. The prompt hook (T67.2) and `/goal` (T67.4) reuse `Session::side_call` rather than a new trait; the http hook's POST lives in `cox-web`, the crate that already opens sockets. The Auto-mode judge (T67.9) may only turn `Ask` into `Allow` and never overrides a deny rule or the sandbox; it waits for the creator's security review of its design (T67.8). The GitHub Action and scheduled runs (T67.13) are design only. P67 cards are done by Cursor `grok-4.7` through pull requests merged with `gh pr merge --squash --delete-branch --match-head-commit` after green CI; a run that hits its quota pushes and opens a PR titled `[#285] …`. Documentation stays English only. No new dependency. Not taken yet: hooks of type `agent`, `/security-review`. No §0 decision changes.
 
 - A148 §3 P66 (new T66.15), 2026-10-09 — the subagent result cap cuts on a char boundary. Why: the fallback cut `String::truncate(cap * 4)` panics on a non-ASCII answer over the cap, and no `panic!` is allowed outside tests. Effect: one card; no new dependency, no §0 decision changes.
 

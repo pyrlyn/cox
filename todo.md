@@ -117,3 +117,16 @@
 - T66.12. Design: resident sessions and a supervisor
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
+- T67.1. Hook kinds in config and in the Claude settings import
+- T67.2. Run prompt and http hooks, failing open
+- T67.3. Five more hook events
+- T67.4. `/goal`: a judged stop condition
+- T67.5. `/goal` in the TUI and stream-json
+- T67.6. Path-scoped rules, loaded on demand
+- T67.7. Leaving Plan mode needs approval
+- T67.8. Design: an Auto-mode risk judge
+- T67.9. Auto-mode risk judge
+- T67.10. MCP resources and prompts
+- T67.11. `cox run -p --json-schema`
+- T67.12. Output styles
+- T67.13. Design: a GitHub Action and scheduled runs
