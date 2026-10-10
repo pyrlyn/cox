@@ -1,5 +1,4 @@
-# Publishes this repo's docs/ to the public site repository pyrlyn/landing on its main branch; a
-# push there deploys https://pyrlyn.github.io/landing/ via GitHub Pages:
+# Publishes this repo's docs/ to the public site repository pyrlyn/landing on its main branch:
 #   - docs/site.md (the project card) -> content/projects/<this repo's name>.md; its front matter
 #     follows CONTENT_CONTRACT.md in pyrlyn/landing.
 #   - every other user-facing docs/**/*.md -> content/docs/<this repo's name>/ (internal pages
