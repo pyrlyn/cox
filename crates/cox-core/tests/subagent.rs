@@ -191,7 +191,9 @@ async fn over_cap_child_answer_is_archived_before_the_parent_sees_it() {
 }
 
 /// T66.15: with the summary failed, the cut lands inside a two-byte char;
-/// a byte-index `truncate` there panics the child task.
+/// a byte-index `truncate` there panics the child task. T66.2's archive
+/// trailer follows the cut marker, so the cut itself is asserted by content
+/// rather than as the whole tail.
 #[tokio::test]
 async fn over_cap_non_ascii_answer_is_cut_on_a_char_boundary() {
     let (events, _, _) = run_with("subagent_cut_non_ascii", cox_protocol::Config::default()).await;
@@ -200,7 +202,7 @@ async fn over_cap_non_ascii_answer_is_cut_on_a_char_boundary() {
     let (ok, visible) = &results[0];
     assert!(ok, "{visible}");
     assert!(visible.starts_with("xя"), "{visible}");
-    assert!(visible.ends_with("[cut at the result cap]"), "{visible}");
+    assert!(visible.contains("[cut at the result cap]"), "{visible}");
 }
 
 /// Collects turn events plus late background completions: `TaskCompleted`
