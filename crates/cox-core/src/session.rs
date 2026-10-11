@@ -464,6 +464,7 @@ impl Session {
             truncated_notice,
             turns,
             repomap_archive,
+            archives,
         ) = match resume {
             Some((id, history)) => {
                 let truncated_notice = history.truncated_notice();
@@ -487,6 +488,7 @@ impl Session {
                     truncated_notice,
                     history.turns,
                     history.repomap,
+                    history.archives,
                 )
             }
             None => (
@@ -498,6 +500,7 @@ impl Session {
                 None,
                 0,
                 None,
+                HashMap::new(),
             ),
         };
         // P42: a top-level session opens in `core.mode`, which only narrows
@@ -580,7 +583,7 @@ impl Session {
                 dedup,
                 discovered: Vec::new(),
                 turn_marks,
-                archives: HashMap::new(),
+                archives,
                 tool_images: HashMap::new(),
                 turn_seq: turns,
                 redone: None,

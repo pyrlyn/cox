@@ -2815,7 +2815,7 @@ Rationale in §6 A142. T65.1 is in `done.md`.
 
 Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) at `afe8d14` (v0.9.8). It is MIT, but no code is copied, so no notice is needed. Each card cites prime-agent files for the idea only, and the implementation is written from the card. If a later card ever copies a substantial part, that file and `THIRD-PARTY-NOTICES` carry prime-agent's full MIT text, both copyright lines and the repository URL, and that notice is never replaced by cox's header.
 
-**Order.** Start T66.1 and T66.2 in parallel; T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it.
+**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it.
 
 **Already in cox, so no card:**
 - `ContextTooLong` already compacts once per user turn and then surfaces the error (`session.rs:1846-1867`, `retried_after_too_long`). That is the contract of prime-agent's `OverflowRecovery` (`pa-daemon/src/overflow_compaction.rs`).
@@ -2829,36 +2829,6 @@ Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeI
 - the `HarnessEntry` and `GoalState` schemas;
 - the `pa-daemon` JSONL socket dialect.
 
-#### T66.1 Compaction lists the archive ids that still expand
-
-Model: opus · Status: open · Depends: — · Size: ~120 · Priority: P1 · Complexity: 3
-
-Goal: after any compaction, the summary item ends with a byte-stable, bounded `## Archived outputs` section. It names every archive id from the compacted turns, so the model can still `expand` evidence it no longer sees. No earlier turn is edited.
-
-Files:
-- `crates/cox-core/src/compact.rs`
-- `crates/cox-core/src/session.rs` (only if step 1 finds the gap)
-- the cox-core compaction test file
-
-Steps:
-1. Check whether `inner.archives` (`session.rs:90`) is refilled when a session resumes from its rollout; only one insert was found (`session.rs:1274`). If it is not refilled, refill it from the replayed tool results here, or split that into T66.1.1 if it breaks the size limit.
-2. `SurvivingHandles { kept: Vec<(ArchiveId, String)>, omitted: usize }` holds each archive id and its tool name. Build it from `inner.archives` for the call ids in `history[..cut]`, ordered by id. Only ids that `turn.rs:659-668` wrote before the model saw the short form count; nothing is named after the fact. `notice_text(&SurvivingHandles) -> String` stops at 32 entries or 2048 bytes and then writes `… and N more`. prime-agent's notice has no bound (idea: `pa-core/src/session_engine/ipython_state.rs` `notice_content`).
-3. Render it as the last section of `WorkingState::render` (T59.1). It then lives in the `Summary` item text, which the rollout already replays (`rollout.rs:153-160`). `WorkingState::carry` merges, re-sorts and re-caps it on the next compaction.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core compaction
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when the `compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim` insta snapshot passes:
-- three archived outputs in the dropped turns appear by id;
-- the last two turns are byte-identical before and after;
-- compacting the same history twice gives the same bytes;
-- a history with 40 ids shows 32 and `… and 8 more`.
-
-Out of scope: a new event type, and any change to the `Content::Pointer` text or to `microcompact`.
 
 #### T66.3 `agent` collect: a status and a capped preview by task id
 
@@ -3646,6 +3616,10 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 
 - A148 §3 P66 (new T66.15), 2026-10-09 — the subagent result cap cuts on a char boundary. Why: the fallback cut `String::truncate(cap * 4)` panics on a non-ASCII answer over the cap, and no `panic!` is allowed outside tests. Effect: one card; no new dependency, no §0 decision changes.
 
+- A153 §3 P66 (T66.1 split; new T66.1.1), by the creator (2026-10-09) (numbered A148 on its branch, renumbered on merge because main's A148 is P67 and T66.15). Step 1 of T66.1 found that a resumed session starts with an empty archive map: `session.rs:583` creates it empty, and `rollout.rs:217` drops `result.archive`. Refilling the map adds `rollout.rs` to T66.1, which takes the card to four files. Why: the size rule. The refill is also a fix in its own right, because `microcompact` has the same gap after a resume. Effect:
+  - New card T66.1.1 refills the archive map on resume.
+  - T66.1 depends on T66.1.1 and now touches only `compact.rs` and its test.
+  - The `## Archived outputs` section is appended in `Session::compact` after `summarise`, not inside `WorkingState::render`. The old wording conflicted with "the summary ends with it", because the state block comes before the model text, and the `llm` strategy has no state block at all.
 ## 7. Risk register
 
 | # | Risk | Signal | Mitigation | Task |
