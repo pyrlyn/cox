@@ -171,7 +171,14 @@ pub fn agents(
         crate::external_agents::config_agents(config, writable, std::env::home_dir().as_deref());
     match cox_store::Store::open(home) {
         Ok(store) => {
-            let plugins = crate::load_plugins(config, home, cwd, Arc::new(store), Some(writable));
+            let plugins = crate::plugins::load_plugins_for_surface(
+                config,
+                home,
+                cwd,
+                Arc::new(store),
+                Some(writable),
+                "acp",
+            );
             agents.extend(plugins.external_agents);
             warnings.extend(plugins.notices);
         }
