@@ -2810,6 +2810,7 @@ mod tests {
             grants: Vec::new(),
             truncated: false,
             repomap: None,
+            archives: Default::default(),
             turns: 4,
             turn_marks: vec![HistoryTurn {
                 item: ItemId::new(),

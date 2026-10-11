@@ -21,7 +21,7 @@ use cox_tools::expand::ExpandTool;
 use cox_tools::glob::GlobTool;
 use cox_tools::grep::GrepTool;
 use cox_tools::lsp::{AfterEdit, DiagnosticsTool, LspPool};
-use cox_tools::memory::{MemorySaveTool, MemorySearchTool};
+use cox_tools::memory::{MemoryGetTool, MemorySaveTool, MemorySearchTool};
 use cox_tools::read::ReadTool;
 use cox_tools::todo::TodoTool;
 use cox_tools::tool_search::ToolSearchTool;
@@ -47,7 +47,9 @@ pub fn tools(answer: Option<String>, store: &Arc<Store>, mdir: PathBuf) -> Vec<A
         // `Answers::Surface` when a caller passes `questions` (T22.1).
         Arc::new(AskUserTool::new(Answers::Fixed(answer))),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
-        Arc::new(MemorySearchTool::new(mem, mdir)),
+        Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
+        Arc::new(MemorySearchTool::new(mem.clone(), mdir.clone())),
+        Arc::new(MemoryGetTool::new(mem, mdir)),
         // Deferred, like memory: `tool_search` indexes them because this
         // insert is before the spec rebuild below (T65.1, D6d).
         Arc::new(DocsResolveTool),
@@ -348,6 +350,25 @@ mod tests {
         config.lsp.enabled = false;
         let without = with_lsp(tools(None, &store, tmp.path().join("memory")), &config, &[]);
         assert!(without.iter().all(|t| t.spec().name != "diagnostics"));
+    }
+
+    /// `memory_get` sits with the other memory tools and stays deferred, so
+    /// it does not join the cached tool prefix until `tool_search` finds it.
+    #[test]
+    fn memory_get_is_registered_next_to_search() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open(tmp.path()).expect("store"));
+        let built = tools(None, &store, tmp.path().join("memory"));
+        let names: Vec<_> = built.iter().map(|t| t.spec().name).collect();
+        let search = names
+            .iter()
+            .position(|n| n == "memory_search")
+            .expect("search");
+        let get = names.iter().position(|n| n == "memory_get").expect("get");
+        assert_eq!(get, search + 1);
+        let spec = built[get].spec();
+        assert!(spec.deferred);
+        assert_eq!(spec.risk, cox_protocol::types::Risk::ReadOnly);
     }
 
     /// T65.1: crate docs stay out of the prompt (`deferred`) and
