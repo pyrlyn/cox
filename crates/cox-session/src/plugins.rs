@@ -26,6 +26,8 @@ use {crate::ServeUi, cox_core::Session, cox_protocol::ids::SessionId, cox_protoc
 /// What the grant check let into a session (T33.6, T33.19).
 #[derive(Default)]
 pub struct Plugins {
+    /// Plugins intentionally unavailable on this session's surface.
+    pub infos: Vec<String>,
     /// One warning per plugin or plugin server that did not load.
     pub notices: Vec<String>,
     /// Each loaded plugin's `[[mcp]]` servers by plugin id, stdio commands
@@ -91,10 +93,31 @@ pub fn load_plugins(
     store: Arc<dyn cox_protocol::PluginStore>,
     writable: Option<&[PathBuf]>,
 ) -> Plugins {
+    load_plugins_for_surface(config, home, cwd, store, writable, "tui")
+}
+
+/// Loads only packages that run where this session is driven.
+#[cfg(feature = "plugins")]
+pub fn load_plugins_for_surface(
+    config: &Config,
+    home: &Path,
+    cwd: &Path,
+    store: Arc<dyn cox_protocol::PluginStore>,
+    writable: Option<&[PathBuf]>,
+    session_surface: &str,
+) -> Plugins {
     use cox_plugin::discover::{self, State};
     use cox_plugin::grant::{self, Verdict};
+    use cox_plugin_api::Surface;
 
+    let surface = match session_surface {
+        "app" => Surface::Desktop,
+        "headless" => Surface::Headless,
+        "acp" => Surface::Acp,
+        _ => Surface::Terminal,
+    };
     let mut out = Plugins::default();
+    out.live.set_surface(surface);
     if !config.plugins.enabled {
         return out;
     }
@@ -115,6 +138,23 @@ pub fn load_plugins(
                 continue;
             }
         };
+        if !manifest.runs_on(surface) {
+            let surfaces = manifest
+                .surfaces
+                .as_ref()
+                .map_or_else(String::new, |allowed| {
+                    allowed
+                        .iter()
+                        .map(|s| s.name())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                });
+            out.infos.push(format!(
+                "plugin {id} runs on {surfaces}; skipped on {}",
+                surface.name()
+            ));
+            continue;
+        }
         // A linked plugin's grant lives under the fixed `grant_digest()` key
         // (T33.41), never the live content `digest`, which changes on every
         // rebuild — looking it up under `digest` here would silently
@@ -308,6 +348,19 @@ pub fn load_plugins(
     Plugins::default()
 }
 
+/// The slim build has no plugin host on any surface.
+#[cfg(not(feature = "plugins"))]
+pub fn load_plugins_for_surface(
+    _config: &Config,
+    _home: &Path,
+    _cwd: &Path,
+    _store: Arc<dyn cox_protocol::PluginStore>,
+    _writable: Option<&[PathBuf]>,
+    _session_surface: &str,
+) -> Plugins {
+    Plugins::default()
+}
+
 /// PL§7c: one plugin's `[[mcp]]` entries as servers `cox-mcp` can start. A
 /// server that cannot be started safely is a warning and absent (D14).
 #[cfg(feature = "plugins")]
@@ -453,10 +506,47 @@ mod tests {
     use super::*;
     use crate::provider::provider_for_served;
     use crate::testing::{Recorder, install_granted, plugin_wat, scripted_session, user_turn};
+
     use crate::tools::with_tool_search_index;
     use cox_protocol::traits::Store as _;
     use cox_protocol::types::Event;
     use cox_tools::tool_search::ToolSearchTool;
+
+    #[test]
+    fn plugin_outside_its_surfaces_is_skipped_with_a_notice() {
+        let home = tempfile::tempdir().expect("home");
+        let work = tempfile::tempdir().expect("work");
+        install_granted(
+            home.path(),
+            "desk",
+            "surfaces = [\"desktop\"]\n",
+            "(module (func (export \"cox_init\") (result i32) (i32.const 0)))",
+        );
+        let store = Arc::new(Store::open(home.path()).expect("store"));
+        let plugins = load_plugins_for_surface(
+            &Config::default(),
+            home.path(),
+            work.path(),
+            store.clone(),
+            None,
+            "headless",
+        );
+        assert!(plugins.live.plugins().is_empty());
+        assert_eq!(
+            plugins.infos,
+            ["plugin desk runs on desktop; skipped on headless"]
+        );
+        let desktop = load_plugins_for_surface(
+            &Config::default(),
+            home.path(),
+            work.path(),
+            store,
+            None,
+            "app",
+        );
+        assert_eq!(desktop.live.plugins().len(), 1);
+        assert!(desktop.infos.is_empty());
+    }
 
     #[cfg(feature = "plugins")]
     fn manifest_with_mcp(mcp: serde_json::Value, net: &[&str]) -> cox_plugin_api::PluginManifest {

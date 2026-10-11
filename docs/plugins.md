@@ -4,6 +4,8 @@ A cox plugin is a WebAssembly module plus a `plugin.toml` manifest. cox loads it
 
 This page is for writing a plugin. To install and use one that already ships in this repository, see its own guide, e.g. `docs/plugins/cursor.md` for the Cursor external agent.
 
+The API has [shared](#shared), [terminal-only](#terminal-only), and [desktop-only](#desktop-only) parts. The [field index](#api-field-index) lists every manifest and ABI field under its part.
+
 ## Setup
 
 The Rust toolchain and its `wasm32-unknown-unknown` target come from the repository's `mise.toml`. `mise install` adds the target if it is missing.
@@ -72,7 +74,8 @@ A handler returns `Result<output, E>` for any error type that implements `Displa
 | `decide` | `cox_decide` | `Question` → `Advice` | at the decision points in `capabilities.decide` (PL§6b) |
 | `tool_subject`, `tool_risk`, `tool_call` | `cox_tool_*` | `ToolCallIn` → `String`, `Risk` / `ToolOutput` as `Value` | for the tools in `InitOut.tools` (PL§7) |
 | `provider_stream` | `cox_provider_stream` | `ProviderCall` → `Vec<ProviderEvent>` as `Vec<Value>` | for an `api = "plugin"` provider (PL§7a) |
-| `command`, `key` | `cox_command`, `cox_key` | `CommandIn` → `CommandOut` | `/<id>:<name>` and the plugin's keys (PL§8) |
+| `command` | `cox_command` | `CommandIn` → `CommandOut` | `/<id>:<name>` on every surface (PL§8) |
+| `key` | `cox_key` | `CommandIn` → `CommandOut` | terminal leader keys only (PL§15.3) |
 | `render` | `cox_render` | `RenderIn` → `Widget` | for a status segment, panel or overlay (PL§8) |
 | `render_item` | `cox_render_item` | `RenderItemIn` → `Option<Widget>` | for the targets in `ui.render` (PL§8) |
 | `shutdown` | `cox_shutdown` | `()` → `()` | at session end, best effort |
@@ -115,3 +118,93 @@ The SDK is a thin layer over one rule, which a guest in any language can follow 
 
 - An export reads its input as one JSON value (an empty input means `null`) and sets one JSON value as its output. A failure sets the extism error text and returns 1.
 - A host function lives in the import module `cox:host/v1` and has the signature `(u64) -> u64`: it takes the offset of an extism memory block holding one JSON value and returns the offset of a block it allocated. The argument is the function's only argument, an object keyed by its argument names when it has several (`{"level": "warn", "text": "…"}`, `{"key": "turns", "value": 3}`, `{"name": "read", "input": {…}}`), or `null` when it has none. The reply is `{"Ok": value}` or `{"Err": AbiError}`.
+
+## Shared
+
+The manifest's package identity, resource limits, providers, models, agents, MCP servers, and shared capabilities apply wherever the plugin loads. `surfaces` optionally narrows loading to `terminal`, `desktop`, `headless`, or `acp`; when absent, it permits all four. `InitIn.surface` tells the guest which one opened the session. `cox:host/v1`, the exports above except `cox_key`, commands, renderers, and the `status.left`, `status.right`, `panel`, and `overlay` slots use this part. Headless and ACP sessions have no UI, so they omit UI grants. `Span.link` accepts an HTTPS URL or workspace-relative path and opens only on a person's click; unsupported links remain text.
+
+## Terminal-only
+
+`[capabilities.terminal] keys = true` grants leader-key bindings declared in `InitOut.keys` (`KeyDecl`) and handled by `cox_key`. The older `capabilities.ui.keys` spelling is an `api = 1` alias. `cox:tui/v1` is reserved and currently has no functions. A desktop session drops returned keys with one informational notice. `cox --plain` maps to the terminal surface but draws no slots.
+
+## Desktop-only
+
+`[capabilities.desktop]` accepts `inspector`, `toolbar`, `palette`, and `notify`. `InitOut.desktop.inspector` declares one `TabDecl`; `cox_render` fills its `desktop.inspector` slot. `toolbar` and `palette` hold `ActionDecl` values whose `command` must name a declared command, run through `cox_command`. `CommandOut.open_inspector` selects the tab. `cox:desktop/v1` exposes `cox_desktop_notify` with a `DesktopNotice` and at most two `NoticeAction` values. `Widget.image` names a package-relative PNG (at most 256 KiB); the terminal shows its `alt` text. A desktop-only host call on another surface returns `AbiError.not_on_this_surface`. Contributions returned on an unavailable surface are dropped with one informational notice, and a plugin excluded by `surfaces` is skipped with a notice. One digest grant covers every surface.
+
+<!-- plugin-api:start -->
+## API field index
+
+Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) schemas by `scripts/plugin_api_reference.py`. Each entry lists a type's fields and enum cases; referenced types have their own entries. Run `python3 scripts/plugin_api_reference.py --write` after an intentional schema change.
+
+### Shared
+
+- manifest `PluginManifest`: `api`, `surfaces`, `id`, `version`, `name`, `description`, `wasm`, `wasi`, `limits`, `capabilities`, `provider`, `models`, `mcp`, `external_agents`, `cloud_agents`, `agents`
+- manifest `Surface`: `terminal`, `desktop`, `headless`, `acp`
+- manifest `Limits`: `memory_mib`, `call_ms`
+- manifest `Capabilities`: `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui`
+- manifest `ModelTier`: `cheap`, `code`
+- manifest `FsCaps`: `read`, `write`
+- manifest `UiCaps`: `status`, `panel`, `overlay`, `commands`, `render`
+- manifest `ProviderDecl`: `name`, `api`, `base_url`, `api_key_env`, `auth`
+- manifest `ProviderApi`: `chat`, `responses`, `plugin`
+- manifest `ProviderAuth`: `bearer`, `x-api-key`, `none`
+- manifest `ModelDecl`: `id`, `provider`, `context_window`, `max_output`, `price`
+- manifest `PriceDecl`: `input`, `output`, `cache_read`, `cache_write`
+- manifest `McpDecl`: `name`, `command`, `args`, `url`
+- manifest `ExternalAgentDecl`: `name`, `command`, `args`, `mode`, `key_env`
+- manifest `AgentMode`: `acp`, `stream-json`
+- manifest `CloudAgentDecl`: `name`, `backend`, `key_env`, `model`, `description`
+- manifest `CloudBackend`: `cursor`
+- manifest `AgentDecl`: `name`, `file`
+- ABI `InitIn`: `api`, `plugin_id`, `config`, `session`, `granted`, `surface`
+- ABI `SessionInfo`: `id`, `cwd`
+- ABI `Surface`: `terminal`, `desktop`, `headless`, `acp`
+- ABI `InitOut`: `tools`, `commands`, `status`, `panels`, `renderers`, `subscribe`
+- ABI `CommandDecl`: `name`, `description`
+- ABI `Slot`: `status.left`, `status.right`, `panel`, `overlay`
+- ABI `EventBatch`: `first_seq`, `dropped`, `events`
+- ABI `Effects`: `redraw`, `notices`
+- ABI `PluginNotice`: `level`, `text`
+- ABI `NoticeLevel`: `info`, `warn`
+- ABI `HookCall`: `event`, `payload`
+- ABI `ToolCallIn`: `name`, `input`
+- ABI `CommandIn`: `name`, `args`
+- ABI `CommandOut`: `prompt`, `prompt.text`, `prompt.kind`, `compact`, `compact.focus`, `compact.kind`, `toggle_panel`, `toggle_panel.kind`, `open_overlay`, `open_overlay.kind`, `notice`, `notice.kind`, `nothing`, `nothing.kind`
+- ABI `RenderIn`: `slot`, `width`, `height`
+- ABI `RenderItemIn`: `target`, `call`, `result`, `width`
+- ABI `ProviderCall`: `request`, `model`
+- ABI `ModelCall`: `tier`, `request`
+- ABI `ModelTier`: `cheap`, `code`
+- ABI `HttpReq`: `method`, `url`, `headers`, `body`
+- ABI `HttpResp`: `status`, `headers`, `body`
+- ABI `Question`: `point`, `state`, `options`
+- ABI `DecidePoint`: `route`, `risk`, `approve_hint`, `compact`, `rank`, `salience`
+- ABI `Advice`: `answer`, `confidence`, `note`
+- ABI `Answer`: `choice`, `choice.order`, `choice.kind`, `score`, `score.value`, `score.kind`, `noul`, `noul.p_yes`, `noul.kind`, `scores`, `scores.values`, `scores.kind`
+- ABI `AbiError`: `not_in_this_context`, `not_in_this_context.kind`, `not_on_this_surface`, `not_on_this_surface.surface`, `not_on_this_surface.kind`, `not_granted`, `not_granted.capability`, `not_granted.kind`, `denied`, `denied.reason`, `denied.kind`, `budget`, `budget.kind`, `too_large`, `too_large.limit`, `too_large.kind`, `timeout`, `timeout.kind`, `transient`, `transient.message`, `transient.kind`, `failed`, `failed.message`, `failed.kind`
+- ABI `Widget`: `text`, `list`, `list.items`, `list.selected`, `table`, `table.header`, `table.rows`, `table.widths`, `key_value`, `gauge`, `gauge.ratio`, `gauge.label`, `stack`, `stack.vertical`, `stack.children`, `stack.sizes`, `block`, `block.title`, `block.child`
+- ABI `Span`: `text`, `style`, `bold`, `italic`, `link`
+- ABI `StyleToken`: `text`, `dim`, `accent`, `user`, `agent`, `tool`, `ok`, `warn`, `error`, `diff_add`, `diff_del`, `diff_hunk`, `border`, `selection`
+
+### Terminal-only
+
+- manifest `Capabilities`: `terminal`
+- manifest `UiCaps`: `keys`
+- manifest `TerminalCaps`: `keys`
+- ABI `InitOut`: `keys`
+- ABI `KeyDecl`: `key`, `name`, `description`
+
+### Desktop-only
+
+- manifest `Capabilities`: `desktop`
+- manifest `DesktopCaps`: `inspector`, `toolbar`, `palette`, `notify`
+- ABI `InitOut`: `desktop`
+- ABI `Slot`: `desktop.inspector`
+- ABI `DesktopOut`: `inspector`, `toolbar`, `palette`
+- ABI `TabDecl`: `title`, `symbol`
+- ABI `ActionDecl`: `command`, `title`, `symbol`
+- ABI `CommandOut`: `open_inspector`, `open_inspector.kind`
+- ABI `Widget`: `image`, `image.path`, `image.alt`
+- ABI `DesktopNotice`: `level`, `title`, `body`, `actions`
+- ABI `NoticeAction`: `label`, `command`
+<!-- plugin-api:end -->
