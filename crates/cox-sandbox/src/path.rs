@@ -19,7 +19,7 @@ use cox_protocol::ToolError;
 ///
 /// 1. Rejects NUL bytes, UNC/device prefixes (`\\server`, `\\?\`) and a
 ///    drive prefix (`C:\x`, `C:/x`, `C:`) outright. On Windows every `:` is
-///    refused too (drive, device and `file:stream` syntax). On Unix a colon
+///    refused, as are reserved device names. On Unix a colon
 ///    inside a name (`a:b.txt`) is an ordinary character: banning it would
 ///    refuse real workspace files and add no safety, because steps 3-4 decide
 ///    containment for whatever characters the path holds.
@@ -32,7 +32,9 @@ use cox_protocol::ToolError;
 ///    canonicalising the *raw* path, not the lexically-normalised one,
 ///    lets the OS resolve `..` against wherever a symlink in the existing
 ///    prefix really points — the case a purely lexical check misses
-///    (`link/../x` where `link` points outside every root).
+///    (`link/../x` where `link` points outside every root). Windows compares
+///    path components with ASCII case folding and resolves junctions and 8.3
+///    aliases at the existing ancestor before the final containment check.
 ///
 /// A non-existent leaf inside an existing, confined directory is allowed
 /// (`write` targets a path that doesn't exist yet); the root itself is
@@ -56,7 +58,7 @@ pub fn confine(roots: &[PathBuf], cwd: &Path, input: &str) -> Result<PathBuf, To
         .iter()
         .map(|r| lexically_normalize(r))
         .chain(canon_roots.iter().cloned())
-        .any(|r| lexical.starts_with(r))
+        .any(|r| path_starts_with(&lexical, &r))
     {
         return Err(confined(&lexical, roots));
     }
@@ -71,7 +73,7 @@ pub fn confine(roots: &[PathBuf], cwd: &Path, input: &str) -> Result<PathBuf, To
     }
     let resolved = lexically_normalize(&resolved);
 
-    if canon_roots.iter().any(|r| resolved.starts_with(r)) {
+    if canon_roots.iter().any(|r| path_starts_with(&resolved, r)) {
         Ok(resolved)
     } else {
         Err(confined(&resolved, roots))
@@ -87,11 +89,65 @@ fn reject_unsafe_syntax(input: &str, roots: &[PathBuf]) -> Result<(), ToolError>
     let suspicious = input.contains('\0')
         || input.starts_with("\\\\")
         || has_drive_prefix(input)
-        || (cfg!(windows) && input.contains(':'));
+        || (cfg!(windows)
+            && (has_windows_namespace_prefix(input)
+                || has_windows_ads(input)
+                || has_windows_reserved_name(input)));
     if suspicious {
         Err(confined(Path::new(input), roots))
     } else {
         Ok(())
+    }
+}
+
+/// Windows accepts either slash in a namespace prefix; a mixed pair must not
+/// turn into a device or UNC path after `PathBuf::join` parses it.
+fn has_windows_namespace_prefix(input: &str) -> bool {
+    input
+        .as_bytes()
+        .get(..2)
+        .is_some_and(|pair| pair.iter().all(|c| matches!(*c, b'\\' | b'/')))
+}
+
+fn has_windows_ads(input: &str) -> bool {
+    input.contains(':')
+}
+
+/// Device names refer to a device even when followed by an extension. Win32
+/// also ignores trailing spaces before the extension when resolving a name.
+fn has_windows_reserved_name(input: &str) -> bool {
+    input.split(['/', '\\']).any(|part| {
+        let stem = part.split('.').next().unwrap_or(part).trim_end_matches(' ');
+        let upper = stem.to_ascii_uppercase();
+        matches!(
+            upper.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || ["COM", "LPT"].iter().any(|prefix| {
+            upper.strip_prefix(*prefix).is_some_and(|digit| {
+                matches!(
+                    digit,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+        })
+    })
+}
+
+/// Path component comparison is case-insensitive on Windows, including the
+/// drive letter. Components still delimit the prefix: `root2` is not `root`.
+fn path_starts_with(path: &Path, root: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let mut path_parts = path.components();
+        root.components().all(|root_part| {
+            path_parts
+                .next()
+                .is_some_and(|part| part.as_os_str().eq_ignore_ascii_case(root_part.as_os_str()))
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        path.starts_with(root)
     }
 }
 
@@ -206,6 +262,19 @@ fn common_prefix_len(a: &Path, b: &Path) -> usize {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    fn make_junction(root: &Path, outside: &Path, name: &str) -> PathBuf {
+        let junction = root.join(name);
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(outside)
+            .output()
+            .expect("mklink /J");
+        assert!(output.status.success(), "mklink /J: {output:?}");
+        junction
+    }
+
     /// Smoke test kept alongside the exhaustive table in
     /// `tests/confine.rs`: a plain in-root relative path resolves to an
     /// absolute path under the root.
@@ -313,5 +382,128 @@ mod tests {
                 "{input}: {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn confine_rejects_verbatim_prefix() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(dir.path()).expect("canonicalize tempdir");
+        for input in [r"\\?\C:\outside", r"\\.\NUL", r"\\server\share"] {
+            assert!(has_windows_namespace_prefix(input), "{input}");
+            assert!(matches!(
+                confine(std::slice::from_ref(&root), &root, input),
+                Err(ToolError::Confined { .. })
+            ));
+        }
+        for input in ["//?/C:/outside", "//./NUL", "/\\server/share"] {
+            assert!(has_windows_namespace_prefix(input), "{input}");
+            #[cfg(windows)]
+            assert!(matches!(
+                confine(std::slice::from_ref(&root), &root, input),
+                Err(ToolError::Confined { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn confine_rejects_reserved_device_names() {
+        for input in [
+            "CON",
+            "con.txt",
+            "sub/NUL.log",
+            r"sub\PrN",
+            "AUX ",
+            "COM1.txt",
+            "com9",
+            "COM¹.txt",
+            "LPT1",
+            "lpt9.log",
+            "CONIN$",
+            "CONOUT$.txt",
+        ] {
+            assert!(has_windows_reserved_name(input), "{input}");
+        }
+        for input in ["console", "com0", "com10", "lpt0", "normal.txt"] {
+            assert!(!has_windows_reserved_name(input), "{input}");
+        }
+        #[cfg(windows)]
+        for input in ["CON", "con.txt", "sub/NUL.log", "COM1.txt", "lpt9.log"] {
+            assert!(matches!(
+                reject_unsafe_syntax(input, &[]),
+                Err(ToolError::Confined { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn confine_rejects_alternate_data_streams() {
+        for input in ["file:stream", "sub/file:stream", "file::$DATA"] {
+            assert!(has_windows_ads(input), "{input}");
+        }
+        assert!(!has_windows_ads("plain/file.txt"));
+        #[cfg(windows)]
+        for input in ["file:stream", "sub/file:stream", "file::$DATA"] {
+            assert!(matches!(
+                reject_unsafe_syntax(input, &[]),
+                Err(ToolError::Confined { .. })
+            ));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn confine_is_case_insensitive_on_windows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("MiXeD");
+        std::fs::create_dir(&root).expect("mkdir");
+        std::fs::write(root.join("file.txt"), b"hi").expect("write fixture");
+        let cwd = dir.path().join("mIxEd");
+        let got = confine(std::slice::from_ref(&root), &cwd, "FILE.TXT").expect("confine");
+        assert_eq!(
+            got,
+            std::fs::canonicalize(root.join("file.txt")).expect("canonicalize")
+        );
+        assert!(!path_starts_with(&dir.path().join("mixed2"), &root));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn confine_rejects_a_junction_out_of_the_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("root");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&root).expect("mkdir root");
+        std::fs::create_dir(&outside).expect("mkdir outside");
+        make_junction(&root, &outside, "link");
+        let err = confine(std::slice::from_ref(&root), &root, "link/secret.txt")
+            .expect_err("junction escapes root");
+        assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn confine_rejects_short_name_alias_out_of_the_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("root");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&root).expect("mkdir root");
+        std::fs::create_dir(&outside).expect("mkdir outside");
+        let junction = make_junction(&root, &outside, "JunctionWithLongName");
+        let command = format!("for %I in (\"{}\") do @echo %~sI", junction.display());
+        let output = std::process::Command::new("cmd")
+            .args(["/C", &command])
+            .output()
+            .expect("query short name");
+        assert!(output.status.success(), "query short name: {output:?}");
+        let alias = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        let short_name = Path::new(&alias).file_name().expect("short name");
+        // NTFS volumes may disable 8.3 generation; no alias exists to test.
+        if !short_name.to_string_lossy().contains('~') {
+            return;
+        }
+        let input = Path::new(short_name).join("secret.txt");
+        let err = confine(std::slice::from_ref(&root), &root, &input.to_string_lossy())
+            .expect_err("short junction alias escapes root");
+        assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
     }
 }

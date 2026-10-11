@@ -275,7 +275,14 @@ pub async fn open_reporting(
         Some(_) => vec![cwd.to_path_buf()],
         None => config.core.workspace_roots.clone(),
     };
-    let mut plugins = load_plugins(&config, &home, cwd, store.clone(), Some(&writable));
+    let mut plugins = plugins::load_plugins_for_surface(
+        &config,
+        &home,
+        cwd,
+        store.clone(),
+        Some(&writable),
+        &surface,
+    );
     // T45.4: taken now, before `catalog_rows` borrows `plugins`; merged
     // into the discovered definitions below.
     let plugin_agent_defs = std::mem::take(&mut plugins.agent_defs);
@@ -407,6 +414,7 @@ pub async fn open_reporting(
         all.extend(mcp);
         warnings.extend(notices.into_iter().map(Warning::Mcp));
     }
+    let plugin_infos = std::mem::take(&mut plugins.infos);
     #[cfg_attr(not(feature = "plugins"), allow(unused_mut))]
     let mut plugin_warnings = plugins.notices;
     #[cfg(feature = "plugins")]
@@ -522,6 +530,9 @@ pub async fn open_reporting(
     }
     for warning in plugin_warnings {
         session.notice(Level::Warn, warning).await?;
+    }
+    for info in plugin_infos {
+        session.notice(Level::Info, info).await?;
     }
     for (level, text) in plugin_started {
         session.notice(level, text).await?;

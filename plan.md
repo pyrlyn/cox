@@ -61,6 +61,11 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.43 | todo | P1 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.45.3 | todo | P2 | 4 | 0% | |
+| T33.45.3.1 | todo | P2 | 2 | 90% | |
+| T33.45.3.2 | todo | P2 | 2 | 90% | |
+| T33.45.3.3 | todo | P2 | 2 | 90% | |
+| T33.45.3.4 | todo | P2 | 2 | 90% | |
+| T33.45.3.5 | todo | P2 | 1 | 90% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
 | T33.45.5 | todo | P2 | 4 | 0% | |
 | T33.45.6 | todo | P2 | 3 | 0% | |
@@ -1144,9 +1149,38 @@ Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and a
 
 #### T33.45.3 Host: load filter, granted filter, `cox:desktop/v1`
 
-Depends: T33.45.1, T33.45.2 · Files: `crates/cox-plugin/src/hostfn.rs`, `crates/cox-plugin/src/live.rs`, `crates/cox-session/src/plugins.rs` · Design: `docs/design/plugins.md` §15, A134
+Depends: T33.45.1, T33.45.2 · Design: `docs/design/plugins.md` §15, A134
+
+The five implementation cards below split the original scope by file and keep each change under the task limit. This parent card stays open until all five cards and the combined Check pass.
 
 Check: `plugin_outside_its_surfaces_is_skipped_with_a_notice`, `other_surface_init_entries_are_dropped_with_a_notice`, `desktop_notify_on_terminal_is_not_on_this_surface` (inline WAT, no build).
+
+#### T33.45.3.1 Host functions
+Model: - · Status: open · Depends: T33.45.1, T33.45.2 · Size: ~100 · Files: `crates/cox-plugin/src/hostfn.rs`
+Goal: register the desktop host function and return `NotOnThisSurface` on terminal sessions.
+Check: `desktop_notify_on_terminal_is_not_on_this_surface` passes.
+
+#### T33.45.3.2 Live plugin state
+Model: - · Status: open · Depends: T33.45.3.1 · Size: ~140 · Files: `crates/cox-plugin/src/live.rs`
+Goal: filter granted capabilities and initialization contributions by the active surface.
+Check: `other_surface_init_entries_are_dropped_with_a_notice` passes.
+
+#### T33.45.3.3 Session plugin discovery
+Model: - · Status: open · Depends: T33.45.3.2 · Size: ~100 · Files: `crates/cox-session/src/plugins.rs`
+Goal: skip plugins that do not declare the active surface and retain an informational notice.
+Check: `plugin_outside_its_surfaces_is_skipped_with_a_notice` passes.
+
+#### T33.45.3.4 Session surface wiring
+Model: - · Status: open · Depends: T33.45.3.3 · Size: ~20 · Files: `crates/cox-session/src/lib.rs`
+Goal: pass `SessionSpec.surface` into plugin discovery and emit informational plugin notices.
+Check: the existing plugin-surface test verifies the info entry is retained; full `cox-session` tests and workspace gates pass. The assembly's `Level::Info` emission is verified by the integration path in review.
+
+#### T33.45.3.5 ACP plugin surface
+Model: - · Status: open · Depends: T33.45.3.3 · Size: ~10 · Files: `crates/cox-session/src/acp_session.rs`
+Goal: discover external-agent plugins against the ACP surface.
+Check: `cox-session` tests and workspace gates pass.
+
+Progress (2026-10-11): T33.45.3.1–.5 are implemented in commits `2908fa3b`, `9bcac57e`, `2fc5597a`, `90e02154` and `27613368`. The `cox-plugin` and `cox-session` suites pass (159/159), focused Clippy with `-D warnings` and `cargo fmt --check` pass, and `cox doctor` passes with a scratch `COX_HOME` and a test environment key. The workspace gates remain blocked before project tests by the missing `wasm32-unknown-unknown` target in `cox-plugin-fixtures` and by the packaged whisper.cpp source lacking its `tests`/`examples` directories. Keep the parent and child cards open until those gates can run cleanly.
 
 #### T33.45.4 TUI: links, image `alt`, surfaces in listings
 
@@ -1681,10 +1715,12 @@ Check: the job is green on the branch; `just windows-check` lists its crates in 
 Remaining (A130): the code is merged (commit 7b1297ed / 6c57b93d) and `just windows-check` passes locally through cargo-xwin; the Windows-host agent runs the Check on Windows, then enables the CI job (`if: false` today).
 
 #### T57.4 `path::confine` on Windows paths
+Model: - · Status: open
 
 Depends: T57.1 · Size: ~180 · Files: `crates/cox-sandbox/src/path.rs`
 Goal: `confine` is the only guard between a model's path and the disk on Windows (no sandbox), so it must reject every Windows escape: drive-letter and name case (compare case-insensitively), `\\?\` and `\\.\` prefixes (which turn off `..` resolution), UNC paths, reserved device names (`CON`, `NUL`, `COM1`…, also with an extension), alternate data streams (`file:stream`), 8.3 short names and junctions resolving outside the roots (R10.4.6). Unix behaviour is untouched. Pure string cases are tested on every host; junction and short-name cases run in the Windows job only.
 Check: `mise exec -- cargo nextest run -p cox-sandbox confine_rejects_verbatim_prefix confine_rejects_reserved_device_names confine_rejects_alternate_data_streams confine_is_case_insensitive_on_windows confine_rejects_a_junction_out_of_the_root` (the last two under `cfg(windows)`, run by T57.1's job).
+Remaining: the code is merged in `5fe890f4`; macOS focused nextest, clippy and fmt pass. Windows-host junction, 8.3 short-name and case checks remain pending; cargo-xwin could not compile because the mise `clang-cl` shim has no version.
 
 #### T57.5 One kill path for process trees: hooks and the session environment
 
@@ -3632,6 +3668,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A145 §1.1, §1.11, §3 (new P65: T65.1) — deferred crate-doc tools, claimed 2026-10-08. `docs_resolve`, `docs_query` and `docs_fetch` stay out of the default prompt (`deferred: true`, D6d). The lockfile names the version; a local `items.jsonl` answers the query; only `docs_fetch` GETs `https://docs.rs/crate/<name>/<version>/json.zst` (no `Authorization` header, no Context7 URL, no API key). `docs_query` with `name = "llms"` searches an `llms.txt` already inside a workspace root and downloads nothing. Why: crate documentation is the same shape as memory — useful, not core, found through `tool_search`. Effect: T65.1. `cox-tools` depends on `sha2` (already a workspace dependency) and `zstd` 0.13 (already in the lockfile via wasmtime) to digest and decompress that download. No §0 decision changes. The card exceeds the 200-line guide because the query, the fetch and the `llms.txt` path share one cache format; splitting them would leave a reader with nothing to read.
 
 - A146 §1.7, §1.12, T64.24 — quarantine untrusted MCP tool definitions. A server's tool description and `readOnlyHint` are untrusted input. `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). Migration `00000000000008_mcp_tool_trust` stores the approved hash (`status` is only `approved`). A missing row is `Pending` for a server from project `.mcp.json` or a plugin, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A stored hash that differs is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses the fixed sentence `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` (so `readOnlyHint` cannot skip approval) and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` already indexes `spec().description`, so there is no second filter. `cox mcp trust <server>` connects and writes every current hash; `cox mcp trust` lists pending and changed tools. Why: a project or plugin server can put instructions in a tool description, or set `readOnlyHint`, and both were reaching the model and the permission engine. Effect: `cox-mcp` links `sha2`, already a workspace dependency. T64.7 and T64.10 stay open — a project `[mcp.servers]` entry is still source `config` until T64.7 reverts it, and an unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
+- A149 §3 P33 (T33.45.3) — split the host/session wiring into file-owned cards, T33.45.3.1–T33.45.3.5, because the original implementation spans more than 200 changed lines across host functions, live state, plugin discovery and session assembly, and ACP has a separate external-agent discovery path. Why: the task-size limit applies to each card, and session surface wiring is a distinct integration step. Effect: the parent card remains open until all five cards and the combined Check pass; no API or design decision changes.
 
 - A147 §3 (new P66: T66.1–T66.14), by the creator (2026-10-09): prime-agent-derived improvements, from a study of PrimeIntellect-ai/prime-agent at `afe8d14c` (v0.9.8, 2026-10-08). Idea-only, clean-room. prime-agent is MIT ("Copyright (c) 2025-2026 Prime Intellect Ltd." and "Copyright (c) 2025 Mario Zechner"), which is compatible with cox's licence. Its Rust code, though, is a byte-level port of a TypeScript product that breaks cox's rules (camelCase JSON, `anyhow` outside `crates/cox`, `unwrap`, no Diesel), so nothing is copied and no notice is needed. A card that ever copies a substantial part adds prime-agent's full MIT text, both copyright lines and the URL to that file and to `THIRD-PARTY-NOTICES`, and the notice is never replaced by cox's header. Why: the study shows four gaps in cox. (1) Compaction does not tell the model which archived outputs still expand. (2) An over-cap subagent answer is summarised or cut with no archive row, against "Lossless by default", and a background answer cannot be collected later. (3) There is no reviewed, reversible way to adjust prompt notes, memory, skills and subagents. (4) `cox run -p` has no gate-driven loop with turn, token and time limits. Effect: fourteen cards in a new phase. `budget::decide` stays the USD cap; `prompt.md` and `prompt_minimal.md` stay immutable; a project config cannot set `[autonomous]`, because its gates are shell commands. T66.12 is a design gate: resident sessions and a supervisor change a crate boundary, so their implementation cards come in a later amendment after the creator approves `docs/design/serve.md`, and T66.13 and T66.14 wait for them. No new dependency; cox-ext links the workspace `sha2`. Overflow recovery already exists (`retried_after_too_long`), so it gets no card. Not taken, with reasons in P66: peer agent sockets, the Python kernel, state factories, per-model prompt blocks in the cached prefix, Prime's prompt prose, and the `HarnessEntry` and `GoalState` schemas. No §0 decision changes.
 - A148 §3 (new P67: T67.1–T67.13), by the creator (2026-10-09): Claude Code parity, idea-only from Claude Code's public docs. Why: cox drops Claude settings hooks of type `prompt` and `http` without a word (`claude_settings.rs` keeps only `command`), has no judged stop condition, loads instructions only as the root-to-cwd chain, has no approval step out of Plan mode, lets Auto mode only allow writes, cannot read MCP resources or prompts, cannot check a headless answer against a schema, and has no output styles. Effect: thirteen cards in a new phase. Path rules (T67.6) and output styles (T67.12) add text only after the last cache breakpoint, so the system prompt, tool schemas and instruction files stay byte-stable; the cache invariant is unchanged. The prompt hook (T67.2) and `/goal` (T67.4) reuse `Session::side_call` rather than a new trait; the http hook's POST lives in `cox-web`, the crate that already opens sockets. The Auto-mode judge (T67.9) may only turn `Ask` into `Allow` and never overrides a deny rule or the sandbox; it waits for the creator's security review of its design (T67.8). The GitHub Action and scheduled runs (T67.13) are design only. P67 cards are done by Cursor `grok-4.7` through pull requests merged with `gh pr merge --squash --delete-branch --match-head-commit` after green CI; a run that hits its quota pushes and opens a PR titled `[#285] …`. Documentation stays English only. No new dependency. Not taken yet: hooks of type `agent`, `/security-review`. No §0 decision changes.
