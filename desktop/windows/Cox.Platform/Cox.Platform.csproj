@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- No WinUI yet: notifications and the host bridge are later cards, and they
+         must not pull the Windows App SDK into Cox.Model. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Cox.Platform</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cox.Model\Cox.Model.csproj" />
+  </ItemGroup>
+</Project>

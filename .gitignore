@@ -17,3 +17,6 @@ desktop/macos/Packages/*/.swiftpm/
 # npm installs, wherever a package.json sits; never committed.
 node_modules/
 desktop/design/diff/out/
+# WinUI / dotnet build output (T58.3).
+desktop/windows/**/bin/
+desktop/windows/**/obj/

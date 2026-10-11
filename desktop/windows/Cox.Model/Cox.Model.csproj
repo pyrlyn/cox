@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- net10.0, not a Windows TFM: stores and their tests run headless (DT§8). -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Cox.Model</RootNamespace>
+  </PropertyGroup>
+</Project>

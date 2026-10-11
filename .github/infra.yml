@@ -33,6 +33,18 @@ sonarcloud:
 license:
   enabled: true
 
+# The shared job restores every solution on Linux. Cox.sln also holds the WinUI app
+# (net10.0-windows), which only builds on the Windows runner in ci.yml's `windows` job,
+# so the Linux job tests the headless net10.0 projects alone (T58.3, DT§8).
+dotnet:
+  test-command: |
+    set -euo pipefail
+    # global.json's Microsoft.Testing.Platform runner is discovered from the cwd, so run
+    # from desktop/windows, not the repository root.
+    cd desktop/windows
+    dotnet restore Cox.Tests/Cox.Tests.csproj
+    dotnet test --no-restore Cox.Tests/Cox.Tests.csproj
+
 # Snyk stays off (pyrlyn/ci's default; SNYK_TOKEN stays).
 
 # actionlint stays off for now: the hand-written release.yml has shellcheck findings and
