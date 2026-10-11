@@ -1180,6 +1180,8 @@ Model: - · Status: open · Depends: T33.45.3.3 · Size: ~10 · Files: `crates/c
 Goal: discover external-agent plugins against the ACP surface.
 Check: `cox-session` tests and workspace gates pass.
 
+Progress (2026-10-11): T33.45.3.1–.5 are implemented in commits `2908fa3b`, `9bcac57e`, `2fc5597a`, `90e02154` and `27613368`. The `cox-plugin` and `cox-session` suites pass (159/159), focused Clippy with `-D warnings` and `cargo fmt --check` pass, and `cox doctor` passes with a scratch `COX_HOME` and a test environment key. The workspace gates remain blocked before project tests by the missing `wasm32-unknown-unknown` target in `cox-plugin-fixtures` and by the packaged whisper.cpp source lacking its `tests`/`examples` directories. Keep the parent and child cards open until those gates can run cleanly.
+
 #### T33.45.4 TUI: links, image `alt`, surfaces in listings
 
 Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
