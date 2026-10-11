@@ -10715,6 +10715,7 @@ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo fmt --check
 ```
 
+
 Done when `resume_refills_archive_refs_from_tool_results` passes and fails without step 1: a rollout with two archived tool results resumes with both ids in the map.
 
 Out of scope: the compaction notice, which is T66.1.
@@ -10753,3 +10754,32 @@ Done when the `compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim
 Out of scope: a new event type, and any change to the `Content::Pointer` text or to `microcompact`.
 Result: `compact.rs` gains `SurvivingHandles::collect(dropped, kept, archives)` and `notice_text`. The surviving set is every entry of `inner.archives` whose call is not in the kept turns `history[cut..]`. The map holds exactly the rows `turn.rs` wrote before the model saw the short form, compaction never prunes it, and since T66.1.1 resume refills it, so it already covers earlier compactions. No id or count is ever parsed from summary text, because that text is model-written (a fake `## Archived outputs` section with an unknown id and `… and 999 more` is ignored). Labels are the `ToolUse` names in `history[..cut]`; for an id from an older compaction the label may come from the earlier section, only for an id already in the set and only if it matches `[A-Za-z0-9_.:-]{1,64}`, else `tool`. Cap: the newest 32 ids within 2048 bytes (a ULID sorts by time), printed in ascending id order; `omitted` is the surviving total minus those shown, computed, so 40 ids show 32 and `… and 8 more`. `Session::compact` appends `## Archived outputs` after `summarise` returns, so it is last under `state+llm` and `llm`; no section is written when nothing was archived. Lines read `- #<id> <tool>`, the same `#<id>` form as the `Content::Pointer` text. Not in `WorkingState::render`, as the card first said: that block is prepended before the model's text and the section would not be last. A call that `/rewind` removed from history is still in the map and is listed; its row exists and expands. Tests: inline cap, byte-cap, map-sourced earlier ids, fake-section, unsafe-label and empty cases in `compact.rs`; the insta snapshot (three dropped outputs by id, kept-turn ids absent, kept turns byte-identical, `llm` ends with the section) and the 40-ids case in `tests/compact.rs`.
 Check output: `mise exec -- cargo nextest run -p cox-core compaction` — 14 passed, including compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim, compaction_notice_shows_the_newest_32_of_40_ids and compaction_notice_ignores_ids_written_in_summary_text; `mise exec -- cargo nextest run -p cox-core` — 373 passed; `mise exec -- cargo nextest run -p cox -p cox-session -p cox-app -p cox-tui` — 791 passed; clippy `--workspace --all-targets -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T66.15 Cut the subagent result cap on a char boundary
+
+Model: Claude Code / opus · Status: done 2026-10-09 · Depends: — · Size: ~30 · Priority: P1 · Complexity: 1
+
+Goal: a non-ASCII child answer over `result_cap_tokens` is cut, not a panic. When `summarize` returns `None`, `run_task` falls back to `result.truncate(cap * 4)` (`subagent.rs:1149`). `String::truncate` panics when that byte index is inside a char, so a Cyrillic, CJK or emoji answer over the cap crashes the parent session. Seen while implementing T66.2.
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/tests/subagent.rs`
+- `crates/cox-core/tests/scenarios/subagent_cut_non_ascii.toml` (fixture)
+
+Steps:
+1. Cut at `result.floor_char_boundary(cap * 4)` (stable since Rust 1.91; the workspace `rust-version` is 1.98). No workspace helper does this: `cox-tools/src/read.rs:229` and `cox-acp/src/terminal.rs:72` each walk `is_char_boundary` inline. The cut stays in place, one line, so it merges with T66.2's archive trailer around it.
+2. The scenario's child answers `x` followed by 5000 `я` (10001 bytes), so byte 4000 and byte 8000 both fall inside a char whichever preset cap applies. Its summarize turn is a scripted `error`, so `summarize` returns `None` and the cut runs.
+3. `over_cap_non_ascii_answer_is_cut_on_a_char_boundary` asserts the parent's tool result is ok, starts with `xя` and ends with `[cut at the result cap]`. Without step 1 the child task panics and the test fails.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the new test passes and fails with step 1 reverted.
+
+Out of scope: archiving the full answer, which is T66.2; the other inline boundary walks.
+
+Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.

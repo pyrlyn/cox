@@ -1146,7 +1146,8 @@ async fn run_task(
             result = short;
             summarised = true;
         } else {
-            result.truncate(cap * 4);
+            // A byte index inside a non-ASCII char would panic `truncate`.
+            result.truncate(result.floor_char_boundary(cap * 4));
             result.push_str("\n[cut at the result cap]");
         }
     }
