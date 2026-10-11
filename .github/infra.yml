@@ -39,10 +39,11 @@ license:
 dotnet:
   test-command: |
     set -euo pipefail
-    for t in desktop/windows/Cox.Tests/Cox.Tests.csproj; do
-      dotnet restore "$t"
-      dotnet test --no-restore "$t"
-    done
+    # global.json's Microsoft.Testing.Platform runner is discovered from the cwd, so run
+    # from desktop/windows, not the repository root.
+    cd desktop/windows
+    dotnet restore Cox.Tests/Cox.Tests.csproj
+    dotnet test --no-restore Cox.Tests/Cox.Tests.csproj
 
 # Snyk stays off (pyrlyn/ci's default; SNYK_TOKEN stays).
 
