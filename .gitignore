@@ -14,5 +14,6 @@ desktop/macos/Cox.xcodeproj/
 # SwiftPM output and Xcode's package workspace data under each local package.
 desktop/macos/Packages/*/.build/
 desktop/macos/Packages/*/.swiftpm/
-desktop/design/node_modules/
+# npm installs, wherever a package.json sits; never committed.
+node_modules/
 desktop/design/diff/out/

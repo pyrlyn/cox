@@ -10720,5 +10720,34 @@ Done when `over_cap_child_answer_is_archived_before_the_parent_sees_it` passes o
 
 Out of scope: collecting a background answer, which is T66.3.
 
-Result: `run_task` writes the full answer with `parent.archive.put` (tool `agent`, subject the task label, a fresh `CallId` because a woken child has no call of its own) only when `len/4 > result_cap_tokens`, before `summarize` runs. The summary or cut then ends with `full answer: expand <id>`, ahead of the worktree trailer. An under-cap answer is unchanged. `TaskOutcome.archive` feeds `Event::TaskCompleted { archive }` on the foreground and background paths, and the background completion detail uses the new `tasks::agent_detail` (`$cost, full output: expand <id>`, the wording detached `bash` uses; it replaces `cost_detail`). A failed archive write only drops the trailer; the cap still applies. Tests: `over_cap_child_answer_is_archived_before_the_parent_sees_it` (archive row byte for byte, parent result is the summary plus the id), `agent_detail_names_the_archive_row_only_when_there_is_one`; `subagent_result_over_cap_is_summarised_on_the_summarize_job` now expects the trailer. Not done: `result.truncate(cap * 4)` can still split a multi-byte character (existing, outside this card); no real-binary run (the change is covered by the scripted provider).
+Result: `run_task` writes the full answer with `parent.archive.put` (tool `agent`, subject the task label, a fresh `CallId` because a woken child has no call of its own) only when `len/4 > result_cap_tokens`, before `summarize` runs. The summary or cut then ends with `full answer: expand <id>`, ahead of the worktree trailer. An under-cap answer is unchanged. `TaskOutcome.archive` feeds `Event::TaskCompleted { archive }` on the foreground and background paths, and the background completion detail uses the new `tasks::agent_detail` (`$cost, full output: expand <id>`, the wording detached `bash` uses; it replaces `cost_detail`). A failed archive write only drops the trailer; the cap still applies. Tests: `over_cap_child_answer_is_archived_before_the_parent_sees_it` (archive row byte for byte, parent result is the summary plus the id), `agent_detail_names_the_archive_row_only_when_there_is_one`; `subagent_result_over_cap_is_summarised_on_the_summarize_job` now expects the trailer. Not done: `result.truncate(cap * 4)` can still split a multi-byte character (fixed later by T66.15); no real-binary run (the change is covered by the scripted provider).
 Check output: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed; `mise exec -- cargo nextest run -p cox-core` — 366 passed, 1 skipped; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T66.15 Cut the subagent result cap on a char boundary
+
+Model: Claude Code / opus · Status: done 2026-10-09 · Depends: — · Size: ~30 · Priority: P1 · Complexity: 1
+
+Goal: a non-ASCII child answer over `result_cap_tokens` is cut, not a panic. When `summarize` returns `None`, `run_task` falls back to `result.truncate(cap * 4)` (`subagent.rs:1149`). `String::truncate` panics when that byte index is inside a char, so a Cyrillic, CJK or emoji answer over the cap crashes the parent session. Seen while implementing T66.2.
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/tests/subagent.rs`
+- `crates/cox-core/tests/scenarios/subagent_cut_non_ascii.toml` (fixture)
+
+Steps:
+1. Cut at `result.floor_char_boundary(cap * 4)` (stable since Rust 1.91; the workspace `rust-version` is 1.98). No workspace helper does this: `cox-tools/src/read.rs:229` and `cox-acp/src/terminal.rs:72` each walk `is_char_boundary` inline. The cut stays in place, one line, so it merges with T66.2's archive trailer around it.
+2. The scenario's child answers `x` followed by 5000 `я` (10001 bytes), so byte 4000 and byte 8000 both fall inside a char whichever preset cap applies. Its summarize turn is a scripted `error`, so `summarize` returns `None` and the cut runs.
+3. `over_cap_non_ascii_answer_is_cut_on_a_char_boundary` asserts the parent's tool result is ok, starts with `xя` and ends with `[cut at the result cap]`. Without step 1 the child task panics and the test fails.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the new test passes and fails with step 1 reverted.
+
+Out of scope: archiving the full answer, which is T66.2; the other inline boundary walks.
+
+Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
