@@ -27,6 +27,7 @@ Core tools are always in context; deferred tools join through `tool_search`
 | `agent` | max of its tools; Destructive with `isolation: "worktree"` | yes | preset | `explore` / `shell` presets, own budget; worktree isolation asks (denied in plan) |
 | `memory_save` | Write | yes | name | one fact file + index + FTS row |
 | `memory_search` | ReadOnly | yes | query | FTS first, then files; top 5 capped |
+| `memory_get` | ReadOnly | yes | name | one fact's body after the frontmatter; missing name is not an error |
 | `docs_resolve` | ReadOnly | yes | crate name | `cargo/<name>/<version>` from `Cargo.lock`; no `cargo` subprocess |
 | `docs_query` | ReadOnly | yes | crate name | cached rustdoc, at most 5 hits of 400 characters; `name=llms` searches a workspace `llms.txt` |
 | `docs_fetch` | ReadOnly | yes | docs.rs URL | one GET of `https://docs.rs/crate/<name>/<version>/json.zst`; no API key |
