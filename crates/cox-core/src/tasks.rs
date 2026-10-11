@@ -146,9 +146,14 @@ pub(crate) enum Child {
     Finished(Box<Dormant>),
 }
 
-/// A subagent's detail: what it cost.
-pub fn cost_detail(cost_usd: f64) -> String {
-    format!("${cost_usd:.4}")
+/// A subagent's detail: what it cost, and the archive id of its full answer
+/// when the result cap shortened it (worded as a detached call's is).
+pub fn agent_detail(cost_usd: f64, archive: Option<ArchiveId>) -> String {
+    let cost = format!("${cost_usd:.4}");
+    match archive {
+        Some(id) => format!("{cost}, full output: expand {id}"),
+        None => cost,
+    }
 }
 
 /// A detached call's detail: its exit code, if it has one, and how to get
@@ -705,9 +710,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn agent_detail_names_the_archive_row_only_when_there_is_one() {
+        let id = ArchiveId::new();
+        assert_eq!(agent_detail(0.5, None), "$0.5000");
+        assert_eq!(
+            agent_detail(0.5, Some(id)),
+            format!("$0.5000, full output: expand {id}")
+        );
+    }
+
+    #[test]
     fn tasks_pointer_line_is_bounded() {
         let long = format!("{}\nsecond line", "x".repeat(5000));
-        let line = pointer_line("explore: y", TaskId::new(), &cost_detail(0.002), &long);
+        let line = pointer_line(
+            "explore: y",
+            TaskId::new(),
+            &agent_detail(0.002, None),
+            &long,
+        );
         assert!(line.contains("explore: y"), "{line}");
         assert!(line.contains("$0.0020"), "{line}");
         assert!(!line.contains("second line"), "first line only");
