@@ -10715,7 +10715,6 @@ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo fmt --check
 ```
 
-
 Done when `resume_refills_archive_refs_from_tool_results` passes and fails without step 1: a rollout with two archived tool results resumes with both ids in the map.
 
 Out of scope: the compaction notice, which is T66.1.
@@ -10755,6 +10754,37 @@ Out of scope: a new event type, and any change to the `Content::Pointer` text or
 Result: `compact.rs` gains `SurvivingHandles::collect(dropped, kept, archives)` and `notice_text`. The surviving set is every entry of `inner.archives` whose call is not in the kept turns `history[cut..]`. The map holds exactly the rows `turn.rs` wrote before the model saw the short form, compaction never prunes it, and since T66.1.1 resume refills it, so it already covers earlier compactions. No id or count is ever parsed from summary text, because that text is model-written (a fake `## Archived outputs` section with an unknown id and `… and 999 more` is ignored). Labels are the `ToolUse` names in `history[..cut]`; for an id from an older compaction the label may come from the earlier section, only for an id already in the set and only if it matches `[A-Za-z0-9_.:-]{1,64}`, else `tool`. Cap: the newest 32 ids within 2048 bytes (a ULID sorts by time), printed in ascending id order; `omitted` is the surviving total minus those shown, computed, so 40 ids show 32 and `… and 8 more`. `Session::compact` appends `## Archived outputs` after `summarise` returns, so it is last under `state+llm` and `llm`; no section is written when nothing was archived. Lines read `- #<id> <tool>`, the same `#<id>` form as the `Content::Pointer` text. Not in `WorkingState::render`, as the card first said: that block is prepended before the model's text and the section would not be last. A call that `/rewind` removed from history is still in the map and is listed; its row exists and expands. Tests: inline cap, byte-cap, map-sourced earlier ids, fake-section, unsafe-label and empty cases in `compact.rs`; the insta snapshot (three dropped outputs by id, kept-turn ids absent, kept turns byte-identical, `llm` ends with the section) and the 40-ids case in `tests/compact.rs`.
 Check output: `mise exec -- cargo nextest run -p cox-core compaction` — 14 passed, including compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim, compaction_notice_shows_the_newest_32_of_40_ids and compaction_notice_ignores_ids_written_in_summary_text; `mise exec -- cargo nextest run -p cox-core` — 373 passed; `mise exec -- cargo nextest run -p cox -p cox-session -p cox-app -p cox-tui` — 791 passed; clippy `--workspace --all-targets -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
+#### T66.2 A subagent's over-cap answer is archived before the parent sees the short form
+
+Model: Claude Code / claude-sonnet · Status: done 2026-10-09 · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2
+
+Goal: when a child's answer is over `result_cap_tokens`, the full text becomes an archive row first. The summary or cut that the parent receives ends with `full answer: expand <id>`. Today the answer is summarised or cut with no archive row (`subagent.rs:1138-1151`), which breaks "Lossless by default".
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/src/tasks.rs`
+- the cox-core subagent test file
+
+Steps:
+1. In the cap path, call `session.archive.put` with the full answer before `summarize` runs; it is the same call `turn.rs:659-668` uses. Put the `expand` trailer after the summary or cut and before the worktree trailer.
+2. The background path (`drive`, `subagent.rs:813-857`) passes that `ArchiveRef` to `Event::TaskCompleted { archive }`, which is `None` today. `notice_text` then says `full output: expand <id>`, as detached `bash` already does (`tasks.rs:159`).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `over_cap_child_answer_is_archived_before_the_parent_sees_it` passes on the scripted provider:
+- the archive row exists;
+- the parent's tool result holds the summary and the id;
+- `expand` returns the full answer byte for byte.
+
+Out of scope: collecting a background answer, which is T66.3.
+
+Result: `run_task` writes the full answer with `parent.archive.put` (tool `agent`, subject the task label, a fresh `CallId` because a woken child has no call of its own) only when `len/4 > result_cap_tokens`, before `summarize` runs. The summary or cut then ends with `full answer: expand <id>`, ahead of the worktree trailer. An under-cap answer is unchanged. `TaskOutcome.archive` feeds `Event::TaskCompleted { archive }` on the foreground and background paths, and the background completion detail uses the new `tasks::agent_detail` (`$cost, full output: expand <id>`, the wording detached `bash` uses; it replaces `cost_detail`). A failed archive write only drops the trailer; the cap still applies. Tests: `over_cap_child_answer_is_archived_before_the_parent_sees_it` (archive row byte for byte, parent result is the summary plus the id), `agent_detail_names_the_archive_row_only_when_there_is_one`; `subagent_result_over_cap_is_summarised_on_the_summarize_job` now expects the trailer. Not done: `result.truncate(cap * 4)` can still split a multi-byte character (fixed later by T66.15); no real-binary run (the change is covered by the scripted provider).
+Check output: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed; `mise exec -- cargo nextest run -p cox-core` — 366 passed, 1 skipped; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 #### T66.15 Cut the subagent result cap on a char boundary
 
 Model: Claude Code / opus · Status: done 2026-10-09 · Depends: — · Size: ~30 · Priority: P1 · Complexity: 1
