@@ -8,4 +8,5 @@ zig = "0.16.0" # linker for `cargo zigbuild`: the Linux cox build the Terminal-B
 "aqua:realm/SwiftLint" = "0.65.1" # lints desktop/macos (T37.18, DS§9); must equal the SwiftLintPlugins version the Swift packages pin
 "aqua:linebender/resvg" = "0.48.1" # renders brand/logo/png from the SVGs (`just brand-icons`, A136); no font loading, so the bytes depend only on this pin
 "aqua:yonaskolb/XcodeGen" = "2.46.0" # generates desktop/macos/Cox.xcodeproj from project.yml, so only the spec is in git (`just desktop-app`, T37.32.1)
+"aqua:watchexec/watchexec" = "2.7.4" # `just desktop-open` rebuilds CoxFFI.xcframework on every Rust change while Xcode is open
 cmake = "3.31.12" # builds whisper.cpp for cox-voice (T54.2, A123); the version sibling projects already pin

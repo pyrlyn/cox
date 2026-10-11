@@ -152,6 +152,18 @@ desktop-xcframework:
 desktop-app: desktop-xcframework
     mise exec -- bash scripts/desktop/app.sh
 
+# The macOS app in Xcode, kept on the current Rust core: builds the XCFramework (an unchanged one
+# is a cargo no-op), regenerates the gitignored Cox.xcodeproj from desktop/macos/project.yml and
+# opens it, then stays in the foreground and rebuilds the XCFramework on every change under
+# crates/ or to the Cargo manifests. Xcode links the new one on the next ⌘R; Ctrl-C stops watching.
+# `queue`, not `restart`: a restart could land between the script's rm and -create-xcframework.
+desktop-open: desktop-xcframework
+    mise exec -- xcodegen generate --quiet --spec desktop/macos/project.yml
+    xed desktop/macos/Cox.xcodeproj
+    mise exec -- watchexec --postpone --on-busy-update queue --debounce 1s \
+        --watch crates --watch Cargo.toml --watch Cargo.lock \
+        -- bash scripts/desktop/xcframework.sh
+
 # The app as a DMG to hand out (T37.32.3): desktop/macos/build/Cox-<version>-<build>-debug-arm64.dmg,
 # ad-hoc signed unless COX_SIGN_IDENTITY names a Developer ID Application identity. CI builds the
 # same through the `desktop build` workflow.
