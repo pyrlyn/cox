@@ -41,10 +41,11 @@ lib="$target_dir/$TARGET/$PROFILE/libcox_ffi.a"
 cargo build -p cox-ffi --lib --profile "$PROFILE" --target "$TARGET"
 
 # Library mode: the generator reads the exported metadata from the built
-# archive. Same profile and target, so only uniffi and cox-ffi rebuild.
+# archive. Same profile and target, so only uniffi and cox-ffi rebuild. Not `-q`:
+# the first build of the generator takes minutes and would otherwise look hung.
 gen="$(mktemp -d)"
 trap 'rm -rf "$gen"' EXIT
-cargo run -q -p cox-ffi --features bindgen --bin uniffi-bindgen \
+cargo run -p cox-ffi --features bindgen --bin uniffi-bindgen \
   --profile "$PROFILE" --target "$TARGET" -- \
   generate --library "$lib" --language swift --out-dir "$gen/swift"
 
