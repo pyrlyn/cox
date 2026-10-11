@@ -17,7 +17,7 @@
 //! `default.toml`'s values are not a Rust type's zero value (`true`,
 //! non-empty strings, non-zero numbers).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use schemars::JsonSchema;
@@ -431,6 +431,14 @@ pub struct ProvidersConfig {
     /// hand-rolled one. No code change needed to add a name here.
     #[serde(flatten)]
     pub custom: HashMap<String, CompatibleProviderConfig>,
+    /// ABI `[[provider]]` section names registered at session open
+    /// (T33.18). Not a config key: `Router::pick` reads it so a tier —
+    /// including a legacy `typesafe` tier — resolves to the plugin
+    /// instead of the built-in client. Empty until `cox-session` fills
+    /// it from the loaded plugins.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub abi: BTreeSet<String>,
 }
 
 impl ProvidersConfig {

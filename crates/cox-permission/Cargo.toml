@@ -13,6 +13,10 @@ globset = { workspace = true }
 [dev-dependencies]
 # `Engine::decide`'s doctest builds a `ToolCall` input.
 serde_json = { workspace = true }
+# T56.4: the A122 test loads a real project config through the one loader
+# (dev only: `deps.rs` keeps cox-permission's runtime graph to cox-protocol).
+cox-config = { path = "../cox-config", version = "0.1.2" }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

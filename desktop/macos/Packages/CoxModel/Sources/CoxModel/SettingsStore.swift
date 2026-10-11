@@ -4,12 +4,13 @@
 
 // The Settings window's state (DT§5.7): the view Rust built from the schema
 // and the config layers, grouped for the sidebar, plus provider keys through
-// a `SecretStore`. Every decision — the page, the label, the control, whether
-// a field is read-only, whether a value or a key is taken (T58.4.8–T58.4.9) —
-// already came from Rust; this store searches, sends edits and keeps the
-// answer.
+// the `SecretStore` dependency (`DependencyValues.secretStore`). Every
+// decision — the page, the label, the control, whether a field is read-only,
+// whether a value or a key is taken (T58.4.8–T58.4.9) — already came from
+// Rust; this store searches, sends edits and keeps the answer.
 
 import CoxClient
+import Dependencies
 import Foundation
 import Observation
 
@@ -40,10 +41,10 @@ public final class SettingsStore {
   /// The project whose layer applies.
   public let cwd: String
   @ObservationIgnored private let client: any SettingsClient
-  @ObservationIgnored private let secrets: any SecretStore
+  @ObservationIgnored @Dependency(\.secretStore) private var secrets
 
-  public init(client: any SettingsClient, secrets: any SecretStore, cwd: String) {
-    (self.client, self.secrets, self.cwd) = (client, secrets, cwd)
+  public init(client: any SettingsClient, cwd: String) {
+    (self.client, self.cwd) = (client, cwd)
   }
 
   public func load() async {

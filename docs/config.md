@@ -202,7 +202,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `timeout_ms` = `2000` — a run that takes longer is killed and the row goes blank (100 to 10000)
 ## `[hooks]`
 
-- `timeout_s` = `60` — seconds per [[hooks.<Event>]] process (a hook's own timeout_s overrides); stdin carries the Claude Code JSON payload, exit 2 blocks, stdout may carry updatedInput or additionalContext
+- `timeout_s` = `60` — seconds per [[hooks.<Event>]] process (a hook's own timeout_s overrides); stdin carries the Claude Code JSON payload, exit 2 blocks, stdout may carry updatedInput or additionalContext; a project config or a repository .claude file cannot add or change hook commands (T64.1) — they are reverted; user config and ~/.claude can
 - `fail_open` = `true` — a hook that crashes, times out or has an invalid matcher regex is warned about and skipped, never fatal (D14). matcher is an exact tool name, or — when it carries a regex metacharacter — a regex over the tool name (T22.3). Events: UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, Stop, PreCompact, PostCompact, SessionStart (payload source: startup | resume | clear; stdout additionalContext joins the volatile system block), SessionEnd, PermissionRequest, SubagentStart, SubagentStop, Notification (observe-only kind/message/title payload on ApprovalRequired, TurnDone and ask_user)
 ## `[mcp]`
 

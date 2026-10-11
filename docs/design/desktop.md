@@ -563,12 +563,27 @@ Rules:
 | Package | Contents | Depends on |
 | --- | --- | --- |
 | `CoxCore` | `binaryTarget` `CoxFFI.xcframework`; generated `cox_ffi.swift` (target `CoxFFIBindings`, Swift 5 mode, a symlink into `build/bindings/`); `LiveCoreClient` converting its values to `CoxClient`'s | `CoxModel`'s `CoxClient` |
-| `CoxModel` | Target `CoxClient`: the timeline and intent values, the `CoreClient` protocol and `FixtureCoreClient` — here, not in `CoxCore`, because a package declaring the binary target does not load before the XCFramework is built (T37.16). Target `CoxModel`: `@Observable @MainActor` stores: `AppStore` (projects, sessions, inbox, badge), `SessionStore` (ordered blocks by id, status), `ComposerStore` (the draft, shell mode, picked `@` files, attachments, the rows `SessionClient.complete` returns — the fixture client answers from a fixed list — and the count of prompts queued while a turn runs, read from the core's `status` patch, T37.24, T37.24.8), `SettingsStore`. `apply(_ patches:)` and `send(_ intent:)` only | swift-collections |
+| `CoxModel` | Target `CoxClient`: the timeline and intent values, the `CoreClient` protocol and `FixtureCoreClient` — here, not in `CoxCore`, because a package declaring the binary target does not load before the XCFramework is built (T37.16). Target `CoxModel`: `@Observable @MainActor` stores: `AppStore` (projects, sessions, inbox, badge), `SessionStore` (ordered blocks by id, status), `ComposerStore` (the draft, shell mode, picked `@` files, attachments, the rows `SessionClient.complete` returns — the fixture client answers from a fixed list — and the count of prompts queued while a turn runs, read from the core's `status` patch, T37.24, T37.24.8), `SettingsStore`. `apply(_ patches:)` and `send(_ intent:)` only. `CoxClient` also declares the launch-wide services as swift-dependencies values (`coreClient`, `secretStore`, `inboxClient`) with test and preview values only | swift-collections, swift-dependencies |
 | `CoxUI` | Views and the design system (DT§5.9); imports no other cox package, so a card is built from plain values | — |
 | `CoxTranscriptText` | `TranscriptTextView`: the transcript as one TextKit 2 `NSTextView`, every timeline block a tracked text range (`BlockRanges`: id → range, location → id), styled by a `TranscriptStyle` the caller builds from tokens (each Rust `StyleToken` maps to a style colour, never a literal); a reply's text is built from its `StyledDoc` spans, and `apply` splices each timeline patch into its own block's range instead of rebuilding the text (`AppendText`, `DocTail`, upsert, remove); tool, approval, question and subagent cards are view-backed attachments (one character each) hosting the SwiftUI views the caller passes as `TranscriptCards`, so it depends on no CoxUI (T37.40, T37.41, T37.43, DT§5.2, `research.md` §9.5.13) | `CoxModel`'s `CoxClient` |
 | `CoxTranscript` | `TranscriptView`: a `SessionStore`'s timeline in `CoxTranscriptText`'s view, a tool, tool-group or task block as CoxUI's `ToolCard`, an approval or question in a caller's slot, with `TranscriptStyle.cox` built from CoxUI's tokens; it follows the store through `SessionStore.didApply`, so each patch batch the store applies is spliced into the text. The one place the three meet, so CoxUI and `CoxTranscriptText` stay independent (T37.23). Also `SessionComposer`: CoxUI's `Composer` over CoxModel's `ComposerStore` (T37.24) | `CoxModel`, `CoxTranscriptText`, `CoxUI` |
 | `CoxPlatform` | `Host` implementation, notifications with actions, Sparkle, OAuth handoff, `NSWorkspace` "open in editor", SwiftTerm and `WebView` panes (M2) | `CoxModel` |
 | App target | `@main`, scenes, menus, entitlements, Info.plist, assets; `project.yml` for XcodeGen, `just desktop-app` builds an ad-hoc signed Debug `Cox.app` (T37.32.1) | all |
+
+**Dependencies.** A store reads a launch-wide service through swift-dependencies'
+`@Dependency` instead of an initializer argument: `SettingsStore` its
+`secretStore`, `SidebarStore` its `inboxClient`, `AskCox` and the window's
+"open session" their `coreClient`. Their keys live in `CoxClient` beside the
+protocols, with an in-memory secret store, no inbox and a core that fails the
+test when nobody provided one. The live values depend on how the app was
+launched (a fixture replay, `COX_HOME`, `COX_KEYRING`), so `AppModel` calls
+`prepareDependencies` with `LaunchCore.prepare` before it makes any store, and
+a test overrides a value with `withDependencies`. `SessionClient` is not a
+dependency: every `SessionStore` holds the one session it was opened on, and
+many are open at once. The clients that are the live Rust core itself
+(settings, workspace, remote hosts, agents, best-of) are still passed in, as
+only a live launch has them. The App Intents use Apple's own `@Dependency`
+(AppIntents' `AppDependencyManager`), so a file never imports both modules.
 
 **What Swift may do:** lay out, animate, localize dates and numbers, map a
 `StyleToken` to a color, keep UI-only state (scroll position, which blocks

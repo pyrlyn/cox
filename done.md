@@ -1,4 +1,200 @@
 
+#### T33.18 Providers, ABI form (`PluginProvider`)
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-09 · Depends: T33.14.1, T33.17 · Size: ~190 (landed larger; see Not done) · Priority: P2 · Complexity: 5 · Files: `crates/cox-plugin/src/provider.rs`, `crates/cox-plugin/src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-session/src/provider.rs`
+Goal: with `api = "plugin"`, `stream()` calls `cox_provider_stream` and forwards `ProviderEvent`s. The guest's `cox_http` is limited to `base_url`'s host, and the host injects the `auth` header from `resolve_key`, so the key never enters wasm memory. Missing usage is estimated; usage below half of cox's estimate is replaced by the estimate with one warning.
+What landed:
+- `PluginProvider::stream` calls `cox_provider_stream` on a worker thread and forwards `ProviderEvent`s. A missing usage event is filled (`estimated: true`, input = the injected estimate, output = 0) and forwarded, because the session prefers the streamed usage. Reported input below half the estimate is replaced once, with one `tracing` warning; output tokens stay. At half, the guest's figure stands.
+- `cox_http` may reach a provider host only while that section's `cox_provider_stream` is active. The host injects `Authorization: Bearer` or `x-api-key` on the reqwest request and drops a guest header of the same name. The key is not copied into wasm. A missing key builds the section without auth and warns. A duplicate section name keeps the lower plugin id. A bad `base_url` is skipped.
+- `Router::pick` resolves a name in `providers.abi` to `ProviderId::Plugin` before built-ins, including a legacy `typesafe` tier, and does not pin `jev-latest`. `provider_name` returns the section name. The ledger tag is `plugin:<section>`.
+- Session open builds the ABI map before the scripted/replay short-circuit, prices it, and keeps it beside the main-turn provider. When no test double is set and the code tier names a section in the map, that priced plugin is the main provider. Child sessions share the map.
+Not done: the card named five files and ~190 lines. Session assembly now lives in `cox-session`, and `ProviderId` is no longer `Copy`, so the change also touches `hostfn.rs`, `live.rs`, `plugin_model.rs`, `config.rs`, `cox/src/sessions.rs`, and the `tokio-util` dependency on `cox-plugin` (already a workspace crate; `Provider::stream` takes `CancellationToken`). `docs/design/plugins.md` already described this path, so no user-doc translation changed. T33.40.1's decide call-out is still open.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib provider_key_never_reaches_guest
+provider::tests::provider_key_never_reaches_guest ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib underreported_usage_is_replaced_by_estimate
+provider::tests::underreported_usage_is_replaced_by_estimate ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib every_request_has_a_usage_row
+provider::tests::every_request_has_a_usage_row ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-core --lib plugin_provider_section_resolves_by_name
+router::tests::plugin_provider_section_resolves_by_name ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-session --lib scripted_provider_mode_still_builds_plugin_providers
+provider::tests::scripted_provider_mode_still_builds_plugin_providers ... ok
+$ mise exec rust@1.98.1 -- cargo test -p cox-protocol --lib
+117 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-plugin --lib
+96 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-core --lib
+156 passed
+$ mise exec rust@1.98.1 -- cargo test -p cox-session --lib
+59 passed
+$ mise exec rust@1.98.1 -- cargo fmt --all -- --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-protocol -p cox-plugin -p cox-core -p cox-session -p cox --all-targets -- -D warnings
+clean
+```
+`cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
+
+#### T64.1 Revert project hook commands
+
+Model: Grok 4.7 · Status: done 2026-10-09 · Depends: — · Size: ~140 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox/src/config_load.rs`, `crates/cox-protocol/default.toml`
+Goal: a repository `.cox/config.toml` or `.claude` file cannot add or change hook commands. Those commands run as `/bin/sh -c` with tool JSON on stdin and no sandbox. User config and `~/.claude` hooks stay.
+Plan:
+1. `apply_project_guards` reverts `hooks.events` to the layers without the project when they differ, and reports one `GuardViolation` (`hooks`).
+2. `timeout_s` and `fail_open` stay project-settable. `source_of` does not treat those scalars as reverted.
+3. The Claude-settings import test expects a repository hook to be dropped. A new test keeps the `~/.claude` command and drops the repository one.
+What landed: the guard, the two tests, the `default.toml` comment (and generated `docs/config.md`), plus the compatibility notes in `docs/compat.md`, `docs/design/extensions.md` and plan D13 / §1.6.
+Not done: hooks are still unsandboxed when the user configured them (the status-line sandbox alternative). T64.2 and later stay open.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config
+37 tests run: 37 passed
+$ mise exec rust@1.98.1 -- cargo nextest run -p cox-config -p cox-protocol -p cox -E 'test(/project_config_cannot_set_hook_commands|user_claude_hooks_survive|config_claude_settings_import|every_guarded_key_has_its_own_reason|config_docs_config_md_matches|project_claude_settings_allow|user_claude_settings_allow/)'
+7 tests run: 7 passed
+$ mise exec rust@1.98.1 -- cargo fmt --all -- --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-config -p cox-protocol -p cox --all-targets -- -D warnings
+clean
+```
+`mise` is not on the default PATH in this environment; the commands used `~/.local/bin/mise` after `mise install rust`. A full `cargo nextest run -p cox` also ran two `external_agents_cursor` tests that fail here because Landlock cannot wrap the fixture agent's argv (`cannot run under the sandbox`). That warning is unrelated to hook loading; CI's sandbox host is the check for it.
+
+#### T59.11 Fold a JSON tool result into one line per node
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: T59.2 · Size: ~580 (`json_tree.rs` past the ~200 cap; see A144) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/json_tree.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-core/src/lib.rs`
+Goal: a single-line JSON design or AST dump larger than `tool_output_visible_bytes` is folded before the line cut, so the model keeps a template line and an `expand` trailer instead of losing the middle; the archive row stays the raw bytes. `read` and `grep` stay unfolded.
+Plan:
+1. `fold_json`: skip a uniform scalar table (an array of objects with the same scalar keys and at least three columns); hoist values used at least twice; template object bodies used at least twice, omitting `id` and `name` (and `children`, which stay nested lines); one positional line per node; deterministic key order; `None` when the folded text is not shorter than `serde_json::to_string` of the input.
+2. In `turn.rs`, inside the `unwrap_or_else` that calls `visible` / `visible_folding`, before shorten: if the tool is not `read` or `grep` and the output is one JSON value and `fold_json` returns a shorter text, shorten that text. The archive `put` stays first and keeps the raw bytes.
+3. Tests: repeated bodies become one template; a single-use field stays inline; a 3-column scalar table returns `None`; two calls return equal strings; identical nodes stay one line each; a `bash` JSON result over the visible budget shows a template line and an expand trailer, and the archive bytes equal the raw output.
+What landed: `crates/cox-core/src/json_tree.rs` (`fold_json`) and `json_source` in `turn.rs`. Nodes are not hoisted (a repeated node stays a positional line); only field values are. `compact.rs`, `dedup.rs` and `fold_repeats` are unchanged. No Figma client, no new dependency.
+Check:
+```text
+$ mise exec -- cargo test -p cox-core json_tree -- --test-threads=8
+test json_tree::tests::identical_nodes_stay_one_line_each ... ok
+test json_tree::tests::repeated_bodies_become_one_template ... ok
+test json_tree::tests::single_use_field_stays_inline ... ok
+test json_tree::tests::two_calls_return_equal_strings ... ok
+test json_tree::tests::three_column_scalar_table_is_not_folded ... ok
+5 passed
+$ mise exec -- cargo test -p cox-core turn
+turn::tests::bash_json_over_budget_shows_a_template_and_keeps_the_raw_archive ... ok
+(the `turn` filter: 20 unit + 17 integration tests passed)
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
+#### T65.2 tool_search summary mode
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: T65.1 · Size: ~50 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/tool_search.rs`
+Goal: `tool_search` returns `{name, description}` unless the caller asks for the full spec, and discovery still returns names.
+What landed: optional `detail` is `summary` (the default) or `full`. Summary serializes `{name, description}` for each hit. `full` keeps the pretty `ToolSpec`. `structured.discovered` is still the names. `context.rs` is unchanged.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools tool_search
+test tool_search::tests::tool_search_ranks_the_matching_deferred_tool_first ... ok
+test tool_search::tests::tool_search_returns_at_most_five_and_nothing_for_no_match ... ok
+test tool_search::tests::tool_search_reports_discovered_names_in_structured_output ... ok
+test tool_search::tests::tool_search_summary_omits_input_schema ... ok
+4 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
+#### T65.1 mcp_exec: one sandboxed program fans out MCP calls
+
+Model: grok-4.7 · Status: done 2026-10-08 · Depends: — · Size: 616 lines in `mcp_exec.rs` plus one `pub mod` · Priority: P0 · Complexity: 3 · Files: `crates/cox-tools/src/mcp_exec.rs`, `crates/cox-tools/src/lib.rs`
+Goal: a unit test where two tool results are 10_000 bytes each and the model-visible string is only the program's final print.
+What landed: `McpExecTool` (`deferred: false`, `Risk::Write`) runs an original Python driver in a new process on every call. `cox_sandbox::sandbox::command` builds it with network off and one fresh temp directory as the only writable root (also a root, so bubblewrap still mounts a path under its private `/tmp`). `sandbox::command` inserts `-c`, so the shell `exec`s `python3 -I -u <driver>`. The driver allows top-level await and speaks `search`, `describe` and `call`; any other stdout `type` is rejected. `describe` is name and description only. `ToolOutput.text` is the program's `result` text, cut at 8_000 bytes with `… truncated`. The tool does not archive. A non-zero exit or a timeout is `is_error` plus the stderr tail. A missing `python3` is `ToolError::Denied` with `python3 is missing`. No protocol change.
+Not done: `McpExecTool` is not registered on the session. That wiring is another file past this card's cap. `mcp_exec.rs` is 616 lines, over the ~200 line card: the driver, the sandbox spawn, the RPC loop and the acceptance test do not pass the Check as separate cards.
+Check output:
+```text
+$ mise exec -- cargo test -p cox-tools mcp_exec
+test mcp_exec::tests::result_text_over_8000_bytes_ends_with_truncated_trailer ... ok
+test mcp_exec::tests::mcp_exec_is_a_present_write_tool_with_no_network ... ok
+test mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print ... ok
+3 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo fmt -p cox-tools --check
+clean
+$ mise exec -- cargo clippy -p cox-tools --all-targets -- -D warnings
+clean
+```
+
+#### T65.1 Deferred lockfile doc lookup
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: `docs.rs` is past the 200-line guide because query, fetch and `llms.txt` share one cache format (A145) · Priority: P1 · Complexity: 3 · Files: `crates/cox-tools/src/docs.rs`, `crates/cox-tools/src/lib.rs`, `crates/cox-session/src/tools.rs`, `docs/tools.md`
+Goal: `docs_resolve`, `docs_query` and `docs_fetch` stay out of the default prompt. The lockfile names the version, a local `items.jsonl` answers the query, and only `docs_fetch` downloads rustdoc from docs.rs.
+Plan:
+1. `docs_resolve` reads `Cargo.lock` text from the workspace roots and returns `cargo/<name>/<version>`. No `cargo` subprocess. Missing name: `not in lockfile`.
+2. `docs_query` searches `~/.rtok/docs/<name>/<version>/items.jsonl` when that directory exists, otherwise `~/.cox/docs`. Case-folded term overlap, every term required, at most 5 hits of 400 characters. A missing cache returns `not cached` and does not construct `docs_fetch`. After a failed parse, `libraryName` and `question` rename to `name` and `query` inside this tool only. `name = "llms"` searches a root `llms.txt` and downloads nothing.
+3. `docs_fetch` GETs `https://docs.rs/crate/<name>/<version>/json.zst` with no `Authorization` header and a 30 s timeout. The version comes from the lockfile, never `latest`, unless the lockfile has no entry and the caller passed a version. Bytes, their sha256, and `items.jsonl` are written only after the body decodes. A failed GET leaves a previous file in place.
+Check: `docs_tools_are_deferred`, `query_deserialize_returns_the_matching_path_first`, `missing_cache_returns_not_cached_and_does_not_construct_fetch`, `tool_search_finds_docs_query`.
+What landed: `crates/cox-tools/src/docs.rs` (`DocsResolveTool`, `DocsQueryTool`, `DocsFetchTool`), `pub mod docs` in `lib.rs`, the three tools registered in `cox-session` before the `tool_search` rebuild, and the `docs/tools.md` rows. `cox-tools` depends on `sha2` 0.11 (already a workspace dependency) and `zstd` 0.13 (already in the lockfile via wasmtime). No Context7 URL, no API key, no change to `memory_save` or `memory_search`.
+Check:
+```text
+$ mise exec -- cargo test -p cox-tools docs::
+test result: ok. 13 passed; 0 failed; 143 filtered out
+$ mise exec -- cargo test -p cox-session tools::
+test result: ok. 4 passed; 0 failed
+  tools::tests::tool_search_finds_docs_query ... ok
+$ mise exec -- cargo clippy -p cox-tools -p cox-session --all-targets -- -D warnings
+Finished `dev` profile; no warnings
+```
+
+#### T64.24 Quarantine untrusted MCP tool definitions
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: larger than the usual card (the prompt required the hash, the migration, the session wiring and the CLI together) · Priority: P0 · Files: `crates/cox-mcp/src/trust.rs`, `crates/cox-mcp/src/client.rs`, `crates/cox-mcp/tests/client.rs`, `crates/cox-store/migrations/00000000000008_mcp_tool_trust/`, `crates/cox-store/src/mcp_trust.rs`, `crates/cox-session/src/mcp.rs`, `crates/cox/src/mcp_cmd.rs`, `crates/cox/src/cli.rs`
+Goal: a server's tool description and `readOnlyHint` do not reach the model or skip approval until the stored contract hash matches.
+What landed: `contract_hash` is the sha256 hex of `name|description|canonical input schema` (object keys sorted; annotations are not an input). `mcp_tool_trust` stores only an approved hash. A missing row is `Pending` for project `.mcp.json` and plugins, and an auto-baselined `Approved` insert for the user layer (`config` and `~/.claude.json`). A different stored hash is `Changed` and is not overwritten. Until `Approved`, `McpTool::spec` uses `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, forces `Risk::Write` and keeps `deferred: true`; `call` returns that sentence as an error and does not call the transport. `tool_search` indexes `spec().description`, so a pending tool whose real description was `ignore previous instructions` is not returned. `cox mcp trust <server>` writes every current hash; `cox mcp trust` lists pending and changed tools. A store read error stays `Pending` (it must not look like a missing row and baseline). `cox-mcp` links `sha2`, already a workspace dependency.
+Not done: T64.7 and T64.10 stay open. A project `[mcp.servers]` entry is still source `config` until T64.7 reverts it. An unsandboxed stdio server is still T64.10. No Bleve, no `cox-sandbox` change, no token-store rewrite, no config watcher, no JS code-execution tool.
+Check:
+```text
+$ mise exec rust -- cargo nextest run -p cox-mcp -p cox-permission -p cox-store -p cox
+PASS cox-mcp::client untrusted_description_and_read_only_hint_do_not_reach_the_model
+PASS cox-store mcp_trust::tests::mcp_trust_approve_replaces_the_hash_and_get_misses_an_unknown_tool
+PASS cox-store tests::schema_snapshot_matches
+PASS cox-store tests::older_binary_refuses_newer_schema
+Summary [  23.360s] 279 tests run: 279 passed, 4 skipped
+$ mise exec rust -- cargo clippy --workspace --all-targets -- -D warnings
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 52.26s
+$ mise exec rust -- cargo fmt --all -- --check
+clean
+```
+`mise exec --` (every tool in `mise.toml`) cannot start on this Linux host: `aqua:yonaskolb/XcodeGen@2.46.0` is darwin-only. The commands above use `mise exec rust --`, which is the pinned Rust 1.98.1 the prompt's `mise exec -- cargo` is there to select.
+The Dart example (`plugin_example_dart`, ignored unless `just plugin-examples dart`) trusts `example-dart-count` before the scripted turn. A plugin grant covers the package, not the description the server reports when it starts.
+
+#### T59.11 Outline rows include the end line
+
+Model: Grok 4.7 · Status: done 2026-10-08 · Depends: — · Size: ~40 · Priority: P0 · Complexity: 1 · Files: `crates/cox-syntax/src/outline.rs`, `crates/cox-tools/src/read.rs`, `crates/cox-tools/src/repomap.rs`
+Goal: an outline row is `start-end: signature` (1-based, inclusive), so the next `read` passes that span as `lines` instead of guessing where the item ends.
+Plan:
+1. Row type `(usize, usize, String)`: start line, end line, signature. End line is `child.end_position().row + 1`. Fallback rows use the same line for start and end.
+2. Render `{start}-{end}: {signature}`. The `bar` fixture row is `5-7: pub fn bar(x: u32) -> u32`.
+3. `ReadTool::spec` says the outline is `start-end: signature`; pass `lines` as that `start-end`. Tool name stays `read`. No new parameter.
+4. `read_outline_of_1000_line_rust_fixture_is_short_and_lists_every_pub_fn` still finds each `pub fn`, and that row matches `^[0-9]+-[0-9]+: `.
+What landed: `collect` keeps the inclusive end line; `render` prints `start-end`; markdown and keyword fallbacks use `n-n`; the `read` description tells the model to pass that span as `lines`; the repomap assertion matches a one-line function (`2-2`).
+Not done: no symbol index, no `check_edit_safe`, no token-savings counter, no provider call, no `symbol` parameter on `read` (T59.8). The ACP editor-buffer keyword outline (`crates/cox-acp/src/client_tools.rs`) still prints a start line only; it does not call `cox-syntax`.
+Check:
+```text
+$ mise exec rust@1.98.1 -- cargo test -p cox-syntax -p cox-tools outline
+PASS cox-syntax outline::tests::outline_falls_back_to_markdown_headings
+PASS cox-syntax outline::tests::outline_falls_back_to_keyword_lines_for_unknown_extension
+PASS cox-syntax outline::tests::outline_rust_lists_pub_fn_and_struct
+PASS cox-tools read::tests::read_outline_of_1000_line_rust_fixture_is_short_and_lists_every_pub_fn
+4 tests run: 4 passed
+$ mise exec rust@1.98.1 -- cargo fmt --check
+clean
+$ mise exec rust@1.98.1 -- cargo clippy -p cox-syntax -p cox-tools --all-targets -- -D warnings
+clean
+```
+A bare `mise exec --` on this Linux host stops while installing `aqua:yonaskolb/XcodeGen@2.46.0` (darwin-only) before cargo starts. The three commands above are the pinned Rust from `mise.toml` (`rust@1.98.1`).
+
 #### T33.14.1 `cox_http`
 
 Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43; the filesystem half is T33.14.2.
@@ -10051,3 +10247,475 @@ Execution plan (Claude Code / opus-5.5):
 - Tests (`lsp::tests`, fake server through the launcher): `edit_reports_the_error_it_introduced`, `edit_adds_nothing_when_no_server_runs` (and nothing is started), `errors_that_existed_before_are_not_reported` (a synced file via `last`, and an unsynced file through `write` via the old-text sync), `introduced_lists_at_most_ten`, `dead_server_adds_nothing`, `a_baseline_cut_off_by_the_deadline_adds_nothing` (from the merge: fails when a deadline report is diffed).
 - Check output summary after the merge: `mise exec -- cargo nextest run -p cox-tools -p cox-session -p cox-protocol -p cox-config --no-fail-fast`: 371 run, 371 passed, 1 skipped; `cargo clippy -p cox-tools -p cox-session -p cox-protocol -p cox-config --all-targets -- -D warnings` clean; `cargo fmt --check` clean. Before the merge (PR #156 alone): `mise exec -- cargo nextest run --workspace --no-fail-fast`: 2063 run, 2062 passed, 1 failed — `cox-plugin hostfn::tests::http_to_allowed_host_round_trips`, untouched by this change, passed when rerun alone. `cargo nextest run -p cox-tools -p cox-session -p cox -p cox-protocol -p cox-config --no-fail-fast`: 562 run, 562 passed (an earlier fail-fast run had `cox::plain plain_has_no_csi_cursor_moves` and `plain_transcript_snapshot` time out waiting for the first prompt while the workspace was still compiling; both passed on the rerun). `cargo nextest run -p cox-tools -E 'test(lsp)'`: 32 passed. `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean. No insta snapshot changed.
 - Not done: `just bench` and the `research.md` bench row (bash check calls −20 %) were not run in this pass (no benchmarks by rule for this run); the default stays `after_edit = false` until they are. The real binary was not run against a scratch `COX_HOME`: the disk filled during that build, so the target dir was cleaned instead; the config keys are covered by the config drift tests.
+
+#### T33.45.2 ABI: surface payloads
+
+Depends: — · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin-api/src/ui.rs`, `docs/plugin-abi.schema.json` · Design: `docs/design/plugins.md` §15, A134
+
+Added `Surface` (identical to T33.45.1's manifest copy, so the merge drops one), `InitIn.surface`, `InitOut.desktop` (`DesktopOut`, `TabDecl`, `ActionDecl`), `DesktopNotice`/`NoticeAction`, `Slot::DesktopInspector`, `CommandOut::OpenInspector`, `AbiError::NotOnThisSurface`, `Span.link`, `Widget::Image { path, alt }` (counted by the node and text caps). Consumers got the minimal arms their exhaustive matches need (`cox-tui`, `cox-app`, `cox-plugin`); the real behaviour stays with T33.45.3–T33.45.6.
+
+Status: done 2026-10-08 · Model: Claude Code / sonnet
+
+Check: `cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-tui -p cox-app` — 661 passed (new: `surface_round_trips_and_uses_lowercase_names`, `desktop_payloads_round_trip`, `init_in_without_surface_reads_as_none`, `inspector_slot_is_spelled_desktop_dot_inspector`, `symbol_names_are_lowercase_ascii_dotted_and_bounded`, `span_link_and_image_round_trip_and_default_to_absent`, `image_counts_toward_the_node_and_text_caps`; `unknown_fields_are_ignored_both_ways` and `command_out_has_no_submission_variant` extended; `abi_schema_matches_committed_file` passes on the regenerated schema). `cargo clippy --no-deps -p cox-plugin-api -p cox-plugin -p cox-tui -p cox-app -p cox-session -p cox --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `plugins/` `cargo check --all-targets` and `cox-plugin-sdk` for `wasm32-unknown-unknown` build.
+
+#### T56.2 Cloud Agents client: create, follow up, stream, cancel, usage
+
+Status: done 2026-10-08 · Depends: T56.1 · Size: ~190 · Files: `crates/cox-cursor-cloud/src/client.rs` (new), `crates/cox-cursor-cloud/src/lib.rs`; also `crates/cox-provider-http/src/sse.rs` (`sse_stream_with_id`), manifest `crates/cox-cursor-cloud/Cargo.toml`
+Goal: a client over `cox-provider-http` (connection setup, Bearer auth, non-2xx mapping, SSE framing, retry): `create_agent`, `create_run`, `get_run`, `stream_run`, `cancel_run`, `usage`. Only GETs are retried; a create is never retried (a retry could start and bill a second run). A dropped stream re-reads the run's status and, when it is not terminal, reopens without delivering an event twice. Errors are a `thiserror` enum whose text never contains the key.
+Plan: `client.rs` holds `Client` (reqwest client from `client_with_timeout`, Bearer from `bearer`, `cox/<version>` User-Agent, non-2xx through `map_http_error` with the key scrubbed from any message) and `CloudError` (thiserror). GETs retry with `retry::Policy`/`retryable`; POSTs never. `stream_run` frames the body with the new `sse::sse_stream_with_id`, because the shared framing drops the SSE `id:` that `Last-Event-ID` resume needs; a dropped stream re-reads `get_run` and, when not terminal, reopens with `Last-Event-ID` and skips the status frame Cursor re-sends. No new third-party dependency.
+Check: `mise exec -- cargo nextest run -p cox-cursor-cloud client_sends_the_key_as_bearer_only client_never_retries_create client_stream_reconnects_without_duplicate_events client_error_text_never_contains_the_key client_user_agent_is_cox_version_only` (wiremock).
+Check output: `cargo nextest run -p cox-cursor-cloud` and `-p cox-provider-http` — 34 passed (the five Check tests, plus client_stream_ends_when_the_dropped_run_is_terminal, client_refuses_ids_that_change_the_path, client_refuses_plain_http_to_a_remote_host and the `sse_stream_with_id` test); `cargo clippy -p cox-cursor-cloud -p cox-provider-http --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+Done when: the tests pass.
+Out of scope: webhooks (not in the v1 API); artifacts.
+
+#### T59.8 `read` by symbol name
+
+Model: sonnet · Status: done 2026-10-08 · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
+
+Goal: `read(path, symbol = "Foo::bar")` returns only that definition's lines from the `cox-syntax` outline, so the model stops reading a whole file to see one function.
+
+Files:
+- `crates/cox-tools/src/read.rs`
+- `crates/cox-syntax/src/outline.rs`
+
+Steps:
+1. Optional `symbol` input in `read`'s spec (`read.rs:48`) and handling in its call path (`read.rs:81`); resolve via `outline` spans; on several matches list them with lines, on none fall back to the existing "closest" message (Empryo idea: `read-file.ts`).
+2. The line range then goes through the existing ranged-read path, so caps and archives are unchanged.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: tests for a unique, an ambiguous and a missing symbol in Rust and TypeScript fixtures.
+
+Out of scope: symbol-addressed edit (separate card after this one shows use in the bench).
+
+Execution plan: (1) `cox-syntax` `outline.rs` walks definitions once into `Def { name, start, end, signature }` (name qualified by the enclosing impl/trait/class, e.g. `Foo::bar`), the outline rows derive from it, and `symbols()` plus `Def::matches` serve lookup. (2) `read.rs` gets `symbol`, resolves it (`.` and `::` both accepted; a unique hit becomes the `lines` range for the existing ranged-read path; several hits and no hit are `Denied` with the candidates or the closest names). (3) Tests in both files for unique, ambiguous and missing in Rust and TypeScript; `docs/tools.md` row updated.
+Check: `cargo nextest run -p cox-syntax -p cox-tools` - 198 passed, 1 skipped (new: `read_symbol_*` for unique, ambiguous and missing symbols in Rust and TypeScript fixtures, plus a no-grammar file; `definitions_*` and `find_symbol_*` in `cox-syntax`); `cargo clippy -p cox-syntax -p cox-tools --all-targets -- -D warnings` clean; `cargo fmt --check` clean. The workspace-wide run is left to CI. `todo.md` never listed T59.8, so it needed no edit.
+
+#### T59.9 Investigate: file claims for parallel subagents
+
+Model: Claude Code / sonnet · Status: done 2026-10-08 · Depends: — · Size: ~0 (research) · Priority: P3 · Complexity: 2
+
+Goal: decide with evidence whether parallel subagents (`Concurrency::Parallel`, `crates/cox-core/src/subagent.rs:395`) need per-file write claims (Empryo idea: `WorkspaceCoordinator.ts`, a claim table that makes the second writer wait or fail), or whether worktrees (P44) already cover it.
+
+Files:
+- `research.md`
+
+Steps:
+1. Count, in `just bench` runs with parallel subagents, how often two subagents wrote the same file in one parent turn.
+2. Write the number, the command and the commit to `research.md`; propose a card only if the rate is above 1 % of parallel runs.
+
+Check:
+```bash
+just bench
+```
+
+Done when: the `research.md` row exists and this card is closed or followed by a sized card.
+
+Out of scope: implementing claims.
+
+Plan: (1) read how `agent` runs children (`subagent.rs`: `isolation`, `tools_for`, `spawn`) and what `just bench` exercises (`bench.rs`, `evals/token/sessions`); (2) read Empryo's `WorkspaceCoordinator.ts` through the GitHub API for what a claim does; (3) write the numbers and the recommendation as a `research.md` section; (4) run the Check.
+
+What landed: `research.md` §11 (the number, the code it rests on, Empryo's claim table, the recommendation) and an `ideas.md` entry under "Subagents" holding the re-open trigger. No follow-up card: no `just bench` run spawns a parallel subagent, so the 1 % threshold is not met.
+Check: the card's `just bench` was not run (research task, no builds); its subject was checked statically at `d5b1570d`:
+```text
+$ grep -c -i "agent\|subagent" crates/cox/examples/bench.rs evals/token/sessions/*.jsonl
+crates/cox/examples/bench.rs:0
+evals/token/sessions/auth-flow.jsonl:0
+evals/token/sessions/bug-hunt.jsonl:0
+evals/token/sessions/docs.jsonl:0
+evals/token/sessions/perf.jsonl:0
+evals/token/sessions/rename.jsonl:0
+```
+Same-file rate: 0 of 0 parallel runs (none exist in the bench).
+
+#### T59.10 Memory entries linked to files boost recall
+
+Model: sonnet · Status: done 2026-10-08 · Depends: — · Size: ~150 · Priority: P3 · Complexity: 2
+
+Execution plan (Claude Code / sonnet):
+1. `cox-store`: migration `00000000000008_memory_files` (`memory_files(memory_id, path)`, cascade on delete), `schema.rs` table, `Store::memory_set_files` and `Store::memory_search_touching` as defaulted trait methods in `cox-protocol` so other `Store` impls keep compiling.
+2. `memory_search_touching`: the FTS candidates (same query and order as `memory_search`) are the text list; those linked to a touched path form the linked list; RRF (k=60) merges them, ties by memory id. No touched paths delegates to `memory_search`, so the order is unchanged. A linked entry that does not match the query text never enters the result.
+3. `cox-tools/src/memory.rs`: `memory_save` links body tokens that `confine` accepts and that are files; `memory_search` derives the touched paths from the session's `read`/`edit`/`write` calls in the rollout.
+4. Tests in `cox-store` (linked entry first, unchanged order without touched paths) and `cox-tools`; then the Check below.
+
+Goal: a memory entry that names a file is ranked above an equally text-matching entry when that file was read or edited in the session.
+
+Files:
+- `crates/cox-store/migrations/<new>/up.sql` (a `memory_files` table; migrations count as fixtures, not source files)
+- `crates/cox-store/src/lib.rs`
+- `crates/cox-store/src/schema.rs`
+
+Steps:
+1. Fill `memory_files(memory_id, path)` on save from paths in the body that exist under the workspace.
+2. `memory_search` (`lib.rs:483`, FTS from `00000000000001_init/up.sql:36`) takes the session's touched paths and merges a file-linked list with the FTS list by RRF, ties by id. Diesel DSL only, no raw SQL in Rust.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: a store test shows the linked entry first and an unchanged order without touched paths.
+
+Out of scope: embeddings, UI.
+
+Result: `memory_files(memory_id, path)` (migration `00000000000008_memory_files`, cascade on delete, `schema.rs`) holds the canonical paths a fact's body names. `cox-protocol` gains two defaulted `Store` methods, `memory_set_files` and `memory_search_touching`, so the test double in `cox-core` is untouched. `cox-store/src/memory.rs` holds the FTS query (moved out of `memory_search`, same order), the link lookup (Diesel DSL) and `fuse`: reciprocal-rank fusion (k = 60) of the text list and the linked list, ties by memory id. The linked list is the subset of the text candidates (up to 50) that names a touched path, so a link alone never turns a non-matching fact into a hit; with no touched path `memory_search_touching` is `memory_search`. `memory_save` links body tokens that `confine` accepts and that are files (`src/a.rs:42` counts as `src/a.rs`); `memory_search` takes the touched paths from the session's own `read`/`edit`/`write` calls in its rollout (`ToolCallRequested`), through `confine`. A failed link write does not fail the save. The schema snapshot gained the new table.
+
+Check: `mise exec -- cargo nextest run -p cox-store -p cox-tools -p cox-protocol --no-fail-fast`: 341 run, 341 passed (new: `memory_search_ranks_a_fact_linked_to_a_touched_file_first`, `memory_search_touching_without_a_matching_touched_path_keeps_text_order`, `memory_link_never_makes_a_non_matching_fact_a_hit`, `memory_set_files_replaces_the_earlier_links`, `fuse_*` x3, `memory_save_links_only_files_that_exist_under_the_workspace`, `memory_search_passes_the_files_the_session_read_or_edited`). `cargo clippy -p cox-store -p cox-tools -p cox-protocol --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+Not done: the whole-workspace nextest and clippy were not run (only the three crates this touches); no run of the binary against a scratch `COX_HOME` (the store tests open a real SQLite file in a tempdir). Memory `apply_patch` calls are not counted as touched (their subject is not one file).
+
+
+#### T62.6 pid-reuse race in the bash kill path
+
+`crates/cox-tools/src/bash/mod.rs`: the leader was reaped as soon as it exited, yet the run still `killpg`s its group afterwards to catch grandchildren, so once the pid was free a reused id could send that signal to an unrelated process group. Fix: the exit is awaited with `waitid(WNOWAIT)` (called through `libc`, since nix wraps it only on Linux and the BSDs), which leaves the zombie unreaped and its pid, and so its group id, reserved; every group signal is sent first and the leader is reaped only after that, synchronously when it exited, on a detached thread otherwise, and in `Abandoned`'s drop. A pid race cannot be forced deterministically in a test, so the regression test pins the mechanism: the wait leaves the status reapable.
+Model: Claude Code / haiku · Status: done 2026-10-07 · Priority: P3 · Complexity: 1 · Files: `crates/cox-tools/src/bash/mod.rs`
+Check: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 mise exec -- cargo nextest run -p cox-tools` — 182 run, 182 passed (1 skipped), including the new `bash::tests::leader_stays_unreaped_after_its_exit_is_seen`, `dropped_run_lets_the_runtime_shut_down` and `bash_timeout_kills_process_group`. `cargo clippy -p cox-tools --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+#### T62.7 Duplicated repo-root resolution
+
+`crates/cox-tools/src/git.rs` resolved the repo root for two different questions: `main_checkout` (`--git-common-dir`, the main checkout shared by every worktree) and `linked` (`--show-toplevel`, the checkout the session runs in). They differ inside a linked worktree, so they stay distinct. The `--show-toplevel` call is now the named `worktree_root` helper next to `main_checkout`, and `linked` calls it. `scripts/changed_tests.py` keeps its own `--show-toplevel`: it is a separate Python program with no Rust helper it can reuse, and it needs the working-tree root that `git diff` paths are relative to.
+Model: Claude Code / haiku · Status: done 2026-10-07 · Priority: P3 · Complexity: 1 · Files: `crates/cox-tools/src/git.rs`
+Check: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 cargo nextest run -p cox-tools`: 182 passed, 1 skipped (the `#[ignore]` checkpoint benchmark); the new `git::tests::worktree_root_is_the_checkout_and_project_root_the_main_one` passes. `cargo clippy -p cox-tools --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+Not done: `scripts/changed_tests.py` unchanged, so its tests were not run. The `#[ignore]` checkpoint benchmark `warm_snapshot_under_200ms_on_50k_files` was run once by mistake and failed; it is unrelated to `git.rs` and was not investigated.
+
+#### T62.8 `checkpoint changes()` rejects mismatched root sets
+
+`crates/cox-tools/src/checkpoint.rs` `changes()` paired the two snapshots' trees with `zip`, so a pair taken over different root sets dropped the unpaired roots and reported a partial change set. Fix: a root-count or root-position mismatch returns the new `ToolError::RootsMismatch { before, after }` (naming both root lists) before any diff runs. The only caller, `cox-core`'s `after()`, already turns a checkpoint error into the warn-once notice rather than a failed turn, so the error is surfaced, not swallowed. `docs/protocol.jsonschema` regenerated; the change is an additive variant.
+Model: Claude Code / haiku · Status: done 2026-10-07 · Priority: P3 · Complexity: 1 · Files: `crates/cox-tools/src/checkpoint.rs`, `crates/cox-protocol/src/errors.rs`, `docs/protocol.jsonschema`
+Check: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 cargo nextest run -p cox-protocol -p cox-tools -p cox-core`: 647 passed, 2 skipped. `changes_errors_when_root_sets_differ` failed before the fix (`left: Ok([])`) and passes after. `protocol_jsonschema_matches_committed_file` passes against the regenerated file. `cargo clippy -p cox-tools -p cox-protocol --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+Not done: no workspace-wide build. `cox-app` and other dependents were not rebuilt; a grep found no exhaustive `ToolError` match outside `cox-protocol`, and the new variant is additive.
+
+#### T62.9 confine accepts colons in Unix names; retry jitter mixes more entropy
+
+`confine` refused every `:`, so a legitimate workspace file such as `a:b.txt` could not be reached on Unix. Now every platform refuses NUL, UNC and device prefixes and the drive prefix (`C:\x`, `C:/x`, `C:`), and only Windows refuses every colon (drive, device and `file:stream` syntax). On Unix a colon inside a name passes, and the lexical and canonical containment checks decide it like any other name; tests prove a `..` behind a colon-named component and a colon-named symlink to outside are still confined. The retry jitter read only the clock's sub-second part, which is nearly constant for callers that start together; it now also hashes a process counter and a per-call std `RandomState` seed, and stays within the same ±25 % band.
+Model: Claude Code / haiku · Status: done 2026-10-08 · Priority: P3 · Complexity: 1 · Files: `crates/cox-sandbox/src/path.rs`, `crates/cox-provider-http/src/retry.rs`, `crates/cox-tools/tests/confine.rs`
+Check: `cargo nextest run -p cox-sandbox -p cox-provider-http` — 38 passed (new: `colon_inside_a_unix_name_is_confined_to_root`, `colon_names_do_not_open_an_escape`, `drive_and_unc_prefixes_are_confined_on_every_platform`, `retry_jitter_differs_across_back_to_back_calls`, `retry_jitter_stays_within_a_quarter_of_the_nominal_wait`); `cargo clippy -p cox-sandbox -p cox-provider-http --all-targets -- -D warnings` clean; `cargo fmt --check` clean. Not run: `cargo test -p cox-tools --test confine` (outside the scoped build). Its ADS case is now `#[cfg(windows)]`, so it should not fail on Unix, but that is unverified here.
+
+#### T63.1 Property-based tests for `SessionStore`
+
+Model: sonnet · Status: done 2026-10-08 · Depends: — · Size: ~10 (manifest) + ~180 tests · Priority: P2 · Complexity: 2
+
+Goal: `SessionStore`'s patch rules — `upsert` ordering and in-place replace, `remove`, `reset` deduplication, batching, and the `lastLines` tail — hold for hundreds of generated patch sequences per run, compared with a plain-array reference model of `cox_app::coalesce::apply`.
+
+Why: the rules are mirrored by hand from Rust, and today's tests pin about ten hand-picked sequences. Collisions (an `upsert` to an id that exists, an anchor that was removed, a `remove` of a missing id) multiply quickly; a generator finds the combination nobody wrote down and shrinks it to the shortest failing list. Risk if skipped: a Swift-side ordering drift shows up only as a transcript in the wrong order for a user, not as a test failure.
+
+Install (no global tool; SwiftPM fetches it):
+- `desktop/macos/Packages/CoxModel/Package.swift`: the package dependency `https://github.com/x-sheep/swift-property-based`, `exact: "2.0.1"` (the repository pins test libraries exactly, as swift-snapshot-testing is), on the test target only.
+
+Files:
+- `desktop/macos/Packages/CoxModel/Package.swift`
+- `desktop/macos/Packages/CoxModel/Package.resolved` (regenerated by `swift package resolve`)
+- `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/SessionStorePropertyTests.swift` (new)
+- `toolchain.md` (a row in the SwiftPM table) and `plan.md` §1 (the dependency row `AGENTS.md` asks for)
+
+Steps:
+1. Manifest — the two changed lists in `Packages/CoxModel/Package.swift`:
+
+   ```swift
+   dependencies: [
+     .package(url: "https://github.com/apple/swift-collections", from: "1.7.1"),
+     .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
+     // T63.1: generated inputs and shrinking for the store's patch rules; tests only.
+     .package(url: "https://github.com/x-sheep/swift-property-based", exact: "2.0.1"),
+   ],
+   ```
+
+   ```swift
+   .testTarget(
+     name: "CoxModelTests",
+     dependencies: [
+       "CoxModel",
+       .product(name: "PropertyBased", package: "swift-property-based"),
+     ],
+     plugins: [swiftLint]
+   ),
+   ```
+
+2. `cd desktop/macos/Packages/CoxModel && swift package resolve`, then check whether `Package.resolved` of `CoxCore`, `CoxPlatform`, `CoxTranscriptText` and `CoxTranscript` changed too (a test-only dependency should not reach them; CI's "Swift pins unchanged by the build" step fails if one changed and was not committed).
+3. The test file. `propertyCheck` takes `isolation: isolated (any Actor)? = #isolation`, so in a `@MainActor` test its closure runs on the main actor and may call the store directly. Ids come from a pool of five so upserts collide; anchors include ids that never exist; text is short so failures shrink to something readable:
+
+   ```swift
+   // Copyright (c) 2026 Ivan Tugay
+   // SPDX-License-Identifier: GPL-3.0-or-later
+   // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
+
+   // SessionStore's patch rules against generated patch lists (T63.1): the store must order
+   // blocks as a plain-array model of `cox_app::coalesce::apply` does, for any mix of upserts
+   // and removes, not only the lists SessionStoreTests spells out.
+
+   import CoxClient
+   import PropertyBased
+   import Testing
+
+   @testable import CoxModel
+
+   /// One timeline edit; `description` keeps a shrunk failure readable.
+   enum Edit: Sendable, CustomStringConvertible {
+     case upsert(BlockID, text: String, after: BlockID?)
+     case remove(BlockID)
+
+     var patch: TimelinePatch {
+       switch self {
+       case .upsert(let id, let text, let after):
+         .upsert(block: Block(id: id, turn: 1, kind: .thinking(text: text)), after: after)
+       case .remove(let id):
+         .remove(id: id)
+       }
+     }
+
+     var description: String {
+       switch self {
+       case .upsert(let id, let text, let after): "upsert(\(id), \(text), after: \(after ?? "nil"))"
+       case .remove(let id): "remove(\(id))"
+       }
+     }
+   }
+
+   /// Five ids so edits collide; anchors b5 and b6 never exist, so those blocks append.
+   func editLists() -> Generator<[Edit], some Sequence> {
+     let id = Gen.int(in: 0...4).map { "b\($0)" }
+     let anchor = Gen.int(in: -1...6).map { n -> BlockID? in n < 0 ? nil : "b\(n)" }
+     let text = Gen.letter.string(of: 0...3)
+     let edit = Gen<Edit>.oneOf(
+       zip(id, text, anchor).map { Edit.upsert($0, text: $1, after: $2) },
+       id.map { Edit.remove($0) })
+     return edit.array(of: 0...40)
+   }
+
+   /// The ordering rule over a plain array: an existing id is replaced in place, `nil` inserts
+   /// first, a known anchor inserts after it, an unknown one appends.
+   func reference(_ edits: [Edit]) -> [(id: BlockID, text: String)] {
+     var rows: [(id: BlockID, text: String)] = []
+     for edit in edits {
+       switch edit {
+       case .upsert(let id, let text, let after):
+         if let at = rows.firstIndex(where: { $0.id == id }) {
+           rows[at].text = text
+           continue
+         }
+         let index =
+           after.map { anchor in rows.firstIndex { $0.id == anchor }.map { $0 + 1 } ?? rows.count }
+           ?? 0
+         rows.insert((id, text), at: index)
+       case .remove(let id):
+         rows.removeAll { $0.id == id }
+       }
+     }
+     return rows
+   }
+
+   @MainActor
+   func emptyStore() -> SessionStore {
+     SessionStore(session: FixtureSession(fixture: Fixture(batches: [], snapshot: [])))
+   }
+
+   @MainActor
+   @Suite struct SessionStoreProperties {
+     @Test func ordersBlocksAsTheReferenceModel() async {
+       await propertyCheck(count: 300, input: editLists()) { edits in
+         let store = emptyStore()
+         store.apply(edits.map(\.patch))
+         let expected = reference(edits)
+         #expect(Array(store.blocks.keys) == expected.map(\.id))
+         #expect(store.blocks.values.map(\.kind) == expected.map { .thinking(text: $0.text) })
+       }
+     }
+
+     @Test func repeatingTheLastEditChangesNothing() async {
+       await propertyCheck(input: editLists(), editLists().filter { !$0.isEmpty }) { edits, tail in
+         let once = emptyStore()
+         once.apply((edits + tail).map(\.patch))
+         let twice = emptyStore()
+         twice.apply((edits + tail + [tail[tail.count - 1]]).map(\.patch))
+         #expect(once.blocks == twice.blocks)
+       }
+     }
+
+     @Test func splittingABatchDoesNotChangeTheResult() async {
+       await propertyCheck(input: editLists(), Gen.int(in: 0...40)) { edits, cut in
+         let whole = emptyStore()
+         whole.apply(edits.map(\.patch))
+         let split = emptyStore()
+         let at = min(cut, edits.count)
+         split.apply(edits[..<at].map(\.patch))
+         split.apply(edits[at...].map(\.patch))
+         #expect(whole.blocks == split.blocks)
+       }
+     }
+
+     @Test func resetKeepsTheFirstPositionAndTheLastValue() async {
+       await propertyCheck(input: editLists()) { edits in
+         let blocks = edits.compactMap { edit -> Block? in
+           guard case .upsert(let id, let text, _) = edit else { return nil }
+           return Block(id: id, turn: 1, kind: .thinking(text: text))
+         }
+         let store = emptyStore()
+         store.apply([.reset(blocks: blocks)])
+         var firstSeen: [BlockID] = []
+         for block in blocks where !firstSeen.contains(block.id) { firstSeen.append(block.id) }
+         #expect(Array(store.blocks.keys) == firstSeen)
+         for id in firstSeen {
+           #expect(store.blocks[id] == blocks.last { $0.id == id })
+         }
+       }
+     }
+
+     @Test func lastLinesKeepsAtMostFiveLinesOfTheEnd() async {
+       let text = Gen.int(in: 0...2).map { ["a", "\n", "\r\n"][$0] }.array(of: 0...60)
+         .map { $0.joined() }
+       await propertyCheck(count: 500, input: text) { text in
+         let tail = lastLines(text)
+         let body = tail.utf8.last == UInt8(ascii: "\n") ? tail.utf8.dropLast() : tail.utf8[...]
+         #expect(text.hasSuffix(tail))
+         #expect(body.filter { $0 == UInt8(ascii: "\n") }.count < tailLines)
+       }
+     }
+   }
+   ```
+
+4. Run it, then make it fail on purpose once to see the shrunk output: change `?? rows.count` to `?? 0` in `reference`, run, read the "shrunk down from" line and the printed `.fixedSeed("…")`, revert.
+5. A failure found later: add the printed `.fixedSeed(...)` trait to that test while fixing, then turn the shrunk input into a plain regression test in `SessionStoreTests.swift` (the `AGENTS.md` rule for bug fixes) and drop the seed.
+6. `toolchain.md`, SwiftPM table: `| swift-property-based | local (CoxModel tests) | https://github.com/x-sheep/swift-property-based | T63.1: generated patch lists and shrinking for SessionStore's rules |`.
+
+Check:
+```bash
+cd desktop/macos/Packages/CoxModel
+swift test --no-parallel --build-system swiftbuild --filter SessionStoreProperties
+swift test --no-parallel --build-system swiftbuild
+```
+
+Done when: the five properties pass with their default counts; the deliberate break in step 4 fails `ordersBlocksAsTheReferenceModel` with a shrunk list of at most a few edits; no other package's `Package.resolved` changed; the `desktop-macos` job stays green.
+
+Risks: a property that is false by design (read the Rust consumer before "fixing" the store to satisfy a test); random seeds make a rare failure appear on an unrelated PR — the failure prints its seed, so it is reproducible, and it is a real bug either way.
+
+Out of scope: properties for the other stores; fuzzing `TimelineDecoding.swift`.
+
+Check: `swift test --no-parallel --build-system swiftbuild --filter SessionStoreProperties` in `desktop/macos/Packages/CoxModel` - 5 tests passed (reference ordering 300 cases, repeated last edit, split batch, reset, `lastLines` 500 cases); the whole `CoxModelTests` target - 159 tests in 7 suites passed. Deliberate break (`?? rows.count` to `?? 0` in `reference`): `ordersBlocksAsTheReferenceModel` failed with "Failure occured with input [upsert(b0, , after: b0), upsert(b1, , after: b1)]. (shrunk down from" an 18-edit list, and printed ``Add `.fixedSeed("UMJuMesJGRGT/pugYWu15U6XxXc1FLZCVm4MajJzA1Y=")` to the Test to reproduce this issue.``; reverted. No other package's `Package.resolved` changed; `swift-format lint --strict` clean on the new files; the `desktop-macos` CI job is not run locally.
+
+#### T63.3 Lint: no AppKit or SwiftUI in `CoxModel` and `CoxCore`
+
+Model: claude-haiku-5-5 · Status: done 2026-10-08 · Depends: — · Size: ~30 (config, fixtures, one CI line) · Priority: P1 · Complexity: 1 · Files: `desktop/macos/.swiftlint.yml`, `desktop/macos/LintFixtures/Rejected/no_ui_import_in_core.swift`, `desktop/macos/LintFixtures/Rejected/no_appkit_type_in_core.swift`, `.github/workflows/ci.yml`, `desktop/design/DESIGN.md`, `desktop/macos/Packages/CoxModel/Sources/CoxClient/TurnCosts.swift`, `desktop/macos/Packages/CoxCore/Sources/CoxCore/Convert.swift`
+
+Goal: a UI-framework import or AppKit type in `Packages/CoxModel/Sources` (`CoxClient` and `CoxModel`) or `Packages/CoxCore/Sources` fails the build of that package and the `desktop-macos-lint` job.
+
+State today (checked 2026-10-07 on `origin/main` d5b1570d): neither package imports AppKit, SwiftUI, UIKit or Cocoa, and neither names an AppKit type. `CoxModel`'s imports are `CoxClient`, `Foundation`, `Observation`, `OrderedCollections`, `Synchronization` and `UniformTypeIdentifiers`; `CoxCore`'s are `CoxClient`, `CoxFFIBindings` and `Foundation`. The rule therefore starts green and only guards.
+
+Why: DT§4.6 keeps these two packages UI-free so the stores and the core client run in tests and previews without a window, and so the Windows client (P58) can follow the same split. Nothing enforces it, and one `import AppKit` for an `NSWorkspace` call would compile and pass review. Risk if skipped: the split erodes quietly, and the first sign is a store test that needs a running `NSApplication`.
+
+Install: nothing. SwiftLint 0.65.1 is pinned in `mise.toml` (CI) and through SwiftLintPlugins 0.65.1 in every package (build). `swift-architecture-check` does not exist (see the table above).
+
+Files:
+- `desktop/macos/.swiftlint.yml` (two custom rules)
+- `desktop/macos/LintFixtures/Rejected/no_ui_import_in_core.swift` and `no_appkit_type_in_core.swift` (new)
+- `.github/workflows/ci.yml` (`desktop-macos-lint`: lint the two packages' sources directly)
+
+Steps:
+1. Add to `custom_rules` in `desktop/macos/.swiftlint.yml`. The rules sit in the root config, which every package reaches through `parent_config`, and are scoped by path with `included`, so no package's own config changes. The fixture paths are included so CI can prove each rule fires:
+
+   ```yaml
+     # DT§4.6: CoxModel (CoxClient, CoxModel) and CoxCore hold state and the core client only;
+     # they never import a UI framework, so tests and previews need no window (T63.3).
+     no_ui_import_in_core:
+       name: No UI framework in CoxModel or CoxCore
+       included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_ui_import_in_core\.swift$)'
+       regex: '^\s*(?:@[\w()]+\s+)*import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(?:AppKit|SwiftUI|UIKit|Cocoa)\b'
+       message: 'CoxModel and CoxCore stay UI-free: move this to CoxPlatform or CoxUI (DT§4.6)'
+       severity: error
+       excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+
+     no_appkit_type_in_core:
+       name: No AppKit type in CoxModel or CoxCore
+       included: '/(?:Packages/(?:CoxModel|CoxCore)/Sources/|LintFixtures/Rejected/no_appkit_type_in_core\.swift$)'
+       regex: '\bNS(?:App|Application|Window|WindowController|View|ViewController|HostingView|Color|Image|Font|Pasteboard|Workspace|Event|Screen|Responder|Menu|MenuItem|Alert|Cursor|Sound|StatusBar|StatusItem|TextView|TextField|Button)\b'
+       message: 'An AppKit type in CoxModel or CoxCore: move it behind a protocol in CoxClient (DT§4.6)'
+       severity: error
+       excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+   ```
+
+   The type list names AppKit classes only; Foundation's `NS` names (`NSHomeDirectory`, `NSLock`, `NSRegularExpression`) stay allowed.
+2. Fixtures, one violation each, named after the rule as the existing `swiftlint fixtures` step expects:
+
+   ```swift
+   // LintFixtures/Rejected/no_ui_import_in_core.swift
+   import AppKit
+   ```
+
+   ```swift
+   // LintFixtures/Rejected/no_appkit_type_in_core.swift
+   func openLink() { NSWorkspace.shared.open(URL(filePath: "/")) }
+   ```
+
+3. `ci.yml`, `desktop-macos-lint`: after "swiftlint app", a step that lints the two packages' sources itself, so the rule still gates pull requests if T61.10 turns the build-tool plugin off during builds:
+
+   ```yaml
+      - name: swiftlint UI-free packages
+        working-directory: desktop/macos
+        run: swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources
+   ```
+
+4. Enforcement points: locally, `swift build` or `swift test` in `CoxModel` or `CoxCore` fails through the SwiftLintBuildToolPlugin (error severity); in Xcode, the same plugin marks the line; in CI, `desktop-macos` fails while building the package and `desktop-macos-lint` fails in the new step and proves the rules with the fixtures.
+5. DS§9 in `desktop/design/DESIGN.md` lists the custom rules: add the two names and one line on why.
+
+Check:
+```bash
+cd desktop/macos
+swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_ui_import_in_core.swift    # fails (no_ui_import_in_core)
+swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_appkit_type_in_core.swift  # fails (no_appkit_type_in_core)
+swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources  # passes
+(cd Packages/CoxModel && swift build --build-system swiftbuild)
+```
+Then add `import AppKit` to `Packages/CoxModel/Sources/CoxModel/SessionStore.swift` locally: `swift build` fails with the rule's message; revert.
+
+Done when: both fixtures fail with their rule, both packages lint clean, and a temporary `import SwiftUI` in `CoxCore` fails `swift build` there.
+
+Risks: SwiftLint matches `included` against the file's absolute path, both from the build plugin and from `swiftlint lint <relative path>`; the fixture check and the temporary import confirm the pattern reaches both. A regex rule is textual; a type reached through a typealias from another module is not caught (none exists today).
+
+Out of scope: rules for the other packages; a semantic linter (Harmonize, SolidLikeARock) — revisit only if a textual rule misses a real case.
+Check: `swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_ui_import_in_core.swift` — fails with `(no_ui_import_in_core)`; `... no_appkit_type_in_core.swift` — fails with `(no_appkit_type_in_core)`; the six older `LintFixtures/Rejected` files still fail with their own rules; `LintFixtures/Accepted` — `--strict` passes; `swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources` — exit 0 (two existing strict-mode violations fixed: a 124-column comment in `TurnCosts.swift`, and `Convert.swift` at 482 lines with a file-level `swiftlint:disable file_length` and a why-comment); `swift build --build-system swiftbuild` in `Packages/CoxModel` with a temporary `import AppKit` in `SessionStore.swift` — exit 1, `error: No UI framework in CoxModel or CoxCore ... (no_ui_import_in_core)`, file reverted; the clean package then builds, `Build complete!`. CoxCore's `swift build` was not run (it needs `build/CoxFFI.xcframework`).
+#### T56.4 `Engine` asks before code leaves the machine: `CloudAgent(<repo>)`
+
+Model: Claude Code / sonnet · Status: done 2026-10-08 · Priority: P3 · Complexity: 3 · Depends: the creator's terms go-ahead (A123 (5)) · Size: ~140 · Files: `crates/cox-permission/src/rules.rs`, `crates/cox-permission/src/policy.rs`, `crates/cox-permission/src/lib.rs`
+Goal: a new permission subject `CloudAgent(<github owner>/<repo>)` in the rule grammar. It asks in every permission mode, `auto` and `bypass` included, unless the user's own config holds an allow rule for that repository; `plan` mode denies it. A project config's `allow` for it is reverted by the existing A122 rule (tested, not re-implemented). The approval text says the repository, the remote, the starting ref, and that the code is read and edited off this machine. The check lives in `Engine` only, never in the plugin or the driver.
+Check: `mise exec -- cargo nextest run -p cox-permission cloud_agent_asks_in_auto_and_bypass cloud_agent_is_denied_in_plan_mode cloud_agent_user_allow_rule_matches_one_repo cloud_agent_project_allow_is_reverted cloud_agent_approval_text_names_repo_ref_and_off_machine`.
+Done when: the tests pass; the rule grammar docs list the subject.
+Plan: `rules.rs` gets the `cloud_agent` tool name (alias `CloudAgent`), a strict `owner/repo` check, rule parsing that accepts only a bare or exact-repo subject, and a case-insensitive exact match for it; `lib.rs` `Engine::decide` routes the tool to one function (deny rules first, then plan denies, then only an exact user allow rule allows, else ask; `never` denies) and gains `cloud_agent_approval_text`; the A122 test loads a real project config through `cox-config` (dev-dependency) and decides with the reverted result; `docs/how-it-works.md` and §1.8 list the subject.
+Out of scope: any other remote-execution subject.
+Result: `cloud_agent` is a canonical tool name (alias `CloudAgent`); a rule `CloudAgent(owner/repo)` parses only for a strict GitHub pair and matches ignoring case, so a deny for `Acme/Widgets` also stops `acme/widgets`. `Engine::decide` routes the tool to one function after the deny rules and before `bypass`: a malformed subject is denied, `plan` denies, only an exact allow rule from the loaded config allows (a bare `CloudAgent` allow and session grants do not), every other case asks, and policy `never` denies like any ask. `cloud_agent_approval_text(call)` builds the approval text from the call's subject and its `remote` and `ref` input fields and strips control and bidi characters. The A122 test loads a real project config through `cox-config` (a dev-dependency; `deps.rs` counts only normal dependencies). Docs: `docs/how-it-works.md` and §1.8. Not done: the approval modal still renders the ask as `rule CloudAgent(owner/repo) asks` (a `Why::RuleAsk`); showing `cloud_agent_approval_text` there, and the driver that builds the call, belong to T56.6.
+Check output: `mise exec -- cargo nextest run -p cox-permission` — 14 passed, including cloud_agent_asks_in_auto_and_bypass, cloud_agent_is_denied_in_plan_mode, cloud_agent_user_allow_rule_matches_one_repo, cloud_agent_project_allow_is_reverted, cloud_agent_approval_text_names_repo_ref_and_off_machine; `mise exec -- cargo clippy -p cox-permission --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T66.15 Cut the subagent result cap on a char boundary
+
+Model: Claude Code / opus · Status: done 2026-10-09 · Depends: — · Size: ~30 · Priority: P1 · Complexity: 1
+
+Goal: a non-ASCII child answer over `result_cap_tokens` is cut, not a panic. When `summarize` returns `None`, `run_task` falls back to `result.truncate(cap * 4)` (`subagent.rs:1149`). `String::truncate` panics when that byte index is inside a char, so a Cyrillic, CJK or emoji answer over the cap crashes the parent session. Seen while implementing T66.2.
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/tests/subagent.rs`
+- `crates/cox-core/tests/scenarios/subagent_cut_non_ascii.toml` (fixture)
+
+Steps:
+1. Cut at `result.floor_char_boundary(cap * 4)` (stable since Rust 1.91; the workspace `rust-version` is 1.98). No workspace helper does this: `cox-tools/src/read.rs:229` and `cox-acp/src/terminal.rs:72` each walk `is_char_boundary` inline. The cut stays in place, one line, so it merges with T66.2's archive trailer around it.
+2. The scenario's child answers `x` followed by 5000 `я` (10001 bytes), so byte 4000 and byte 8000 both fall inside a char whichever preset cap applies. Its summarize turn is a scripted `error`, so `summarize` returns `None` and the cut runs.
+3. `over_cap_non_ascii_answer_is_cut_on_a_char_boundary` asserts the parent's tool result is ok, starts with `xя` and ends with `[cut at the result cap]`. Without step 1 the child task panics and the test fails.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the new test passes and fails with step 1 reverted.
+
+Out of scope: archiving the full answer, which is T66.2; the other inline boundary walks.
+
+Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.

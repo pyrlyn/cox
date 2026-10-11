@@ -8,6 +8,7 @@
 //! call reaches the ledger. Separate from `open` because ACP and `doctor`
 //! build or ask about the same provider without a session.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use cox_protocol::Config;
@@ -19,6 +20,9 @@ use cox_provider::openai::responses::OpenAiResponsesProvider;
 use cox_provider::usage::{PriceTable, Priced};
 
 use crate::SessionError;
+
+/// ABI providers by section name (T33.18), already priced when `assemble` returns them.
+type AbiProviders = HashMap<String, Arc<dyn Provider>>;
 
 /// The `tiers.code` provider decides which real client to build; every tier
 /// of a session goes through the same provider object (routing picks models).
@@ -36,6 +40,46 @@ fn provider_for_with(
     resolve: impl FnOnce(&str, &str) -> Result<String, cox_protocol::errors::ProviderError>,
 ) -> Result<Arc<dyn Provider>, SessionError> {
     provider_for_served(config, resolve, None, &[])
+}
+
+/// The main-turn provider plus the priced ABI map (T33.18).
+///
+/// `COX_PROVIDER=scripted`/`replay` still short-circuits the main turn,
+/// but only after `abi` is priced: a scripted main e2e can reach a real
+/// plugin provider through the map. An empty map skips pricing and is
+/// [`provider_for_served`].
+pub(crate) fn assemble(
+    config: &Config,
+    resolve: impl FnOnce(&str, &str) -> Result<String, cox_protocol::errors::ProviderError>,
+    served: Option<&cox_provider::lmstudio::Model>,
+    plugin_models: &[cox_models::PluginModels<'_>],
+    abi: AbiProviders,
+) -> Result<(Arc<dyn Provider>, AbiProviders), SessionError> {
+    if abi.is_empty() {
+        return Ok((
+            provider_for_served(config, resolve, served, plugin_models)?,
+            abi,
+        ));
+    }
+    let prices = Arc::new(PriceTable::embedded()?);
+    let abi: AbiProviders = abi
+        .into_iter()
+        .map(|(name, provider)| {
+            (
+                name,
+                Arc::new(Priced::new(provider, Arc::clone(&prices))) as Arc<dyn Provider>,
+            )
+        })
+        .collect();
+    if cox_provider::from_env()?.is_none()
+        && let Some(plugin) = abi.get(config.tiers.code.provider.as_str())
+    {
+        return Ok((Arc::clone(plugin), abi));
+    }
+    Ok((
+        provider_for_served(config, resolve, served, plugin_models)?,
+        abi,
+    ))
 }
 
 /// [`provider_for_with`] plus what a local server reported for the
@@ -652,5 +696,71 @@ mod tests {
         let rows = store.usage_for_session(&session.id()).expect("usage query");
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert_eq!(rows[0].provider, ProviderId::Local);
+    }
+
+    /// T33.18: `COX_PROVIDER=scripted` still builds the ABI map, and the
+    /// main-turn provider stays the scripted double.
+    #[cfg(feature = "plugins")]
+    #[test]
+    fn scripted_provider_mode_still_builds_plugin_providers() {
+        use std::sync::Arc;
+
+        use cox_plugin::LivePlugins;
+        use cox_plugin_api::PluginManifest;
+
+        let home = tempfile::tempdir().expect("home");
+        let scenario = home.path().join("scenario.toml");
+        std::fs::write(&scenario, "[[turn]]\ntext = \"ok\"\n").expect("scenario");
+        let wasm = br#"(module
+          (import "extism:host/env" "http_request" (func $http (param i64 i64) (result i64)))
+          (import "extism:host/env" "input_length" (func $input_length (result i64)))
+          (import "extism:host/env" "input_load_u8" (func $load (param i64) (result i32)))
+          (import "extism:host/env" "alloc" (func $alloc (param i64) (result i64)))
+          (import "extism:host/env" "store_u8" (func $store (param i64 i32)))
+          (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
+          (func (export "cox_init") (result i32) (i32.const 0)))"#;
+        let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
+            "api": 1,
+            "id": "acme-plugin",
+            "version": "0.1.0",
+            "name": "Acme",
+            "wasm": "plugin.wasm",
+            "provider": [{
+                "name": "acme",
+                "api": "plugin",
+                "base_url": "http://127.0.0.1:9",
+                "auth": "none"
+            }]
+        }))
+        .expect("manifest");
+        let store = Store::open(home.path()).expect("store");
+        let store: Arc<dyn cox_protocol::PluginStore> = Arc::new(store);
+        let mut live = LivePlugins::default();
+        live.load(&manifest, wasm, store).expect("plugin loads");
+        let (raw, warnings) = cox_plugin::provider::backends(
+            &live,
+            &|_, _| Err(cox_protocol::errors::ProviderError::Auth),
+            Arc::new(|_: &cox_protocol::types::Request| 1),
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let mut config = Config::default();
+        config.tiers.code.provider = "acme".into();
+        let scenario = scenario.to_string_lossy().into_owned();
+        cox_config::load::temp_env(
+            &[
+                ("COX_PROVIDER", Some("scripted")),
+                ("COX_SCENARIO", Some(scenario.as_str())),
+            ],
+            || {
+                let models: &[cox_models::PluginModels] = &[];
+                let (primary, map) =
+                    assemble(&config, no_key, None, models, raw).expect("providers");
+                assert_eq!(primary.id(), ProviderId::Local);
+                assert!(matches!(
+                    map.get("acme").expect("section").id(),
+                    ProviderId::Plugin(ref name) if name == "acme"
+                ));
+            },
+        );
     }
 }

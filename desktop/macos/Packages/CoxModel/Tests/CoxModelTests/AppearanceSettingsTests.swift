@@ -32,7 +32,7 @@ private func row(_ field: String, _ value: String, _ kind: SettingKind) -> Setti
 @MainActor
 private func loaded() async -> Loaded {
   let client = FixtureSettingsClient(view: appearanceView)
-  let store = SettingsStore(client: client, secrets: MemorySecretStore(), cwd: "/project")
+  let store = SettingsStore(client: client, cwd: "/project")
   await store.load()
   return (store, client)
 }
@@ -100,7 +100,7 @@ private func loaded() async -> Loaded {
     ],
     userFile: "/home/.cox/config.toml")
   let store = SettingsStore(
-    client: FixtureSettingsClient(view: view), secrets: MemorySecretStore(), cwd: "/project")
+    client: FixtureSettingsClient(view: view), cwd: "/project")
   #expect(store.darkHighlight == .none)
   #expect(store.darkHighlightScope == .controls)
   await store.load()

@@ -12,7 +12,7 @@ Core tools are always in context; deferred tools join through `tool_search`
 
 | Tool | Risk | Deferred | Subject | Notes |
 |---|---|---|---|---|
-| `read` | ReadOnly | no | path | whole / `lines="a-b"` / `mode="outline"`; images returned as images, other binaries refused |
+| `read` | ReadOnly | no | path | whole / `lines="a-b"` / `mode="outline"` / `symbol="Foo::bar"` (one definition; .rs/.ts/.tsx/.py/.go); images returned as images, other binaries refused |
 | `grep` | ReadOnly | no | pattern | ripgrep libs, respects `.gitignore` |
 | `glob` | ReadOnly | no | pattern | mtime order, fuzzy with `query` |
 | `edit` | Write | no | path | exact `str_replace`, ambiguity errors |
@@ -28,6 +28,9 @@ Core tools are always in context; deferred tools join through `tool_search`
 | `memory_save` | Write | yes | name | one fact file + index + FTS row |
 | `memory_search` | ReadOnly | yes | query | FTS first, then files; top 5 capped |
 | `memory_get` | ReadOnly | yes | name | one fact's body after the frontmatter; missing name is not an error |
+| `docs_resolve` | ReadOnly | yes | crate name | `cargo/<name>/<version>` from `Cargo.lock`; no `cargo` subprocess |
+| `docs_query` | ReadOnly | yes | crate name | cached rustdoc, at most 5 hits of 400 characters; `name=llms` searches a workspace `llms.txt` |
+| `docs_fetch` | ReadOnly | yes | docs.rs URL | one GET of `https://docs.rs/crate/<name>/<version>/json.zst`; no API key |
 | `diagnostics` | ReadOnly (Exec for the call that starts a server) | yes | path | one sandboxed LSP server per language; falls back to `bash` |
 | `mcp__<server>__<tool>` | from server annotations (default Write) | yes | namespaced name | fail-open servers |
 

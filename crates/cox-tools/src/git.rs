@@ -405,6 +405,15 @@ pub async fn project_root(dir: &Path) -> Result<PathBuf, WorktreeError> {
     main_checkout(dir).await
 }
 
+/// The root of the checkout `dir` is in: the linked worktree itself from a
+/// linked worktree, the main checkout from the main one. Not the same as
+/// `main_checkout`, which always names the main checkout.
+async fn worktree_root(dir: &Path) -> Option<PathBuf> {
+    git(dir, &["rev-parse", "--show-toplevel"])
+        .await
+        .map(|top| PathBuf::from(top.trim()))
+}
+
 /// Nearest ancestor of `main` holding `_worktrees/`, else a new one next to
 /// it — the skill's "one location" rule.
 fn worktrees_root(main: &Path) -> PathBuf {
@@ -532,8 +541,8 @@ pub struct Linked {
 /// checkout and its disk size; `None` in the main checkout or outside git.
 pub async fn linked(dir: &Path) -> Option<Linked> {
     let main = main_checkout(dir).await.ok()?;
-    let top = git(dir, &["rev-parse", "--show-toplevel"]).await?;
-    let record = worktree_record(&main, Path::new(top.trim())).await.ok()??;
+    let top = worktree_root(dir).await?;
+    let record = worktree_record(&main, &top).await.ok()??;
     if record.path == main {
         return None;
     }
@@ -781,6 +790,26 @@ mod tests {
         assert_eq!(got.commit, head.map(|h| h.trim().to_string()));
         assert!(got.bytes >= 8, "a.txt is on disk: {}", got.bytes);
         assert_eq!(linked(&main).await, None, "the main checkout is not linked");
+    }
+
+    /// From a linked worktree the checkout root is the worktree and the
+    /// project root is the main checkout; the two helpers must not swap.
+    #[tokio::test]
+    async fn worktree_root_is_the_checkout_and_project_root_the_main_one() {
+        let Some((_dir, main)) = nested().await else {
+            return;
+        };
+        let wt = worktree_add(&main, "t62", "cox / s1").await.expect("add");
+        let wt_path = fs::canonicalize(&wt.path).expect("canon");
+        let from_wt = worktree_root(&wt.path)
+            .await
+            .map(|p| fs::canonicalize(p).expect("canon"));
+        assert_eq!(from_wt, Some(wt_path));
+        let from_main = worktree_root(&main)
+            .await
+            .map(|p| fs::canonicalize(p).expect("canon"));
+        assert_eq!(from_main, Some(main.clone()));
+        assert_eq!(project_root(&wt.path).await.expect("project"), main);
     }
 
     #[tokio::test]

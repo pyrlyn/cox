@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use cox_plugin_api::{
     AbiError, HttpReq, InitIn, ModelCall, ModelTier, NoticeLevel, PluginManifest, SessionInfo,
-    ToolCallIn,
+    Surface, ToolCallIn,
 };
 use cox_protocol::config::PluginsConfig;
 use cox_protocol::errors::CoreError;
@@ -39,6 +39,8 @@ use crate::net::Net;
 
 /// The import module every host function lives in.
 pub const NAMESPACE: &str = "cox:host/v1";
+/// Desktop imports are linked on every surface so a guest can still load.
+pub const DESKTOP_NAMESPACE: &str = "cox:desktop/v1";
 
 /// Every import ABI v1 names. All are registered so a guest built with the
 /// SDK links whatever it imports; one this host does not implement yet
@@ -105,6 +107,7 @@ impl LogWindow {
 /// capabilities, the stores behind them, and the export now running.
 pub struct HostEnv {
     id: String,
+    surface: Surface,
     granted: BTreeSet<String>,
     store: Option<Arc<dyn PluginStore>>,
     context: Arc<Context>,
@@ -123,6 +126,22 @@ pub struct HostEnv {
     tool_invoker: Option<Arc<dyn ToolInvoker>>,
     // T33.14.1: `cox_http`'s allow-list, from the same grant as `granted`.
     net: Net,
+    /// Held for the whole `cox_provider_stream` so two sections of one
+    /// plugin cannot interleave their active host (T33.18).
+    provider_gate: Mutex<()>,
+}
+
+/// Holds the provider-call gate and clears the active section on drop,
+/// including when the guest traps (T33.18).
+pub(crate) struct ProviderGuard<'a> {
+    env: &'a HostEnv,
+    _gate: MutexGuard<'a, ()>,
+}
+
+impl Drop for ProviderGuard<'_> {
+    fn drop(&mut self) {
+        self.env.net.deactivate();
+    }
 }
 
 /// The running `cox_tool_call`'s end of its `ToolCx` (T33.12): where
@@ -139,6 +158,7 @@ impl HostEnv {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
+            surface: Surface::Terminal,
             granted: BTreeSet::new(),
             store: None,
             context: Arc::new(Context::new()),
@@ -150,7 +170,14 @@ impl HostEnv {
             tool: Mutex::new(None),
             tool_invoker: None,
             net: Net::new(&BTreeSet::new()),
+            provider_gate: Mutex::new(()),
         }
+    }
+
+    /// The surface fixed when the session opens.
+    pub fn with_surface(mut self, surface: Surface) -> Self {
+        self.surface = surface;
+        self
     }
 
     /// The granted capability lines (`grant::capability_list` of a manifest
@@ -191,6 +218,34 @@ impl HostEnv {
         self.tool_invoker = Some(invoker);
         self.runtime = Some(runtime);
         self
+    }
+
+    /// The runtime `cox_http` blocks on. Session open sets it via
+    /// `with_model_caller`; tests that call `PluginProvider` directly set
+    /// it here.
+    #[cfg(test)]
+    pub(crate) fn set_runtime(&mut self, runtime: tokio::runtime::Handle) {
+        self.runtime = Some(runtime);
+    }
+
+    /// Remembers an ABI section's host and auth header (T33.18).
+    pub(crate) fn bind_provider(
+        &self,
+        name: &str,
+        base_url: &str,
+        header: Option<(String, String)>,
+    ) -> bool {
+        self.net.bind_section(name, base_url, header)
+    }
+
+    /// Makes `name` the section `cox_http` may call, until the guard drops.
+    pub(crate) fn activate_provider<'a>(&'a self, name: &str) -> ProviderGuard<'a> {
+        let gate = lock(&self.provider_gate);
+        self.net.activate(name);
+        ProviderGuard {
+            env: self,
+            _gate: gate,
+        }
     }
 
     /// The plugin id.
@@ -234,7 +289,9 @@ impl HostEnv {
     pub(crate) fn functions(self: &Arc<Self>) -> Vec<Function> {
         IMPORTS
             .iter()
-            .map(|&name| {
+            .map(|&name| (name, NAMESPACE))
+            .chain(std::iter::once(("cox_desktop_notify", DESKTOP_NAMESPACE)))
+            .map(|(name, namespace)| {
                 Function::new(
                     name,
                     [PTR],
@@ -263,7 +320,7 @@ impl HostEnv {
                         }
                     },
                 )
-                .with_namespace(NAMESPACE)
+                .with_namespace(namespace)
             })
             .collect()
     }
@@ -280,6 +337,18 @@ impl HostEnv {
                 let line: Line = parse(arg)?;
                 self.notify(cap(line.level), &line.text)?;
                 Ok(Value::Null)
+            }
+            "cox_desktop_notify" => {
+                if self.surface != Surface::Desktop {
+                    return Err(AbiError::NotOnThisSurface {
+                        surface: self.surface,
+                    });
+                }
+                self.require("desktop.notify")?;
+                self.outside_render()?;
+                Err(failed(
+                    "desktop notifications are not connected to the app yet",
+                ))
             }
             "cox_kv_get" => {
                 let store = self.kv()?;
@@ -551,6 +620,31 @@ pub fn init_input(
     plugins: &PluginsConfig,
     session: SessionInfo,
 ) -> InitIn {
+    init_input_on_surface(manifest, plugins, session, Surface::Terminal)
+}
+
+/// Sends only capability tables that can work on this session's surface.
+pub fn init_input_on_surface(
+    manifest: &PluginManifest,
+    plugins: &PluginsConfig,
+    session: SessionInfo,
+    surface: Surface,
+) -> InitIn {
+    let mut granted = serde_json::to_value(&manifest.capabilities).unwrap_or_else(|_| json!({}));
+    if let Some(caps) = granted.as_object_mut() {
+        if surface != Surface::Terminal {
+            caps.remove("terminal");
+            if let Some(ui) = caps.get_mut("ui").and_then(Value::as_object_mut) {
+                ui.remove("keys");
+            }
+        }
+        if surface != Surface::Desktop {
+            caps.remove("desktop");
+        }
+        if matches!(surface, Surface::Headless | Surface::Acp) {
+            caps.remove("ui");
+        }
+    }
     InitIn {
         api: cox_plugin_api::API_MAJOR,
         plugin_id: manifest.id.clone(),
@@ -560,7 +654,8 @@ pub fn init_input(
             .cloned()
             .unwrap_or_else(|| json!({})),
         session,
-        granted: serde_json::to_value(&manifest.capabilities).unwrap_or_else(|_| json!({})),
+        granted,
+        surface: Some(surface),
     }
 }
 
@@ -624,7 +719,7 @@ pub(crate) mod tests {
 
     /// A guest whose every export but `cox_init` passes its input to the
     /// `cox:host/v1` import `import` and returns its reply block.
-    fn relay(import: &str) -> Vec<u8> {
+    fn relay_in(namespace: &str, import: &str) -> Vec<u8> {
         format!(
             r#"(module
               (import "extism:host/env" "input_length" (func $input_length (result i64)))
@@ -633,7 +728,7 @@ pub(crate) mod tests {
               (import "extism:host/env" "store_u8" (func $store (param i64 i32)))
               (import "extism:host/env" "length" (func $length (param i64) (result i64)))
               (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
-              (import "cox:host/v1" "{import}" (func $host (param i64) (result i64)))
+              (import "{namespace}" "{import}" (func $host (param i64) (result i64)))
               (func $relay (result i32) (local $n i64) (local $off i64) (local $i i64) (local $r i64)
                 (local.set $n (call $input_length))
                 (local.set $off (call $alloc (local.get $n)))
@@ -657,11 +752,41 @@ pub(crate) mod tests {
     }
 
     fn call(env: &Arc<HostEnv>, import: &str, export: &str, arg: Value) -> Value {
-        let host = PluginHost::load_with(&relay(import), &Limits::default(), env.clone())
-            .expect("relay loads");
+        call_in(env, NAMESPACE, import, export, arg)
+    }
+
+    fn call_in(
+        env: &Arc<HostEnv>,
+        namespace: &str,
+        import: &str,
+        export: &str,
+        arg: Value,
+    ) -> Value {
+        let host = PluginHost::load_with(
+            &relay_in(namespace, import),
+            &Limits::default(),
+            env.clone(),
+        )
+        .expect("relay loads");
         host.call::<_, Value>(Lane::Control, export, &arg, Duration::from_secs(5))
             .expect("relay call")
             .expect("relay export exists")
+    }
+
+    #[test]
+    fn desktop_notify_on_terminal_is_not_on_this_surface() {
+        let env = Arc::new(HostEnv::new("t"));
+        let reply = call_in(
+            &env,
+            DESKTOP_NAMESPACE,
+            "cox_desktop_notify",
+            "cox_command",
+            json!({ "level": "info", "title": "hello" }),
+        );
+        assert_eq!(
+            reply,
+            json!({ "Err": { "kind": "not_on_this_surface", "surface": "terminal" } })
+        );
     }
 
     #[test]
@@ -941,7 +1066,7 @@ pub(crate) mod tests {
 
     #[test]
     fn init_config_is_the_plugins_own_table() {
-        let manifest = PluginManifest {
+        let mut manifest = PluginManifest {
             api: 1,
             surfaces: None,
             id: "jev".into(),
@@ -962,6 +1087,9 @@ pub(crate) mod tests {
             cloud_agents: Vec::new(),
             agents: Vec::new(),
         };
+        manifest.capabilities.desktop.notify = true;
+        manifest.capabilities.terminal.keys = true;
+        manifest.capabilities.ui.status = true;
         let mut plugins = PluginsConfig::default();
         plugins
             .entries
@@ -976,6 +1104,13 @@ pub(crate) mod tests {
         let init = init_input(&manifest, &plugins, session.clone());
         assert_eq!(init.config, json!({ "route": "cheap" }));
         assert_eq!(init.granted["kv"], true);
+        assert_eq!(init.surface, Some(Surface::Terminal));
+        assert!(init.granted.get("desktop").is_none());
+        let headless =
+            init_input_on_surface(&manifest, &plugins, session.clone(), Surface::Headless);
+        assert!(headless.granted.get("desktop").is_none());
+        assert!(headless.granted.get("terminal").is_none());
+        assert!(headless.granted.get("ui").is_none());
         let bare = init_input(&manifest, &PluginsConfig::default(), session);
         assert_eq!(bare.config, json!({}));
     }

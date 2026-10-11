@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock, Weak};
 
 use async_trait::async_trait;
-use cox_plugin_api::{CommandDecl, InitOut, KeyDecl, PluginManifest, SessionInfo, Slot};
+use cox_plugin_api::{CommandDecl, InitOut, KeyDecl, PluginManifest, SessionInfo, Slot, Surface};
 use cox_protocol::PluginStore;
 use cox_protocol::config::PluginsConfig;
 use cox_protocol::errors::CoreError;
@@ -29,7 +29,7 @@ use crate::events::{PluginTap, Redraw, subscriptions};
 use crate::grant;
 use crate::hooks::PluginHooks;
 use crate::host::PluginHost;
-use crate::hostfn::{HostEnv, init_input};
+use crate::hostfn::{HostEnv, init_input_on_surface};
 
 /// Where drained plugin notices go; the session emits each as
 /// `Event::Notice`. Called from inside `EventTap::offer`, so it must not
@@ -56,6 +56,16 @@ impl Live {
     /// The one instance; hooks, the tap and tools each hold a clone.
     pub fn host(&self) -> &Arc<PluginHost> {
         &self.host
+    }
+
+    /// The environment `cox_http` and the ABI provider share (T33.18).
+    pub fn env(&self) -> &Arc<HostEnv> {
+        &self.env
+    }
+
+    /// `[[provider]]` rows, declarative and ABI.
+    pub fn provider_decls(&self) -> &[cox_plugin_api::ProviderDecl] {
+        &self.manifest.provider
     }
 
     /// `grant::capability_list` of the granted manifest.
@@ -147,6 +157,7 @@ fn slot_capability(slot: Slot) -> &'static str {
         Slot::StatusLeft | Slot::StatusRight => "ui.status",
         Slot::Panel => "ui.panel",
         Slot::Overlay => "ui.overlay",
+        Slot::DesktopInspector => "desktop.inspector",
     }
 }
 
@@ -202,9 +213,19 @@ pub struct LivePlugins {
     caller: Arc<LateCaller>,
     invoker: Arc<Late<dyn ToolInvoker>>,
     plugins: Vec<Live>,
+    surface: Option<Surface>,
 }
 
 impl LivePlugins {
+    /// Fixed by session assembly before any plugin is loaded.
+    pub fn set_surface(&mut self, surface: Surface) {
+        self.surface = Some(surface);
+    }
+
+    fn surface(&self) -> Surface {
+        self.surface.unwrap_or(Surface::Terminal)
+    }
+
     /// The session's folded context, read by every plugin's `cox_context`.
     pub fn context(&self) -> &Arc<Context> {
         &self.context
@@ -239,6 +260,7 @@ impl LivePlugins {
     ) -> Result<(), PluginError> {
         let granted = grant::capability_list(manifest);
         let mut env = HostEnv::new(manifest.id.as_str())
+            .with_surface(self.surface())
             .with_grant(granted.clone(), store)
             .with_context(self.context.clone());
         // The plugin's worker blocks on this handle to run the call, since
@@ -275,12 +297,78 @@ impl LivePlugins {
             cwd: cwd.display().to_string(),
         };
         let mut warnings = Vec::new();
+        let surface = self.surface();
         self.plugins.retain_mut(|p| {
             if p.init.is_some() {
                 return true;
             }
-            match p.host.init(&init_input(&p.manifest, config, info.clone())) {
-                Ok(out) => {
+            match p.host.init(&init_input_on_surface(
+                &p.manifest,
+                config,
+                info.clone(),
+                surface,
+            )) {
+                Ok(mut out) => {
+                    let mut dropped = Vec::new();
+                    if surface != Surface::Terminal && !out.keys.is_empty() {
+                        out.keys.clear();
+                        dropped.push("keys");
+                    }
+                    if matches!(surface, Surface::Headless | Surface::Acp)
+                        && (!out.commands.is_empty()
+                            || !out.status.is_empty()
+                            || !out.panels.is_empty()
+                            || !out.renderers.is_empty())
+                    {
+                        out.commands.clear();
+                        out.status.clear();
+                        out.panels.clear();
+                        out.renderers.clear();
+                        dropped.push("ui");
+                    }
+                    if surface != Surface::Desktop {
+                        if out.desktop.inspector.take().is_some() {
+                            dropped.push("desktop.inspector");
+                        }
+                        if !out.desktop.toolbar.is_empty() {
+                            out.desktop.toolbar.clear();
+                            dropped.push("desktop.toolbar");
+                        }
+                        if !out.desktop.palette.is_empty() {
+                            out.desktop.palette.clear();
+                            dropped.push("desktop.palette");
+                        }
+                        let before = out.status.len() + out.panels.len();
+                        out.status.retain(|slot| *slot != Slot::DesktopInspector);
+                        out.panels.retain(|slot| *slot != Slot::DesktopInspector);
+                        if out.status.len() + out.panels.len() != before {
+                            dropped.push("desktop.inspector slot");
+                        }
+                    } else {
+                        if !p.granted.iter().any(|g| g == "desktop.inspector") {
+                            out.desktop.inspector = None;
+                        }
+                        if out.desktop.inspector.is_none() {
+                            out.status.retain(|slot| *slot != Slot::DesktopInspector);
+                            out.panels.retain(|slot| *slot != Slot::DesktopInspector);
+                        }
+                        if !p.granted.iter().any(|g| g == "desktop.toolbar") {
+                            out.desktop.toolbar.clear();
+                        }
+                        if !p.granted.iter().any(|g| g == "desktop.palette") {
+                            out.desktop.palette.clear();
+                        }
+                    }
+                    if !dropped.is_empty() {
+                        let _ = p.env.notify(
+                            cox_plugin_api::NoticeLevel::Info,
+                            &format!(
+                                "dropped contributions unavailable on {}: {}",
+                                surface.name(),
+                                dropped.join(", ")
+                            ),
+                        );
+                    }
                     p.init = Some(out);
                     true
                 }
@@ -404,7 +492,61 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::host::tests::module;
+    use crate::host::tests::{answering, module};
+
+    fn init_module(json: &str) -> Vec<u8> {
+        format!(
+            r#"(module
+              (import "extism:host/env" "alloc" (func $alloc (param i64) (result i64)))
+              (import "extism:host/env" "store_u8" (func $store (param i64 i32)))
+              (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
+              {})"#,
+            answering("cox_init", json)
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn other_surface_init_entries_are_dropped_with_a_notice() {
+        let caps = json!({
+            "ui": { "commands": true },
+            "terminal": { "keys": true },
+            "desktop": { "inspector": true, "toolbar": true, "palette": true }
+        });
+        let wasm = init_module(
+            r#"{"keys":[{"key":"g","name":"go"}],"status":["desktop.inspector"],"desktop":{"inspector":{"title":"Info","symbol":"info.circle"},"toolbar":[{"command":"go","title":"Go","symbol":"play.fill"}],"palette":[{"command":"go","title":"Go","symbol":"play.fill"}]}}"#,
+        );
+        for (surface, missing) in [
+            (Surface::Terminal, "desktop.inspector"),
+            (Surface::Desktop, "keys"),
+        ] {
+            let mut live = LivePlugins::default();
+            live.set_surface(surface);
+            live.load(&manifest("parts", caps.clone()), &wasm, store())
+                .expect("loads");
+            assert!(
+                live.start(&PluginsConfig::default(), SessionId::new(), Path::new("/w"))
+                    .is_empty()
+            );
+            let init = live.plugins()[0].init_out().expect("init");
+            if surface == Surface::Terminal {
+                assert_eq!(init.keys.len(), 1);
+                assert!(
+                    init.desktop.inspector.is_none()
+                        && init.desktop.toolbar.is_empty()
+                        && init.desktop.palette.is_empty()
+                );
+                assert!(init.status.is_empty());
+            } else {
+                assert!(init.keys.is_empty());
+                assert!(init.desktop.inspector.is_some());
+            }
+            let notices = live.take_notices();
+            assert_eq!(notices.len(), 1, "{notices:?}");
+            assert_eq!(notices[0].0, Level::Info);
+            assert!(notices[0].1.contains(missing), "{notices:?}");
+        }
+    }
 
     fn manifest(id: &str, caps: serde_json::Value) -> PluginManifest {
         serde_json::from_value(json!({

@@ -52,6 +52,10 @@ pub struct Span {
     /// Italic.
     #[serde(default)]
     pub italic: bool,
+    /// An `https://` URL or a workspace-relative path; the host drops
+    /// anything else to plain text and opens a link only on a click.
+    #[serde(default)]
+    pub link: Option<String>,
 }
 
 /// One row of spans.
@@ -101,6 +105,15 @@ pub enum Widget {
         #[serde(default)]
         sizes: Vec<u16>,
     },
+    /// A package-relative PNG the desktop draws (PL§15.4); the terminal draws
+    /// `alt` as one dim line. A path, never a URL, so the host never fetches
+    /// for a plugin.
+    Image {
+        /// Path inside the plugin package.
+        path: String,
+        /// Accessibility label and the terminal fallback.
+        alt: String,
+    },
     /// A bordered box around one child.
     Block {
         /// Title on the top border.
@@ -140,6 +153,10 @@ impl Widget {
                 add(&mut pairs.iter().flat_map(|(k, v)| std::iter::once(k).chain(v)))
             }
             Widget::Gauge { label, .. } => add(&mut std::iter::once(label)),
+            Widget::Image { path, alt } => {
+                *text += path.len() + alt.len();
+                *text <= MAX_TEXT_BYTES
+            }
             Widget::Stack { children, .. } => {
                 children.iter().all(|c| c.fits(depth + 1, nodes, text))
             }
@@ -171,5 +188,53 @@ mod tests {
                 child: Box::new(Widget::Text(vec![vec![span]])),
             }
         );
+    }
+
+    #[test]
+    fn span_link_and_image_round_trip_and_default_to_absent() {
+        let w: Widget = serde_json::from_str(
+            r#"{"stack":{"vertical":true,"children":[
+                {"text":[[{"text":"docs","link":"https://example.com"},{"text":"plain"}]]},
+                {"image":{"path":"img/logo.png","alt":"logo"}}]}}"#,
+        )
+        .expect("parses");
+        let Widget::Stack { children, .. } = &w else {
+            panic!("a stack");
+        };
+        let Widget::Text(lines) = &children[0] else {
+            panic!("text");
+        };
+        assert_eq!(lines[0][0].link.as_deref(), Some("https://example.com"));
+        assert_eq!(lines[0][1].link, None);
+        assert_eq!(
+            children[1],
+            Widget::Image {
+                path: "img/logo.png".into(),
+                alt: "logo".into()
+            }
+        );
+        let again: Widget =
+            serde_json::from_str(&serde_json::to_string(&w).expect("serializes")).expect("parses");
+        assert_eq!(again, w);
+    }
+
+    #[test]
+    fn image_counts_toward_the_node_and_text_caps() {
+        let image = || Widget::Image {
+            path: "a.png".into(),
+            alt: "a".into(),
+        };
+        let stack = |n: usize| Widget::Stack {
+            vertical: true,
+            children: (0..n).map(|_| image()).collect(),
+            sizes: vec![],
+        };
+        assert!(stack(MAX_NODES - 1).within_limits());
+        assert!(!stack(MAX_NODES).within_limits());
+        let long = Widget::Image {
+            path: "a.png".into(),
+            alt: "x".repeat(MAX_TEXT_BYTES),
+        };
+        assert!(!long.within_limits());
     }
 }

@@ -26,6 +26,7 @@ extension CoxClient.PluginSlotKind {
     case .statusRight: self = .statusRight
     case .panel: self = .panel
     case .overlay: self = .overlay
+    case .desktopInspector: self = .desktopInspector
     }
   }
 }

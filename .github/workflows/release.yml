@@ -115,13 +115,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.ref }}
-      - uses: pyrlyn/ci/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
         with:
           version: '27'
       # The Rust mise.toml pins, checked like in ci.yml. `cox-plugin-fixtures`
       # builds the example plugin for wasm32 (PL§13, T33.28); the target comes
       # with the pin.
-      - uses: ./.github/actions/rust
+      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - name: Format
@@ -341,7 +341,7 @@ jobs:
       actions: read # failed job names
       issues: write
     steps:
-      - uses: pyrlyn/ci/.github/actions/notify-release-failure@d709124d53dd4923eff8f594b3155842508b0049
+      - uses: pyrlyn/ci/.github/actions/notify-release-failure@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
         with:
           ref: ${{ needs.version.outputs.tag || github.ref_name }}
           needs: ${{ toJSON(needs) }}

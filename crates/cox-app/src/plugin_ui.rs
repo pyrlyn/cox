@@ -152,6 +152,9 @@ fn convert(widget: &Widget) -> WidgetView {
             // At most one size per child, as for a table's widths.
             sizes: sizes.iter().take(children.len()).copied().collect(),
         },
+        // T33.45.6 gives the app a real image view; until then the label
+        // stands in, as it does on the terminal.
+        Widget::Image { alt, .. } => line(sanitize(alt), StyleToken::Dim),
         Widget::Block { title, child } => WidgetView::Block {
             title: title.as_ref().map(span),
             child: vec![convert(child)],
@@ -378,6 +381,8 @@ impl PluginSlots {
             Slot::StatusLeft | Slot::StatusRight => true,
             Slot::Panel => self.panel.as_deref() == Some(&e.plugin),
             Slot::Overlay => self.overlay.as_deref() == Some(&e.plugin),
+            // T33.45.5 owns the inspector's visibility (it renders while selected).
+            Slot::DesktopInspector => false,
         }
     }
 
@@ -386,7 +391,7 @@ impl PluginSlots {
         match slot {
             Slot::StatusLeft | Slot::StatusRight => (SEGMENT_COLS, 1),
             Slot::Panel => (self.area.0, PANEL_ROWS),
-            Slot::Overlay => self.area,
+            Slot::Overlay | Slot::DesktopInspector => self.area,
         }
     }
 

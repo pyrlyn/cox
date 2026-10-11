@@ -38,7 +38,7 @@ final class Host {
     self.material = material
     self.send = send
     hosting = NSHostingView(rootView: AnyView(EmptyView()))
-    window = NSWindow(
+    window = RunnerWindow(
       // A window frame far off screen, not a design size.
       // swiftlint:disable:next no_literal_size
       contentRect: NSRect(origin: NSPoint(x: -20_000, y: -20_000), size: size),
@@ -101,6 +101,12 @@ final class Host {
   /// makes a card's view when its line draws, so the text view draws `dirty` (all it shows
   /// when `nil`) into a bitmap itself, as the T37.41 suite does.
   func flush(drawing dirty: NSRect? = nil) {
+    // Legacy scrollers, as on the CI runner (no trackpad). A Mac with a trackpad overlays them,
+    // so the text column is a scroller wider and the snapshots reflow.
+    for scroll in descendants(of: hosting, as: NSScrollView.self)
+    where scroll.scrollerStyle != .legacy {
+      scroll.scrollerStyle = .legacy
+    }
     window.layoutIfNeeded()
     window.displayIfNeeded()
     for text in descendants(of: hosting, as: TranscriptTextView.self) {
@@ -228,6 +234,13 @@ final class Host {
   }
 
   enum HostError: Error { case noBitmap }
+}
+
+/// The host's window at 1× backing, as on the CI runner, which has no Retina display. On a
+/// Retina Mac the cards' SwiftUI layers rasterize at 2×, so the snapshots differ from the
+/// references wherever a card draws text or an icon.
+final class RunnerWindow: NSWindow {
+  override var backingScaleFactor: CGFloat { 1 }
 }
 
 func descendants<T: NSView>(of view: NSView, as type: T.Type) -> [T] {

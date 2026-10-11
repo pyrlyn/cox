@@ -24,7 +24,7 @@ use cox_protocol::types::{
 };
 
 use policy::{ExecPath, exec_path};
-use rules::{Rule, canonical_tool};
+use rules::{CLOUD_AGENT, Rule, canonical_tool, is_github_repo};
 
 /// What the engine concluded for one call.
 #[derive(Debug, Clone, PartialEq)]
@@ -155,6 +155,11 @@ impl Engine {
                 by: DecidedBy::Rule,
             };
         }
+        // Before `bypass` and `auto`: code leaving the machine is not a risk
+        // class those modes may waive (T56.4, A123 (5)).
+        if rules::tool_matches(CLOUD_AGENT, &call.name) {
+            return self.decide_cloud_agent(call, mode, policy);
+        }
         if mode == PermissionMode::Bypass {
             return Outcome::Allow {
                 by: DecidedBy::Policy,
@@ -204,6 +209,87 @@ impl Engine {
             Some(why) => Outcome::Ask(why),
         }
     }
+}
+
+impl Engine {
+    /// `CloudAgent(<owner>/<repo>)` (T56.4): the repository's code is read and
+    /// edited on someone else's machine, so every mode asks, `bypass` and
+    /// `auto` included. Only an exact allow rule from the loaded config lifts
+    /// the question; `plan` mode never does. A project config cannot hold
+    /// such a rule: the config loader reverts its `allow` (A122), so what
+    /// reaches the engine is the user's own. Session grants do not count, since
+    /// the user approved a command there, not a repository.
+    fn decide_cloud_agent(
+        &self,
+        call: &ToolCall,
+        mode: PermissionMode,
+        policy: ApprovalPolicy,
+    ) -> Outcome {
+        let deny = |reason: String| Outcome::Deny {
+            reason,
+            by: DecidedBy::Policy,
+        };
+        // The subject is matched byte for byte against rules and printed in
+        // the approval, so only a clean `owner/repo` gets that far.
+        if !is_github_repo(&call.subject) {
+            return deny("a cloud agent needs a GitHub <owner>/<repo> subject".into());
+        }
+        if mode == PermissionMode::Plan {
+            return deny("plan mode: code does not leave this machine".into());
+        }
+        if self
+            .allow
+            .iter()
+            .any(|r| r.is_exact() && r.matches(&call.name, &call.subject))
+        {
+            return Outcome::Allow {
+                by: DecidedBy::Rule,
+            };
+        }
+        let why = Why::RuleAsk {
+            rule: format!("CloudAgent({})", call.subject),
+        };
+        if policy == ApprovalPolicy::Never {
+            return deny(format!(
+                "{} and the approval policy is `never`",
+                why_text(&why)
+            ));
+        }
+        Outcome::Ask(why)
+    }
+}
+
+/// The approval text for a cloud agent call (T56.4): the repository (the
+/// call's subject), the remote and the starting ref (the call's `remote` and
+/// `ref` input fields), and that the code leaves this machine. Control and
+/// bidi characters are dropped because the remote and the ref come from a
+/// repository's git config and refs, which are untrusted.
+pub fn cloud_agent_approval_text(call: &ToolCall) -> String {
+    let field = |key: &str| {
+        call.input[key]
+            .as_str()
+            .map(clean)
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "unknown".into())
+    };
+    format!(
+        "Run a cloud agent on {repo}?\n\
+         Remote: {remote}\n\
+         Starting ref: {git_ref}\n\
+         The code of this repository is read and edited off this machine.",
+        repo = clean(&call.subject),
+        remote = field("remote"),
+        git_ref = field("ref"),
+    )
+}
+
+fn clean(text: &str) -> String {
+    text.chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+        })
+        .collect()
 }
 
 /// Whether allow-side matchers cover `call`. A call without segments is one
@@ -467,6 +553,195 @@ mod tests {
             &[],
         );
         assert!(matches!(outcome, Outcome::Deny { .. }), "got {outcome:?}");
+    }
+
+    fn cloud_call(repo: &str) -> ToolCall {
+        ToolCall {
+            id: CallId::new(),
+            name: "cloud_agent".into(),
+            input: serde_json::json!({
+                "remote": "https://github.com/acme/widgets.git",
+                "ref": "main",
+            }),
+            risk: Risk::Exec,
+            subject: repo.into(),
+            segments: None,
+        }
+    }
+
+    fn engine_with(allow: &[&str], ask: &[&str], deny: &[&str]) -> Engine {
+        let strings = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let cfg = PermissionsConfig {
+            allow: strings(allow),
+            ask: strings(ask),
+            deny: strings(deny),
+            ..PermissionsConfig::default()
+        };
+        Engine::compile(&cfg, Some(Path::new("/home/u")), Path::new("/repo"))
+            .expect("rules compile")
+    }
+
+    fn decide_cloud(engine: &Engine, repo: &str, mode: PermissionMode) -> Outcome {
+        engine.decide(
+            &cloud_call(repo),
+            mode,
+            ApprovalPolicy::OnRequest,
+            SandboxMode::WorkspaceWrite,
+            &[],
+        )
+    }
+
+    fn is_cloud_ask(outcome: &Outcome) -> bool {
+        matches!(outcome, Outcome::Ask(Why::RuleAsk { rule }) if rule.starts_with("CloudAgent("))
+    }
+
+    #[test]
+    fn cloud_agent_asks_in_auto_and_bypass() {
+        let engine = engine_with(&[], &[], &[]);
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::Auto,
+            PermissionMode::Bypass,
+        ] {
+            let outcome = decide_cloud(&engine, "acme/widgets", mode);
+            assert!(is_cloud_ask(&outcome), "{mode:?} gave {outcome:?}");
+        }
+        // A session grant approved a command, not a repository.
+        let grants = [("cloud_agent".to_string(), "acme/widgets".to_string())];
+        let granted = engine.decide(
+            &cloud_call("acme/widgets"),
+            PermissionMode::Auto,
+            ApprovalPolicy::OnRequest,
+            SandboxMode::WorkspaceWrite,
+            &grants,
+        );
+        assert!(is_cloud_ask(&granted), "got {granted:?}");
+        // Nobody can answer under `never`, as for every other ask.
+        let never = engine.decide(
+            &cloud_call("acme/widgets"),
+            PermissionMode::Bypass,
+            ApprovalPolicy::Never,
+            SandboxMode::WorkspaceWrite,
+            &[],
+        );
+        assert!(matches!(never, Outcome::Deny { .. }), "got {never:?}");
+    }
+
+    #[test]
+    fn cloud_agent_is_denied_in_plan_mode() {
+        let engine = engine_with(&["CloudAgent(acme/widgets)"], &[], &[]);
+        let outcome = decide_cloud(&engine, "acme/widgets", PermissionMode::Plan);
+        assert!(matches!(outcome, Outcome::Deny { .. }), "got {outcome:?}");
+        // The subject must be a clean `owner/repo` in every mode.
+        for bad in ["acme", "acme/widgets extra", "acme/../x", ""] {
+            let outcome = decide_cloud(&engine, bad, PermissionMode::Bypass);
+            assert!(
+                matches!(outcome, Outcome::Deny { .. }),
+                "{bad:?} gave {outcome:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cloud_agent_user_allow_rule_matches_one_repo() {
+        let engine = engine_with(&["CloudAgent(acme/widgets)"], &[], &[]);
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::Auto,
+            PermissionMode::Bypass,
+        ] {
+            assert_eq!(
+                decide_cloud(&engine, "acme/widgets", mode),
+                Outcome::Allow {
+                    by: DecidedBy::Rule
+                },
+                "{mode:?}"
+            );
+            let other = decide_cloud(&engine, "acme/other", mode);
+            assert!(is_cloud_ask(&other), "{mode:?} gave {other:?}");
+        }
+        // GitHub names ignore case; the allow follows.
+        assert!(matches!(
+            decide_cloud(&engine, "ACME/Widgets", PermissionMode::Auto),
+            Outcome::Allow { .. }
+        ));
+        // A bare `CloudAgent` allow would approve every repository: ignored.
+        let bare = engine_with(&["CloudAgent"], &[], &[]);
+        let outcome = decide_cloud(&bare, "acme/widgets", PermissionMode::Auto);
+        assert!(is_cloud_ask(&outcome), "got {outcome:?}");
+        // A deny rule still beats the allow, whatever the mode or case.
+        let denied = engine_with(
+            &["CloudAgent(acme/widgets)"],
+            &[],
+            &["CloudAgent(Acme/Widgets)"],
+        );
+        let outcome = decide_cloud(&denied, "acme/widgets", PermissionMode::Bypass);
+        assert!(matches!(outcome, Outcome::Deny { .. }), "got {outcome:?}");
+    }
+
+    /// A repository must not pre-approve sending its own code away: the real
+    /// loader reverts the project's `allow` (A122), so the engine built from
+    /// the effective config still asks.
+    #[test]
+    fn cloud_agent_project_allow_is_reverted() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(root.path().join(".git")).expect("mkdir .git");
+        std::fs::create_dir_all(root.path().join(".cox")).expect("mkdir .cox");
+        std::fs::write(
+            root.path().join(".cox/config.toml"),
+            "[permissions]\nallow = [\"CloudAgent(acme/widgets)\"]\n",
+        )
+        .expect("write project config");
+        let loaded = cox_config::load::load_in(
+            &home.path().join("config.toml"),
+            root.path(),
+            &serde_json::json!({}),
+            |_| None,
+        )
+        .expect("config loads");
+        assert!(
+            loaded
+                .violations
+                .iter()
+                .any(|v| v.key == "permissions.allow"),
+            "the project allow must be reported: {:?}",
+            loaded.violations
+        );
+        let engine = Engine::compile(&loaded.config.permissions, Some(home.path()), root.path())
+            .expect("effective rules compile");
+        for mode in [PermissionMode::Auto, PermissionMode::Bypass] {
+            let outcome = decide_cloud(&engine, "acme/widgets", mode);
+            assert!(is_cloud_ask(&outcome), "{mode:?} gave {outcome:?}");
+        }
+    }
+
+    #[test]
+    fn cloud_agent_approval_text_names_repo_ref_and_off_machine() {
+        let text = cloud_agent_approval_text(&cloud_call("acme/widgets"));
+        assert!(text.contains("acme/widgets"), "{text}");
+        assert!(
+            text.contains("https://github.com/acme/widgets.git"),
+            "{text}"
+        );
+        assert!(text.contains("Starting ref: main"), "{text}");
+        assert!(text.contains("off this machine"), "{text}");
+        // The remote and ref are repository-controlled: no escape sequences.
+        let mut hostile = cloud_call("acme/widgets");
+        hostile.input = serde_json::json!({
+            "remote": "https://github.com/a/b\u{1b}[2J",
+            "ref": "main\u{202E}",
+        });
+        let text = cloud_agent_approval_text(&hostile);
+        assert!(
+            !text.contains('\u{1b}') && !text.contains('\u{202E}'),
+            "{text:?}"
+        );
+        let bare = ToolCall {
+            input: serde_json::Value::Null,
+            ..cloud_call("acme/widgets")
+        };
+        assert!(cloud_agent_approval_text(&bare).contains("Starting ref: unknown"));
     }
 
     #[test]

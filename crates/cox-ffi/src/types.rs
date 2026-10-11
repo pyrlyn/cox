@@ -290,6 +290,10 @@ pub enum Slot {
     StatusRight,
     Panel,
     Overlay,
+    /// The desktop inspector tab (PL§15.4). UniFFI's remote enum has to
+    /// name every variant of `cox_plugin_api::Slot`, and the app is the
+    /// surface that draws this one.
+    DesktopInspector,
 }
 
 /// PL§8's closed widget tree, sanitized and bounded by cox-app; it recurses
