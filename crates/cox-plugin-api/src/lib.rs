@@ -111,4 +111,14 @@ mod tests {
         let generated = serde_json::to_string_pretty(&schema).expect("schema serializes") + "\n";
         assert_committed("plugin-abi.schema.json", &generated);
     }
+
+    #[test]
+    fn plugin_api_reference_covers_both_schemas() {
+        let status = std::process::Command::new("python3")
+            .arg("scripts/plugin_api_reference.py")
+            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .status()
+            .expect("run plugin API reference drift check");
+        assert!(status.success(), "docs/plugins.md API field index is stale");
+    }
 }
