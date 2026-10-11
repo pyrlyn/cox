@@ -10,6 +10,17 @@
       "format": "uint32",
       "minimum": 0
     },
+    "surfaces": {
+      "description": "Where the plugin loads (PL§15.5). Absent means every surface, so a\nmanifest written before surfaces existed keeps loading everywhere;\nan empty list is an error, not \"nowhere\".",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/Surface"
+      },
+      "default": null
+    },
     "id": {
       "description": "Package id, `^[a-z][a-z0-9-]{1,23}$`.",
       "type": "string"
@@ -71,6 +82,15 @@
           "commands": false,
           "keys": false,
           "render": []
+        },
+        "terminal": {
+          "keys": false
+        },
+        "desktop": {
+          "inspector": false,
+          "toolbar": false,
+          "palette": false,
+          "notify": false
         }
       }
     },
@@ -131,6 +151,31 @@
     "name"
   ],
   "$defs": {
+    "Surface": {
+      "description": "A place a plugin can run: who drives the session (PL§15.1).",
+      "oneOf": [
+        {
+          "description": "The TUI and `cox --plain`.",
+          "type": "string",
+          "const": "terminal"
+        },
+        {
+          "description": "The macOS app, local or over `cox app-server`.",
+          "type": "string",
+          "const": "desktop"
+        },
+        {
+          "description": "`cox run -p`.",
+          "type": "string",
+          "const": "headless"
+        },
+        {
+          "description": "`cox acp`.",
+          "type": "string",
+          "const": "acp"
+        }
+      ]
+    },
     "Limits": {
       "description": "`[limits]`. Absent means \"the host default\".",
       "type": "object",
@@ -238,7 +283,7 @@
           "default": []
         },
         "ui": {
-          "description": "TUI contributions (PL§8).",
+          "description": "Contributions both surfaces draw (PL§8, PL§15.2); `ui.keys` is the\npre-surface spelling of [`TerminalCaps::keys`].",
           "$ref": "#/$defs/UiCaps",
           "default": {
             "status": false,
@@ -247,6 +292,23 @@
             "commands": false,
             "keys": false,
             "render": []
+          }
+        },
+        "terminal": {
+          "description": "Terminal-only contributions (PL§15.3).",
+          "$ref": "#/$defs/TerminalCaps",
+          "default": {
+            "keys": false
+          }
+        },
+        "desktop": {
+          "description": "Desktop-only contributions (PL§15.4).",
+          "$ref": "#/$defs/DesktopCaps",
+          "default": {
+            "inspector": false,
+            "toolbar": false,
+            "palette": false,
+            "notify": false
           }
         }
       },
@@ -315,7 +377,7 @@
           "default": false
         },
         "keys": {
-          "description": "Keys under the plugin leader.",
+          "description": "Alias of [`TerminalCaps::keys`]; read it through\n[`Capabilities::terminal_keys`].",
           "type": "boolean",
           "default": false
         },
@@ -326,6 +388,45 @@
             "type": "string"
           },
           "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "TerminalCaps": {
+      "description": "`capabilities.terminal`: what only a terminal has (PL§15.3).",
+      "type": "object",
+      "properties": {
+        "keys": {
+          "description": "Keys under the plugin leader.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "DesktopCaps": {
+      "description": "`capabilities.desktop`: what only the app has (PL§15.4).",
+      "type": "object",
+      "properties": {
+        "inspector": {
+          "description": "An inspector tab.",
+          "type": "boolean",
+          "default": false
+        },
+        "toolbar": {
+          "description": "Toolbar items.",
+          "type": "boolean",
+          "default": false
+        },
+        "palette": {
+          "description": "Command-palette actions.",
+          "type": "boolean",
+          "default": false
+        },
+        "notify": {
+          "description": "Actionable notifications.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false

@@ -43,7 +43,7 @@ twins with the same schemas:
 | commands | `commands/*.md` with `$ARGUMENTS`, `!`cmd``, `@file` | `cox_ext::commands` (T7.3) | expand a prompt; shell and file inclusion go through the caller's `Includes`, never a raw spawn |
 | subagent definitions | `agents/*.md` | `cox_ext::agents` (T7.3) | narrow a child's tools and pick its tier; never widen |
 | hooks | Claude JSON protocol over `sh -c` | `cox_ext::hooks::ShellHooks` + `cox_core::hooks` (T7.4) | block or rewrite a prompt or tool input, observe results; fail open |
-| Claude settings | `.claude/settings.json` | `cox_ext::claude_settings` (T7.5) | permission rules and hooks, imported read-only below `.cox` config |
+| Claude settings | `.claude/settings.json` | `cox_ext::claude_settings` (T7.5) | permission rules imported read-only; `~/.claude` hooks too; a repository's hook commands are reverted (T64.1) |
 | MCP | `.mcp.json`, `[mcp.servers]`, `~/.claude.json` | `cox_mcp::{discovery, client}` (T7.6) | tools as `mcp__<server>__<tool>`, deferred, gated like built-ins |
 
 Three properties hold across the table and are the reason this is enough:

@@ -110,6 +110,16 @@ exact subject, `Tool(prefix:*)` a subject that is `prefix` alone or
 `prefix` followed by whitespace, `WebFetch(domain:host)` the host and its
 subdomains, and a path glob for file tools.
 
+`CloudAgent(<owner>/<repo>)` (T56.4) names a GitHub repository whose code a
+cloud agent would read and edit off this machine. It asks in every
+permission mode, `auto` and `bypass` included, and `plan` mode denies it.
+Only an exact `allow = ["CloudAgent(owner/repo)"]` in your own config lifts
+the question, for that one repository (names are matched ignoring case); a
+bare `CloudAgent` allow, a session grant and a repository's own project
+config do not, because a project config's `allow` is reverted. `deny` and
+`ask` rules apply as for any tool. The approval names the repository, the
+remote, the starting ref and that the code leaves the machine.
+
 A `bash` command line is matched **command by command** (T36.1). The
 tool splits it with its tree-sitter parse on `;`, `&&`, `||`, `|`, `&` and
 newlines, including commands nested in a subshell, a `$(…)` or a loop
@@ -319,6 +329,10 @@ new turn number, so a rewind is itself undoable. Conversation appends an
 the rollout keeps every line, and resume stops reading at the marker. The
 next turn keeps counting from where the session was (`T8` after a rewind
 to `T7`), so a turn number never means two things.
+
+## MCP tool definitions are not trusted until you say so
+
+A tool description and a `readOnlyHint` come from the server, so they are untrusted input. cox hashes `name`, the description and a canonical form of the input schema (annotations are not part of the hash). A server from your user config or `~/.claude.json` is recorded the first time it connects. A server from the project's `.mcp.json`, or from a plugin, stays pending until you run `cox mcp trust <server>`, which stores the current hashes. While a tool is pending, or its definition has changed since the stored hash, the model sees only `pending trust for mcp server '<name>'; run: cox mcp trust <name>`, the tool is treated as a write (a `readOnlyHint` does not skip approval), and a call returns that sentence without reaching the server. `cox mcp trust` with no name lists the pending and changed tools. A later change to the description or the schema does not replace the stored hash; trust the new definition with `cox mcp trust <server>` again.
 
 ## MCP servers that need a login
 

@@ -66,7 +66,7 @@ import Testing
     ],
     userFile: "/home/.cox/config.toml")
   let store = SettingsStore(
-    client: FixtureSettingsClient(view: view), secrets: MemorySecretStore(), cwd: "/project")
+    client: FixtureSettingsClient(view: view), cwd: "/project")
   #expect(store.cacheHitScope == .turn)
   await store.load()
   #expect(store.cacheHitScope == .session)

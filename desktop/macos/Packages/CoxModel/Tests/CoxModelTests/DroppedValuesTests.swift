@@ -22,7 +22,7 @@ import Testing
           change: "999 → 5")
       ])
     let store = SettingsStore(
-      client: FixtureSettingsClient(view: view), secrets: MemorySecretStore(), cwd: "/p")
+      client: FixtureSettingsClient(view: view), cwd: "/p")
     await store.load()
 
     #expect(

@@ -572,5 +572,7 @@ Before finishing:
   A missing reference is recorded and fails once; `SNAPSHOT_TESTING_RECORD=all swift test` re-records
   after an intended change, and a second run must pass.
 - SwiftLint (0.65.1, checked on GitHub 2026-09-28) passes, including the custom rules that reject
-  literal colours, sizes, fonts, radii, shadows and durations outside `Tokens/` and `Foundations/`.
+  literal colours, sizes, fonts, radii, shadows and durations outside `Tokens/` and `Foundations/`,
+  and `no_ui_import_in_core` and `no_appkit_type_in_core`, which keep `CoxModel` and `CoxCore` free of
+  UI frameworks so their stores and tests run without a window (DT§4.6).
 - If you added or changed a token, the drift test passes and `tokens/tokens.css` is regenerated.

@@ -10,7 +10,8 @@
 use diesel::prelude::*;
 
 use crate::schema::{
-    archive, checkpoints, cloud_runs, memory, plugin_grants, plugin_kv, sessions, usage,
+    archive, checkpoints, cloud_runs, mcp_tool_trust, memory, memory_files, plugin_grants,
+    plugin_kv, sessions, usage,
 };
 
 #[derive(Insertable)]
@@ -99,6 +100,14 @@ pub(crate) struct NewMemory {
     pub updated_at: String,
 }
 
+/// One `memory_files` link (T59.10): a memory entry names this path.
+#[derive(Insertable)]
+#[diesel(table_name = memory_files)]
+pub(crate) struct NewMemoryFile {
+    pub memory_id: i32,
+    pub path: String,
+}
+
 /// Both directions of the `checkpoints` table (T26.1): written by
 /// `checkpoint_insert`, read back by `checkpoint_list`. Field order matches
 /// the table after `id`.
@@ -141,6 +150,18 @@ pub(crate) struct PluginKvDbRow {
     pub plugin_id: String,
     pub key: String,
     pub value: Vec<u8>,
+    pub updated_at: String,
+}
+
+/// Both directions of `mcp_tool_trust` (T64.24).
+#[derive(Insertable, Queryable, Selectable)]
+#[diesel(table_name = mcp_tool_trust)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub(crate) struct McpToolTrustRow {
+    pub server: String,
+    pub tool: String,
+    pub hash: String,
+    pub status: String,
     pub updated_at: String,
 }
 

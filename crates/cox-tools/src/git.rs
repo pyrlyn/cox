@@ -287,11 +287,7 @@ async fn remove(path: &Path, owner: &str, discard: bool) -> Result<(), WorktreeE
 /// its merge base with the ref [`worktree_add`] cuts from — committed or
 /// not, with each untracked file counted as all added (T52.10).
 pub async fn worktree_diffstat(dir: &Path) -> Result<Vec<FileStat>, WorktreeError> {
-    let main = main_checkout(dir).await?;
-    let base = base_ref(&main).await;
-    let from = git(dir, &["merge-base", "HEAD", &base])
-        .await
-        .map_or_else(|| "HEAD".to_string(), |out| out.trim().to_string());
+    let from = cut_from(dir).await?;
     let tracked = git_or_err(dir, &["diff", "--numstat", &from]).await?;
     let mut stats = file_stats(&tracked);
     let untracked = git(dir, &["ls-files", "--others", "--exclude-standard", "-z"])
@@ -306,6 +302,23 @@ pub async fn worktree_diffstat(dir: &Path) -> Result<Vec<FileStat>, WorktreeErro
         });
     }
     Ok(stats)
+}
+
+/// The commit the worktree at `dir` was cut from: its merge base with the
+/// ref [`worktree_add`] cuts from, else `HEAD`.
+async fn cut_from(dir: &Path) -> Result<String, WorktreeError> {
+    let main = main_checkout(dir).await?;
+    let base = base_ref(&main).await;
+    Ok(git(dir, &["merge-base", "HEAD", &base])
+        .await
+        .map_or_else(|| "HEAD".to_string(), |out| out.trim().to_string()))
+}
+
+/// `file` as the commit the worktree at `dir` was cut from holds it
+/// (T52.24); `None` when that commit has no such file.
+pub async fn worktree_base_text(dir: &Path, file: &Path) -> Result<Option<String>, WorktreeError> {
+    let spec = format!("{}:{}", cut_from(dir).await?, file.to_string_lossy());
+    Ok(git(dir, &["show", &spec]).await)
 }
 
 /// `git diff --numstat`, one row per file; a binary file's `-` counts as 0.
@@ -357,6 +370,10 @@ impl Worktrees for GitWorktrees {
         worktree_diffstat(path).await
     }
 
+    async fn base_text(&self, path: &Path, file: &Path) -> Result<Option<String>, WorktreeError> {
+        worktree_base_text(path, file).await
+    }
+
     async fn remove(&self, path: &Path, owner: &str, discard: bool) -> Result<(), WorktreeError> {
         remove(path, owner, discard).await
     }
@@ -386,6 +403,15 @@ async fn main_checkout(dir: &Path) -> Result<PathBuf, WorktreeError> {
 /// The main checkout shared by `dir` and every linked worktree.
 pub async fn project_root(dir: &Path) -> Result<PathBuf, WorktreeError> {
     main_checkout(dir).await
+}
+
+/// The root of the checkout `dir` is in: the linked worktree itself from a
+/// linked worktree, the main checkout from the main one. Not the same as
+/// `main_checkout`, which always names the main checkout.
+async fn worktree_root(dir: &Path) -> Option<PathBuf> {
+    git(dir, &["rev-parse", "--show-toplevel"])
+        .await
+        .map(|top| PathBuf::from(top.trim()))
 }
 
 /// Nearest ancestor of `main` holding `_worktrees/`, else a new one next to
@@ -515,8 +541,8 @@ pub struct Linked {
 /// checkout and its disk size; `None` in the main checkout or outside git.
 pub async fn linked(dir: &Path) -> Option<Linked> {
     let main = main_checkout(dir).await.ok()?;
-    let top = git(dir, &["rev-parse", "--show-toplevel"]).await?;
-    let record = worktree_record(&main, Path::new(top.trim())).await.ok()??;
+    let top = worktree_root(dir).await?;
+    let record = worktree_record(&main, &top).await.ok()??;
     if record.path == main {
         return None;
     }
@@ -766,6 +792,26 @@ mod tests {
         assert_eq!(linked(&main).await, None, "the main checkout is not linked");
     }
 
+    /// From a linked worktree the checkout root is the worktree and the
+    /// project root is the main checkout; the two helpers must not swap.
+    #[tokio::test]
+    async fn worktree_root_is_the_checkout_and_project_root_the_main_one() {
+        let Some((_dir, main)) = nested().await else {
+            return;
+        };
+        let wt = worktree_add(&main, "t62", "cox / s1").await.expect("add");
+        let wt_path = fs::canonicalize(&wt.path).expect("canon");
+        let from_wt = worktree_root(&wt.path)
+            .await
+            .map(|p| fs::canonicalize(p).expect("canon"));
+        assert_eq!(from_wt, Some(wt_path));
+        let from_main = worktree_root(&main)
+            .await
+            .map(|p| fs::canonicalize(p).expect("canon"));
+        assert_eq!(from_main, Some(main.clone()));
+        assert_eq!(project_root(&wt.path).await.expect("project"), main);
+    }
+
     #[tokio::test]
     async fn worktree_add_is_idempotent() {
         let Some((_dir, main)) = nested().await else {
@@ -927,6 +973,23 @@ mod tests {
             .await
             .expect("discard");
         assert!(!wt.path.exists());
+    }
+
+    /// A best-of merge diffs each candidate from the commit its tree was
+    /// cut from (T52.24): an edited file's old text, none for a new one.
+    #[tokio::test]
+    async fn worktree_base_text_reads_the_commit_the_tree_was_cut_from() {
+        let Some((_dir, main)) = nested().await else {
+            return;
+        };
+        let wt = worktree_add(&main, "t52-24", "cox / best-of-x")
+            .await
+            .expect("add");
+        std::fs::write(wt.path.join("a.txt"), "changed\n").expect("write");
+        let base = worktree_base_text(&wt.path, Path::new("a.txt")).await;
+        assert_eq!(base.expect("base"), Some("one\ntwo\n".to_string()));
+        let new = worktree_base_text(&wt.path, Path::new("new.txt")).await;
+        assert_eq!(new.expect("base"), None);
     }
 
     #[test]

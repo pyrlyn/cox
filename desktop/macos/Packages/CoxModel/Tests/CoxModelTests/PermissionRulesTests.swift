@@ -40,7 +40,7 @@ import Testing
     grants: [grant])
 
   func loaded(_ client: FixtureSettingsClient) async -> SettingsStore {
-    let store = SettingsStore(client: client, secrets: MemorySecretStore(), cwd: "/p")
+    let store = SettingsStore(client: client, cwd: "/p")
     await store.load()
     return store
   }

@@ -15,10 +15,12 @@ use std::sync::Arc;
 use cox_core::Session;
 use cox_mcp::elicit::{Ask, Asker};
 use cox_protocol::Config;
+use cox_protocol::StoreError;
 use cox_protocol::config::McpServerConfig;
 use cox_protocol::ids::CallId;
 use cox_protocol::traits::{Relay, Tool};
 use cox_protocol::types::Source;
+use cox_store::Store;
 use tokio::sync::mpsc;
 
 use crate::sandbox::sandboxed_argv;
@@ -56,19 +58,88 @@ pub(crate) async fn mcp_tools(
     ask: Option<Asker>,
     plugins: Vec<(String, Vec<(String, McpServerConfig)>)>,
     writable: &[PathBuf],
+    store: &Store,
 ) -> (Vec<Arc<dyn Tool>>, Vec<String>) {
+    let (listed, warnings) =
+        connect_discovered(config, cwd, login, ask, plugins, writable, store, None).await;
+    (listed.into_iter().map(|row| row.tool).collect(), warnings)
+}
+
+/// The tools `cox mcp trust` lists or approves. `only` restricts the
+/// connection to one server; an unknown name is `Err` and nothing connects.
+pub async fn mcp_tool_trust_list(
+    config: &Config,
+    cwd: &Path,
+    store: &Store,
+    plugins: Vec<(String, Vec<(String, McpServerConfig)>)>,
+    writable: &[PathBuf],
+    only: Option<&str>,
+) -> Result<(Vec<cox_mcp::client::ListedTool>, Vec<String>), String> {
+    if let Some(name) = only {
+        let mut found = mcp_servers(config, cwd);
+        for (id, servers) in &plugins {
+            cox_mcp::discovery::add_plugin(&mut found, id, servers.clone());
+        }
+        if !found.servers.contains_key(name) {
+            return Err(name.to_string());
+        }
+    }
+    Ok(connect_discovered(config, cwd, None, None, plugins, writable, store, only).await)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn connect_discovered(
+    config: &Config,
+    cwd: &Path,
+    login: Option<cox_mcp::client::Prompt>,
+    ask: Option<Asker>,
+    plugins: Vec<(String, Vec<(String, McpServerConfig)>)>,
+    writable: &[PathBuf],
+    store: &Store,
+    only: Option<&str>,
+) -> (Vec<cox_mcp::client::ListedTool>, Vec<String>) {
     let mut found = mcp_servers(config, cwd);
     for (id, servers) in plugins {
         cox_mcp::discovery::add_plugin(&mut found, &id, servers);
+    }
+    if let Some(name) = only {
+        found.servers.retain(|server, _| server == name);
+        found.sources.retain(|server, _| server == name);
     }
     sandbox_stdio_servers(&mut found, config, writable);
     let timeout = std::time::Duration::from_secs(u64::from(config.mcp.timeout_s));
     let mut auth = mcp_auth(login);
     auth.ask = ask;
-    let (_clients, tools, notices) =
-        cox_mcp::client::connect_all(&found.servers, timeout, config.mcp.deferred, &auth).await;
+    // A newtype, not `impl TrustStore for Store`: cox-store cannot depend on
+    // cox-mcp, and cox-session cannot implement a foreign trait for a
+    // foreign type.
+    let adapter = StoreTrust(store);
+    let ctx = cox_mcp::trust::TrustCtx {
+        sources: &found.sources,
+        store: &adapter,
+    };
+    let (_clients, listed, notices) = cox_mcp::client::connect_listed(
+        &found.servers,
+        timeout,
+        config.mcp.deferred,
+        &auth,
+        Some(&ctx),
+    )
+    .await;
     let warnings = found.notices.into_iter().chain(notices).collect();
-    (tools, warnings)
+    (listed, warnings)
+}
+
+struct StoreTrust<'a>(&'a Store);
+
+impl cox_mcp::trust::TrustStore for StoreTrust<'_> {
+    fn mcp_trust_get(&self, server: &str, tool: &str) -> Result<Option<String>, StoreError> {
+        self.0.mcp_trust_get(server, tool)
+    }
+
+    fn mcp_trust_approve(&self, server: &str, tool: &str, hash: &str) -> Result<(), StoreError> {
+        self.0.mcp_trust_approve(server, tool, hash)
+    }
 }
 
 /// T47.3: the elicitation asker, only on a surface that answers questions

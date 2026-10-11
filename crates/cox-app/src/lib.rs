@@ -87,6 +87,7 @@ pub use workspace::{Project, SearchHit, SessionEntry, Workspace, WorkspaceError}
 // other workspace crate (T37.39, DT§4.2).
 pub use cox_render::diffmodel;
 pub use cox_render::doc;
+pub use cox_render::pointer;
 pub use cox_store::fts::SessionInfo;
 pub use cox_store::lock::Holder;
 pub use cox_tools::git::Linked;

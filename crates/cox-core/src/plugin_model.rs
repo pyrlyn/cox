@@ -80,7 +80,10 @@ impl ModelCaller for Session {
             ..request
         };
         let (tx, mut rx) = mpsc::channel(64);
-        let provider = self.provider.clone();
+        // An ABI route uses the plugin map; the scripted main provider
+        // stays put (T33.18).
+        let provider = self.plugin_backend(&route);
+        let provider_id = provider.id();
         let cancel = self.cancel_token();
         let join = tokio::spawn(async move { provider.stream(req, tx, cancel).await });
         let mut events = Vec::new();
@@ -98,7 +101,7 @@ impl ModelCaller for Session {
                 turn: 0,
                 job,
                 tier: route.tier,
-                provider: self.provider.id(),
+                provider: provider_id,
                 model: route.model,
                 effort: Some(effort),
                 usage,

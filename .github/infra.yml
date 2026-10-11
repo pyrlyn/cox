@@ -10,32 +10,32 @@ version: 1
 # job runs `just docs-check` (the tests that validate docs/) instead.
 # Documentation = any *.md except Markdown that is code or test input: crates/ (prompts, agents
 # and fixtures via include_str! or read by tests), plugins/ (shipped packages), fixtures/,
-# desktop/ (lint fixtures, design), evals/, examples/, scripts/, tests/, README.md and
-# CHANGELOG.md (release). Anything else (.github/, mise.toml, a non-.md file) runs the full CI.
+# desktop/ (lint fixtures, design), evals/, examples/, scripts/ and tests/; README.md and
+# CHANGELOG.md (release) through pyrlyn/ci's default `base-exclude`. Anything else (.github/,
+# mise.toml, a non-.md file) runs the full CI.
 docs-only:
   enabled: true
   exclude:
     - '^(crates|plugins|fixtures|desktop|evals|examples|scripts|tests)/'
-    - '^(README|CHANGELOG)\.md$'
 
 codeql:
   # Every language in the repository that supports `build-mode: none`.
   languages: [actions, javascript-typescript, python, rust]
 
 sonarcloud:
-  enabled: true
-  events: [push, pull_request, workflow_dispatch] # as the former sonarcloud.yml
+  enabled: true # push, pull_request and workflow_dispatch (pyrlyn/ci's default events)
   rust: true # llvm-tools-preview, cargo-llvm-cov
   mise-install-args: rust
   setup-command: bash .github/actions/voice/install.sh # cox-voice build packages
   coverage-command: cargo llvm-cov --workspace --locked --lcov --output-path coverage/lcov.info
 
-# Snyk is switched off (flag; snyk.yml and SNYK_TOKEN stay): the snyk job is skipped and the
-# gate counts it as passed. `enabled: true` turns it back on.
-snyk:
-  enabled: false
+# License files against pyrlyn/ci's canonical ones (replaces license-check.yml).
+license:
+  enabled: true
 
-# actionlint stays off for now: dist-generated release.yml (never hand-edited) has shellcheck
-# findings. Turn on once .github/actionlint.yaml ignores that file.
+# Snyk stays off (pyrlyn/ci's default; SNYK_TOKEN stays).
+
+# actionlint stays off for now: the hand-written release.yml has shellcheck findings and
+# ci.yml has a constant `if: false` job. Turn on once those are fixed.
 lint:
   enabled: false

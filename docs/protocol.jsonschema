@@ -2752,6 +2752,35 @@
             ]
           },
           {
+            "description": "Two workspace snapshots were taken over different root sets. Diffing\nthem would pair unrelated trees, so the change set is refused whole\nrather than reported partially.",
+            "type": "object",
+            "properties": {
+              "before": {
+                "description": "The roots of the earlier snapshot.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "after": {
+                "description": "The roots of the later snapshot.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "const": "roots_mismatch"
+              }
+            },
+            "required": [
+              "type",
+              "before",
+              "after"
+            ]
+          },
+          {
             "description": "A filesystem I/O error occurred.",
             "type": "object",
             "properties": {

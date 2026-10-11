@@ -23,7 +23,8 @@
 //! - [`context`] — the event-folded, redacted snapshot `cox_context`
 //!   returns (PL§5, T33.9).
 //! - [`provider`] — merges a granted plugin's declarative `[[provider]]`
-//!   rows into `providers.custom` (PL§7a, T33.17).
+//!   rows into `providers.custom` (PL§7a, T33.17) and drives
+//!   `api = "plugin"` through `PluginProvider` (T33.18).
 //! - [`events`] — the session's `EventTap`: per-plugin drop-oldest rings
 //!   delivered to `cox_on_event` in batches (PL§5, T33.10).
 //! - [`external_agent`] — a granted `[[external_agents]]` entry resolved

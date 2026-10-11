@@ -9,7 +9,7 @@ description: >-
 runs:
   using: composite
   steps:
-    - uses: pyrlyn/ci/.github/actions/setup-xcode@87cca51e2e995af39b78e6938bc89a82a844f4e2
+    - uses: pyrlyn/ci/.github/actions/setup-xcode@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
       with:
         version: '27'
 
@@ -22,7 +22,7 @@ runs:
         xcodebuild -showComponent MetalToolchain || true
         xcodebuild -downloadComponent MetalToolchain
 
-    - uses: ./.github/actions/rust
+    - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 

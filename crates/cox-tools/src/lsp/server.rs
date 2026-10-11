@@ -353,6 +353,20 @@ impl Server {
         }
     }
 
+    /// The diagnostics the server last reported for `path`, without sending
+    /// it anything; `None` when cox never synced the file to this server,
+    /// so the caller knows there is no baseline rather than an empty one.
+    pub async fn last(&self, path: &Path) -> Option<Vec<Diagnostic>> {
+        let mut st = self.state.lock().await;
+        let version = *st.versions.get(path)?;
+        // A push that landed after the last call returned is still the
+        // newest word on the synced text.
+        while let Ok(note) = st.notes.try_recv() {
+            st.absorb(note, path, version);
+        }
+        Some(st.latest.get(path).cloned().unwrap_or_default())
+    }
+
     /// One `textDocument/diagnostic` pull; stores a non-`unchanged` result.
     async fn pull_once(
         &self,

@@ -1465,8 +1465,13 @@ impl std::fmt::Display for ModelId {
 }
 
 /// Which provider backend is in play; matches the `[providers.*]` config sections (D3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+///
+/// `Plugin` carries the ABI section name (T33.18). It is not `Copy`, and it
+/// serializes as `plugin:<section>` — the same shape as `Job::Plugin` — so
+/// the ledger's text column stays a JSON string (`cox_store::to_tag`) and
+/// does not collide with `jev` or a compatible section's `local` tag.
+/// `provider_name` returns the bare section name.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderId {
     /// Anthropic Messages API.
     Anthropic,
@@ -1479,6 +1484,75 @@ pub enum ProviderId {
     /// An external CLI agent from a plugin (EA§6, T35.5): billed on the
     /// user's own plan, so its ledger rows are `$0` and never priced here.
     External,
+    /// An ABI `[[provider]]` section (`api = "plugin"`, T33.18).
+    Plugin(String),
+}
+
+impl ProviderId {
+    /// The ledger tag: a fixed snake_case name, or `plugin:<section>`.
+    fn tag(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Self::Anthropic => std::borrow::Cow::Borrowed("anthropic"),
+            Self::OpenAi => std::borrow::Cow::Borrowed("openai"),
+            Self::Local => std::borrow::Cow::Borrowed("local"),
+            Self::Jev => std::borrow::Cow::Borrowed("jev"),
+            Self::External => std::borrow::Cow::Borrowed("external"),
+            Self::Plugin(name) => std::borrow::Cow::Owned(format!("plugin:{name}")),
+        }
+    }
+}
+
+impl Serialize for ProviderId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.tag())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProviderId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "anthropic" => Ok(Self::Anthropic),
+            "openai" => Ok(Self::OpenAi),
+            "local" => Ok(Self::Local),
+            "jev" => Ok(Self::Jev),
+            "external" => Ok(Self::External),
+            other => match other.strip_prefix("plugin:") {
+                Some(name) if !name.is_empty() => Ok(Self::Plugin(name.to_string())),
+                _ => Err(serde::de::Error::unknown_variant(
+                    other,
+                    &[
+                        "anthropic",
+                        "openai",
+                        "local",
+                        "jev",
+                        "external",
+                        "plugin:<section>",
+                    ],
+                )),
+            },
+        }
+    }
+}
+
+impl JsonSchema for ProviderId {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("ProviderId")
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Which provider backend served a call. An ABI section is `plugin:<section>`.",
+            "oneOf": [
+                { "type": "string", "const": "anthropic" },
+                { "type": "string", "const": "openai" },
+                { "type": "string", "const": "local" },
+                { "type": "string", "const": "jev" },
+                { "type": "string", "const": "external" },
+                { "type": "string", "pattern": "^plugin:.+$" }
+            ]
+        })
+    }
 }
 
 /// One block of the system prompt, with its own cache eligibility (plan.md §1.9).

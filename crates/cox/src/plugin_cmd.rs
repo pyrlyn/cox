@@ -973,7 +973,7 @@ fn declared_summary(caps: &Capabilities) -> String {
         (caps.ui.panel, "panel"),
         (caps.ui.overlay, "overlay"),
         (caps.ui.commands, "commands"),
-        (caps.ui.keys, "keys"),
+        (caps.terminal_keys(), "keys"),
     ] {
         if flag {
             parts.push(name.to_string());

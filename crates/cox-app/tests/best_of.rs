@@ -554,6 +554,31 @@ async fn best_of_merge_prompt_holds_each_chosen_answer_and_only_those() {
 }
 
 #[tokio::test]
+async fn best_of_merge_prompt_holds_each_chosen_diff_and_only_those() {
+    let (dir, trees) = scratch();
+    let app = app(dir.path(), &trees);
+    let launch = finished(&app, dir.path(), vec![cox(), cox(), cox()]).await;
+    for (n, word) in ["zero", "one", "two"].iter().enumerate() {
+        let file = worktree(&launch, n).join(format!("{word}.tsx"));
+        std::fs::write(file, format!("{word}-marker\n")).expect("write");
+    }
+    let merged = merged(&app, &launch, &[2, 0], cox()).await;
+    let prompts = user_texts(&merged.sessions[0]);
+    let prompt = &prompts[0];
+    assert!(prompt.contains("+++ b/zero.tsx\n@@"), "{prompt}");
+    assert!(prompt.contains("\n+zero-marker\n"), "{prompt}");
+    assert!(prompt.contains("\n+two-marker\n"), "{prompt}");
+    assert!(!prompt.contains("one-marker"), "{prompt}");
+    assert_eq!(
+        prompt
+            .matches("Its diff against the base:\n```text\n")
+            .count(),
+        2,
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
 async fn best_of_merge_runs_on_the_chosen_model() {
     let (dir, trees) = scratch();
     let app = app(dir.path(), &trees);

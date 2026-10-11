@@ -16,6 +16,10 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# T64.24: the tool-contract hash. `sha2` is already a workspace dependency
+# (cox-store's archive digests); this crate needs the same hash and must
+# not take a dependency on cox-store to get it.
+sha2 = { workspace = true }
 # T22.5: OAuth for HTTP servers — tokens live in the OS keyring (the same
 # `cox/<account>` entries the providers use); `reqwest` is the client rmcp's
 # `AuthClient` wraps, so the crate names it rather than relying on rmcp's
@@ -27,6 +31,9 @@ reqwest = { version = "0.13", default-features = false, features = ["default-tls
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# T64.24: the quarantine test indexes a pending tool's spec through the
+# real `tool_search`, which already reads `spec().description`.
+cox-tools = { path = "../cox-tools", version = "0.1.2" }
 # T22.5: the OAuth contract test plays authorization server and MCP server.
 wiremock = { workspace = true }
 

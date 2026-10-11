@@ -684,7 +684,8 @@ impl LiveSession {
                 }
                 return;
             }
-            Some(CommandOut::Nothing) | None => return,
+            // T33.45.5 selects the inspector tab; nothing draws it yet.
+            Some(CommandOut::OpenInspector | CommandOut::Nothing) | None => return,
         };
         if matches!(intent, Intent::Send { .. })
             && let Err(e) = self.ensure_ready().await
