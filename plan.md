@@ -91,7 +91,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.7 | todo | P3 | 4 | 0% | |
+| T56.7 | in progress | P3 | 4 | 0% | Claude Code / opus-5.5 |
 | T56.8 | todo | P3 | 3 | 0% | |
 | T56.9 | todo | P3 | 1 | 0% | |
 | T56.10 | todo | P3 | 2 | 0% | |
@@ -1705,6 +1705,7 @@ Goal: at a terminal state the driver reads the run's usage and writes one `usage
 Check: `mise exec -- cargo nextest run -p cox-session cloud_agent_usage_row_is_billed_externally_with_cursor_tokens cloud_agent_usage_row_is_written_once resume_reattaches_to_a_running_cloud_run resume_finalizes_a_run_that_finished_while_closed`.
 Done when: the tests pass.
 Out of scope: pricing the tokens in USD (the spend is on the user's Cursor plan).
+Plan: in `cloud_agents.rs`, at the end of a run (done, terminal status or cancel) `settle` reads `GET /v1/agents/{id}/usage` (the run's entry, else the total), claims `cloud_run_mark_usage_recorded` and only then returns the tokens from `task_turn`, so the core's external-turn path writes the one row (provider external, cost $0, job `agent`); a failed read leaves the run unclaimed for the next resume. Core seam: `ExternalAgent::ledger_model` (default `name()`) so the row names the requested model or `cursor:auto`, and a public `Session::complete_resumed_task` that emits `TaskCompleted`, publishes the result and writes the usage row through the same helper the external turn uses. Store: `cloud_runs_non_terminal` becomes `cloud_runs_unsettled` (not terminal, or no usage row yet). Resume: `open` with `resume` spawns `cloud_agents::resume_runs`, which for each unsettled row of the session settles usage only (terminal row), finalizes a run `GET` reports terminal (result item from `run.result` and usage row), or follows the stream of one still running and then finalizes it. Tests with wiremock and a scratch store; then `-p cox-session -p cox-core -p cox-store -p cox-protocol`, clippy, fmt.
 
 #### T56.8 Offline end-to-end over hand-written fixtures
 
