@@ -34,6 +34,7 @@ use crate::keymap::{self, Keymap};
 use crate::markdown;
 use crate::modal::{Approval, PluginGrantDialog, Question, QuestionAnswer, RemoveConfirm};
 use crate::picker::{self, Kind, Pick, Picker};
+use crate::pointer::{Interaction, Pointer, pointer};
 use crate::tasks;
 use crate::term::{Caps, Progress};
 use crate::theme::{Theme, ThemeFile};
@@ -297,6 +298,13 @@ pub struct State {
     /// can hit-test a click — interior mutability, so `view` keeps its
     /// `&State` every render call site and test already assumes.
     pub cell_rows: RefCell<Vec<(Range<u16>, usize)>>,
+    /// Screen rows the transcript band fills with text after the last draw
+    /// (T5.9), recorded by `view.rs` beside `cell_rows`; a mouse move over
+    /// one is over text that can be selected, over any other row is not.
+    pub text_rows: RefCell<Range<u16>>,
+    /// The pointer shape last written through OSC 22 (T5.9), so a move that
+    /// lands on the same shape writes nothing.
+    pub pointer: Pointer,
     /// The `todo` tool's latest list; `/todo` shows it.
     pub todo: Vec<TodoItem>,
     pub show_todo: bool,
@@ -700,6 +708,9 @@ pub enum Cmd {
     },
     /// OSC 9;4 tab progress (T23.6); only sent when `caps.osc9_4`.
     Progress(Progress),
+    /// OSC 22 pointer shape (T5.9); only sent when `caps.osc22` and the
+    /// shape differs from the last one written.
+    Pointer(Pointer),
     /// Ring the terminal (T23.5); `app.rs` picks OSC 9/777 by `Caps`.
     Notify {
         title: String,
@@ -772,6 +783,8 @@ impl State {
             diff_mode: crate::diff::Mode::Auto,
             expanded: HashSet::new(),
             cell_rows: RefCell::new(Vec::new()),
+            text_rows: RefCell::new(0..0),
+            pointer: Pointer::Default,
             todo: Vec::new(),
             show_todo: false,
             marks: false,
@@ -1099,6 +1112,9 @@ fn replay_cells(events: Vec<Event>) -> Vec<Cell> {
 /// lands inside `cell_rows` — `view.rs`'s record of what is actually on
 /// screen after the last draw — so anywhere else does nothing.
 fn on_mouse(state: &mut State, ev: MouseEvent) -> Vec<Cmd> {
+    if matches!(ev.kind, MouseEventKind::Moved) {
+        return on_move(state, ev.row);
+    }
     if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
         if state.modal.is_none() {
             let hit = state
@@ -1727,6 +1743,34 @@ fn toggle_fold(state: &mut State, i: usize) -> Vec<Cmd> {
         state.expanded.insert(i);
     }
     Vec::new()
+}
+
+/// A mouse move (T5.9): the pointer shape for what is under `row`, decided
+/// by `cox_render::pointer` from the same two facts `on_mouse` acts on — a
+/// row in `cell_rows` is where a click folds a card (only with no modal
+/// open), a row in `text_rows` is transcript text. No rule of its own: this
+/// only builds the `Interaction`. Silent without OSC 22 or with the mouse
+/// off, so a terminal that cannot draw it is never sent the bytes.
+fn on_move(state: &mut State, row: u16) -> Vec<Cmd> {
+    if !(state.mouse && state.caps.osc22) {
+        return Vec::new();
+    }
+    let clickable = state.modal.is_none()
+        && state
+            .cell_rows
+            .borrow()
+            .iter()
+            .any(|(rows, _)| rows.contains(&row));
+    let want = pointer(Interaction {
+        clickable,
+        selectable: state.text_rows.borrow().contains(&row),
+        ..Interaction::default()
+    });
+    if want == state.pointer {
+        return Vec::new();
+    }
+    state.pointer = want;
+    vec![Cmd::Pointer(want)]
 }
 
 /// A key for the composer, and what its `Edit` means for the session.
@@ -3708,6 +3752,97 @@ mod tests {
         assert!(
             !state.expanded.contains(&0),
             "a second click should fold the card back"
+        );
+    }
+
+    /// T5.9: what the tests below move over — rows 2..4 are a tool card (a
+    /// click folds it), rows 4..8 transcript text, anything else empty.
+    fn pointer_state(osc22: bool) -> State {
+        let mut state = State::new(PermissionMode::Default, SandboxMode::WorkspaceWrite);
+        state.caps.osc22 = osc22;
+        *state.cell_rows.borrow_mut() = vec![(2..4, 0)];
+        *state.text_rows.borrow_mut() = 2..8;
+        state
+    }
+
+    fn moved(row: u16) -> Msg {
+        Msg::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 3,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn mouse_move_asks_for_the_pointer_the_shared_rule_picks() {
+        use cox_render::pointer::Pointer;
+        let mut state = pointer_state(true);
+        assert_eq!(
+            update(&mut state, moved(2)),
+            vec![Cmd::Pointer(Pointer::Action)],
+            "a foldable card row is clickable, which outranks selectable"
+        );
+        assert_eq!(
+            update(&mut state, moved(5)),
+            vec![Cmd::Pointer(Pointer::Text)]
+        );
+        assert_eq!(
+            update(&mut state, moved(12)),
+            vec![Cmd::Pointer(Pointer::Default)]
+        );
+    }
+
+    #[test]
+    fn mouse_move_inside_the_same_shape_writes_nothing() {
+        let mut state = pointer_state(true);
+        update(&mut state, moved(5));
+        assert_eq!(update(&mut state, moved(6)), Vec::new());
+        assert_eq!(update(&mut state, moved(5)), Vec::new());
+        // The arrow is the starting shape, so empty space first asks for none.
+        let mut fresh = pointer_state(true);
+        assert_eq!(update(&mut fresh, moved(12)), Vec::new());
+    }
+
+    #[test]
+    fn mouse_move_writes_nothing_without_osc22_or_with_the_mouse_off() {
+        let mut without = pointer_state(false);
+        assert_eq!(update(&mut without, moved(2)), Vec::new());
+        assert_eq!(without.pointer, cox_render::pointer::Pointer::Default);
+
+        let mut off = pointer_state(true);
+        off.mouse = false;
+        assert_eq!(update(&mut off, moved(2)), Vec::new());
+    }
+
+    #[test]
+    fn an_open_modal_makes_a_card_row_plain_text() {
+        use cox_render::pointer::Pointer;
+        let mut state = pointer_state(true);
+        state.modal = Some(Modal::Help);
+        assert_eq!(
+            update(&mut state, moved(2)),
+            vec![Cmd::Pointer(Pointer::Text)],
+            "a click does nothing behind a modal, so the row is not clickable"
+        );
+    }
+
+    #[test]
+    fn view_records_the_rows_that_carry_transcript_text() {
+        let mut state = State::new(PermissionMode::Default, SandboxMode::WorkspaceWrite);
+        for text in ["one", "two"] {
+            state.transcript.push(Cell::Notice {
+                level: Level::Info,
+                text: text.into(),
+            });
+        }
+        let area = ratatui::layout::Rect::new(0, 4, 40, 20);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        crate::view::view(&state, area, &mut buf);
+        let rows = state.text_rows.borrow().clone();
+        assert!(
+            rows.start >= area.y && !rows.is_empty() && rows.end < area.bottom(),
+            "{rows:?} should be a band of text inside the viewport, not all of it"
         );
     }
 
