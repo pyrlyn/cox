@@ -10,10 +10,10 @@ cox-protocol = { path = "../cox-protocol", version = "0.1.2" }
 # T44.2: presence text names another session's worktree path to the model,
 # through the one terminal-text guard.
 cox-sanitize = { path = "../cox-sanitize", version = "0.1.2" }
-# T7.2: frontmatter (serde_yaml, plan §1.1 cox-ext row), the `skill` tool
+# T7.2: frontmatter (serde-saphyr since T7.9, plan §1.1 cox-ext row), the `skill` tool
 # (async-trait like every Tool impl), JSON schemas and structured output.
 serde = { workspace = true }
-serde_yaml = { workspace = true }
+serde-saphyr = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }

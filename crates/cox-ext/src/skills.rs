@@ -51,8 +51,8 @@ struct Header {
     description: Option<String>,
     license: Option<String>,
     #[serde(rename = "allowed-tools")]
-    allowed_tools: Option<serde_yaml::Value>,
-    metadata: Option<BTreeMap<String, serde_yaml::Value>>,
+    allowed_tools: Option<frontmatter::Value>,
+    metadata: Option<BTreeMap<String, frontmatter::Value>>,
     compatibility: Option<String>,
 }
 
@@ -145,16 +145,7 @@ fn parse_skill(path: &Path) -> Result<Skill, String> {
         .metadata
         .unwrap_or_default()
         .into_iter()
-        .map(|(k, v)| {
-            let v = match v {
-                serde_yaml::Value::String(s) => s,
-                other => serde_yaml::to_string(&other)
-                    .unwrap_or_default()
-                    .trim_end()
-                    .to_string(),
-            };
-            (k, v)
-        })
+        .map(|(k, v)| (k, frontmatter::text(v)))
         .collect();
     Ok(Skill {
         name,

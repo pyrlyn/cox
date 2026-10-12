@@ -40,7 +40,7 @@ pub struct Discovered {
 struct Header {
     description: Option<String>,
     #[serde(rename = "allowed-tools")]
-    allowed_tools: Option<serde_yaml::Value>,
+    allowed_tools: Option<frontmatter::Value>,
     model: Option<String>,
     #[serde(rename = "argument-hint")]
     argument_hint: Option<String>,

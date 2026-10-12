@@ -36,7 +36,7 @@ pub struct Discovered {
 struct Header {
     name: Option<String>,
     description: Option<String>,
-    tools: Option<serde_yaml::Value>,
+    tools: Option<frontmatter::Value>,
     model: Option<String>,
     /// T34.10: `disabled: true` hides the def from the model without
     /// removing it from disk or from `cox ext list`.

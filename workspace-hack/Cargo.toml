@@ -17,6 +17,7 @@ publish = false
 ### BEGIN HAKARI SECTION
 [dependencies]
 aho-corasick = { version = "1" }
+anstyle = { version = "1" }
 anyhow = { version = "1" }
 bit-set = { version = "0.8" }
 bit-vec = { version = "0.8" }
