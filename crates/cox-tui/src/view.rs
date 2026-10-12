@@ -278,6 +278,13 @@ pub fn view(state: &State, area: Rect, buf: &mut Buffer) -> Option<Position> {
             (lines, offset)
         }
     };
+    // T5.9: the rows that carry text, for the pointer shape; a modal that
+    // draws its own band leaves `lines` empty and so no text rows.
+    let shown = lines.len().saturating_sub(offset).min(rows);
+    *state.text_rows.borrow_mut() = transcript.y
+        ..transcript
+            .y
+            .saturating_add(u16::try_from(shown).unwrap_or(u16::MAX));
     Paragraph::new(lines)
         .scroll((u16::try_from(offset).unwrap_or(u16::MAX), 0))
         .render(transcript, buf);
