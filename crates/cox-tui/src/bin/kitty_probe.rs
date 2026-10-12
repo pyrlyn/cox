@@ -27,8 +27,9 @@
 //! `COX_PROBE_SCENARIO=progress` (T23.6) starts and ends one turn;
 //! `COX_PROBE_OSC9_4=1` says the terminal draws OSC 9;4 progress.
 //! `COX_PROBE_MOUSE=1` (T22.4) sets `tui.mouse`, so `app::run` asks for
-//! mouse capture; needs no scenario of its own since capture is a startup
-//! decision, not something a fed `Msg` drives.
+//! mouse capture; `COX_PROBE_OSC22=1` (T5.9) says the terminal draws OSC 22
+//! pointer shapes, so exit restores the arrow. Both are startup decisions,
+//! not something a fed `Msg` drives, so they need no scenario of their own.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -105,6 +106,8 @@ async fn main() {
     // T22.4: `tui.mouse`, off by default here like every other probe switch.
     state.mouse = std::env::var("COX_PROBE_MOUSE").as_deref() == Ok("1");
     state.caps.osc52 = std::env::var("COX_PROBE_OSC52").as_deref() == Ok("1");
+    // T5.9: `restore` puts the pointer back only when this run could set it.
+    state.caps.osc22 = std::env::var("COX_PROBE_OSC22").as_deref() == Ok("1");
     // The notify scenario needs a terminal that shows OSC 9 and reports focus.
     if std::env::var("COX_PROBE_SCENARIO").as_deref() == Ok("notify") {
         state.caps.osc9 = true;
