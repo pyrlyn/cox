@@ -91,7 +91,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.8 | todo | P3 | 3 | 0% | |
+| T56.8 | in progress | P3 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T56.9 | todo | P3 | 1 | 0% | |
 | T56.10 | todo | P3 | 2 | 0% | |
 | T57.1 | todo | P1 | 2 | 90% | |
@@ -1698,6 +1698,9 @@ Every card in this phase:
 - makes no network call in tests (wiremock and hand-written fixtures only, D12).
 
 #### T56.8 Offline end-to-end over hand-written fixtures
+
+Model: Claude Code / sonnet-5.5
+Plan: (1) `cloud_agents::drivers` reads the test-only env `COX_CURSOR_CLOUD_URL` and points the Cursor client there through a new `Client::with_loopback_base_url`, which refuses any host but loopback, so the override can never carry the key off the machine and is not a manifest field. (2) Hand-written fixtures in `crates/cox/tests/fixtures/cursor-cloud/` (`create_agent.json`, `stream.sse`, `usage.json`, `plugin/{plugin.toml,plugin.wasm}`) from the public endpoint docs only (A40 step 3). (3) `crates/cox/tests/cloud_agents.rs`: a scratch `COX_HOME`, `cox plugin install --yes` of the fixture package, a fixture git repo with a GitHub `origin` and a commit by a distinctive user, a wiremock server, a scripted parent that calls `agent(preset)`. Tests: `cloud_agent_headless_run_end_to_end` (task events in the stream-json, one external-provider $0 usage row in the ledger, the run row `FINISHED`) and `cloud_agent_requests_carry_no_git_identity` (no request body, header or path has the git name or email). Deviation to record: T56.6 made the approval an exact `CloudAgent(owner/repo)` allow rule (a background task has no prompt), so the test grants it in config instead of passing `--answer`; a third test checks that without the rule no request leaves. Verify with the Check, clippy, fmt, and the binary against a scratch `COX_HOME`.
 
 Depends: T56.7 · Size: ~160 · Files: `crates/cox/tests/cloud_agents.rs` (new); fixtures `tests/fixtures/cursor-cloud/*.json`, `*.sse` and a fixture plugin package with a `[[cloud_agents]]` entry
 Goal: the real binary against a scratch `COX_HOME`, a wiremock server standing in for `api.cursor.com` (host override for tests only, never a manifest field), and a fixture repository with a GitHub remote: `cox run -p --output-format stream-json` dispatches a background cloud task, the approval is asked (`--answer` allow), the task events appear in the stream, the ledger holds one `billed_externally` row, and no request body contains the fixture's git user name or email.
