@@ -46,24 +46,40 @@ pub struct Fetched {
 /// hop — resolves through [`PublicOnly`], which refuses loopback,
 /// link-local, private and unspecified addresses (T62.5).
 pub fn client() -> Client {
-    match reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        .redirect(private_guard_policy())
-        .user_agent("cox (+https://github.com/pyrlyn/cox)")
-        .dns_resolver(std::sync::Arc::new(PublicOnly))
-        .build()
+    match configured(
+        reqwest::Client::builder().user_agent("cox (+https://github.com/pyrlyn/cox)"),
+        PublicOnly,
+        TIMEOUT,
+    )
+    .build()
     {
         Ok(built) => built,
-        // The builder only fails on a broken TLS backend; a bare client
-        // still fetches, just without the timeout, and `fetch` bounds the
-        // body itself. The guard is re-installed so it never depends on the
-        // backend's health.
-        Err(_) => reqwest::Client::builder()
-            .redirect(private_guard_policy())
-            .dns_resolver(std::sync::Arc::new(PublicOnly))
+        // why: only a broken TLS backend fails the build, and the retry drops
+        // just the user agent. The timeout and the guard stay, so the fallback
+        // is never unbounded or unguarded. If the retry fails too, the
+        // `Default` impl panics inside reqwest: no unguarded client is returned.
+        Err(_) => configured(reqwest::Client::builder(), PublicOnly, TIMEOUT)
             .build()
             .unwrap_or_default(),
     }
+}
+
+/// The settings every cox client shares: `timeout`, the redirect guard and
+/// `resolver`. Both branches of [`client`] build through it, so a fallback
+/// cannot drop one of them (T64.12). `resolver` and `timeout` are parameters
+/// only so a test can stall name resolution with a short timeout.
+fn configured<R>(
+    builder: reqwest::ClientBuilder,
+    resolver: R,
+    timeout: Duration,
+) -> reqwest::ClientBuilder
+where
+    R: reqwest::dns::Resolve + 'static,
+{
+    builder
+        .timeout(timeout)
+        .redirect(private_guard_policy())
+        .dns_resolver(std::sync::Arc::new(resolver))
 }
 
 const PRIVATE_REFUSAL: &str =
@@ -521,5 +537,42 @@ mod tests {
     #[test]
     fn web_fetch_decode_handles_numeric_and_unknown_entities() {
         assert_eq!(decode("a &#65;&#x42; &unknown; &"), "a AB &unknown; &");
+    }
+
+    /// T64.12: the fallback client lost `.timeout(TIMEOUT)`, so a request
+    /// that stalled hung with no bound. A resolver that never answers stands
+    /// in for a stalled host, so no socket opens; the outer timeout turns a
+    /// missing client timeout into a failure instead of a hung test.
+    #[test]
+    fn configured_client_times_out_when_name_resolution_stalls() {
+        struct Stalled;
+        impl reqwest::dns::Resolve for Stalled {
+            fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+                Box::pin(std::future::pending())
+            }
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let http = configured(
+            reqwest::Client::builder(),
+            Stalled,
+            Duration::from_millis(100),
+        )
+        .build()
+        .expect("client");
+        let outcome = runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                http.get("http://stalled.invalid/").send(),
+            )
+            .await
+        });
+        match outcome {
+            Ok(Err(e)) => assert!(e.is_timeout(), "expected a timeout, got {e}"),
+            Ok(Ok(_)) => panic!("a stalled request must not succeed"),
+            Err(_) => panic!("the client ignored its timeout and hung"),
+        }
     }
 }
