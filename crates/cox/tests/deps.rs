@@ -31,6 +31,9 @@ fn workspace_deps() -> HashMap<String, HashSet<String>> {
     let workspace_names: HashSet<String> = packages
         .iter()
         .map(|p| p["name"].as_str().expect("package name").to_string())
+        // cargo-hakari's feature-unification crate carries no code, so it is not a
+        // layering edge; every crate depends on it.
+        .filter(|name| name != "workspace-hack")
         .collect();
 
     packages

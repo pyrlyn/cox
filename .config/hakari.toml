@@ -24,3 +24,18 @@ platforms = [
 
 # Write out exact versions rather than a semver range. (Defaults to false.)
 # exact-versions = true
+
+# Built for wasm32-unknown-unknown by the guest workspace (plugins/, PL§9): the host
+# feature set (getrandom `std`/`sys_rng`) does not compile there, and both crates are
+# meant to have no workspace dependency.
+[final-excludes]
+workspace-members = ["cox-plugin-api", "cox-plugin-fixtures"]
+
+# Kept out of the unified feature set so the layering tests in crates/cox/tests/deps.rs
+# still hold: crossterm must not reach the UI-agnostic cox-app (the desktop staticlib),
+# and uniffi must stay cox-ffi's alone, never in the cox binary.
+[traversal-excludes]
+third-party = [
+    { name = "crossterm" },
+    { name = "uniffi" },
+]

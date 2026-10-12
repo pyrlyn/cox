@@ -1417,15 +1417,11 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
- "workspace-hack",
 ]
 
 [[package]]
 name = "cox-plugin-fixtures"
 version = "0.1.2"
-dependencies = [
- "workspace-hack",
-]
 
 [[package]]
 name = "cox-protocol"
@@ -8934,16 +8930,10 @@ dependencies = [
  "bit-vec 0.8.0",
  "bitflags 2.13.2",
  "bstr",
- "camino",
  "cc",
  "chrono",
- "clap",
- "clap_builder",
  "crossbeam-utils",
- "crossterm",
  "crypto-common 0.1.7",
- "derive_more",
- "derive_more-impl",
  "digest 0.10.7",
  "digest 0.11.3",
  "either",
@@ -8975,9 +8965,7 @@ dependencies = [
  "lock_api",
  "log",
  "memchr",
- "mio",
  "nix 0.31.3",
- "nom",
  "num-complex",
  "num-integer",
  "num-traits",
@@ -9033,7 +9021,6 @@ dependencies = [
  "tracing-core",
  "tracing-subscriber",
  "typenum",
- "uniffi",
  "url",
  "uuid",
  "wasmtime-environ",

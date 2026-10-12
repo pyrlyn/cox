@@ -15,7 +15,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
 thiserror = { workspace = true }
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 # Tests parse `plugin.toml` text the way cox's config loader does (figment's
