@@ -1,3 +1,48 @@
+#### T64.2 Guard project `core.workspace_roots`
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~110 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot widen the roots `confine` checks against. Its `core.workspace_roots` becomes `ToolCx.roots` (`cox-session/src/lib.rs`, `cox-core/src/turn.rs`), so `workspace_roots = ["/"]` opened the whole disk to `read`, `write` and `edit`.
+Plan:
+1. Test first in `load.rs`: a project root outside the git root reverts the whole list to the user's roots with a `core.workspace_roots` violation; a root inside the git root and one the user already lists stay.
+2. `apply_project_guards` takes the git root. A project root is kept when the layers without the project already list it, or when it is absolute and its canonical path is inside the canonical git root. Any other root reverts the list to `without_project`'s, the way `lsp.servers` reverts. Relative roots are refused: `confine` resolves them against the process cwd, not the repository.
+3. `core.workspace_roots` joins `GUARDED_KEYS` with its own reason; plan §1.6 lists the guard.
+What landed: `root_inside` and the guard in `apply_project_guards`; `load_in` finds the git root once and passes it (`project_config_in` shares the `.cox/config.toml` join with `project_config_path`). Test `project_config_cannot_widen_workspace_roots` covers `/`, a relative `src`, a symlink inside the repo pointing out, and `<git root>/..`; the user's root survives and `--sources` names the user layer.
+Not done: a project root that is a subdirectory of the checkout is still canonicalized again by `confine` at call time, so a directory later swapped for a symlink widens it; that is the symlink-swap class tracked by T64.15. No `docs/config.md` change: `default.toml`'s `workspace_roots` comment feeds a `cox-app` settings snapshot. The real binary was not run (disk was at 99%); `cox-config`'s own loader tests cover the path `cox config show` takes.
+Check:
+```text
+$ CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 mise exec -- cargo nextest run -p cox-config
+39 tests run: 39 passed, 0 skipped
+  PASS load::tests::project_config_cannot_widen_workspace_roots
+  PASS load::tests::every_guarded_key_has_its_own_reason
+$ mise exec -- cargo clippy -p cox-config --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+Before the fix the new test failed: `'/' must revert the list to the user's`, left `[<git>/src, "/"]`.
+
+#### T64.3 Guard project provider endpoints and keys
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~150 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot send the user's API keys somewhere else. It could set `providers.<name>.base_url` or `api_key_env`, or add a `[providers.<name>]` table naming any env var, and the key resolved for that section followed the request.
+Plan:
+1. Test first in `load.rs`: a project `base_url` and `api_key_env` on a native and a compatible section revert to the user's values, a new `[providers.evil]` table is dropped, and `timeout_s` stays project-settable; each attempt is its own violation with its own reason, and `--sources` still names the project for the untouched keys.
+2. `apply_project_guards` pins every section's `base_url` and `api_key_env` to `without_project`'s (through the existing `transport()` accessor) and removes `custom` tables the layers without the project do not have. Violations: `providers.*.base_url`, `providers.*.api_key_env`, `providers` (added tables).
+3. `LoadedConfig::source_of` matches a `*` segment in a guarded key, so `providers.anthropic.base_url` (and the existing `mcp.servers.*.sandbox`) takes the pre-project provenance when reverted.
+What landed: the guard after the `external_agents` one, three reasons, two `GUARDED_KEYS` rows (`providers` is left out on purpose: its keys never reach the effective config, and listing it would send every project-set provider key to the pre-project figment), the wildcard-aware `under` in `source_of`, and plan §1.6. Test `project_config_cannot_redirect_provider_keys`.
+Not done: a project may still set a tier's `provider` to a name the guard dropped; the router then rejects it as unknown. The real binary was not run (disk was at 99%).
+Check:
+```text
+$ CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 mise exec -- cargo nextest run -p cox-config
+39 tests run: 39 passed, 0 skipped
+  PASS load::tests::project_config_cannot_redirect_provider_keys
+$ mise exec -- cargo clippy -p cox-config --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+Before the fix the new test failed: `providers.anthropic.base_url` was `https://evil.example`, expected `https://api.anthropic.com`.
+
 
 #### T33.18 Providers, ABI form (`PluginProvider`)
 
