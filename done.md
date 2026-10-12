@@ -10826,3 +10826,25 @@ Status: done 2026-10-12
 Implementation: `Caps.osc22` (`detect` sets it for kitty, Ghostty and foot outside tmux; `Caps::query` probes `OSC 22 ; ?pointer` behind a device-attributes backstop and returns `Queried`; `[tui.caps] osc22` overrides; `cox doctor` prints it). `term::pointer_bytes` writes the OSC 22 sequence from `Pointer::css_name()`. `view.rs` records `State.text_rows` beside `cell_rows`; `state::on_mouse` turns a `Moved` event into an `Interaction` for `cox_render::pointer::pointer` and emits `Cmd::Pointer` only when `caps.osc22`, `tui.mouse` is on and the shape changed. `app.rs` writes it and `restore` writes `default` on exit and in the panic hook. cox-tui has no suspend path, so there is nothing to hook for suspend.
 
 Check output: `mise exec -- cargo nextest run -p cox-tui -p cox-protocol -p cox-render` - 484 passed, including `mouse_move_asks_for_the_pointer_the_shared_rule_picks` (card row `pointer`, text row `text`, empty row `default`), `mouse_move_inside_the_same_shape_writes_nothing`, `mouse_move_writes_nothing_without_osc22_or_with_the_mouse_off`, `pty_restores_the_pointer_only_with_the_capability`; `cargo nextest run -p cox` - 194 passed; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: a live kitty or Ghostty window (none on this machine).
+
+#### T64.8 Serialize same-path `write`/`edit` calls in one parallel batch
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~110 · Priority: P1 · Complexity: 2 · Files: `crates/cox-core/src/turn.rs`, `crates/cox-core/tests/same_path.rs`, `crates/cox-core/tests/scenarios/same_path_batch.toml`
+Goal: `write` and `edit` are `Concurrency::Parallel`, so two calls on one path in one batch raced and the last rename won, not the model's last call. The parallel batch is grouped by `Tool::touches()` path; calls that share a path run one after another in model order, calls on different paths and read-only calls stay parallel under `core.parallel_tools`.
+Plan:
+1. Regression test first (`tests/same_path.rs`): a parallel write stub with a slow first call and a second call on `./x.txt`; it fails while both start at once.
+2. In `run_tools`, key each non-read-only parallel call by `touches()` paths made absolute against the session cwd and folded lexically (`x.txt`, `./x.txt`); `group_by_path` chains calls that share a path directly or through a third call. Each group is one task in the existing `JoinSet`.
+3. Unit tests for `group_by_path` and the path key; run `cox-core` and `cox-tools` tests, clippy and fmt.
+What landed: the plan above, with no new mechanism: the existing `touches()` and the existing `JoinSet` loop, where a task is now a path group instead of a single call. Keys are lexical (no symlink resolution), so two different names for one file through a symlink still race; `confine` is unchanged.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-core --test same_path   (before the fix)
+FAIL same_path_calls_run_in_model_order_while_other_paths_overlap
+["start:a", "start:b", "start:c", "end:b", "end:c", "end:a"]
+$ CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 mise exec -- cargo nextest run -p cox-core -p cox-tools
+598 tests run: 598 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-core -p cox-tools --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
