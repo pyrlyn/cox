@@ -40,7 +40,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T5.9 | in progress | P3 | 3 | 10% | Claude Code / sonnet-5.5 |
 | T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
@@ -777,14 +776,6 @@ P22–P30 (A27): P22 first; T22.1–T22.6 may proceed independently, then T22.7 
 ### P4 — Sandbox (goal: `workspace-write` enforced on macOS and Linux)
 
 ### P5 — TUI (goal: a daily-driver terminal UI with snapshots for every state)
-
-#### T5.9 Terminal pointer shape follows what the cell does (OSC 22)
-
-Depends: T37.50 · Size: ~150 · Files: `crates/cox-tui/src/term.rs` (`Caps`), `crates/cox-tui/src/state.rs` (`on_mouse`), `crates/cox-tui/src/app.rs` (`restore`)
-Goal: the TUI shows T37.50's shared pointer (A148) where the terminal can: with `tui.mouse` on, a mouse move builds the `Interaction` of what is under it (a row in `cell_rows` that a click acts on — a fold toggle, T22.9 — is clickable; transcript text is selectable), calls `cox_render::pointer::pointer` and writes `Pointer::css_name()` through OSC 22 (`ESC ] 22 ; <name> ST`). The TUI keeps no rule of its own. The shape is written only when it changes. `Caps::query` (T23.0) asks the terminal with OSC 22's `?` query and records support; a terminal that does not answer gets no OSC 22 bytes at all. `restore` puts the pointer back to `default` on exit and on suspend.
-Check: `on_mouse` unit tests: a move onto a fold row asks for `pointer`, onto plain text `text`, onto empty space `default`, a second move inside the same row writes nothing; a `Caps` without OSC 22 support writes no bytes; in kitty or Ghostty the pointer changes over a tool-call header and returns to the arrow after `cox` exits.
-Out of scope: terminals without OSC 22 (nothing changes there).
-Plan: (1) `Caps.osc22` (T23.0): `detect` sets it for kitty, Ghostty and foot outside tmux, `query` refines it with a `?pointer` OSC 22 probe behind the same DA1 sentinel crossterm uses, `[tui.caps]` can override it; `doctor` prints it. (2) `term::pointer_bytes` writes `ESC ] 22 ; <css_name> ESC \`. (3) `view.rs` records `text_rows` (screen rows that carry transcript text) beside `cell_rows`; `state::on_mouse` builds an `Interaction` for a `Moved` event and calls `cox_render::pointer::pointer`, emitting `Cmd::Pointer` only when `caps.osc22 && mouse` and the shape differs from `State.pointer`. (4) `app.rs` writes the bytes; `restore` writes `default` when a shape was set. cox-tui has no suspend path today, so the suspend half of the card has nothing to hook yet. (5) Unit tests in `state.rs` and `term.rs`, docs row in `docs/` if `[tui.caps]` is documented.
 
 ### P6 — Headless and MCP server (goal: scripts and other agents can drive cox)
 
