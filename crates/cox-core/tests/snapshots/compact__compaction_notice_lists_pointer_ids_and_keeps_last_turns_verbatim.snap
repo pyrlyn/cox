@@ -1,0 +1,21 @@
+---
+source: crates/cox-core/tests/compact.rs
+expression: "redact_ids(text, &flat)"
+---
+[Compacted summary of 3 earlier turn(s)]
+
+## Files touched
+- a.rs: read, edited
+## Errors seen
+none
+## Last request
+t2
+
+## Goal
+ship
+
+## Archived outputs
+Full outputs the expand tool still retrieves:
+- #ID1 read
+- #ID2 grep
+- #ID3 edit

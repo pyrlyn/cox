@@ -135,6 +135,7 @@ impl GuardViolation {
             "plugins.enabled" => "A project may not turn plugins back on",
             "tiers.think.confirm" => "A project may not skip the think tier's confirmation",
             "mcp.servers.*.sandbox" => "A project may not run an MCP server unsandboxed",
+            "hooks" => "A project may not choose which hook commands run",
             "lsp.servers" => "A project may not choose which language servers run",
             "voice" => "A project may not turn on the microphone or choose the voice model",
             "tui.status_line.command" => "A project may not choose a status-line command",
@@ -322,6 +323,49 @@ fn apply_project_guards(full: &mut Config, without_project: &Config) -> Vec<Guar
         full.lsp.servers = without_project.lsp.servers.clone();
     }
 
+    // T64.1: a hook command is `/bin/sh -c` with the tool JSON on stdin and
+    // no sandbox, so a cloned repository must not add or change one. The
+    // command may arrive from `.cox/config.toml` or a project `.claude`
+    // file (both are this layer). The user's own hooks, including
+    // `~/.claude`, stay. `timeout_s` and `fail_open` are not commands.
+    if full.hooks.events != without_project.hooks.events {
+        let mut changed: Vec<&str> = full
+            .hooks
+            .events
+            .iter()
+            .filter(|(name, hooks)| without_project.hooks.events.get(name.as_str()) != Some(*hooks))
+            .map(|(name, _)| name.as_str())
+            .collect();
+        for name in without_project.hooks.events.keys() {
+            if !full.hooks.events.contains_key(name) {
+                changed.push(name);
+            }
+        }
+        changed.sort_unstable();
+        changed.dedup();
+        let mut kept: Vec<&str> = without_project
+            .hooks
+            .events
+            .keys()
+            .map(String::as_str)
+            .collect();
+        kept.sort_unstable();
+        violations.push(GuardViolation {
+            key: "hooks",
+            project_value: if changed.is_empty() {
+                "none".to_string()
+            } else {
+                changed.join(", ")
+            },
+            reverted_to: if kept.is_empty() {
+                "none".to_string()
+            } else {
+                kept.join(", ")
+            },
+        });
+        full.hooks.events = without_project.hooks.events.clone();
+    }
+
     // T54.4 (A123): `[voice]` switches the microphone on and picks the
     // model file cox loads, so the whole table is the user's alone; any
     // project difference reverts all of it.
@@ -450,7 +494,7 @@ fn rule_list(rules: &[String]) -> String {
 /// Dotted keys the project-config guard list can revert (plan.md §1.6);
 /// used only to pick which figment (with or without the project layer) a
 /// reverted key's provenance is looked up in.
-const GUARDED_KEYS: [&str; 16] = [
+const GUARDED_KEYS: [&str; 17] = [
     "budget.session_usd",
     "budget.monthly_usd",
     "budget.warn_at",
@@ -458,6 +502,7 @@ const GUARDED_KEYS: [&str; 16] = [
     "desktop.remote_hosts",
     "external_agents",
     "external_agents.*.writable",
+    "hooks",
     "lsp.servers",
     "mcp.servers.*.sandbox",
     "permissions.allow",
@@ -468,6 +513,11 @@ const GUARDED_KEYS: [&str; 16] = [
     "tui.status_line.command",
     "voice",
 ];
+
+/// `[hooks]` scalars a project may still set. They sit under the same
+/// `hooks.` prefix as the flattened event arrays, which [`LoadedConfig::source_of`]
+/// must not treat as reverted.
+const HOOK_SCALARS: [&str; 3] = ["hooks.timeout_s", "hooks.fail_open", "hooks.enabled"];
 
 /// The result of [`load`]: the effective, guard-corrected `Config`, plus
 /// enough of the layered figments to answer `source_of` for `cox config show
@@ -495,8 +545,12 @@ impl LoadedConfig {
                     .strip_prefix(guarded)
                     .is_some_and(|rest| rest.starts_with('.'))
         };
-        let reverted =
-            GUARDED_KEYS.iter().any(|g| under(g)) && self.violations.iter().any(|v| under(v.key));
+        // Event arrays are flattened as `hooks.<Event>`, so the `hooks`
+        // prefix also covers `timeout_s` and `fail_open`, which this guard
+        // does not revert. Those scalars keep the full figment's provenance.
+        let reverted = !HOOK_SCALARS.contains(&key)
+            && GUARDED_KEYS.iter().any(|g| under(g))
+            && self.violations.iter().any(|v| under(v.key));
         let fig = if reverted {
             &self.pre_project_fig
         } else {
@@ -899,6 +953,36 @@ mod tests {
             assert_eq!(loaded.source_of("lsp.servers.zig.command"), "user");
             assert_eq!(loaded.source_of("lsp.timeout_s"), "project");
         });
+    }
+
+    /// T64.1: a hook command is a program cox runs unsandboxed, so a
+    /// project `.cox/config.toml` can neither add one nor replace the
+    /// user's. `timeout_s` is not a command and stays project-settable,
+    /// and `--sources` still names the layer that set it.
+    #[test]
+    fn project_config_cannot_set_hook_commands() {
+        load_with_project(
+            Some("[[hooks.Stop]]\ncommand = \"echo mine\"\n"),
+            "[hooks]\ntimeout_s = 5\n\n[[hooks.Stop]]\ncommand = \"echo evil\"\n\n\
+             [[hooks.PreToolUse]]\ncommand = \"echo also-evil\"\n",
+            |loaded| {
+                let events = &loaded.config.hooks.events;
+                assert_eq!(events["Stop"][0].command, "echo mine");
+                assert!(!events.contains_key("PreToolUse"), "{events:?}");
+                assert_eq!(loaded.config.hooks.timeout_s, 5, "timeout_s is not guarded");
+                let v = violation(&loaded, "hooks").expect("a hooks violation");
+                assert!(v.project_value.contains("Stop"), "{v:?}");
+                assert!(v.project_value.contains("PreToolUse"), "{v:?}");
+                assert_eq!(v.reverted_to, "Stop");
+                assert_eq!(
+                    v.reason(),
+                    "A project may not choose which hook commands run"
+                );
+                assert_eq!(loaded.source_of("hooks.Stop"), "user");
+                assert_eq!(loaded.source_of("hooks.PreToolUse"), "default");
+                assert_eq!(loaded.source_of("hooks.timeout_s"), "project");
+            },
+        );
     }
 
     /// T52.2: an external agent is a program cox spawns and `writable`

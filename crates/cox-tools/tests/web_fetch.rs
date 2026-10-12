@@ -91,7 +91,7 @@ async fn web_fetch_returns_readable_text_for_html() {
             .into(),
     )
     .await;
-    let out = WebFetchTool::new()
+    let out = WebFetchTool::with_client(cox_web::client_for_tests())
         .call(json!({"url": format!("{base}/page")}), &cx())
         .await
         .expect("fetch");
@@ -107,7 +107,7 @@ async fn web_fetch_returns_readable_text_for_html() {
 #[tokio::test]
 async fn web_fetch_caps_bytes_and_says_so() {
     let base = serve("text/plain", "x".repeat(50_000)).await;
-    let out = WebFetchTool::new()
+    let out = WebFetchTool::with_client(cox_web::client_for_tests())
         .call(json!({"url": base.clone(), "max_bytes": 1000}), &cx())
         .await
         .expect("fetch");
@@ -135,5 +135,8 @@ async fn web_fetch_only_takes_http_urls_and_reports_bad_status() {
         .call(json!({"url": "http://127.0.0.1:9/"}), &cx())
         .await
         .expect_err("refused");
-    assert!(matches!(err, ToolError::Denied { .. }), "{err:?}");
+    assert!(
+        matches!(&err, ToolError::Denied { why } if why.contains("refuses")),
+        "the guard must say so: {err:?}"
+    );
 }

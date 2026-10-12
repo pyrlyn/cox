@@ -406,11 +406,22 @@ mod claude_settings_tests {
                 assert!(denied.is_some(), "rm must be denied");
                 assert_eq!(denied, deny_of(&native.config, native_dir.path()));
                 // A list both layers feed keeps the first layer's label
-                // (figment `adjoin`); a key only Claude sets is labelled.
+                // (figment `adjoin`). T64.1: a repository hook command is
+                // reverted, the same as a project `.cox` hook.
                 assert_eq!(imported.source_of("permissions.deny"), "project");
-                assert_eq!(imported.source_of("hooks.Stop"), "claude-settings");
+                assert!(
+                    !imported.config.hooks.events.contains_key("Stop"),
+                    "{:?}",
+                    imported.config.hooks.events
+                );
+                let hooks = imported
+                    .violations
+                    .iter()
+                    .find(|v| v.key == "hooks")
+                    .expect("a hooks violation");
+                assert!(hooks.project_value.contains("Stop"), "{hooks:?}");
+                assert_eq!(imported.source_of("hooks.Stop"), "default");
                 assert_eq!(native.source_of("permissions.deny"), "project");
-                assert_eq!(imported.config.hooks.events["Stop"][0].command, "say done");
 
                 // The import is opt-out.
                 fs::write(
@@ -516,5 +527,37 @@ mod claude_settings_tests {
             .expect("an allow violation");
         assert_eq!(v.project_value, "Bash(git status), Bash");
         assert_eq!(v.reverted_to, "Bash(git status)");
+    }
+
+    /// T64.1: `~/.claude` hook commands still run; a repository's
+    /// `.claude/settings.json` hook on the same event is dropped.
+    #[test]
+    fn user_claude_hooks_survive_and_project_hooks_are_reverted() {
+        let home = tempdir().expect("tempdir");
+        let git_root = tempdir().expect("tempdir");
+        fs::create_dir_all(home.path().join(".claude")).expect("mkdir ~/.claude");
+        fs::write(
+            home.path().join(".claude/settings.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say mine"}]}]}}"#,
+        )
+        .expect("write user settings");
+        fs::create_dir_all(git_root.path().join(".git")).expect("mkdir .git");
+        fs::create_dir_all(git_root.path().join(".claude")).expect("mkdir .claude");
+        fs::write(
+            git_root.path().join(".claude/settings.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}"#,
+        )
+        .expect("write project settings");
+
+        let loaded = load_isolated(home.path(), git_root.path());
+        assert_eq!(loaded.config.hooks.events["Stop"].len(), 1);
+        assert_eq!(loaded.config.hooks.events["Stop"][0].command, "say mine");
+        let v = loaded
+            .violations
+            .iter()
+            .find(|v| v.key == "hooks")
+            .expect("a hooks violation");
+        assert!(v.project_value.contains("Stop"), "{v:?}");
+        assert_eq!(loaded.source_of("hooks.Stop"), "claude-settings");
     }
 }

@@ -8,8 +8,8 @@
 //! rule, which T33.40.1 extends with provider hosts reachable only from
 //! `cox_provider_stream`.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::OnceLock;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use cox_plugin_api::{AbiError, Capabilities, HttpReq, HttpResp, PluginManifest};
@@ -24,10 +24,23 @@ pub const MAX_HTTP_RESPONSE_BYTES: usize = 1 << 20;
 /// the request carries its own.
 const TIMEOUT: Duration = Duration::from_secs(30);
 
-/// One plugin's network rule: its granted `net:<host>` lines.
+/// One bound ABI provider section (T33.18): the only host `cox_http` may
+/// reach while that section's `cox_provider_stream` is the active call,
+/// and the auth header the host adds on the way out.
+struct Bound {
+    host: String,
+    auth: Option<(HeaderName, HeaderValue)>,
+}
+
+/// One plugin's network rule: its granted `net:<host>` lines, plus the
+/// ABI provider sections whose hosts are reachable only during their own
+/// `cox_provider_stream` (T33.18).
 pub(crate) struct Net {
     allow: Capabilities,
     client: OnceLock<Result<reqwest::Client, String>>,
+    sections: Mutex<HashMap<String, Bound>>,
+    /// The section whose `cox_provider_stream` is running, if any.
+    active: Mutex<Option<String>>,
 }
 
 impl Net {
@@ -44,18 +57,64 @@ impl Net {
                 ..Capabilities::default()
             },
             client: OnceLock::new(),
+            sections: Mutex::new(HashMap::new()),
+            active: Mutex::new(None),
         }
     }
 
-    /// Where `url` may go. The host is matched with `net_allows`, the one
-    /// matcher every `net` check uses. T33.40.1 adds its provider-host
-    /// branch here, ahead of the `net` check, keyed on the calling export.
+    /// Remembers an ABI section. `header` is attached to outgoing requests
+    /// for this host and never handed to the guest. `false` means
+    /// `base_url` or the header could not be used.
+    pub(crate) fn bind_section(
+        &self,
+        name: &str,
+        base_url: &str,
+        header: Option<(String, String)>,
+    ) -> bool {
+        let Ok(url) = Url::parse(base_url) else {
+            return false;
+        };
+        let Some(host) = url.host_str() else {
+            return false;
+        };
+        let auth = match header {
+            Some((name, value)) => {
+                let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
+                    return false;
+                };
+                let Ok(value) = HeaderValue::from_str(&value) else {
+                    return false;
+                };
+                Some((name, value))
+            }
+            None => None,
+        };
+        self.sections
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                name.to_string(),
+                Bound {
+                    host: host.to_string(),
+                    auth,
+                },
+            );
+        true
+    }
+
+    pub(crate) fn activate(&self, name: &str) {
+        *self.active.lock().unwrap_or_else(PoisonError::into_inner) = Some(name.to_string());
+    }
+
+    pub(crate) fn deactivate(&self) {
+        *self.active.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
+    /// Where `url` may go. A provider host is allowed only while its
+    /// section is the active `cox_provider_stream` (T33.18); any other
+    /// caller gets `NotInThisContext`, ahead of the `net` grant. T33.40.1
+    /// keys that same branch on the calling export.
     pub(crate) fn target(&self, url: &str) -> Result<Url, AbiError> {
-        if self.allow.net.is_empty() {
-            return Err(AbiError::NotGranted {
-                capability: "net".into(),
-            });
-        }
         let url = Url::parse(url).map_err(|e| failed(&format!("bad url: {e}")))?;
         if !matches!(url.scheme(), "http" | "https") {
             return Err(failed("only http and https urls"));
@@ -63,6 +122,17 @@ impl Net {
         let host = url
             .host_str()
             .ok_or_else(|| failed("the url has no host"))?;
+        if self.active_host_matches(host) {
+            return Ok(url);
+        }
+        if self.covers_provider_host(host) {
+            return Err(AbiError::NotInThisContext);
+        }
+        if self.allow.net.is_empty() {
+            return Err(AbiError::NotGranted {
+                capability: "net".into(),
+            });
+        }
         if !self.allow.net_allows(host) {
             return Err(AbiError::NotGranted {
                 capability: format!("net:{host}"),
@@ -71,10 +141,51 @@ impl Net {
         Ok(url)
     }
 
+    fn active_host_matches(&self, host: &str) -> bool {
+        let active = self
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let Some(name) = active else {
+            return false;
+        };
+        self.sections
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&name)
+            .is_some_and(|bound| bound.host.eq_ignore_ascii_case(host))
+    }
+
+    fn covers_provider_host(&self, host: &str) -> bool {
+        self.sections
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .any(|bound| bound.host.eq_ignore_ascii_case(host))
+    }
+
+    /// The auth header for the active section when `host` is that
+    /// section's host. Copied out of the mutex before any await.
+    fn auth_header(&self, host: &str) -> Option<(HeaderName, HeaderValue)> {
+        let active = self
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()?;
+        self.sections
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&active)
+            .filter(|bound| bound.host.eq_ignore_ascii_case(host))
+            .and_then(|bound| bound.auth.clone())
+    }
+
     /// Sends `request` to `url` (already through [`Net::target`]).
     pub(crate) async fn send(&self, request: HttpReq, url: Url) -> Result<HttpResp, AbiError> {
         let method =
             Method::from_bytes(request.method.as_bytes()).map_err(|_| failed("bad http method"))?;
+        let injected = url.host_str().and_then(|host| self.auth_header(host));
         let mut headers = HeaderMap::new();
         for (name, value) in &request.headers {
             let name = HeaderName::from_bytes(name.as_bytes())
@@ -84,8 +195,19 @@ impl Net {
             if name == HOST {
                 return Err(failed("the Host header comes from the url"));
             }
+            // The guest does not get to supply the key. The host's value
+            // replaces any header of the same name.
+            if injected
+                .as_ref()
+                .is_some_and(|(auth, _)| name.as_str().eq_ignore_ascii_case(auth.as_str()))
+            {
+                continue;
+            }
             let value = HeaderValue::from_str(value).map_err(|_| failed("bad header value"))?;
             headers.append(name, value);
+        }
+        if let Some((name, value)) = injected {
+            headers.insert(name, value);
         }
         let client = self
             .client
@@ -266,6 +388,36 @@ mod tests {
             Some(AbiError::NotGranted {
                 capability: "net".into()
             })
+        );
+    }
+
+    #[test]
+    fn provider_host_is_open_only_while_its_section_is_active() {
+        let net = Net::new(&BTreeSet::new());
+        assert!(net.bind_section(
+            "acme",
+            "https://llm.example.com/v1",
+            Some(("authorization".into(), "Bearer secret".into()))
+        ));
+        assert_eq!(
+            net.target("https://llm.example.com/v1").err(),
+            Some(AbiError::NotInThisContext)
+        );
+        net.activate("acme");
+        assert!(
+            net.target("https://User:pw@LLM.example.com:8443/v1")
+                .is_ok()
+        );
+        assert_eq!(
+            net.target("https://other.example/v1").err(),
+            Some(AbiError::NotGranted {
+                capability: "net".into()
+            })
+        );
+        net.deactivate();
+        assert_eq!(
+            net.target("https://llm.example.com/v1").err(),
+            Some(AbiError::NotInThisContext)
         );
     }
 }

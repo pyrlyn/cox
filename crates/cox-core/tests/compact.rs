@@ -257,6 +257,47 @@ async fn compact_focus_is_passed_to_summarizer() {
     );
 }
 
+/// What the summariser is sent for `config`, after three turns and a compact.
+async fn compact_system_prompt(config: cox_protocol::Config) -> String {
+    let probe = Arc::new(Probe {
+        system: Mutex::new(String::new()),
+    });
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        config,
+        probe.clone(),
+        common::tools(),
+        store.clone(),
+        store.clone(),
+        PathBuf::from("/tmp/cox-turn"),
+    )
+    .expect("session");
+    let mut rx = session.events().expect("events");
+    for t in ["a", "b", "c"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    probe.system.lock().expect("lock").clone()
+}
+
+#[tokio::test]
+async fn compact_default_strategy_is_state_llm_and_adds_the_narrative_only_note() {
+    let system = compact_system_prompt(cox_protocol::Config::default()).await;
+    assert!(system.contains("do not write"), "{system}");
+}
+
+#[tokio::test]
+async fn compact_llm_strategy_still_sends_exactly_the_old_prompt() {
+    let mut config = cox_protocol::Config::default();
+    config.compaction.strategy = cox_protocol::config::CompactionStrategy::Llm;
+    let system = compact_system_prompt(config).await;
+    assert!(!system.contains("do not write"), "{system}");
+    assert!(system.ends_with("## Next step\n"), "{system}");
+}
+
 // (MemoryStore ignores the session key, so tests read with a dummy id.)
 
 /// `Scripted` behind a finite window, recording every request it is sent;
@@ -466,4 +507,249 @@ async fn pre_call_still_over_after_compaction_stops_with_budget() {
         [Job::Main, Job::Main, Job::Main, Job::Compact],
         "nothing sent after"
     );
+}
+
+/// A stub answering under a real tool's name, so `working_state` reads
+/// its calls the way it reads the built-in tools'.
+struct Named(&'static str, &'static str, bool);
+
+#[async_trait]
+impl Tool for Named {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: self.0.into(),
+            description: "named stub".into(),
+            input_schema: serde_json::json!({"type": "object"}),
+            deferred: false,
+            risk: Risk::ReadOnly,
+            concurrency: Concurrency::Exclusive,
+        }
+    }
+    fn subject(&self, _input: &Value) -> String {
+        self.0.into()
+    }
+    async fn call(&self, _input: Value, _cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+        Ok(ToolOutput {
+            text: self.1.into(),
+            is_error: self.2,
+            diff: None,
+            structured: None,
+        })
+    }
+}
+
+const STATE_SCENARIO: &str = concat!(
+    "[[turn]]\ntext = \"working\"\ntool_calls = [\n",
+    "  { name = \"read\", input = { path = \"src/lib.rs\" } },\n",
+    "  { name = \"edit\", input = { path = \"src/lib.rs\" } },\n",
+    "  { name = \"bash\", input = { command = \"cargo test\" } },\n",
+    "]\n",
+    "[[turn]]\ntext = \"first done\"\n",
+    "[[turn]]\ntext = \"second\"\n",
+    "[[turn]]\ntext = \"third\"\n",
+    "[[turn]]\ntext = \"## Goal\\nfix the parser\\n## Next step\\nrerun\"\n",
+);
+
+#[tokio::test]
+async fn compact_state_llm_summary_lists_touched_paths_and_failing_command() {
+    let mut config = cox_protocol::Config::default();
+    config.compaction.strategy = cox_protocol::config::CompactionStrategy::StateLlm;
+    let tools: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(Named("read", "1 fn parse()", false)),
+        Arc::new(Named("edit", "edited", false)),
+        Arc::new(Named(
+            "bash",
+            "error: test parse failed\n[exit 101 in 9ms]",
+            true,
+        )),
+    ];
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        config,
+        Arc::new(Scripted::from_toml(STATE_SCENARIO, "").expect("scenario")),
+        tools,
+        store.clone(),
+        store.clone(),
+        PathBuf::from("/tmp/cox-turn"),
+    )
+    .expect("session");
+    let mut rx = session.events().expect("events");
+    for t in ["fix the parser", "t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    let history = session.history().await;
+    let Content::Text { text } = &history[0].content[0] else {
+        panic!("summary first: {:?}", history[0]);
+    };
+    assert!(text.contains("- src/lib.rs: read, edited"), "{text}");
+    assert!(
+        text.contains("- `cargo test` → exit 101: error: test parse failed"),
+        "{text}"
+    );
+    assert!(text.contains("## Last request\nfix the parser"), "{text}");
+    assert!(
+        text.contains("## Goal\nfix the parser"),
+        "model text follows: {text}"
+    );
+}
+
+/// A scenario of one tool-calling turn per entry of `turns`, each `(tool,
+/// calls)`, then the summariser's reply. A tool turn is two `[[turn]]`s:
+/// the calls, then the answer once the results are in.
+fn archived_scenario(turns: &[(&str, usize)], summary: &str) -> String {
+    let mut toml = String::new();
+    for (tool, calls) in turns {
+        let call = format!("  {{ name = \"{tool}\", input = {{ path = \"a.rs\" }} }},\n");
+        toml.push_str(&format!(
+            "[[turn]]\ntext = \"working\"\ntool_calls = [\n{}]\n[[turn]]\ntext = \"done\"\n",
+            call.repeat(*calls)
+        ));
+    }
+    toml.push_str(&format!("[[turn]]\ntext = \"{summary}\"\n"));
+    toml
+}
+
+/// Runs one user turn per entry of `turns`, compacts, and returns the
+/// history before and after with the archive ids each turn wrote.
+async fn compact_archived(
+    turns: &[(&str, usize)],
+    strategy: cox_protocol::config::CompactionStrategy,
+) -> (
+    Vec<cox_protocol::types::Message>,
+    Vec<cox_protocol::types::Message>,
+    Vec<Vec<String>>,
+) {
+    let mut config = cox_protocol::Config::default();
+    config.compaction.strategy = strategy;
+    let tools: Vec<Arc<dyn Tool>> = ["read", "grep", "edit"]
+        .into_iter()
+        .map(|name| Arc::new(Named(name, "output", false)) as Arc<dyn Tool>)
+        .collect();
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        config,
+        Arc::new(
+            Scripted::from_toml(&archived_scenario(turns, "## Goal\\nship"), "").expect("scenario"),
+        ),
+        tools,
+        store.clone(),
+        store.clone(),
+        PathBuf::from("/tmp/cox-turn"),
+    )
+    .expect("session");
+    let mut rx = session.events().expect("events");
+    let mut ids = Vec::new();
+    for t in 0..turns.len() {
+        let events = user_turn(&session, &mut rx, &format!("t{t}")).await;
+        ids.push(
+            events
+                .iter()
+                .filter_map(|e| match e {
+                    Event::ToolCallDone { result, .. } => result.archive.as_ref(),
+                    _ => None,
+                })
+                .map(|a| a.id.to_string())
+                .collect(),
+        );
+        // Archive ids are ULIDs: distinct milliseconds keep id order equal
+        // to turn order, which the snapshot depends on.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    let before = session.history().await;
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    (before, session.history().await, ids)
+}
+
+fn summary_text(history: &[cox_protocol::types::Message]) -> String {
+    let Content::Text { text } = &history[0].content[0] else {
+        panic!("summary first: {:?}", history[0]);
+    };
+    text.clone()
+}
+
+/// Archive ids are random; the snapshot names them by position instead.
+fn redact_ids(mut text: String, ids: &[String]) -> String {
+    for (n, id) in ids.iter().enumerate() {
+        text = text.replace(id, &format!("ID{}", n + 1));
+    }
+    text
+}
+
+#[tokio::test]
+async fn compaction_notice_lists_pointer_ids_and_keeps_last_turns_verbatim() {
+    use cox_protocol::config::CompactionStrategy::{Llm, StateLlm};
+    // Turns 1-3 are dropped (three archived outputs), turns 4-5 are kept.
+    let turns = [
+        ("read", 1),
+        ("grep", 1),
+        ("edit", 1),
+        ("read", 1),
+        ("grep", 1),
+    ];
+    let (before, after, ids) = compact_archived(&turns, StateLlm).await;
+    let text = summary_text(&after);
+    let flat: Vec<String> = ids.concat();
+    for id in &flat[..3] {
+        assert!(text.contains(id.as_str()), "{id} missing from {text}");
+    }
+    for id in &flat[3..] {
+        assert!(
+            !text.contains(id.as_str()),
+            "kept turn's {id} named: {text}"
+        );
+    }
+    let kept = before.len() - after.len() + 1;
+    assert_eq!(
+        &after[1..],
+        &before[kept..],
+        "last two turns byte-identical"
+    );
+    insta::assert_snapshot!(redact_ids(text, &flat));
+
+    // The model's text is last under `strategy = llm` too.
+    let (_, after_llm, ids) = compact_archived(&turns, Llm).await;
+    let text = summary_text(&after_llm);
+    assert!(
+        text.contains("## Goal\nship\n\n## Archived outputs\n"),
+        "{text}"
+    );
+    assert!(
+        text.lines()
+            .last()
+            .is_some_and(|l| l.starts_with("- #") && l.ends_with(" edit")),
+        "{text}"
+    );
+    assert!(
+        ids.concat()[..3]
+            .iter()
+            .all(|id| text.contains(id.as_str()))
+    );
+}
+
+#[tokio::test]
+async fn compaction_notice_shows_the_newest_32_of_40_ids() {
+    let turns = [("read", 40), ("grep", 1), ("edit", 1)];
+    let (_, after, ids) =
+        compact_archived(&turns, cox_protocol::config::CompactionStrategy::Llm).await;
+    let text = summary_text(&after);
+    let mut dropped = ids[0].clone();
+    dropped.sort();
+    let want: Vec<String> = dropped[8..]
+        .iter()
+        .map(|id| format!("- #{id} read"))
+        .collect();
+    let listed: Vec<String> = text
+        .lines()
+        .filter(|l| l.starts_with("- #"))
+        .map(str::to_string)
+        .collect();
+    assert_eq!(listed, want, "the newest 32 of 40, ascending: {text}");
+    assert!(text.ends_with("\n… and 8 more"), "{text}");
 }

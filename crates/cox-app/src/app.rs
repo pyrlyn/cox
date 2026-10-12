@@ -373,7 +373,7 @@ impl App {
 
     /// Merges the finished candidates `merge.from` of group `merge.id` with
     /// `merge.by` (T52.24, A142): a new worktree, a session sent their
-    /// answers, joined to the group as one more candidate. The
+    /// answers and diffs, joined to the group as one more candidate. The
     /// person pressing Merge is A75's consent to the worktree. Refused
     /// before anything starts for fewer than two, one not finished, or a
     /// picked group. Call on a tokio runtime, as for [`App::open`].

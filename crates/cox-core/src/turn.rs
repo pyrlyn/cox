@@ -5,6 +5,7 @@
 //! One provider call and its tool batch. Kept separate from `Session` so
 //! the loop's `step` stays a state transition, not a grab-bag of I/O.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -680,16 +681,22 @@ async fn run_one(
                     .await;
             }
             let visible = pointer.unwrap_or_else(|| {
-                // Only shell output: `read` text is line-numbered source an
-                // `edit` must match exactly and `grep` hits carry `file:line`,
-                // so folding either would drop information, not noise.
-                let shorten = if tool.spec().name == "bash" {
+                // `read` is line-numbered source an `edit` must match, and
+                // `grep` hits carry `file:line`, so neither is rewritten.
+                // Any other tool whose text is one JSON value is folded
+                // before the line cut: a single-line design or AST dump
+                // would otherwise collapse to the archive trailer. Bash
+                // still line-folds after that. The archive row above is
+                // the raw bytes either way.
+                let name = tool.spec().name;
+                let shorten = if name == "bash" {
                     crate::truncate::visible_folding
                 } else {
                     crate::truncate::visible
                 };
+                let source = json_source(&name, &output.text);
                 shorten(
-                    &output.text,
+                    &source,
                     id,
                     session.config.context.tool_output_visible_bytes as usize,
                     session.config.context.tool_output_head_lines as usize,
@@ -805,6 +812,22 @@ fn failed_result(msg: &str) -> ToolResult {
         duration_ms: 0,
         diff: None,
         structured: None,
+    }
+}
+
+/// Folded JSON when `text` is one value and the fold is shorter than the
+/// raw tool text. `read` and `grep` stay byte-for-byte: their lines are
+/// what a later `edit` or a hit citation has to match.
+fn json_source<'a>(name: &str, text: &'a str) -> Cow<'a, str> {
+    if name == "read" || name == "grep" {
+        return Cow::Borrowed(text);
+    }
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return Cow::Borrowed(text);
+    };
+    match crate::json_tree::fold_json(&value) {
+        Some(folded) if folded.text.len() < text.len() => Cow::Owned(folded.text),
+        _ => Cow::Borrowed(text),
     }
 }
 
@@ -1050,14 +1073,26 @@ mod tests {
         assert_eq!(session.history().await[2], last);
     }
 
-    /// A tool that prints 30 progress lines and one error.
-    struct Chatty(&'static str);
+    /// A tool that returns a fixed body. The line-fold tests use the
+    /// compiler chatter; the JSON-fold test uses one document.
+    struct Chatty {
+        name: &'static str,
+        text: String,
+    }
+
+    impl Chatty {
+        fn lines(name: &'static str) -> Self {
+            let mut text: String = (1..=30).map(|n| format!("Compiling {n}/30\n")).collect();
+            text.push_str("error: boom\n");
+            Self { name, text }
+        }
+    }
 
     #[async_trait::async_trait]
     impl Tool for Chatty {
         fn spec(&self) -> cox_protocol::types::ToolSpec {
             cox_protocol::types::ToolSpec {
-                name: self.0.into(),
+                name: self.name.into(),
                 description: "chatty".into(),
                 input_schema: serde_json::json!({"type": "object"}),
                 deferred: false,
@@ -1069,10 +1104,8 @@ mod tests {
             String::new()
         }
         async fn call(&self, _input: Value, _cx: &ToolCx) -> Result<ToolOutput, ToolError> {
-            let mut text: String = (1..=30).map(|n| format!("Compiling {n}/30\n")).collect();
-            text.push_str("error: boom\n");
             Ok(ToolOutput {
-                text,
+                text: self.text.clone(),
                 is_error: false,
                 diff: None,
                 structured: None,
@@ -1082,15 +1115,19 @@ mod tests {
 
     /// The result `name` hands the model, and the archived bytes behind it.
     async fn chatty_result(name: &'static str) -> (String, Vec<u8>) {
+        recorded(Chatty::lines(name), cox_protocol::Config::default()).await
+    }
+
+    async fn recorded(tool: Chatty, mut config: cox_protocol::Config) -> (String, Vec<u8>) {
         use cox_protocol::traits::Store as _;
         let store = Arc::new(MemoryStore::new());
+        let name = tool.name;
         let scenario = format!(
             "[[turn]]\ntext = \"run\"\ntool_calls = [{{ name = \"{name}\", input = {{}} }}]\n\n\
              [[turn]]\ntext = \"done\"\n"
         );
-        let mut config = cox_protocol::Config::default();
         config.session.auto_title = false;
-        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(Chatty(name))];
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(tool)];
         let session = Session::new(
             config,
             Arc::new(Scripted::from_toml(&scenario, "").expect("scenario")),
@@ -1135,6 +1172,58 @@ mod tests {
     async fn other_tools_output_is_not_folded() {
         let (visible, _) = chatty_result("chatty").await;
         assert_eq!(visible.lines().count(), 31, "{visible}");
+    }
+
+    /// One JSON document of repeated node bodies, large enough to clear the
+    /// visible budget even after templating.
+    fn repeated_rows() -> String {
+        let rows: Vec<Value> = (0..40)
+            .map(|i| {
+                serde_json::json!({
+                    "id": i.to_string(),
+                    "name": format!("n{i}"),
+                    "type": "ROW",
+                    "fill": {"color": "red", "opacity": 1},
+                    "w": 1
+                })
+            })
+            .collect();
+        serde_json::to_string(&Value::Array(rows)).expect("json")
+    }
+
+    /// T59.11: a `bash` result that is one JSON document over the visible
+    /// budget shows a template line and an expand trailer, and the archive
+    /// row is still the raw tool text. `read` and `grep` stay unfolded.
+    #[tokio::test]
+    async fn bash_json_over_budget_shows_a_template_and_keeps_the_raw_archive() {
+        let raw = repeated_rows();
+        let mut config = cox_protocol::Config::default();
+        config.context.tool_output_visible_bytes = 500;
+        config.context.tool_output_head_lines = 6;
+        config.context.tool_output_tail_lines = 0;
+        let (visible, archived) = recorded(
+            Chatty {
+                name: "bash",
+                text: raw.clone(),
+            },
+            config.clone(),
+        )
+        .await;
+        assert!(visible.contains("template="), "{visible}");
+        assert!(visible.contains("expand #"), "{visible}");
+        assert_eq!(archived, raw.as_bytes());
+        for name in ["read", "grep"] {
+            let (shown, bytes) = recorded(
+                Chatty {
+                    name,
+                    text: raw.clone(),
+                },
+                config.clone(),
+            )
+            .await;
+            assert!(!shown.contains("template="), "{name}: {shown}");
+            assert_eq!(bytes, raw.as_bytes());
+        }
     }
 
     /// A91: reasoning streams into its own `Thinking` item, which closes

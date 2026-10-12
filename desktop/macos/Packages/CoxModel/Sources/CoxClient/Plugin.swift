@@ -9,6 +9,9 @@
 /// Where a plugin draws (`cox_protocol::plugin::Slot`).
 public enum PluginSlotKind: Hashable, Sendable {
   case statusLeft, statusRight, panel, overlay
+  /// The desktop inspector tab (PL§15.4). The FFI slot has to round-trip;
+  /// drawing the tab is a later card.
+  case desktopInspector
 }
 
 /// A run of plugin text in one theme role (`cox_app::SpanView`).

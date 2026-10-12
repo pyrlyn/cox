@@ -278,6 +278,16 @@ impl Workspace {
         Ok(self.worktrees.diffstat(path).await?)
     }
 
+    /// `file` as the commit the worktree at `path` was cut from holds it
+    /// (T52.24): the other side of a best-of merge's diffs.
+    pub(crate) async fn base_text(
+        &self,
+        path: &Path,
+        file: &Path,
+    ) -> Result<Option<String>, WorkspaceError> {
+        Ok(self.worktrees.base_text(path, file).await?)
+    }
+
     /// Removes the worktree at `path` locked for `owner`; `discard` only
     /// after the person confirmed a second time (T52.10).
     pub(crate) async fn remove_worktree(

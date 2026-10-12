@@ -59,7 +59,21 @@ fn cx(root: PathBuf) -> ToolCx {
 /// synchronous, so the runtime is built per call rather than via
 /// `#[tokio::test]`.
 fn edit(dir: &tempfile::TempDir, old: &str, new: &str) -> Result<(), ToolError> {
-    let input = serde_json::json!({ "path": "f.txt", "old": old, "new": new });
+    edit_input(
+        dir,
+        serde_json::json!({ "path": "f.txt", "old": old, "new": new }),
+    )
+}
+
+/// Same as [`edit`] with `replace_all: true`.
+fn edit_replace_all(dir: &tempfile::TempDir, old: &str, new: &str) -> Result<(), ToolError> {
+    edit_input(
+        dir,
+        serde_json::json!({ "path": "f.txt", "old": old, "new": new, "replace_all": true }),
+    )
+}
+
+fn edit_input(dir: &tempfile::TempDir, input: serde_json::Value) -> Result<(), ToolError> {
     tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("runtime")
@@ -177,4 +191,22 @@ fn edit_fallback_does_not_forgive_missing_indentation() {
         matches!(&err, ToolError::Denied { why } if why.starts_with("old_string not found")),
         "got {err:?}"
     );
+}
+
+/// T62.2. `replace_all` on overlapping fallback windows used to panic: every
+/// window was spliced against the original byte offsets, so after the first
+/// (rightmost, shorter) replacement shrank the string, the next window's
+/// `end_byte` ran past it — `range end index out of range`. The fix keeps
+/// only non-overlapping windows; a dropped window's lines are inside the one
+/// already replaced. Every line here carries a trailing space so the exact
+/// substring path never fires and the fallback is what matches.
+#[test]
+fn edit_replace_all_overlapping_fallback_windows_do_not_panic() {
+    let dir = write_fixture("AAA \nAAA  \nAAA \n");
+    edit_replace_all(&dir, "AAA\nAAA", "B").expect("overlapping windows replaced");
+
+    let after = std::fs::read_to_string(dir.path().join("f.txt")).expect("read");
+    // Window at line 0 (lines 0–1) is kept; the window at line 1 overlaps it
+    // and is dropped, leaving line 2 untouched.
+    assert_eq!(after, "B\nAAA \n");
 }

@@ -1,5 +1,6 @@
 ---
 source: crates/cox-store/src/lib.rs
+assertion_line: 1218
 expression: rendered
 ---
 -- archive
@@ -34,11 +35,31 @@ CREATE TABLE cloud_runs (
 -- cloud_runs_session
 CREATE INDEX cloud_runs_session ON cloud_runs (session_id);
 
+-- mcp_tool_trust
+CREATE TABLE mcp_tool_trust (
+  server TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('approved')),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (server, tool)
+);
+
 -- memory
 CREATE TABLE memory (
   id INTEGER PRIMARY KEY, project_slug TEXT NOT NULL, name TEXT NOT NULL, path TEXT NOT NULL,
   kind TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(project_slug, name)
 );
+
+-- memory_files
+CREATE TABLE memory_files (
+  memory_id INTEGER NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  PRIMARY KEY (memory_id, path)
+);
+
+-- memory_files_path
+CREATE INDEX memory_files_path ON memory_files(path);
 
 -- memory_fts
 CREATE VIRTUAL TABLE memory_fts USING fts5(name, body, project_slug UNINDEXED);

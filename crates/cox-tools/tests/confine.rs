@@ -227,6 +227,9 @@ fn confine_windows_device_path_is_confined() {
     ));
 }
 
+// Only Windows gives `:` stream meaning; on Unix `file.txt:stream` is an
+// ordinary name, and the colon name cases live in cox-sandbox's path tests.
+#[cfg(windows)]
 #[test]
 fn confine_alternate_data_stream_is_confined() {
     let ws = Workspace::new();

@@ -380,6 +380,7 @@ pub(crate) mod tests {
                 cwd: "/w".into(),
             },
             granted: json!({ "events": ["turn_done"] }),
+            surface: None,
         }
     }
 

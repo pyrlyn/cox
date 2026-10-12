@@ -229,6 +229,8 @@ mod tests {
     /// T26.3: `/handoff` asks the parent's `compact` job (cheap tier, in the
     /// ledger) for a summary; the child's first and only history item is
     /// that summary plus the objective, as a `Summary` item, not a turn.
+    /// T59.1: under the default `state+llm` the deterministic working state
+    /// leads the summary, so the child keeps the last request verbatim.
     #[tokio::test]
     async fn handoff_seeds_summary() {
         let home = tempfile::tempdir().expect("home");
@@ -242,7 +244,11 @@ mod tests {
         let parent = session.id();
 
         let summary = session.handoff_summary("ship it").await;
-        assert_eq!(summary.as_deref(), Some("we said hello"));
+        let seed = summary.as_deref().expect("summary");
+        assert!(
+            seed.contains("## Last request\nhello") && seed.ends_with("we said hello"),
+            "working state, then the model's summary: {seed:?}"
+        );
         let usage = store.usage_for_session(&parent).expect("usage");
         assert!(
             usage

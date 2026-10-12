@@ -1,5 +1,10 @@
+# ptools (pyrlyn/tools) is pinned in mise.toml; PTOOLS overrides it if mise is already activated.
+ptools := env("PTOOLS", "mise exec -- ptools")
+
 # cox — task runner. Every target runs through `mise exec` so the pinned
 # toolchain (mise.toml) is used, never whatever `cargo` happens to be on PATH.
+# On Windows just has no `sh`; the desktop-windows recipes are PowerShell.
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 check:
     bash scripts/leftovers.sh
@@ -95,10 +100,7 @@ plugin-examples lang:
 
 # Lossless cleanup of ./target (compress + dedupe); never deletes. A no-op without swarfr.
 swarfr:
-    #!/usr/bin/env sh
-    command -v swarfr >/dev/null || { echo "swarfr not found; install it with: ketch install swarfr"; exit 0; }
-    [ -d target ] || exit 0
-    swarfr run target || test $? -eq 2
+    {{ptools}} swarfr
 
 snap:
     mise exec -- cargo insta review
@@ -152,11 +154,39 @@ desktop-xcframework:
 desktop-app: desktop-xcframework
     mise exec -- bash scripts/desktop/app.sh
 
+# The macOS app in Xcode, kept on the current Rust core: builds the XCFramework (an unchanged one
+# is a cargo no-op), regenerates the gitignored Cox.xcodeproj from desktop/macos/project.yml and
+# opens it, then stays in the foreground and rebuilds the XCFramework on every change under
+# crates/ or to the Cargo manifests. Xcode links the new one on the next ⌘R; Ctrl-C stops watching.
+# `queue`, not `restart`: a restart could land between the script's rm and -create-xcframework.
+desktop-open: desktop-xcframework
+    mise exec -- xcodegen generate --quiet --spec desktop/macos/project.yml
+    xed desktop/macos/Cox.xcodeproj
+    mise exec -- watchexec --postpone --on-busy-update queue --debounce 1s \
+        --watch crates --watch Cargo.toml --watch Cargo.lock \
+        -- bash scripts/desktop/xcframework.sh
+
 # The app as a DMG to hand out (T37.32.3): desktop/macos/build/Cox-<version>-<build>-debug-arm64.dmg,
 # ad-hoc signed unless COX_SIGN_IDENTITY names a Developer ID Application identity. CI builds the
 # same through the `desktop build` workflow.
 desktop-dmg: desktop-app
     bash scripts/desktop/dmg.sh
+
+# The Windows app (T58.3). Visual Studio is the Xcode counterpart: `just desktop-windows-open`
+# opens desktop/windows/Cox.sln. Build and test run from that directory so global.json pins
+# SDK 10 and the Microsoft.Testing.Platform runner. `just desktop-windows-run` builds Debug
+# and starts the unpackaged window.
+desktop-windows-open:
+    powershell -NoProfile -File scripts/desktop/windows.ps1 open
+
+desktop-windows:
+    powershell -NoProfile -File scripts/desktop/windows.ps1 build
+
+desktop-windows-test:
+    powershell -NoProfile -File scripts/desktop/windows.ps1 test
+
+desktop-windows-run:
+    powershell -NoProfile -File scripts/desktop/windows.ps1 run
 
 # The native apps' string resources from crates/cox-i18n/po (docs/i18n.md):
 # Apple .strings/.stringsdict and Windows .resw under target/i18n/ (gitignored).
@@ -189,12 +219,11 @@ brand-icons *args:
 
 # $CARGO_HOME sizes (no deletes) and ./target
 cache:
-    mise exec -- cargo-cache
-    du -sh target 2>/dev/null || echo "target: (missing)"
+    {{ptools}} cache
 
 # drop extracted crate/git checkouts; keep archives
 cache-autoclean:
-    mise exec -- cargo-cache --autoclean
+    {{ptools}} cache --autoclean
 
 # Re-render docs/screenshots/*.svg from the whole-screen snapshot tests
 # (crates/cox-tui/tests/screenshots.rs); the same frames insta compares.

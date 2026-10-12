@@ -28,6 +28,11 @@ packages:
     path: Packages/CoxTranscript
   CoxUI:
     path: Packages/CoxUI
+  # The launch registers the core, secret store and inbox the stores read (DT§4.6); MIT. The
+  # same requirement as CoxModel's Package.swift, so both resolve to one version.
+  swift-dependencies:
+    url: https://github.com/pointfreeco/swift-dependencies
+    from: 1.17.1
   # T51.15: the global hotkeys' registration, recorder and storage (DT§4.6); MIT.
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
@@ -46,6 +51,8 @@ targets:
       - package: CoxTranscript
       - package: CoxUI
       - package: KeyboardShortcuts
+      - package: swift-dependencies
+        product: Dependencies
     settings:
       base:
         PRODUCT_NAME: Cox

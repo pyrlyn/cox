@@ -1,7 +1,7 @@
 # Todo
 
+- T5.9. Terminal pointer shape follows what the cell does (OSC 22)
 - T33.14.2. Filesystem preopens
-- T33.18. Providers, ABI form (`PluginProvider`)
 - T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
 - T33.40.1. ABI: two-phase decide, own-provider call-out, batched questions
@@ -21,8 +21,6 @@
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
 - T33.43. Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
-- T33.45.1. Manifest and grant: surfaces and surface tables
-- T33.45.2. ABI: surface payloads
 - T33.45.3. Host: load filter, granted filter, `cox:desktop/v1`
 - T33.45.4. TUI: links, image `alt`, surfaces in listings
 - T33.45.5. App core: inspector tab, toolbar and palette actions
@@ -36,15 +34,18 @@
 - T37.32.2. Developer ID signing, notarization, Sparkle, bundled CLI, Homebrew cask
 - T37.32.3. Debug macOS app DMG on CI, every feature, Developer ID-signed
 - T37.33. Performance budget suite
+- T37.50. Pointer rule in Rust, shared by every client
+- T37.51. macOS app: pointer from the shared rule
 - T39.7. Optional: live check against the real Gemini endpoint (needs the creator's key)
 - T43.6. Bench the map on and off
+- T52.24. `cox-app` merges chosen best-of candidates with a chosen model or agent
+- T52.25. `cox-ffi` and CoxModel carry the merge
+- T52.26. CoxUI: Merge in the best-of compare view
 - T53.5. Freeze ABI `api = 1`
 - T53.6. `cox-plugin-api` ready for crates.io
 - T53.7. `cox-plugin-sdk` ready for crates.io
 - T53.8. Go SDK module ready to tag
 - T53.9. Templates and docs use the published SDKs
-- T56.2. Cloud Agents client: create, follow up, stream, cancel, usage
-- T56.4. `Engine` asks before code leaves the machine: `CloudAgent(<repo>)`
 - T56.6. Host driver: a background task becomes a Cursor Cloud run
 - T56.7. Usage row and resume
 - T56.8. Offline end-to-end over hand-written fixtures
@@ -103,3 +104,33 @@
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
 - T61.11. No feature-unification rebuilds between `just test` and `just check-all`
+- T63.2. CI: re-run only the Swift packages a change can affect
+- T63.4. Dependency injection through swift-dependencies
+- T63.4.1. Keys and values (`CoxClient`, `CoxPlatform`)
+- T63.4.2. The stores read `@Dependency` (`CoxModel`)
+- T63.4.3. App wiring (`App/`)
+- T66.3. `agent` collect: a status and a capped preview by task id
+- T66.4. Store: the `refine_events` table
+- T66.5. Harness entries on disk: apply, backup, rollback, fingerprint
+- T66.6. Core: a refine proposal from one cheap call, with the base prompt fixed
+- T66.7. Session: apply a refine, record it, and render the digest after the cached prefix
+- T66.8. `/refine` and `cox refine`
+- T66.9. A pure autonomous driver beside the USD cap
+- T66.10. `[autonomous]` config, which a project cannot set
+- T66.11. `cox run -p --autonomous`: shell gates and the headless loop
+- T66.12. Design: resident sessions and a supervisor
+- T66.13. Heartbeat re-entry for a resident session
+- T66.14. Archive old sessions without deleting them
+- T67.1. Hook kinds in config and in the Claude settings import
+- T67.2. Run prompt and http hooks, failing open
+- T67.3. Five more hook events
+- T67.4. `/goal`: a judged stop condition
+- T67.5. `/goal` in the TUI and stream-json
+- T67.6. Path-scoped rules, loaded on demand
+- T67.7. Leaving Plan mode needs approval
+- T67.8. Design: an Auto-mode risk judge
+- T67.9. Auto-mode risk judge
+- T67.10. MCP resources and prompts
+- T67.11. `cox run -p --json-schema`
+- T67.12. Output styles
+- T67.13. Design: a GitHub Action and scheduled runs

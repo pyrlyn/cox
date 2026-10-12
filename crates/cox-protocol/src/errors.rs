@@ -124,6 +124,16 @@ pub enum ToolError {
     /// The target file is binary; the tool refuses to read/edit it as text.
     #[error("binary file")]
     Binary,
+    /// Two workspace snapshots were taken over different root sets. Diffing
+    /// them would pair unrelated trees, so the change set is refused whole
+    /// rather than reported partially.
+    #[error("snapshot roots differ: before {before:?}, after {after:?}")]
+    RootsMismatch {
+        /// The roots of the earlier snapshot.
+        before: Vec<PathBuf>,
+        /// The roots of the later snapshot.
+        after: Vec<PathBuf>,
+    },
     /// A filesystem I/O error occurred.
     #[error("io error")]
     Io,

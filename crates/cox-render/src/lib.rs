@@ -28,6 +28,7 @@ pub mod glyph;
 #[cfg(feature = "ratatui")]
 pub mod link;
 pub mod markdown;
+pub mod pointer;
 #[cfg(feature = "ratatui")]
 pub mod svg;
 #[cfg(feature = "ratatui")]

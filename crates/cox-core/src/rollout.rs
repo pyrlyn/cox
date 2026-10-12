@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 
 use cox_protocol::ids::{ArchiveId, CallId, ItemId};
 use cox_protocol::types::{
-    Content, Decision, Event, ItemKind, Job, Level, Message, PermissionMode, Role, StopReason,
-    ToolCall,
+    ArchiveRef, Content, Decision, Event, ItemKind, Job, Level, Message, PermissionMode, Role,
+    StopReason, ToolCall,
 };
 
 use crate::context::attached_content;
@@ -37,6 +37,10 @@ pub struct History {
     /// The archived repo map of the last `RepoMapBuilt` (P43): resume
     /// reads it back instead of rebuilding, so `system[2]` keeps its bytes.
     pub repomap: Option<ArchiveId>,
+    /// The archive row of every tool call that wrote one. Resume seeds the
+    /// session's map from it, so compaction and `microcompact` can still
+    /// name an output from before the restart.
+    pub archives: HashMap<CallId, ArchiveRef>,
 }
 
 /// Reconstructed metadata for one user turn.
@@ -78,6 +82,7 @@ impl History {
         let mut grants = Vec::new();
         let mut permission_mode = None;
         let mut repomap = None;
+        let mut archives = HashMap::new();
         let mut turns = 0u32;
         let mut current_seq = 0u32;
         let mut item_seq: HashMap<ItemId, u32> = HashMap::new();
@@ -215,6 +220,11 @@ impl History {
                     *checkpoint_counts.entry(current_seq).or_default() += files.len();
                 }
                 Event::ToolCallDone { call_id, result } => {
+                    // Kept even when an interrupted turn drops the result
+                    // below: the row exists and the output still expands.
+                    if let Some(archive) = &result.archive {
+                        archives.insert(*call_id, archive.clone());
+                    }
                     pending_results.push(Content::ToolResult {
                         call_id: *call_id,
                         content: result.visible.clone(),
@@ -272,6 +282,7 @@ impl History {
             turns,
             turn_marks,
             repomap,
+            archives,
         }
     }
 
@@ -379,6 +390,40 @@ mod tests {
         ];
         assert_eq!(History::from_events(&events).repomap, Some(second));
         assert_eq!(History::from_events(&events[1..2]).repomap, None);
+    }
+
+    #[test]
+    fn resume_refills_archive_refs_from_tool_results() {
+        let done = |call_id, archive| Event::ToolCallDone {
+            call_id,
+            result: ToolResult {
+                ok: true,
+                visible: "out".into(),
+                archive,
+                bytes: 9,
+                duration_ms: 0,
+                diff: None,
+                structured: None,
+            },
+        };
+        let (a, b, plain) = (CallId::new(), CallId::new(), CallId::new());
+        let (ra, rb) = (
+            ArchiveRef {
+                id: ArchiveId::new(),
+                bytes: 9,
+            },
+            ArchiveRef {
+                id: ArchiveId::new(),
+                bytes: 9,
+            },
+        );
+        let events = vec![
+            done(a, Some(ra.clone())),
+            done(plain, None),
+            done(b, Some(rb.clone())),
+        ];
+        let h = History::from_events(&events);
+        assert_eq!(h.archives, HashMap::from([(a, ra), (b, rb)]));
     }
 
     #[test]

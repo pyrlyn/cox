@@ -17,7 +17,7 @@
 //! `default.toml`'s values are not a Rust type's zero value (`true`,
 //! non-empty strings, non-zero numbers).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use schemars::JsonSchema;
@@ -47,6 +47,8 @@ pub struct Config {
     pub providers: ProvidersConfig,
     /// `[context]`
     pub context: ContextConfig,
+    /// `[compaction]`
+    pub compaction: CompactionConfig,
     /// `[permissions]`
     pub permissions: PermissionsConfig,
     /// `[sandbox]`
@@ -429,6 +431,14 @@ pub struct ProvidersConfig {
     /// hand-rolled one. No code change needed to add a name here.
     #[serde(flatten)]
     pub custom: HashMap<String, CompatibleProviderConfig>,
+    /// ABI `[[provider]]` section names registered at session open
+    /// (T33.18). Not a config key: `Router::pick` reads it so a tier —
+    /// including a legacy `typesafe` tier — resolves to the plugin
+    /// instead of the built-in client. Empty until `cox-session` fills
+    /// it from the loaded plugins.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub abi: BTreeSet<String>,
 }
 
 impl ProvidersConfig {
@@ -822,6 +832,30 @@ impl Default for ContextConfig {
     }
 }
 
+/// `[compaction]` (T59.1).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct CompactionConfig {
+    /// `compaction.strategy`: who writes the summary's file and error
+    /// sections.
+    pub strategy: CompactionStrategy,
+}
+
+/// `compaction.strategy` (T59.1). `state+llm` is the default because the
+/// creator chose it on 2026-10-07, before the bench; `llm` stays available as
+/// an opt-out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub enum CompactionStrategy {
+    /// The model writes every section from the transcript.
+    #[serde(rename = "llm")]
+    Llm,
+    /// Files touched, errors seen and the last request are read off the
+    /// transcript; the model writes only the narrative sections.
+    #[default]
+    #[serde(rename = "state+llm")]
+    StateLlm,
+}
+
 /// `[permissions]` (plan.md §1.6/§1.8).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -1156,6 +1190,11 @@ pub struct LspConfig {
     /// Quiet period, in milliseconds, after the last pushed
     /// `publishDiagnostics` before the result is taken as complete.
     pub quiet_ms: u32,
+    /// Whether `edit` and `write` end with the diagnostics they introduced,
+    /// asked of a language server only when one already runs (T59.3).
+    pub after_edit: bool,
+    /// Longest wait, in milliseconds, for those diagnostics after a change.
+    pub after_edit_ms: u32,
     /// `[lsp.servers.<name>]` entries.
     pub servers: BTreeMap<String, LspServerConfig>,
 }
@@ -1187,6 +1226,8 @@ impl Default for LspConfig {
             enabled: true,
             timeout_s: 30,
             quiet_ms: 500,
+            after_edit: false,
+            after_edit_ms: 1500,
             servers: servers
                 .into_iter()
                 .map(|(name, s)| (name.to_string(), s))
@@ -1959,6 +2000,33 @@ mod tests {
                 .extract()
                 .expect("default.toml parses");
         assert_eq!(from_toml.context, ContextConfig::default());
+    }
+
+    /// T59.1: `state+llm` is the default in the hand-written default and in
+    /// `default.toml` alike (the creator's decision), and `llm` still parses
+    /// as the opt-out.
+    #[test]
+    fn compaction_strategy_defaults_to_state_llm_and_llm_opts_out() {
+        use figment::providers::Format as _;
+        let parse = |toml: &str| -> Config {
+            figment::Figment::from(figment::providers::Toml::string(toml))
+                .extract()
+                .expect("parses")
+        };
+        assert_eq!(
+            Config::default().compaction.strategy,
+            CompactionStrategy::StateLlm
+        );
+        assert_eq!(
+            parse(DEFAULT_CONFIG_TOML).compaction,
+            CompactionConfig::default()
+        );
+        assert_eq!(
+            parse("[compaction]\nstrategy = \"llm\"\n")
+                .compaction
+                .strategy,
+            CompactionStrategy::Llm
+        );
     }
 
     /// T41.1: the hand-written `LspConfig::default()` and the `[lsp]` rows

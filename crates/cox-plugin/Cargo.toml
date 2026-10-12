@@ -37,6 +37,9 @@ thiserror = { workspace = true }
 # worker thread (a plain OS thread, not a tokio runtime worker) on
 # `ModelCaller::call` via `Handle::block_on`. The workspace's one async runtime.
 tokio = { workspace = true }
+# T33.18: `PluginProvider` implements `Provider`, whose `stream` takes
+# `tokio_util::sync::CancellationToken`. Already a workspace dependency.
+tokio-util = { workspace = true }
 # T33.9: `cox_log` writes to cox's log (PL§4); already workspace-pinned.
 tracing = { workspace = true }
 # Only to switch on wasmtime's `anyhow` feature, which extism needs and does

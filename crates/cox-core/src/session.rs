@@ -175,6 +175,11 @@ pub struct Session {
     pub(crate) id: SessionId,
     pub(crate) config: cox_protocol::Config,
     pub(crate) provider: Arc<dyn Provider>,
+    /// ABI providers by section name (T33.18). The main turn stays on
+    /// `provider` — `COX_PROVIDER=scripted` short-circuits that — and a
+    /// route of `ProviderId::Plugin` reads this map, so a scripted main
+    /// turn can still reach a real plugin provider.
+    pub(crate) plugin_providers: Arc<StdMutex<HashMap<String, Arc<dyn Provider>>>>,
     pub(crate) tools: Vec<Arc<dyn Tool>>,
     pub(crate) store: Arc<dyn Store>,
     pub(crate) archive: Arc<dyn Archive>,
@@ -232,6 +237,11 @@ pub struct Session {
     /// `instructions`. Not copied to children: a child's tool list may
     /// have no `skill` tool for the index to point at.
     skills_index: Arc<OnceLock<String>>,
+    /// The memory index appended to volatile `system[3]` (T10). The surface
+    /// builds it with `cox_ext::memory::index_text`; this crate never reads
+    /// the memory directory (D2). Shared with children: the index is project
+    /// facts, not a tool catalog the child may lack.
+    memory_index: Arc<OnceLock<String>>,
     /// The task id `send_message`'s `Relay` impl stamps a child's own
     /// message with (T34.6, SM§4), set once by `subagent::spawn` right
     /// after the child session exists; unset for the session the user is
@@ -417,6 +427,7 @@ impl Session {
         child.hunks = self.hunks.clone();
         child.worktrees = self.worktrees.clone();
         child.instructions = self.instructions.clone();
+        child.memory_index = self.memory_index.clone();
         child.checkpoint_warned = self.checkpoint_warned.clone();
         // T34.9: share this session's name→TaskId registry so the child can
         // resolve a sibling by name itself (`resolve_name_or_id`).
@@ -424,6 +435,9 @@ impl Session {
         // T38.2: ending this session also ends the child's detached shells.
         child.ended = self.ended.child_token();
         child.renew_cancel();
+        // `build` starts an empty map; a child reaches the same ABI
+        // providers the parent loaded (T33.18).
+        child.plugin_providers = Arc::clone(&self.plugin_providers);
         Ok(child)
     }
 
@@ -456,6 +470,7 @@ impl Session {
             truncated_notice,
             turns,
             repomap_archive,
+            archives,
         ) = match resume {
             Some((id, history)) => {
                 let truncated_notice = history.truncated_notice();
@@ -479,6 +494,7 @@ impl Session {
                     truncated_notice,
                     history.turns,
                     history.repomap,
+                    history.archives,
                 )
             }
             None => (
@@ -490,6 +506,7 @@ impl Session {
                 None,
                 0,
                 None,
+                HashMap::new(),
             ),
         };
         // P42: a top-level session opens in `core.mode`, which only narrows
@@ -525,6 +542,7 @@ impl Session {
             id,
             config,
             provider,
+            plugin_providers: Arc::new(StdMutex::new(HashMap::new())),
             tools,
             store,
             archive,
@@ -546,6 +564,7 @@ impl Session {
             agent_defs: Arc::new(OnceLock::new()),
             instructions: Arc::new(OnceLock::new()),
             skills_index: Arc::new(OnceLock::new()),
+            memory_index: Arc::new(OnceLock::new()),
             self_task: Arc::new(OnceLock::new()),
             external_agents: Arc::new(OnceLock::new()),
             event_tap: Arc::new(OnceLock::new()),
@@ -571,7 +590,7 @@ impl Session {
                 dedup,
                 discovered: Vec::new(),
                 turn_marks,
-                archives: HashMap::new(),
+                archives,
                 tool_images: HashMap::new(),
                 turn_seq: turns,
                 redone: None,
@@ -693,6 +712,31 @@ impl Session {
 
     pub(crate) fn clone_handle(&self) -> Self {
         self.clone()
+    }
+
+    /// Replaces the ABI provider map session open built (T33.18). The
+    /// main-turn provider is unchanged.
+    pub fn set_plugin_providers(&self, map: HashMap<String, Arc<dyn Provider>>) {
+        *self
+            .plugin_providers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = map;
+    }
+
+    /// The provider a route should call. An ABI section uses the map;
+    /// every other route, including the scripted main turn, uses
+    /// [`Self::provider`].
+    pub(crate) fn plugin_backend(&self, route: &crate::router::Route) -> Arc<dyn Provider> {
+        if let ProviderId::Plugin(name) = &route.provider
+            && let Some(provider) = self
+                .plugin_providers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(name)
+        {
+            return Arc::clone(provider);
+        }
+        Arc::clone(&self.provider)
     }
 
     pub(crate) async fn emit(&self, ev: Event) -> Result<(), CoreError> {
@@ -859,6 +903,14 @@ impl Session {
     pub fn set_instructions(&self, block: String, skills_index: String) {
         let _ = self.instructions.set(block);
         let _ = self.skills_index.set(skills_index);
+    }
+
+    /// Installs the memory index `system[3]` carries (T10), built once by
+    /// the surface from the project memory directory. A second call is
+    /// ignored, like `set_instructions`. Empty is skipped at assembly: the
+    /// surface passes nothing when the directory yields only the header.
+    pub fn set_memory_index(&self, index: String) {
+        let _ = self.memory_index.set(index);
     }
 
     /// Installs the granted external-agent drivers (T35.5); the surface
@@ -1687,6 +1739,14 @@ impl Session {
             if !startup_context.is_empty() {
                 req.system[3].text.push_str(&startup_context);
             }
+            // T10: the surface's memory index joins the volatile block, after
+            // the last cache breakpoint, so system[0..=2] stay byte-identical
+            // and system[3].cache stays false.
+            let memory_index = self.memory_index.get().map_or("", String::as_str);
+            if !memory_index.is_empty() {
+                req.system[3].text.push('\n');
+                req.system[3].text.push_str(memory_index);
+            }
             req
         };
         let first = build(
@@ -1716,7 +1776,7 @@ impl Session {
             parent: &tracing::Span::current(),
             "chat",
             gen_ai.operation.name = "chat",
-            gen_ai.provider.name = provider_name(route.provider),
+            gen_ai.provider.name = provider_name(&route.provider),
             gen_ai.request.model = %route.model,
             gen_ai.response.model = tracing::field::Empty,
             gen_ai.response.finish_reasons = tracing::field::Empty,
@@ -1870,7 +1930,7 @@ impl Session {
         tracing::info!(
             parent: &provider_span,
             event.name = "cox.provider.completed",
-            gen_ai.provider.name = provider_name(route.provider),
+            gen_ai.provider.name = provider_name(&route.provider),
             gen_ai.request.model = %route.model,
             gen_ai.response.model = %response_model,
             input_tokens = usage.input_tokens,
@@ -2287,13 +2347,15 @@ pub(crate) fn stop_reason_name(stop: &StopReason) -> &'static str {
     }
 }
 
-fn provider_name(provider: ProviderId) -> &'static str {
+fn provider_name(provider: &ProviderId) -> String {
     match provider {
-        ProviderId::Anthropic => "anthropic",
-        ProviderId::OpenAi => "openai",
-        ProviderId::Local => "local",
-        ProviderId::Jev => "typesafe",
-        ProviderId::External => "external",
+        ProviderId::Anthropic => "anthropic".to_string(),
+        ProviderId::OpenAi => "openai".to_string(),
+        ProviderId::Local => "local".to_string(),
+        ProviderId::Jev => "typesafe".to_string(),
+        ProviderId::External => "external".to_string(),
+        // The section name, not the `plugin:` ledger tag (T33.18).
+        ProviderId::Plugin(name) => name.clone(),
     }
 }
 
@@ -2493,6 +2555,16 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+
+    #[test]
+    fn provider_name_of_a_plugin_section_is_the_section() {
+        use cox_protocol::types::ProviderId;
+        assert_eq!(
+            super::provider_name(&ProviderId::Plugin("acme".into())),
+            "acme"
+        );
+        assert_eq!(super::provider_name(&ProviderId::Jev), "typesafe");
+    }
 
     /// Records every hook call and always continues (T22.3's claims).
     #[derive(Default)]
@@ -2971,5 +3043,41 @@ mod tests {
         assert_eq!(shutdowns(&tool), 0);
         parent.end();
         assert_eq!(shutdowns(&tool), 1);
+    }
+
+    /// The memory index is volatile: two requests with the same tools and
+    /// history differ in `system[3]` only, and only the indexed one names it.
+    #[tokio::test]
+    async fn memory_index_keeps_prefix_bytes_identical() {
+        let (plain, _, plain_provider) = recorded(cox_protocol::Config::default(), 1);
+        let (indexed, _, indexed_provider) = recorded(cox_protocol::Config::default(), 1);
+        indexed
+            .set_memory_index("Memory index:\n- auth-flow: Login goes through auth.rs.\n".into());
+        turn(&plain, false).await;
+        turn(&indexed, false).await;
+        let plain_seen = plain_provider.seen();
+        let indexed_seen = indexed_provider.seen();
+        assert_eq!(plain_seen.len(), 1);
+        assert_eq!(indexed_seen.len(), 1);
+        let (a, b) = (&plain_seen[0], &indexed_seen[0]);
+        assert_eq!(a.tools, b.tools);
+        assert_eq!(a.messages, b.messages);
+        assert_eq!(a.system[0].text, b.system[0].text);
+        assert_eq!(a.system[1].text, b.system[1].text);
+        assert_eq!(a.system[2].text, b.system[2].text);
+        assert!(!a.system[3].cache);
+        assert!(!b.system[3].cache);
+        assert!(
+            !a.system[3].text.contains("Memory index:"),
+            "{}",
+            a.system[3].text
+        );
+        assert!(
+            b.system[3]
+                .text
+                .contains("Memory index:\n- auth-flow: Login goes through auth.rs."),
+            "{}",
+            b.system[3].text
+        );
     }
 }
