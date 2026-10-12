@@ -9,7 +9,8 @@
 // actions (T37.27); the terminal pane over SwiftTerm (T51.5); the agent's browser page
 // over WebKit's `WebPage` (T51.9, no dependency); later Sparkle and the OAuth handoff.
 // Depends on CoxClient only, for the `SecretStore` seam, so it builds and
-// tests without the Rust XCFramework.
+// tests without the Rust XCFramework; and on swift-dependencies, to give that seam's
+// dependency key its live value (DT§4.6).
 import PackageDescription
 
 /// desktop/macos/.swiftlint.yml, through Packages/CoxPlatform/.swiftlint.yml.
@@ -24,6 +25,8 @@ let package = Package(
   ],
   dependencies: [
     .package(path: "../CoxModel"),
+    // T63.4.1: the secret store's live value; the same requirement as CoxModel's, so one version.
+    .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.17.1"),
     // T51.5: the terminal pane's emulator and renderer (research.md §9.5.2, MIT).
     .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.20.0"),
     .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
@@ -33,6 +36,7 @@ let package = Package(
       name: "CoxPlatform",
       dependencies: [
         .product(name: "CoxClient", package: "CoxModel"),
+        .product(name: "Dependencies", package: "swift-dependencies"),
         .product(name: "SwiftTerm", package: "SwiftTerm"),
       ],
       linkerSettings: [.linkedFramework("Security")],

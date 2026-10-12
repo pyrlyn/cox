@@ -4,9 +4,11 @@
 
 // The launch-wide services as swift-dependencies values (DT§4.6): the core sessions open on, the
 // store provider keys live in, and the inbox across sessions. Declared beside their protocols
-// with test and preview values only, because the live ones depend on how the app was launched
-// (a fixture replay, `COX_HOME`, `COX_KEYRING`): the app registers them once with
-// `prepareDependencies` (`LaunchCore`), and a test overrides one with `withDependencies`.
+// with test and preview values only. The core and the inbox depend on how the app was launched
+// (a fixture replay, `COX_HOME`): the app registers them once with `prepareDependencies`
+// (`LaunchCore`). The secret store's live value is `CoxPlatform`'s, beside the Keychain it
+// wraps, so `SecretStoreKey` is public for that conformance. A test overrides a value with a
+// `.dependency` trait or `withDependencies`.
 // `SessionClient` is not one of them: each `SessionStore` holds the session it was opened on,
 // and many sessions are open at once.
 
@@ -57,9 +59,9 @@ private enum CoreClientKey: TestDependencyKey {
 }
 
 /// In memory in every test and preview, so none touches the real Keychain (A49).
-private enum SecretStoreKey: TestDependencyKey {
-  static var testValue: any SecretStore { MemorySecretStore() }
-  static var previewValue: any SecretStore { MemorySecretStore() }
+public enum SecretStoreKey: TestDependencyKey {
+  public static var testValue: any SecretStore { MemorySecretStore() }
+  public static var previewValue: any SecretStore { MemorySecretStore() }
 }
 
 private enum InboxClientKey: TestDependencyKey {
