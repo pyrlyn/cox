@@ -45,7 +45,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.1 | todo | P1 | 5 | 0% | |
-| T33.40.3 | todo | P2 | 4 | 0% | |
+| T33.40.3 | in progress | P2 | 4 | 0% | Claude Code / opus-5.5 |
 | T33.40.4 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
@@ -945,6 +945,12 @@ Goal: `cox_provider_stream` speaks System One over `cox_http` (PL§7a ABI form).
 Check:
 - guest tests `decision_call_body_is_sent_verbatim`, `tier_request_uses_lossy_mapping_and_warns` and `status_529_maps_to_transient`;
 - `cargo build -p cox-plugin-fixtures` produces both fixtures, and with the wasm target missing it fails naming `mise install`.
+Plan:
+1. `plugins/jev/src/provider.rs` (pure, host-testable): a request with job `plugin:jev` must be one user message with one text block; that text is POSTed verbatim to `<base>/v1/systemone`. Any other job gets the old `build_body` mapping through `SystemOneRequest::new` and the J13 warning once per instance. Status: 2xx passes; 429, 529 and other 5xx are `AbiError::Transient`; 401, 422 and other 4xx are `Failed`. The response becomes `TextDelta` (body verbatim), `Stop`, and `Usage` with the response's own counts when present. The export error text is the `AbiError` as JSON, so a host can read its kind.
+2. `lib.rs`: register `provider_stream`, calling `cox_http` and `cox_notify` through the SDK.
+3. `plugin.toml`: `[[models]]` rows `jev-1.13.0` and `jev-latest`.
+4. `cox-plugin-fixtures`: build `cox-plugin-jev` in the same nested cargo run and lay out `OUT_DIR/jev` (`JEV_DIR`, `JEV_WASM`, `JEV_MANIFEST`).
+5. Verify: guest tests, guest wasm32 build and clippy, `cargo build -p cox-plugin-fixtures` (also with a `RUSTC` wrapper that hides the wasm target), the fixtures tests, workspace clippy and fmt.
 
 #### T33.40.4 Jev plugin as a provider, end to end and offline
 
