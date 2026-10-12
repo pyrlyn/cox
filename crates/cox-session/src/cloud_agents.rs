@@ -17,24 +17,31 @@
 //! alone, so credentials, a port or a path in the configured remote never
 //! leave. The sandbox and `path::confine` do not apply: nothing runs here.
 //! Every string from the backend passes `cox_sanitize::sanitize`.
+//!
+//! T56.7: when a run ends its tokens become one `$0` external-usage row
+//! (EA§6), named after the requested model; `cloud_runs`' usage claim makes
+//! it exactly once, whichever process sees the end. A resumed session
+//! finishes what its runs left: [`resume_runs`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use cox_core::Session;
 use cox_core::permission::rules::{CLOUD_AGENT, is_github_repo};
 use cox_core::permission::{Engine, Outcome, cloud_agent_approval_text};
 use cox_cursor_cloud::client::Client;
-use cox_cursor_cloud::wire::{CreateAgentRequest, Repo, RunStatus, StreamEvent};
+use cox_cursor_cloud::wire::{CreateAgentRequest, Repo, RunStatus, StreamEvent, UsageResponse};
 use cox_plugin_api::CloudAgentDecl;
 use cox_protocol::Config;
 use cox_protocol::errors::{CoreError, ProviderError};
 use cox_protocol::ids::{CallId, ItemId, SessionId, TurnId};
 use cox_protocol::traits::{ExternalAgent, TaskTurn};
 use cox_protocol::types::{
-    ApprovalPolicy, Event, ItemKind, PermissionMode, Risk, SandboxMode, StopReason, ToolCall, Usage,
+    ApprovalPolicy, Event, ItemKind, Level, PermissionMode, Risk, SandboxMode, StopReason,
+    ToolCall, Usage,
 };
 use cox_store::Store;
-use cox_store::cloud_runs::NewCloudRun;
+use cox_store::cloud_runs::{CloudRun, NewCloudRun};
 use cox_tools::git::git;
 use futures::StreamExt as _;
 use serde_json::json;
@@ -52,8 +59,8 @@ pub(crate) fn drivers(
     cwd: &Path,
     store: Arc<Store>,
     key: impl Fn(&str, &str) -> Result<String, ProviderError>,
-) -> (Vec<Arc<dyn ExternalAgent>>, Vec<String>) {
-    let (mut out, mut left_out): (Vec<Arc<dyn ExternalAgent>>, _) = (Vec::new(), Vec::new());
+) -> (Vec<Arc<CloudDriver>>, Vec<String>) {
+    let (mut out, mut left_out) = (Vec::new(), Vec::new());
     if decls.is_empty() {
         return (out, left_out);
     }
@@ -88,7 +95,7 @@ pub(crate) fn drivers(
     (out, left_out)
 }
 
-struct CloudDriver {
+pub(crate) struct CloudDriver {
     name: String,
     backend: &'static str,
     model: Option<String>,
@@ -100,6 +107,71 @@ struct CloudDriver {
     session: SessionId,
     cwd: PathBuf,
     store: Arc<Store>,
+}
+
+/// The ledger's name for what a run used: the model the preset asked for,
+/// or `<backend>:auto` when the backend picked (it reports no model).
+fn ledger_model(backend: &str, model: Option<&str>) -> String {
+    model.map_or_else(|| format!("{backend}:auto"), str::to_string)
+}
+
+/// One run's tokens out of `GET /v1/agents/{id}/usage`: its own entry, or
+/// the agent's total, which is the same thing for the one run cox starts
+/// per agent. Saturates rather than wraps.
+fn run_usage(report: &UsageResponse, run: &str) -> Usage {
+    let tokens = report
+        .runs
+        .iter()
+        .find(|entry| entry.id == run)
+        .map_or(report.total_usage, |entry| entry.usage);
+    let count = |n: u64| u32::try_from(n).unwrap_or(u32::MAX);
+    Usage {
+        input_tokens: count(tokens.input_tokens),
+        output_tokens: count(tokens.output_tokens),
+        cache_read_tokens: count(tokens.cache_read_tokens),
+        cache_write_tokens: count(tokens.cache_write_tokens),
+        estimated: false,
+        cost_usd: 0.0,
+        latency_ms: 0,
+    }
+}
+
+/// T56.7: what a resumed session owes its cloud runs, which `open` runs in
+/// the background. A run that ended while cox was closed gets its result
+/// and ledger row now; one still going is followed again until it ends; a
+/// run whose usage read failed gets its row. A run no granted driver serves
+/// is left for a resume that has one.
+pub(crate) async fn resume_runs(session: Session, drivers: Vec<Arc<CloudDriver>>) {
+    let Some(first) = drivers.first() else {
+        return;
+    };
+    let runs = match first.store.cloud_runs_unsettled(&session.id()) {
+        Ok(runs) => runs,
+        Err(e) => {
+            let text = format!("cloud runs not resumed: {e}");
+            let _ = session.notice(Level::Warn, text).await;
+            return;
+        }
+    };
+    let pending = runs.into_iter().filter_map(|row| {
+        let serves = |d: &&Arc<CloudDriver>| d.backend == row.backend;
+        let driver = drivers
+            .iter()
+            .filter(serves)
+            .find(|d| d.model == row.model)
+            .or_else(|| drivers.iter().find(serves))?
+            .clone();
+        let session = session.clone();
+        Some(async move {
+            if let Err(e) = driver.finalize(&session, &row).await {
+                let text = format!("cloud run {} of task {}: {e}", row.run_id, row.task_id);
+                let _ = session
+                    .notice(Level::Warn, cox_sanitize::sanitize(&text))
+                    .await;
+            }
+        })
+    });
+    futures::future::join_all(pending).await;
 }
 
 /// The repository as GitHub names it, and the only URL cox sends for it.
@@ -190,6 +262,10 @@ impl ExternalAgent for CloudDriver {
         true
     }
 
+    fn ledger_model(&self) -> String {
+        ledger_model(self.backend, self.model.as_deref())
+    }
+
     /// Outside a task there is no row to record the run against, so this is
     /// refused before any request.
     async fn turn(
@@ -214,10 +290,8 @@ impl ExternalAgent for CloudDriver {
         events: mpsc::Sender<Event>,
         cancel: CancellationToken,
     ) -> Result<Option<Usage>, CoreError> {
-        // T56.7 turns the run's usage into the ledger row.
         self.run(cx, turn, prompt, &events, &cancel)
             .await
-            .map(|()| None)
             .map_err(|message| CoreError::ExternalAgent {
                 agent: self.name.clone(),
                 message: cox_sanitize::sanitize(&message),
@@ -233,7 +307,7 @@ impl CloudDriver {
         prompt: String,
         events: &mpsc::Sender<Event>,
         cancel: &CancellationToken,
-    ) -> Result<(), String> {
+    ) -> Result<Option<Usage>, String> {
         let task = cx
             .task
             .ok_or("a cloud agent runs only as a background task")?;
@@ -273,8 +347,12 @@ impl CloudDriver {
                 "could not record run {run}, so it was cancelled: {e}"
             ));
         }
-        let Some(answer) = self.follow(&agent, &run, cancel).await? else {
-            return Ok(());
+        // A stream that failed leaves the usage unclaimed for a resume.
+        let answer = self.follow(&agent, &run, cancel).await?;
+        // The core writes the row from what the turn returns (EA§6).
+        let usage = self.settle(&agent, &run).await;
+        let Some(answer) = answer else {
+            return Ok(usage);
         };
         let text = match head.warning() {
             Some(warning) => format!("{warning}\n\n{answer}"),
@@ -288,6 +366,48 @@ impl CloudDriver {
         let _ = events.send(Event::ItemDone { item }).await;
         let stop = StopReason::EndTurn;
         let _ = events.send(Event::TurnDone { turn, stop }).await;
+        Ok(usage)
+    }
+
+    /// The run's tokens, for the one caller that wins `cloud_runs`' usage
+    /// claim. `None` while the row is not terminal (a later resume follows
+    /// the run to its end) or when the read fails (a later resume retries),
+    /// and for every caller after the first.
+    async fn settle(&self, agent: &str, run: &str) -> Option<Usage> {
+        let row = self.store.cloud_run(self.backend, run).ok().flatten()?;
+        if !row.terminal || row.usage_recorded {
+            return None;
+        }
+        let report = self.client.usage(agent).await.ok()?;
+        let won = self.store.cloud_run_mark_usage_recorded(self.backend, run);
+        won.ok()?.then(|| run_usage(&report, run))
+    }
+
+    /// One unsettled run of a resumed session. A run still going is never
+    /// cancelled from here: closing cox again leaves it running for the
+    /// next resume.
+    async fn finalize(&self, session: &Session, row: &CloudRun) -> Result<(), String> {
+        let (agent, run) = (row.agent_id.as_str(), row.run_id.as_str());
+        if !row.terminal {
+            let now = self.client.get_run(agent, run).await;
+            let now = now.map_err(|e| e.to_string())?;
+            let answer = if now.status.is_terminal() {
+                self.record(run, &now.status);
+                let text = now.result.filter(|t| !t.trim().is_empty());
+                text.unwrap_or_else(|| format!("run {run} ended with no text"))
+            } else {
+                let never = CancellationToken::new();
+                self.follow(agent, run, &never).await?.unwrap_or_default()
+            };
+            let answer = cox_sanitize::sanitize(&answer);
+            let done = session.complete_resumed_task(row.task_id, &self.name, &answer);
+            done.await.map_err(|e| e.to_string())?;
+        }
+        if let Some(usage) = self.settle(agent, run).await {
+            let model = ledger_model(self.backend, row.model.as_deref());
+            let recorded = session.record_resumed_task_usage(&model, usage);
+            recorded.map_err(|e| e.to_string())?;
+        }
         Ok(())
     }
 
@@ -577,41 +697,27 @@ tool_calls = [{ name = "agent", input = { task = "work", preset = "cursor-cloud"
 text = "done"
 "#;
 
-    /// T56.6 Check: `agent(preset)` without `background` still runs in the
-    /// background; the run's assistant text (sanitized, thinking left out)
-    /// is the task's answer between `TaskCreated` and `TaskCompleted`, the
-    /// request carries the clean GitHub URL and the row ends `FINISHED`.
-    #[tokio::test]
-    async fn cloud_agent_stream_maps_to_task_events() {
-        let Some(ws) = repo("https://user:ghp_secret@github.com/acme/widgets.git") else {
-            return;
-        };
-        let (home, server) = (
-            tempfile::tempdir().expect("home"),
-            MockServer::start().await,
-        );
-        let sse = ResponseTemplate::new(200).set_body_raw(STREAM, "text/event-stream");
-        mount_run(&server, sse).await;
-        let driver = Arc::new(driver(
-            ws.path(),
-            home.path(),
-            &server,
-            &["CloudAgent(acme/widgets)"],
-        ));
+    /// A session that dispatches `driver` as a background task, run until
+    /// the task's result notice; the ledger it wrote and what was seen
+    /// (`created`, the tool result, `completed`, the notice text).
+    async fn dispatch(
+        ws: &Path,
+        driver: Arc<CloudDriver>,
+    ) -> (Arc<cox_core::MemoryStore>, Vec<String>) {
         let provider = cox_provider::scripted::Scripted::from_toml(DISPATCH, "").expect("scenario");
         let memory = Arc::new(cox_core::MemoryStore::new());
         let mut config = Config::default();
-        config.core.workspace_roots = vec![ws.path().to_path_buf()];
+        config.core.workspace_roots = vec![ws.to_path_buf()];
         let session = cox_core::Session::new(
             config,
             Arc::new(provider),
             vec![],
             memory.clone(),
-            memory,
-            ws.path().to_path_buf(),
+            memory.clone(),
+            ws.to_path_buf(),
         )
         .expect("session");
-        session.set_external_agents(vec![driver.clone()]);
+        session.set_external_agents(vec![driver]);
         let mut rx = session.events().expect("events");
         let mode = PermissionMode::Bypass;
         let sub = Submission::SetPermissionMode { mode };
@@ -643,6 +749,31 @@ text = "done"
         };
         let collected = tokio::time::timeout(Duration::from_secs(20), collect).await;
         assert!(collected.is_ok(), "{seen:?}");
+        (memory, seen)
+    }
+
+    /// T56.6 Check: `agent(preset)` without `background` still runs in the
+    /// background; the run's assistant text (sanitized, thinking left out)
+    /// is the task's answer between `TaskCreated` and `TaskCompleted`, the
+    /// request carries the clean GitHub URL and the row ends `FINISHED`.
+    #[tokio::test]
+    async fn cloud_agent_stream_maps_to_task_events() {
+        let Some(ws) = repo("https://user:ghp_secret@github.com/acme/widgets.git") else {
+            return;
+        };
+        let (home, server) = (
+            tempfile::tempdir().expect("home"),
+            MockServer::start().await,
+        );
+        let sse = ResponseTemplate::new(200).set_body_raw(STREAM, "text/event-stream");
+        mount_run(&server, sse).await;
+        let driver = Arc::new(driver(
+            ws.path(),
+            home.path(),
+            &server,
+            &["CloudAgent(acme/widgets)"],
+        ));
+        let (_, seen) = dispatch(ws.path(), driver.clone()).await;
         assert_eq!(seen[0], "created", "{seen:?}");
         let started = seen.iter().any(|s| s.starts_with("background task"));
         assert!(started, "{seen:?}");
@@ -714,6 +845,246 @@ text = "done"
         let row = driver.store.cloud_run("cursor", "run-1").expect("read");
         let row = row.expect("row");
         assert_eq!((row.status.as_str(), row.terminal), ("CANCELLED", true));
+        server.verify().await;
+    }
+
+    /// Cursor's report: the run's own entry differs from the agent total,
+    /// so a test sees which one the row took.
+    const USAGE: &str = r#"{"totalUsage":{"inputTokens":900,"outputTokens":900},
+        "runs":[{"id":"run-1","usage":{"inputTokens":11,"outputTokens":7,
+        "cacheReadTokens":5,"cacheWriteTokens":3,"totalTokens":26}}]}"#;
+
+    async fn mount_usage(server: &MockServer, times: u64) {
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/bc-1/usage"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(USAGE, "application/json"))
+            .expect(times)
+            .mount(server)
+            .await;
+    }
+
+    fn assert_cursor_row(row: &cox_protocol::UsageRow, model: &str) {
+        assert_eq!(row.provider, cox_protocol::types::ProviderId::External);
+        assert_eq!(row.model.0, model);
+        assert_eq!(row.job, cox_protocol::types::Job::Agent);
+        let u = &row.usage;
+        let tokens = (u.input_tokens, u.output_tokens, u.cache_read_tokens);
+        assert_eq!((tokens, u.cache_write_tokens), ((11, 7, 5), 3));
+        assert_eq!(u.cost_usd, 0.0, "billed on the user's Cursor plan");
+        assert!(!u.estimated);
+    }
+
+    /// T56.7 Check: a finished run's ledger row goes through the external
+    /// agent's path: provider external, $0, Cursor's four token counts for
+    /// this run, the requested model (`cursor:auto` when none was named) and
+    /// the task's job tag; the run is marked recorded.
+    #[tokio::test]
+    async fn cloud_agent_usage_row_is_billed_externally_with_cursor_tokens() {
+        assert_eq!(ledger_model("cursor", Some("composer-2")), "composer-2");
+        let Some(ws) = repo("git@github.com:acme/widgets.git") else {
+            return;
+        };
+        let (home, server) = (
+            tempfile::tempdir().expect("home"),
+            MockServer::start().await,
+        );
+        let sse = ResponseTemplate::new(200).set_body_raw(STREAM, "text/event-stream");
+        mount_run(&server, sse).await;
+        mount_usage(&server, 1).await;
+        let allow = ["CloudAgent(acme/widgets)"];
+        let driver = Arc::new(driver(ws.path(), home.path(), &server, &allow));
+        let (memory, seen) = dispatch(ws.path(), driver.clone()).await;
+        assert!(seen.contains(&"completed".to_string()), "{seen:?}");
+        let rows = memory.usage_rows();
+        let external: Vec<_> = rows
+            .iter()
+            .filter(|r| r.provider == cox_protocol::types::ProviderId::External)
+            .collect();
+        let [row] = external.as_slice() else {
+            panic!("one external row: {rows:?}");
+        };
+        assert_cursor_row(row, "cursor:auto");
+        let run = driver.store.cloud_run("cursor", "run-1").expect("read");
+        assert!(run.expect("row").usage_recorded);
+        server.verify().await;
+    }
+
+    /// A resumed session over `home`, and the driver serving its runs,
+    /// sharing its store; plus one `RUNNING` row of the session's task.
+    fn resumed(ws: &Path, home: &Path) -> (Session, Arc<Store>, TaskId) {
+        let (session, store) = crate::testing::scripted_session(home, ws, "");
+        let task = TaskId::new();
+        let row = NewCloudRun {
+            backend: "cursor".into(),
+            run_id: "run-1".into(),
+            session_id: session.id(),
+            task_id: task,
+            agent_id: "bc-1".into(),
+            repository: "acme/widgets".into(),
+            model: None,
+            status: "RUNNING".into(),
+            terminal: false,
+        };
+        store.cloud_run_insert(&row).expect("insert");
+        (session, store, task)
+    }
+
+    fn serving(
+        ws: &Path,
+        home: &Path,
+        server: &MockServer,
+        s: &Session,
+        store: &Arc<Store>,
+    ) -> Arc<CloudDriver> {
+        Arc::new(CloudDriver {
+            store: store.clone(),
+            session: s.id(),
+            ..driver(ws, home, server, &[])
+        })
+    }
+
+    /// The resumed task's `TaskCompleted` and result notice, and the
+    /// session's external ledger rows.
+    async fn finished(
+        session: &Session,
+        store: &Store,
+        task: TaskId,
+    ) -> (String, Vec<cox_protocol::UsageRow>) {
+        let mut rx = session.events().expect("events");
+        let (mut completed, mut notice) = (false, String::new());
+        while let Ok(ev) = rx.try_recv() {
+            match ev {
+                Event::TaskCompleted { task: t, .. } => completed |= t == task,
+                Event::Notice { text, .. } => notice = text,
+                _ => {}
+            }
+        }
+        assert!(completed, "TaskCompleted for {task}: {notice}");
+        let rows = store.usage_for_session(&session.id()).expect("usage");
+        (notice, rows)
+    }
+
+    /// T56.7 Check: whichever caller sees the run end first records its
+    /// tokens; a second settle, and a resume after the live turn wrote the
+    /// row, read nothing and write nothing.
+    #[tokio::test]
+    async fn cloud_agent_usage_row_is_written_once() {
+        let (ws, home) = (
+            tempfile::tempdir().expect("ws"),
+            tempfile::tempdir().expect("home"),
+        );
+        let server = MockServer::start().await;
+        mount_usage(&server, 1).await;
+        let (session, store, _) = resumed(ws.path(), home.path());
+        let driver = serving(ws.path(), home.path(), &server, &session, &store);
+        assert_eq!(
+            driver.settle("bc-1", "run-1").await,
+            None,
+            "not terminal yet"
+        );
+        driver.record("run-1", &RunStatus::Finished);
+        let first = driver.settle("bc-1", "run-1").await.expect("first");
+        assert_eq!((first.input_tokens, first.output_tokens), (11, 7));
+        assert_eq!(driver.settle("bc-1", "run-1").await, None, "claimed once");
+        resume_runs(session.clone(), vec![driver]).await;
+        let rows = store.usage_for_session(&session.id()).expect("usage");
+        assert!(rows.is_empty(), "the resume writes no second row: {rows:?}");
+        server.verify().await;
+    }
+
+    /// T56.7 Check: a run still going when the session reopens is followed
+    /// again; its end is the task's result in the resumed session, with the
+    /// ledger row and a terminal, recorded `cloud_runs` row.
+    #[tokio::test]
+    async fn resume_reattaches_to_a_running_cloud_run() {
+        let (ws, home) = (
+            tempfile::tempdir().expect("ws"),
+            tempfile::tempdir().expect("home"),
+        );
+        let server = MockServer::start().await;
+        let running = r#"{"id":"run-1","status":"RUNNING"}"#;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/bc-1/runs/run-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(running, "application/json"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/bc-1/runs/run-1/stream"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(STREAM, "text/event-stream"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        mount_usage(&server, 1).await;
+        let (session, store, task) = resumed(ws.path(), home.path());
+        let driver = serving(ws.path(), home.path(), &server, &session, &store);
+        let resume = resume_runs(session.clone(), vec![driver]);
+        tokio::time::timeout(Duration::from_secs(20), resume)
+            .await
+            .expect("the reattached run ended");
+        let (notice, rows) = finished(&session, &store, task).await;
+        assert!(
+            notice.contains("Hello world") && !notice.contains('\u{1b}'),
+            "{notice}"
+        );
+        let [row] = rows.as_slice() else {
+            panic!("one row: {rows:?}");
+        };
+        assert_cursor_row(row, "cursor:auto");
+        let run = store
+            .cloud_run("cursor", "run-1")
+            .expect("read")
+            .expect("row");
+        assert_eq!(
+            (run.status.as_str(), run.terminal, run.usage_recorded),
+            ("FINISHED", true, true)
+        );
+        server.verify().await;
+    }
+
+    /// T56.7 Check: a run that ended while cox was closed is finalized at
+    /// resume from `GET` alone (no stream): its result, sanitized, is the
+    /// task's result item, and its tokens are the ledger row.
+    #[tokio::test]
+    async fn resume_finalizes_a_run_that_finished_while_closed() {
+        let (ws, home) = (
+            tempfile::tempdir().expect("ws"),
+            tempfile::tempdir().expect("home"),
+        );
+        let server = MockServer::start().await;
+        let ended = r#"{"id":"run-1","status":"FINISHED","result":"fixed while away\u001b[2J"}"#;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/bc-1/runs/run-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(ended, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/bc-1/runs/run-1/stream"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        mount_usage(&server, 1).await;
+        let (session, store, task) = resumed(ws.path(), home.path());
+        let driver = serving(ws.path(), home.path(), &server, &session, &store);
+        resume_runs(session.clone(), vec![driver]).await;
+        let (notice, rows) = finished(&session, &store, task).await;
+        assert!(
+            notice.contains("fixed while away") && !notice.contains('\u{1b}'),
+            "{notice}"
+        );
+        let [row] = rows.as_slice() else {
+            panic!("one row: {rows:?}");
+        };
+        assert_cursor_row(row, "cursor:auto");
+        let run = store
+            .cloud_run("cursor", "run-1")
+            .expect("read")
+            .expect("row");
+        assert_eq!(
+            (run.status.as_str(), run.terminal, run.usage_recorded),
+            ("FINISHED", true, true)
+        );
         server.verify().await;
     }
 }

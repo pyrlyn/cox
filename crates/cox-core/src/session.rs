@@ -1547,6 +1547,33 @@ impl Session {
         }
     }
 
+    /// The ledger row of an external agent's work (EA§6): billed on the
+    /// user's own plan, never cox's, so the cost is $0 whatever was
+    /// reported. Returns the usage as recorded.
+    pub(crate) fn insert_external_usage(
+        &self,
+        job: Job,
+        tier: Tier,
+        model: &str,
+        mut usage: cox_protocol::types::Usage,
+    ) -> Result<cox_protocol::types::Usage, CoreError> {
+        usage.cost_usd = 0.0;
+        self.store
+            .usage_insert(&cox_protocol::UsageRow {
+                session_id: self.id,
+                // One call per turn: the driver runs its own loop inside.
+                turn: 1,
+                job,
+                tier,
+                provider: ProviderId::External,
+                model: ModelId(model.to_string()),
+                effort: None,
+                usage,
+            })
+            .map_err(|error| CoreError::Store { error })?;
+        Ok(usage)
+    }
+
     /// An external-agent child's turn (T35.5, EA§3): the driver stands where
     /// the provider would and runs its own tools inside its own sandboxed
     /// process, so its events are recorded as they come; each answer joins
@@ -1612,22 +1639,9 @@ impl Session {
             cost_usd: 0.0,
             latency_ms: 0,
         });
-        // Billed on the user's own plan, never cox's ledger (EA§6).
-        usage.cost_usd = 0.0;
         usage.latency_ms = started.elapsed().as_millis() as u64;
-        self.store
-            .usage_insert(&cox_protocol::UsageRow {
-                session_id: self.id,
-                // One call per turn: the driver runs its own loop inside.
-                turn: 1,
-                job: self.job.clone(),
-                tier,
-                provider: ProviderId::External,
-                model: ModelId(agent.name().to_string()),
-                effort: None,
-                usage,
-            })
-            .map_err(|error| CoreError::Store { error })?;
+        let usage =
+            self.insert_external_usage(self.job.clone(), tier, &agent.ledger_model(), usage)?;
         self.emit(Event::Usage { turn, usage }).await?;
         let stop = stop.unwrap_or(if self.cancel_token().is_cancelled() {
             StopReason::Interrupted

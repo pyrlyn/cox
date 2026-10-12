@@ -669,7 +669,8 @@ pub trait EventTap: Send + Sync {
 /// process itself.
 #[async_trait]
 pub trait ExternalAgent: Send + Sync {
-    /// The dispatch name (`cursor`), also the usage row's model.
+    /// The dispatch name (`cursor`), also the usage row's model unless
+    /// [`ExternalAgent::ledger_model`] says otherwise.
     fn name(&self) -> &str;
     /// Runs one turn for `prompt`, streaming the agent's work on `events`
     /// as cox events (`StreamJsonMapper` for stream-json); a `TurnDone` it
@@ -689,6 +690,12 @@ pub trait ExternalAgent: Send + Sync {
     /// that dispatched it.
     fn background_only(&self) -> bool {
         false
+    }
+
+    /// The model the ledger row names (T56.7). A hosted backend runs the
+    /// model the preset requested, not one called by the dispatch name.
+    fn ledger_model(&self) -> String {
+        self.name().to_string()
     }
 
     /// [`ExternalAgent::turn`] with the task it runs for. The core calls
