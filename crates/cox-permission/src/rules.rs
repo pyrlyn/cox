@@ -63,11 +63,14 @@ pub fn is_github_repo(s: &str) -> bool {
 /// else is lower-cased as-is. `project` (T59.5) is a shell command run by
 /// `bash`'s executor, so it shares `bash`'s rules and session grants: a deny
 /// rule `Bash(rm:*)` must not be bypassable by the same command arriving
-/// under another tool name.
+/// under another tool name. `rename_symbol` (T59.7) rewrites files, so it
+/// is `edit` for the same reason: `Edit(secrets/**)` holds for every file a
+/// rename would change.
 pub fn canonical_tool(name: &str) -> String {
     let lower = name.trim().to_ascii_lowercase();
     match lower.as_str() {
         "project" => "bash".into(),
+        "rename_symbol" => "edit".into(),
         "webfetch" => "web_fetch".into(),
         "cloudagent" => CLOUD_AGENT.into(),
         "websearch" => "web_search".into(),
@@ -245,6 +248,8 @@ mod tests {
         assert!(rule("Edit(src/**)").matches("edit", "/repo/src/a.rs"));
         assert!(rule("Edit(src/**)").matches("edit", "src/a.rs"));
         assert!(!rule("Edit(src/**)").matches("write", "src/a.rs"));
+        assert!(rule("Edit(src/**)").matches("rename_symbol", "/repo/src/a.rs"));
+        assert!(rule("rename_symbol(src/**)").matches("edit", "src/a.rs"));
         assert!(
             rule("WebFetch(domain:example.com)").matches("web_fetch", "https://api.example.com/x")
         );

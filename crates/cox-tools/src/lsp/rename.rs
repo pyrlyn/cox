@@ -7,9 +7,12 @@
 //! the file. Separate from `nav.rs` because it writes: the server's edit is
 //! untrusted, so every file it names goes through `confine` against the
 //! writable roots, a versioned edit made against text cox no longer holds
-//! is refused, and the whole set is written by `write::rewrite_all` (all
-//! or nothing, each pre-image archived) only after every file's new text
-//! is computed. There is no text-search fallback: a rename by name match
+//! is refused, the session's permission engine judges every file as an
+//! edit of that path (`Relay::approve_writes`: one deny refuses all, one
+//! approval lists them), and the whole set is written by
+//! `write::rewrite_all` (all or nothing, each pre-image archived) only
+//! after every file's new text is computed and approved. The tool decides
+//! none of it itself. There is no text-search fallback: a rename by name match
 //! would rewrite unrelated symbols, so without a server it refuses.
 
 use std::collections::{BTreeMap, HashMap};
@@ -275,7 +278,9 @@ impl Tool for RenameTool {
                  and point into the file as `read` shows it. Needs the file's language server \
                  to be running already (call `diagnostics` on a file of that language to \
                  start it); without one it refuses rather than rename by text search. Every \
-                 file is written or none is, each one's old text archived. Refuses when the \
+                 file it would change is checked against the edit permission rules, and any \
+                 approval lists them all. Every file is written or none is, each one's old \
+                 text archived. Refuses when the \
                  rename would create, move or delete a file, touch a file outside the \
                  writable workspace, or apply to text that changed since the server saw it."
                 .to_string(),
@@ -293,6 +298,10 @@ impl Tool for RenameTool {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string()
+    }
+
+    fn defers_write_approval(&self) -> bool {
+        true
     }
 
     async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
@@ -345,12 +354,34 @@ impl Tool for RenameTool {
                 None,
             ));
         }
+        let shown = |p: &Path| p.strip_prefix(&root).unwrap_or(p).display().to_string();
         let paths: Vec<PathBuf> = rewrites.iter().map(|r| r.path.clone()).collect();
+        // The gate judged only the symbol's own file; the session's engine
+        // judges every file the server named before one is written (T59.7).
+        let Some(relay) = &cx.relay else {
+            return Err(denied(format!(
+                "no session can approve the files {NAME} would write"
+            )));
+        };
+        relay
+            .approve_writes(cx.call, NAME, &paths)
+            .await
+            .map_err(|e| self.clean(e))?;
         self.baselines(&server, &paths, &mut baselines, cx).await;
+        // The approval may wait on a person, and a file edited meanwhile
+        // would be overwritten with text computed from what it held before.
+        let changed = rewrites
+            .iter()
+            .find(|r| load(&r.path).ok().as_deref() != Some(r.before.as_str()));
+        if let Some(r) = changed {
+            return Err(denied(format!(
+                "{} changed while the rename waited; nothing was written, call {NAME} again",
+                shown(&r.path)
+            )));
+        }
 
         rewrite_all(NAME, &rewrites, cx).await?;
 
-        let shown = |p: &Path| p.strip_prefix(&root).unwrap_or(p).display().to_string();
         let mut text = format!("renamed to `{new_name}` in {} file(s):", rewrites.len());
         let mut unified = String::new();
         for r in &rewrites {
@@ -434,12 +465,57 @@ fn reply(text: String, diff: Option<Diff>) -> ToolOutput {
 mod tests {
     use std::sync::Mutex;
 
-    use cox_protocol::{Archive, ArchiveId, ArchivePut, StoreError};
+    use cox_protocol::{Archive, ArchiveId, ArchivePut, CallId, Relay, StoreError};
     use serde_json::json;
 
-    use super::super::tests::{cx, tool, workspace};
+    use super::super::tests::{cx as bare_cx, tool, workspace};
     use super::super::{DiagnosticsTool, lock};
     use super::*;
+
+    /// Stands in for the session's engine behind `approve_writes`: records
+    /// each file list it is handed, optionally rewrites `src/b.rs` the way
+    /// an editor might while a person reads the approval, then answers
+    /// `refuse` or yes.
+    #[derive(Default)]
+    struct Judge {
+        refuse: Option<&'static str>,
+        meanwhile: Option<PathBuf>,
+        asked: Mutex<Vec<Vec<PathBuf>>>,
+    }
+
+    #[async_trait]
+    impl Relay for Judge {
+        async fn send_message(&self, _to: &str, _text: &str) -> Result<(), ToolError> {
+            Ok(())
+        }
+        async fn approve_writes(
+            &self,
+            _call: CallId,
+            tool: &str,
+            paths: &[PathBuf],
+        ) -> Result<(), ToolError> {
+            assert_eq!(tool, NAME);
+            lock(&self.asked).push(paths.to_vec());
+            if let Some(root) = &self.meanwhile {
+                std::fs::write(root.join("src/b.rs"), "fn edited() { main(); }\n").unwrap();
+            }
+            match self.refuse {
+                Some(why) => Err(denied(why.to_string())),
+                None => Ok(()),
+            }
+        }
+    }
+
+    /// A call context whose session approves every file.
+    fn cx(root: &Path) -> ToolCx {
+        judged(root, Arc::new(Judge::default()))
+    }
+
+    fn judged(root: &Path, judge: Arc<Judge>) -> ToolCx {
+        let mut cx = bare_cx(root);
+        cx.relay = Some(judge as Arc<dyn Relay>);
+        cx
+    }
 
     /// Stands in for `cox_sanitize::sanitize`, which `cox-tools` may not
     /// depend on; the session hands in the real one.
@@ -594,6 +670,70 @@ mod tests {
         assert_eq!(read(&root, "src/b.rs"), "// moved\nfn x() { start(); }\n");
     }
 
+    /// T59.7: the engine, not the gate's one look at `src/a.rs`, decides
+    /// every file; refused for the second one, the first stays as it was.
+    #[tokio::test(start_paused = true)]
+    async fn every_file_goes_to_the_engine_and_a_refusal_writes_nothing() {
+        let (_dir, root, diags) = running("fn main() {}\n").await;
+        let judge = Arc::new(Judge {
+            refuse: Some("permission denied: src/b.rs: denied by rule Edit(src/b.rs)"),
+            ..Judge::default()
+        });
+        let mut cx = judged(&root, judge.clone());
+        let kept = Arc::new(Kept::default());
+        cx.archive = kept.clone();
+
+        let out = rename(&diags, None).call(to("start"), &cx).await;
+        assert!(
+            matches!(&out, Err(ToolError::Denied { why }) if why.contains("src/b.rs: denied by rule")),
+            "{out:?}"
+        );
+        let canon = |f: &str| std::fs::canonicalize(root.join(f)).unwrap();
+        assert_eq!(
+            *lock(&judge.asked),
+            [vec![canon("src/a.rs"), canon("src/b.rs")]]
+        );
+        assert_eq!(read(&root, "src/a.rs"), "fn main() {}\n");
+        assert_eq!(read(&root, "src/b.rs"), B);
+        assert!(lock(&kept.0).is_empty(), "nothing archived");
+    }
+
+    /// With no session behind the call (`relay: None`, as `cox mcp` builds
+    /// it) no engine can judge the files, so none is written.
+    #[tokio::test(start_paused = true)]
+    async fn without_a_session_to_judge_the_files_it_writes_nothing() {
+        let (_dir, root, diags) = running("fn main() {}\n").await;
+
+        let out = rename(&diags, None)
+            .call(to("start"), &bare_cx(&root))
+            .await;
+        assert!(
+            matches!(&out, Err(ToolError::Denied { why }) if why.contains("no session can approve")),
+            "{out:?}"
+        );
+        assert_eq!(read(&root, "src/a.rs"), "fn main() {}\n");
+        assert_eq!(read(&root, "src/b.rs"), B);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_file_edited_while_the_approval_waits_is_not_overwritten() {
+        let (_dir, root, diags) = running("fn main() {}\n").await;
+        let judge = Arc::new(Judge {
+            meanwhile: Some(root.clone()),
+            ..Judge::default()
+        });
+
+        let out = rename(&diags, None)
+            .call(to("start"), &judged(&root, judge))
+            .await;
+        assert!(
+            matches!(&out, Err(ToolError::Denied { why }) if why.contains("src/b.rs changed while")),
+            "{out:?}"
+        );
+        assert_eq!(read(&root, "src/a.rs"), "fn main() {}\n");
+        assert_eq!(read(&root, "src/b.rs"), "fn edited() { main(); }\n");
+    }
+
     #[test]
     fn spec_is_a_deferred_exclusive_write_on_the_symbols_file() {
         let (diags, _) = tool(&[("rust", "/bin/sh", "rs")]);
@@ -603,6 +743,10 @@ mod tests {
         assert!(spec.deferred);
         assert_eq!(spec.risk, Risk::Write);
         assert_eq!(spec.concurrency, Concurrency::Exclusive);
+        assert!(
+            tool.defers_write_approval(),
+            "asked once the files are known"
+        );
         assert_eq!(tool.subject(&to("x")), "src/a.rs");
         assert_eq!(
             tool.touches(&to("x")),

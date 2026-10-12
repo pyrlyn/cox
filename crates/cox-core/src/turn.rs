@@ -7,6 +7,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -380,6 +381,9 @@ async fn gate(
                     .await?;
                 return Ok(Err(denied(&reason)));
             }
+            // Asked now, the person would approve without seeing the files;
+            // `approve_writes` asks once they are known, before any write.
+            Outcome::Ask(_) if tool.defers_write_approval() => return Ok(Ok(call)),
             Outcome::Ask(why) => why,
         };
         match ask(session, &call, why).await? {
@@ -395,6 +399,87 @@ async fn gate(
             // risk and subject change, so it goes back through `decide`.
             Decision::Edit { input } => rate(&mut call, tool, input),
         }
+    }
+}
+
+/// `Relay::approve_writes` (T59.7): the engine judges each file a call
+/// learned only while running as an edit of that path, so `Edit(...)` rules
+/// and session grants hold however the write arrives. One deny refuses the
+/// whole set; any ask becomes a single approval naming every file.
+pub(crate) async fn approve_writes(
+    session: &Session,
+    id: CallId,
+    tool: &str,
+    paths: &[PathBuf],
+) -> Result<(), ToolError> {
+    let refuse = |why: String| ToolError::Denied {
+        why: format!("permission denied: {why}"),
+    };
+    let failed = |e: CoreError| ToolError::Denied { why: e.to_string() };
+    // `confine` hands back canonical paths, but rules anchor relative globs
+    // at the cwd as configured, which may sit behind a symlink (`/var`).
+    let canon = std::fs::canonicalize(&session.cwd).unwrap_or_else(|_| session.cwd.clone());
+    let mut calls = Vec::with_capacity(paths.len());
+    let mut shown = Vec::with_capacity(paths.len());
+    for path in paths {
+        let (subject, label) = match path.strip_prefix(&canon) {
+            Ok(rel) => (session.cwd.join(rel), rel.to_path_buf()),
+            Err(_) => (path.clone(), path.clone()),
+        };
+        let subject = subject.to_string_lossy().into_owned();
+        shown.push(label.to_string_lossy().into_owned());
+        calls.push(ToolCall {
+            id,
+            name: tool.to_string(),
+            input: serde_json::json!({ "path": subject }),
+            risk: Risk::Write,
+            subject,
+            segments: None,
+        });
+    }
+    let mut asks = None;
+    for (call, label) in calls.iter().zip(&shown) {
+        match session.decide(call).await {
+            Outcome::Allow { .. } => {}
+            Outcome::Deny { reason, by } => {
+                let reason = format!("{label}: {reason}");
+                let decision = Decision::Deny {
+                    reason: reason.clone(),
+                };
+                let decided = Event::ApprovalDecided {
+                    call_id: id,
+                    decision,
+                    by,
+                };
+                session.emit(decided).await.map_err(failed)?;
+                return Err(refuse(reason));
+            }
+            Outcome::Ask(why) => {
+                asks.get_or_insert(why);
+            }
+        }
+    }
+    let Some(why) = asks else { return Ok(()) };
+    let all = ToolCall {
+        id,
+        name: tool.to_string(),
+        input: serde_json::json!({ "files": shown }),
+        risk: Risk::Write,
+        subject: shown.join(", "),
+        segments: None,
+    };
+    match ask(session, &all, why).await.map_err(failed)? {
+        Decision::Allow => Ok(()),
+        Decision::AllowForSession => {
+            for (tool, subject) in calls.iter().flat_map(crate::permission::grants_for) {
+                session.grant(tool, subject).await;
+            }
+            Ok(())
+        }
+        Decision::Deny { reason } => Err(refuse(reason)),
+        // The list is the server's answer, not the model's input: there is
+        // nothing a person could rewrite it into, so only a yes writes.
+        Decision::Edit { .. } => Err(refuse("the file list cannot be edited".into())),
     }
 }
 
