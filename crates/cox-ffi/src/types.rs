@@ -324,6 +324,11 @@ pub enum WidgetView {
         children: Vec<WidgetView>,
         sizes: Vec<u16>,
     },
+    /// A package PNG (PL§15.4); `alt` is its accessibility label.
+    Image {
+        alt: String,
+        png: Vec<u8>,
+    },
     Block {
         title: Option<SpanView>,
         child: Vec<WidgetView>,
@@ -336,6 +341,8 @@ pub struct SpanView {
     pub style: StyleToken,
     pub bold: bool,
     pub italic: bool,
+    /// What a click opens, already checked (`cox_app::plugin_ui::link_target`).
+    pub link: Option<String>,
 }
 
 #[uniffi::remote(Record)]

@@ -24,6 +24,7 @@ use cox_store::lock::Holder;
 use crate::live::LiveSession;
 use crate::mcp_login::{LoginError, McpAuth};
 use crate::mcp_status::McpRun;
+use crate::plugin_ui::PluginAlert;
 use crate::{Activity, Inbox, InboxItem, IntentError, SettingsError, SettingsView};
 use crate::{AgentChoice, RuleKind, SessionGrant};
 use crate::{Workspace, WorkspaceError};
@@ -56,6 +57,14 @@ pub trait Host: Send + Sync {
     /// and opens `url` only once the person confirms. The default opens
     /// nothing: a host that cannot ask never opens a remote's link.
     fn confirm_open_url(&self, _origin: &str, _url: &str) {}
+    /// T33.45.6 (PL§15.4): a plugin's desktop notice, to post as a system
+    /// notification with its buttons. True when posted; false (the default,
+    /// and the answer while the app is frontmost with the session visible)
+    /// leaves the session to show it as a notice in the transcript. A button
+    /// runs through the session's `plugin_action` with its `id`.
+    fn plugin_notice(&self, _alert: PluginAlert) -> bool {
+        false
+    }
     /// The stored secret for a provider section (`anthropic`, `openai`, a
     /// `[providers.<name>]`); its env var, when set, wins.
     fn secret(&self, section: &str) -> Option<String>;

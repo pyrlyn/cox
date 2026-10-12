@@ -99,11 +99,19 @@ pub fn package_program(dir: &Path, command: &str) -> Result<PathBuf, ProgramErro
     ) {
         return Ok(path.to_path_buf());
     }
+    package_file(dir, command)
+}
+
+/// `rel` as a regular file inside `dir`, reached through no symlink, for
+/// whatever else a package ships and the digest covers (a program, a widget
+/// image). Never a PATH name: a single component is a file in `dir`.
+pub fn package_file(dir: &Path, rel: &str) -> Result<PathBuf, ProgramError> {
+    let path = Path::new(rel);
     if !path
         .components()
         .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
     {
-        return Err(ProgramError::Outside(command.to_string()));
+        return Err(ProgramError::Outside(rel.to_string()));
     }
     let mut at = dir.to_path_buf();
     for part in path.components() {

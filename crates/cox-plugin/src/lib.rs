@@ -30,6 +30,8 @@
 //! - [`external_agent`] — a granted `[[external_agents]]` entry resolved
 //!   to the sandbox-wrapped command the host spawns, and the in-package
 //!   program resolution `[[mcp]]` shares (EA§2, T35.2).
+//! - [`image`] — the bytes of a widget image, read only from the package
+//!   the digest covers (PL§15.4, T33.45.6).
 //! - [`live`] — a session's live plugins: one instance per granted plugin,
 //!   `cox_init` once, shared by hooks, the tap and tools (T33.44).
 //! - [`advisor`] — a plugin's granted decision points behind the protocol's
@@ -49,6 +51,7 @@ pub mod grant;
 pub mod hooks;
 pub mod host;
 pub mod hostfn;
+pub mod image;
 pub mod install;
 pub mod live;
 pub mod net;
@@ -63,6 +66,7 @@ pub use events::{PluginTap, Redraw, subscriptions};
 pub use grant::Verdict;
 pub use hooks::PluginHooks;
 pub use host::{CONTROL_DEPTH, EVENT_DEPTH, Lane, PluginHost};
-pub use hostfn::{HostEnv, init_input};
-pub use live::{Live, LivePlugins, Notices, SessionTap};
+pub use hostfn::{DesktopSink, HostEnv, init_input};
+pub use image::{ImageError, package_image};
+pub use live::{DesktopNotices, Live, LivePlugins, Notices, SessionTap};
 pub use tool::WasmTool;

@@ -20,7 +20,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    Block, Changes, Completion, InboxItem, Intent, Project, SearchHit, SessionEntry, TimelinePatch,
+    Block, Changes, Completion, InboxItem, Intent, PluginAlert, Project, SearchHit, SessionEntry,
+    TimelinePatch,
 };
 
 /// The protocol version every line carries. A peer refuses a line with
@@ -91,6 +92,12 @@ pub enum Call {
     Plan {
         session: SessionId,
     },
+    /// T33.45.6: a plugin button or action (`plugin:<id>:<command>`) clicked
+    /// on the client; the remote session runs the command it names.
+    PluginAction {
+        session: SessionId,
+        id: String,
+    },
     /// Stops the session's patch stream; the session keeps running.
     Close {
         session: SessionId,
@@ -137,6 +144,8 @@ pub enum Reply {
     Complete(#[schemars(with = "Vec<Value>")] Vec<Completion>),
     Changes(#[schemars(with = "Value")] Changes),
     Plan(Vec<TodoItem>),
+    /// Whether the session's plugins granted the action's command.
+    Acted(bool),
     Closed,
 }
 
@@ -170,6 +179,12 @@ pub enum ServerEvent {
     /// `Host::open_url`: the client opens it only after the user confirms,
     /// and only an `http(s)` URL (T52.19).
     OpenUrl { url: String },
+    /// `Host::plugin_notice`: a plugin's desktop notice, sanitized, for the
+    /// client to post; a button's `id` goes back as `plugin_action`.
+    PluginNotice {
+        #[schemars(with = "Value")]
+        alert: Box<PluginAlert>,
+    },
 }
 
 /// Why a line could not be read.
@@ -221,6 +236,7 @@ mod tests {
     use cox_protocol::types::TodoState;
 
     use super::*;
+    use crate::AlertAction;
 
     fn session() -> SessionId {
         SessionId::new()
@@ -279,6 +295,10 @@ mod tests {
             }),
             request(Call::Changes { session: id }),
             request(Call::Plan { session: id }),
+            request(Call::PluginAction {
+                session: id,
+                id: "plugin:clock:snooze".into(),
+            }),
             request(Call::Close { session: id }),
             reply(Reply::Projects(Vec::new())),
             reply(Reply::Sessions(Vec::new())),
@@ -300,6 +320,7 @@ mod tests {
                 text: "wire".into(),
                 state: TodoState::Pending,
             }])),
+            reply(Reply::Acted(true)),
             reply(Reply::Closed),
             Line::Response(Response {
                 v: VERSION,
@@ -314,6 +335,19 @@ mod tests {
             event(ServerEvent::Badge { badge: 2 }),
             event(ServerEvent::OpenUrl {
                 url: "https://example.com/login".into(),
+            }),
+            event(ServerEvent::PluginNotice {
+                alert: Box::new(PluginAlert {
+                    session: id,
+                    plugin: "clock".into(),
+                    warn: true,
+                    title: "Break".into(),
+                    body: "Stand up".into(),
+                    actions: vec![AlertAction {
+                        label: "Snooze".into(),
+                        id: "plugin:clock:snooze".into(),
+                    }],
+                }),
             }),
         ]
     }

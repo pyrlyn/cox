@@ -9,17 +9,22 @@
 //! again and when three missed deadlines stop one — and the desktop-only
 //! contributions (PL§15.4): the inspector tab, which renders only while
 //! selected, and the toolbar and palette actions, each of which runs one of
-//! the plugin's granted commands. Separate from
+//! the plugin's granted commands, and what a plugin can put in front of the
+//! person (PL§15.2, §15.4): a link that opens on a click, an image from its
+//! package, a notice with buttons. Separate from
 //! `cox-session`'s `plugin_ui`, which only calls the hosts: this module is
 //! what the app shows, as `cox-tui`'s `status.rs` is for the terminal.
 
+use std::cell::Cell;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use cox_protocol::ids::ItemId;
+use cox_protocol::ids::{ItemId, SessionId};
 use cox_protocol::plugin::ui::Span;
 use cox_protocol::plugin::{
-    ActionDecl, CommandDecl, DesktopOut, MAX_TOOLBAR_ACTIONS, RenderIn, Slot, StyleToken, Widget,
-    is_symbol_name,
+    ActionDecl, CommandDecl, DesktopNotice, DesktopOut, MAX_IMAGE_BYTES, MAX_NOTICE_ACTIONS,
+    MAX_TOOLBAR_ACTIONS, NoticeLevel, RenderIn, Slot, StyleToken, Widget, is_link, is_symbol_name,
 };
 use cox_protocol::types::{Event, ItemKind, ToolCall};
 use cox_sanitize::sanitize;
@@ -45,6 +50,10 @@ const DEFAULT_AREA: (u16, u16) = (80, 24);
 /// What the app draws for a symbol name outside `is_symbol_name` (PL§15.4),
 /// the glyph it also falls back to for a valid name AppKit does not know.
 pub const FALLBACK_SYMBOL: &str = "puzzlepiece.extension";
+/// The image bytes one widget tree may carry. PL§8's node cap alone would
+/// allow 512 images of `MAX_IMAGE_BYTES` each; past this the rest draw as
+/// their `alt` line.
+const TREE_IMAGE_BYTES: usize = 4 * MAX_IMAGE_BYTES;
 
 /// A run of sanitized text with one colour role.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +62,10 @@ pub struct SpanView {
     pub style: StyleToken,
     pub bold: bool,
     pub italic: bool,
+    /// What a click opens, when the plugin's `Span.link` is one the app may
+    /// follow (`link_target`); pass it to `open_link`.
+    #[serde(default)]
+    pub link: Option<String>,
 }
 
 /// One `key: value` row; a struct, not a tuple, so the FFI mirrors it.
@@ -91,6 +104,13 @@ pub enum WidgetView {
         children: Vec<WidgetView>,
         sizes: Vec<u16>,
     },
+    /// A PNG the plugin ships (PL§15.4), read from its package; `alt` is the
+    /// accessibility label. An image that cannot be read draws as a `Text`
+    /// of its `alt` instead, so a UI never sees a path.
+    Image {
+        alt: String,
+        png: Vec<u8>,
+    },
     /// `child` holds exactly one view: a list rather than a box, so the FFI
     /// mirrors the recursion as plain data.
     Block {
@@ -102,14 +122,27 @@ pub enum WidgetView {
 /// `widget` as the app shows it: every string sanitized, and a tree over
 /// PL§8's node, depth or text caps replaced by one dim line.
 pub fn view(widget: &Widget) -> WidgetView {
-    if widget.within_limits() {
-        convert(widget)
-    } else {
-        line(TOO_LARGE.to_string(), StyleToken::Dim)
-    }
+    view_in(widget, None)
 }
 
-fn convert(widget: &Widget) -> WidgetView {
+/// [`view`] with the images of the package at `dir`; with `None`, or an
+/// image that is not a small PNG under it, the `alt` line stands in.
+pub fn view_in(widget: &Widget, dir: Option<&Path>) -> WidgetView {
+    if !widget.within_limits() {
+        return line(TOO_LARGE.to_string(), StyleToken::Dim);
+    }
+    let spent = Cell::new(0);
+    convert(widget, &|path| {
+        let png = cox_session::plugin_ui::package_image(dir?, path).ok()?;
+        spent.set(spent.get() + png.len());
+        (spent.get() <= TREE_IMAGE_BYTES).then_some(png)
+    })
+}
+
+/// Reads a package image by its widget path, or says it cannot be shown.
+type Images<'a> = &'a dyn Fn(&str) -> Option<Vec<u8>>;
+
+fn convert(widget: &Widget, images: Images) -> WidgetView {
     let lines = |ls: &[Vec<Span>]| -> Vec<Vec<SpanView>> {
         ls.iter().map(Vec::as_slice).map(spans).collect()
     };
@@ -158,16 +191,20 @@ fn convert(widget: &Widget) -> WidgetView {
             sizes,
         } => WidgetView::Stack {
             vertical: *vertical,
-            children: children.iter().map(convert).collect(),
+            children: children.iter().map(|c| convert(c, images)).collect(),
             // At most one size per child, as for a table's widths.
             sizes: sizes.iter().take(children.len()).copied().collect(),
         },
-        // T33.45.6 gives the app a real image view; until then the label
-        // stands in, as it does on the terminal.
-        Widget::Image { alt, .. } => line(sanitize(alt), StyleToken::Dim),
+        Widget::Image { path, alt } => match images(path) {
+            Some(png) => WidgetView::Image {
+                alt: sanitize(alt),
+                png,
+            },
+            None => line(sanitize(alt), StyleToken::Dim),
+        },
         Widget::Block { title, child } => WidgetView::Block {
             title: title.as_ref().map(span),
-            child: vec![convert(child)],
+            child: vec![convert(child, images)],
         },
     }
 }
@@ -182,6 +219,9 @@ fn span(s: &Span) -> SpanView {
         style: s.style,
         bold: s.bold,
         italic: s.italic,
+        // Only a link a click can follow reaches the UI, so it never draws
+        // an affordance the app would then refuse.
+        link: s.link.clone().filter(|l| link_target(l).is_some()),
     }
 }
 
@@ -191,6 +231,7 @@ fn line(text: String, style: StyleToken) -> WidgetView {
         style,
         bold: false,
         italic: false,
+        link: None,
     };
     WidgetView::Text {
         lines: vec![vec![span]],
@@ -280,6 +321,8 @@ pub struct PluginSlots {
     /// The inspector's own area: it is narrower than the window and
     /// resizes on its own.
     inspector_area: (u16, u16),
+    /// Each plugin's package directory, where its widget images are read.
+    dirs: BTreeMap<String, PathBuf>,
 }
 
 impl Default for PluginSlots {
@@ -291,11 +334,22 @@ impl Default for PluginSlots {
             inspector: None,
             area: DEFAULT_AREA,
             inspector_area: DEFAULT_AREA,
+            dirs: BTreeMap::new(),
         }
     }
 }
 
 impl PluginSlots {
+    /// Where `plugin`'s package is, so its widgets' images can be read.
+    pub fn set_dir(&mut self, plugin: &str, dir: &Path) {
+        self.dirs.insert(plugin.to_string(), dir.to_path_buf());
+    }
+
+    /// `widget` as `plugin` drew it: one guard for a slot and an item card.
+    pub fn view_of(&self, plugin: &str, widget: &Widget) -> WidgetView {
+        view_in(widget, self.dirs.get(plugin).map(PathBuf::as_path))
+    }
+
     /// Registers `plugin`'s granted slots and asks for the visible ones.
     pub fn declare(&mut self, plugin: &str, slots: &[Slot]) -> Step {
         for &slot in slots {
@@ -327,7 +381,7 @@ impl PluginSlots {
                 let Some(i) = self.live(&plugin, slot) else {
                     return Step::default();
                 };
-                self.entries[i].view = Some(view(&widget));
+                self.entries[i].view = Some(self.view_of(&plugin, &widget));
                 self.entries[i].misses = 0;
                 self.changed(&[i])
             }
@@ -519,13 +573,94 @@ impl PluginSlots {
     }
 }
 
-/// Puts a `cox_render_item` answer on its tool or reply block through the same
-/// [`view`] a slot's render takes, so the sanitize and PL§8 limits are the
-/// one guard. `None` (a miss) clears it and the generic card shows.
-pub fn land(kind: &mut BlockKind, widget: Option<&Widget>) {
+/// Puts a `cox_render_item` answer on its tool or reply block. The view
+/// comes from [`PluginSlots::view_of`], the one a slot's render takes, so the
+/// sanitize and PL§8 limits are one guard. `None` (a miss) clears it and the
+/// generic card shows.
+pub fn land(kind: &mut BlockKind, widget: Option<WidgetView>) {
     if let BlockKind::Tool { plugin_view, .. } | BlockKind::Assistant { plugin_view, .. } = kind {
-        *plugin_view = widget.map(view);
+        *plugin_view = widget;
     }
+}
+
+/// What a plugin link names once [`is_link`] passed it (PL§15.4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LinkTarget {
+    /// An `https://` URL, normalized.
+    Web(String),
+    /// A workspace-relative path and the line after its `:`, if any.
+    File { path: String, line: Option<u32> },
+}
+
+/// `link` as a click may follow it: the one rule of `cox_plugin_api::is_link`
+/// (shared with the terminal's link marks) and a parsed URL with a host.
+pub fn link_target(link: &str) -> Option<LinkTarget> {
+    if !is_link(link) {
+        return None;
+    }
+    if link.starts_with("https://") {
+        let url = url::Url::parse(link).ok()?;
+        return url.host().is_some().then(|| LinkTarget::Web(url.into()));
+    }
+    let (path, line) = match link.rsplit_once(':') {
+        Some((path, line)) => (path, Some(line.parse().ok()?)),
+        None => (link, None),
+    };
+    Some(LinkTarget::File {
+        path: path.to_string(),
+        line,
+    })
+}
+
+/// What a click on a plugin link did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LinkClick {
+    /// A URL went to the host (local) or to its confirmation (remote).
+    Opened,
+    /// A file the UI shows itself; local paths are confined, so absolute.
+    File { path: String, line: Option<u32> },
+    /// Not a link a click may follow; nothing happened.
+    Refused,
+}
+
+/// Follows `link` as a click does: a URL goes to `open`, a path comes back
+/// confined to `roots` (so a `..` that leaves the workspace is refused),
+/// anything else changes nothing.
+pub fn click(link: &str, roots: &[PathBuf], cwd: &Path, open: impl FnOnce(&str)) -> LinkClick {
+    match link_target(link) {
+        Some(LinkTarget::Web(url)) => {
+            open(&url);
+            LinkClick::Opened
+        }
+        Some(LinkTarget::File { path, line }) => cox_tools::path::confine(roots, cwd, &path)
+            .map(|p| LinkClick::File {
+                path: p.to_string_lossy().into_owned(),
+                line,
+            })
+            .unwrap_or(LinkClick::Refused),
+        None => LinkClick::Refused,
+    }
+}
+
+/// A button on a [`PluginAlert`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlertAction {
+    pub label: String,
+    /// `plugin:<id>:<command>`, as `plugin_action` takes it.
+    pub id: String,
+}
+
+/// A plugin's desktop notice (PL§15.4) ready for the platform: every string
+/// sanitized, the buttons only granted commands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginAlert {
+    /// The session whose plugin posted it, which runs a button's command.
+    pub session: SessionId,
+    pub plugin: String,
+    pub warn: bool,
+    pub title: String,
+    pub body: String,
+    pub actions: Vec<AlertAction>,
 }
 
 /// The renderer target of an assistant reply (PL§8).
@@ -682,6 +817,45 @@ impl PluginUi {
         }
     }
 
+    /// Records where `plugin`'s package is, for its widgets' images.
+    pub fn package(&self, plugin: &str, dir: &Path) {
+        self.lock().slots.set_dir(plugin, dir);
+    }
+
+    /// `widget` as `plugin` drew it, for an item card.
+    pub fn view_of(&self, plugin: &str, widget: &Widget) -> WidgetView {
+        self.lock().slots.view_of(plugin, widget)
+    }
+
+    /// `notice` as an alert for `session`. A button naming a command the
+    /// plugin was not granted is left out, so a click can only reach
+    /// `cox_command` with one; at most [`MAX_NOTICE_ACTIONS`] stay.
+    pub fn alert(&self, session: SessionId, plugin: &str, notice: DesktopNotice) -> PluginAlert {
+        let d = self.lock();
+        let actions = notice
+            .actions
+            .into_iter()
+            .filter(|a| {
+                d.commands
+                    .iter()
+                    .any(|(p, c)| p == plugin && c.name == a.command)
+            })
+            .take(MAX_NOTICE_ACTIONS)
+            .map(|a| AlertAction {
+                label: sanitize(&a.label),
+                id: format!("plugin:{}", full_name(plugin, &a.command)),
+            })
+            .collect();
+        PluginAlert {
+            session,
+            plugin: sanitize(plugin),
+            warn: notice.level == NoticeLevel::Warn,
+            title: sanitize(&notice.title),
+            body: sanitize(&notice.body),
+            actions,
+        }
+    }
+
     /// Every change takes the lock once, so a poisoned lock is still usable.
     fn lock(&self) -> MutexGuard<'_, Declared> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
@@ -797,19 +971,31 @@ impl PluginUi {
             .collect()
     }
 
-    /// A toolbar item or palette action clicked: asks its plugin's
-    /// `cox_command` with no arguments, whose answer lands like a typed
-    /// command's. False for an id no plugin declared.
+    /// A toolbar item, palette action or notice button clicked: asks its
+    /// plugin's `cox_command` with no arguments, whose answer lands like a
+    /// typed command's. False for an id no plugin granted.
     pub fn action(&self, id: &str) -> bool {
         let found = {
             let d = self.lock();
-            d.toolbar
+            let declared = d
+                .toolbar
                 .iter()
                 .chain(&d.palette)
                 .find(|a| a.shown.id == id)
-                .map(|a| PluginRequest::Command {
-                    plugin: a.plugin.clone(),
-                    name: a.command.clone(),
+                .map(|a| (a.plugin.clone(), a.command.clone()));
+            // A notice button may name any granted command, not only one
+            // the plugin put on the toolbar.
+            let named = || {
+                d.commands
+                    .iter()
+                    .find(|(plugin, c)| id == format!("plugin:{}", full_name(plugin, &c.name)))
+                    .map(|(plugin, c)| (plugin.clone(), c.name.clone()))
+            };
+            declared
+                .or_else(named)
+                .map(|(plugin, name)| PluginRequest::Command {
+                    plugin,
+                    name,
                     args: String::new(),
                 })
         };
@@ -877,6 +1063,7 @@ pub fn serve_ui(
     ui: Arc<PluginUi>,
     requests: mpsc::Receiver<Ask>,
     answers: mpsc::Sender<Answered>,
+    notices: mpsc::Sender<(String, DesktopNotice)>,
 ) -> cox_session::ServeUi {
     Box::new(move |live: &LivePlugins| {
         // A serve thread that fails to start leaves the slots unrendered,
@@ -889,6 +1076,9 @@ pub fn serve_ui(
             |block, answer| Answered { block, answer },
         );
         for p in live.plugins() {
+            if let Some(dir) = p.dir() {
+                ui.package(p.id(), dir);
+            }
             // Leader keys are terminal-only (PL§15.3): the app has none.
             let desktop = p.init_out().map(|i| i.desktop.clone()).unwrap_or_default();
             ui.declare(
@@ -899,6 +1089,14 @@ pub fn serve_ui(
                 p.granted_renderers(),
             );
         }
+        // After the grants are declared: a notice from `cox_init` is held
+        // until now, and its buttons are checked against them.
+        // A full queue drops a notice: the plugin's rate limit already makes
+        // a flood rare, and this runs on the plugin's own worker thread.
+        let sink: cox_session::plugin_ui::DesktopNotices = Arc::new(move |plugin, notice| {
+            let _ = notices.try_send((plugin.to_string(), notice));
+        });
+        live.on_desktop_notice(&sink);
         cox_session::plugin_ui::redraw(move |plugin| {
             // The tap's pump thread must not block on a full queue.
             let answer = PluginAnswer::Redraw { plugin };
@@ -942,6 +1140,7 @@ mod tests {
                 add(&r.value);
             }),
             WidgetView::Gauge { label, .. } => add(std::slice::from_ref(label)),
+            WidgetView::Image { alt, .. } => out.push(alt.clone()),
             WidgetView::Stack { children, .. } => children.iter().for_each(|c| strings(c, out)),
             WidgetView::Block { title, child } => {
                 add(title.as_slice());
@@ -1171,7 +1370,7 @@ mod tests {
 
         let widget = Widget::Text(vec![vec![text("\x1b[2Jdone")]]);
         let mut kind = tool_block();
-        land(&mut kind, Some(&widget));
+        land(&mut kind, Some(view(&widget)));
         let BlockKind::Tool { plugin_view, .. } = &kind else {
             panic!("a tool stays a tool");
         };
@@ -1219,7 +1418,7 @@ mod tests {
 
         let widget = Widget::Text(vec![vec![text("\x1b]8;;http://x\x07hi\u{202e}")]]);
         let mut kind = reply_block();
-        land(&mut kind, Some(&widget));
+        land(&mut kind, Some(view(&widget)));
         let BlockKind::Assistant { plugin_view, .. } = &kind else {
             panic!("a reply stays a reply");
         };
@@ -1421,5 +1620,187 @@ mod tests {
         assert!(notices[1].contains("\"C\" dropped"), "{notices:?}");
         assert!(ui.take_notices().is_empty(), "told once");
         assert!(ui.tabs().is_empty());
+    }
+
+    fn png(len: usize) -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        bytes.resize(len, 0);
+        bytes
+    }
+
+    fn image(path: &str) -> Widget {
+        Widget::Image {
+            path: path.into(),
+            alt: "\x1b[2Jchart".into(),
+        }
+    }
+
+    #[test]
+    fn an_image_is_read_from_the_package_and_otherwise_draws_its_alt_text() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("a.png"), png(64)).expect("png");
+        std::fs::write(dir.path().join("b.png"), b"not a png").expect("text");
+        let at = |w: &Widget| view_in(w, Some(dir.path()));
+        assert_eq!(
+            at(&image("a.png")),
+            WidgetView::Image {
+                alt: "chart".into(),
+                png: png(64)
+            }
+        );
+        let alt = line("chart".into(), StyleToken::Dim);
+        for path in ["b.png", "missing.png", "../a.png", "/etc/hosts", "c:a.png"] {
+            assert_eq!(at(&image(path)), alt, "{path}");
+        }
+        assert_eq!(view(&image("a.png")), alt, "no package, no image");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_image_symlinked_out_of_the_package_is_not_read() {
+        let (dir, other) = (
+            tempfile::tempdir().expect("dir"),
+            tempfile::tempdir().expect("dir"),
+        );
+        std::fs::write(other.path().join("secret.png"), png(64)).expect("png");
+        std::os::unix::fs::symlink(other.path().join("secret.png"), dir.path().join("a.png"))
+            .expect("link");
+        let shown = view_in(&image("a.png"), Some(dir.path()));
+        assert!(matches!(shown, WidgetView::Text { .. }), "{shown:?}");
+    }
+
+    #[test]
+    fn one_tree_cannot_carry_more_image_bytes_than_its_budget() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("big.png"), png(MAX_IMAGE_BYTES)).expect("png");
+        let tree = Widget::Stack {
+            vertical: true,
+            children: (0..5).map(|_| image("big.png")).collect(),
+            sizes: vec![],
+        };
+        let WidgetView::Stack { children, .. } = view_in(&tree, Some(dir.path())) else {
+            panic!("a stack stays a stack");
+        };
+        let drawn = children
+            .iter()
+            .filter(|c| matches!(c, WidgetView::Image { .. }))
+            .count();
+        assert_eq!(drawn, TREE_IMAGE_BYTES / MAX_IMAGE_BYTES);
+    }
+
+    #[test]
+    fn a_span_link_reaches_the_ui_only_when_a_click_may_follow_it() {
+        let linked = |l: &str| {
+            span(&Span {
+                text: "x".into(),
+                link: Some(l.into()),
+                ..Span::default()
+            })
+            .link
+        };
+        assert_eq!(
+            linked("https://example.com/a"),
+            Some("https://example.com/a".into())
+        );
+        assert_eq!(linked("src/lib.rs:12"), Some("src/lib.rs:12".into()));
+        for bad in [
+            "http://example.com",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "",
+        ] {
+            assert_eq!(linked(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_click_opens_a_web_link_and_confines_a_path_to_the_workspace() {
+        let root = tempfile::tempdir().expect("root");
+        std::fs::create_dir(root.path().join("src")).expect("src");
+        std::fs::write(root.path().join("src/lib.rs"), "").expect("file");
+        let roots = vec![root.path().to_path_buf()];
+        let opened = std::cell::RefCell::new(Vec::new());
+        let go = |link: &str| {
+            click(link, &roots, root.path(), |url| {
+                opened.borrow_mut().push(url.to_string())
+            })
+        };
+        assert_eq!(go("https://example.com"), LinkClick::Opened);
+        assert_eq!(*opened.borrow(), ["https://example.com/"]);
+        let LinkClick::File { path, line } = go("src/lib.rs:7") else {
+            panic!("a workspace path is a file");
+        };
+        assert!(path.ends_with("src/lib.rs"), "{path}");
+        assert_eq!(line, Some(7));
+        for bad in [
+            "../outside",
+            "/etc/passwd",
+            "http://example.com",
+            "file:///etc/passwd",
+            "a:b:c",
+        ] {
+            assert_eq!(go(bad), LinkClick::Refused, "{bad}");
+        }
+        assert_eq!(opened.borrow().len(), 1, "a refused link opened nothing");
+    }
+
+    fn notice(actions: &[(&str, &str)]) -> DesktopNotice {
+        DesktopNotice {
+            level: NoticeLevel::Warn,
+            title: "\x1b[2JBreak\u{202e}".into(),
+            body: "Stand up".into(),
+            actions: actions
+                .iter()
+                .map(|(label, command)| cox_protocol::plugin::NoticeAction {
+                    label: (*label).into(),
+                    command: (*command).into(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_notice_button_runs_a_granted_command_and_an_ungranted_one_is_dropped() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let ui = PluginUi::new(tx);
+        ui.declare(
+            "acme",
+            &[],
+            vec![command("snooze")],
+            DesktopOut::default(),
+            vec![],
+        );
+        let session = SessionId::new();
+        let alert = ui.alert(
+            session,
+            "acme",
+            notice(&[
+                ("Snooze\x1b[31m", "snooze"),
+                ("Ghost", "ghost"),
+                ("Other", "snooze"),
+            ]),
+        );
+        assert_eq!(alert.session, session);
+        assert_eq!(alert.title, sanitize("\x1b[2JBreak\u{202e}"));
+        assert!(alert.warn);
+        let ids: Vec<&str> = alert.actions.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["plugin:acme:snooze", "plugin:acme:snooze"]);
+        assert_eq!(alert.actions[0].label, "Snooze");
+
+        assert!(
+            ui.action(&alert.actions[0].id),
+            "not on the toolbar, but granted"
+        );
+        assert_eq!(
+            rx.try_recv().ok().map(|a| a.request),
+            Some(PluginRequest::Command {
+                plugin: "acme".into(),
+                name: "snooze".into(),
+                args: String::new(),
+            })
+        );
+        assert!(!ui.action("plugin:acme:ghost"));
+        assert!(!ui.action("plugin:other:snooze"));
+        assert!(rx.try_recv().is_err());
     }
 }

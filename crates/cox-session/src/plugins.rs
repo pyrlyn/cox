@@ -186,7 +186,9 @@ pub fn load_plugins_for_surface(
                         .and_then(|wasm| {
                             out.live
                                 .load(manifest, &wasm, store.clone())
-                                .map_err(|e| e.to_string())
+                                .map_err(|e| e.to_string())?;
+                            out.live.set_dir(id, &p.dir);
+                            Ok(())
                         }),
                     None => Ok(()),
                 };

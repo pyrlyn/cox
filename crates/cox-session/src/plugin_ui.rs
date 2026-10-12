@@ -20,7 +20,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 
 // What a surface's `ServeUi` is handed and what its tests load, named here so
 // the desktop app reaches them without depending on the extism host (T52.14).
-pub use cox_plugin::{LivePlugins, PluginHost};
+pub use cox_plugin::{DesktopNotices, ImageError, LivePlugins, PluginHost, package_image};
 
 /// A render's budget (PL§8, PL§12 "render 20 ms").
 pub const RENDER_DEADLINE: Duration = Duration::from_millis(20);

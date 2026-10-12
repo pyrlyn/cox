@@ -19,8 +19,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use cox_plugin_api::{
-    AbiError, HttpReq, InitIn, ModelCall, ModelTier, NoticeLevel, PluginManifest, SessionInfo,
-    Surface, ToolCallIn,
+    AbiError, DesktopNotice, HttpReq, InitIn, MAX_NOTICE_ACTIONS, ModelCall, ModelTier,
+    NoticeLevel, PluginManifest, SessionInfo, Surface, ToolCallIn,
 };
 use cox_protocol::config::PluginsConfig;
 use cox_protocol::errors::CoreError;
@@ -68,6 +68,39 @@ const PENDING_NOTICES: usize = 16;
 /// Longest kv key. Keys are not counted in the value quota, so without a
 /// cap one key could store what the quota exists to stop.
 const MAX_KEY_BYTES: usize = 256;
+/// The least time between two desktop notices of one plugin (PL§15.4).
+const DESKTOP_NOTICE_GAP: Duration = Duration::from_secs(10);
+/// Desktop notices held until the app binds its sink, so `cox_init` can post.
+const PENDING_DESKTOP: usize = 4;
+/// Title, body and button labels of one desktop notice, together.
+const MAX_DESKTOP_NOTICE_BYTES: usize = 4096;
+
+/// Where a plugin's desktop notices go: the app, which posts them through its
+/// host. Called on the plugin's worker thread, so it must not block.
+pub type DesktopSink = Arc<dyn Fn(DesktopNotice) + Send + Sync>;
+
+/// Rate limit and delivery of `cox_desktop_notify`, behind one lock so a
+/// notice is either held for the sink or handed to it, never both.
+#[derive(Default)]
+struct DesktopOutbox {
+    last: Option<Instant>,
+    sink: Option<DesktopSink>,
+    pending: Vec<DesktopNotice>,
+}
+
+impl DesktopOutbox {
+    /// Whether a notice at `now` is far enough from the last one; counts it.
+    fn admit(&mut self, now: Instant) -> bool {
+        if self
+            .last
+            .is_some_and(|last| now.duration_since(last) < DESKTOP_NOTICE_GAP)
+        {
+            return false;
+        }
+        self.last = Some(now);
+        true
+    }
+}
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -129,6 +162,7 @@ pub struct HostEnv {
     /// Held for the whole `cox_provider_stream` so two sections of one
     /// plugin cannot interleave their active host (T33.18).
     provider_gate: Mutex<()>,
+    desktop: Mutex<DesktopOutbox>,
 }
 
 /// Holds the provider-call gate and clears the active section on drop,
@@ -171,6 +205,7 @@ impl HostEnv {
             tool_invoker: None,
             net: Net::new(&BTreeSet::new()),
             provider_gate: Mutex::new(()),
+            desktop: Mutex::new(DesktopOutbox::default()),
         }
     }
 
@@ -246,6 +281,20 @@ impl HostEnv {
             env: self,
             _gate: gate,
         }
+    }
+
+    /// Binds the app's end of `cox_desktop_notify` and hands it what the
+    /// plugin posted before the app was listening. A second bind is ignored.
+    pub fn bind_desktop_sink(&self, sink: DesktopSink) {
+        let held = {
+            let mut outbox = lock(&self.desktop);
+            if outbox.sink.is_some() {
+                return;
+            }
+            outbox.sink = Some(sink.clone());
+            std::mem::take(&mut outbox.pending)
+        };
+        held.into_iter().for_each(|notice| sink(notice));
     }
 
     /// The plugin id.
@@ -338,18 +387,7 @@ impl HostEnv {
                 self.notify(cap(line.level), &line.text)?;
                 Ok(Value::Null)
             }
-            "cox_desktop_notify" => {
-                if self.surface != Surface::Desktop {
-                    return Err(AbiError::NotOnThisSurface {
-                        surface: self.surface,
-                    });
-                }
-                self.require("desktop.notify")?;
-                self.outside_render()?;
-                Err(failed(
-                    "desktop notifications are not connected to the app yet",
-                ))
-            }
+            "cox_desktop_notify" => self.desktop_notify(arg),
             "cox_kv_get" => {
                 let store = self.kv()?;
                 let key = key(parse(arg)?)?;
@@ -454,6 +492,56 @@ impl HostEnv {
             NoticeLevel::Info => tracing::info!(plugin = %id, "{text}"),
             NoticeLevel::Warn => tracing::warn!(plugin = %id, "{text}"),
         }
+    }
+
+    /// `cox_desktop_notify` (PL§15.4): a notice with buttons for the app to
+    /// post. Everything the plugin wrote is cleaned here, the level is capped
+    /// at `warn` like every plugin notice, and a plugin gets one every ten
+    /// seconds, so a loop cannot fill the person's notification centre. A
+    /// button's command is checked by the app, which knows the plugin's
+    /// granted commands.
+    fn desktop_notify(&self, mut arg: Value) -> Result<Value, AbiError> {
+        if self.surface != Surface::Desktop {
+            return Err(AbiError::NotOnThisSurface {
+                surface: self.surface,
+            });
+        }
+        self.require("desktop.notify")?;
+        self.outside_render()?;
+        if let Some(level) = arg.get_mut("level") {
+            *level = json!(cap(level.take()));
+        }
+        let mut notice: DesktopNotice = parse(arg)?;
+        notice.actions.truncate(MAX_NOTICE_ACTIONS);
+        notice.title = clean(&notice.title);
+        notice.body = clean(&notice.body);
+        for action in &mut notice.actions {
+            action.label = clean(&action.label);
+        }
+        let size = notice.title.len()
+            + notice.body.len()
+            + notice.actions.iter().map(|a| a.label.len()).sum::<usize>();
+        if size > MAX_DESKTOP_NOTICE_BYTES {
+            return Err(AbiError::TooLarge {
+                limit: MAX_DESKTOP_NOTICE_BYTES as u64,
+            });
+        }
+        let sink = {
+            let mut outbox = lock(&self.desktop);
+            if !outbox.admit(Instant::now()) {
+                return Err(failed("one desktop notice per 10 seconds"));
+            }
+            match outbox.sink.clone() {
+                Some(sink) => sink,
+                None if outbox.pending.len() < PENDING_DESKTOP => {
+                    outbox.pending.push(notice);
+                    return Ok(Value::Null);
+                }
+                None => return Err(failed("the app is not listening yet")),
+            }
+        };
+        sink(notice);
+        Ok(Value::Null)
     }
 
     /// `cox_model_call` (PL§7d, T33.15): the tier is clamped to the grant
@@ -787,6 +875,90 @@ pub(crate) mod tests {
             reply,
             json!({ "Err": { "kind": "not_on_this_surface", "surface": "terminal" } })
         );
+    }
+
+    fn desktop_env(granted: &[&str]) -> Arc<HostEnv> {
+        let granted = granted.iter().map(|g| g.to_string()).collect();
+        Arc::new(
+            HostEnv::new("t")
+                .with_surface(Surface::Desktop)
+                .with_grant(granted, Arc::new(MemKv::default())),
+        )
+    }
+
+    fn notify(env: &Arc<HostEnv>, arg: Value) -> Value {
+        call_in(
+            env,
+            DESKTOP_NAMESPACE,
+            "cox_desktop_notify",
+            "cox_command",
+            arg,
+        )
+    }
+
+    fn collect(env: &Arc<HostEnv>) -> Arc<Mutex<Vec<DesktopNotice>>> {
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let into = Arc::clone(&got);
+        env.bind_desktop_sink(Arc::new(move |n| lock(&into).push(n)));
+        got
+    }
+
+    #[test]
+    fn desktop_notice_reaches_the_sink_cleaned_capped_and_trimmed() {
+        let env = desktop_env(&["desktop.notify"]);
+        let got = collect(&env);
+        let reply = notify(
+            &env,
+            json!({
+                "level": "security",
+                "title": "\u{1b}[2Jdone\u{202e}",
+                "body": "b",
+                "actions": [
+                    { "label": "a", "command": "one" },
+                    { "label": "b", "command": "two" },
+                    { "label": "c", "command": "three" }
+                ]
+            }),
+        );
+        assert_eq!(reply, json!({ "Ok": null }));
+        let got = lock(&got);
+        let [notice] = got.as_slice() else {
+            panic!("expected one notice, got {got:?}");
+        };
+        assert_eq!(notice.level, NoticeLevel::Warn);
+        assert_eq!(notice.title, "done");
+        assert_eq!(notice.actions.len(), MAX_NOTICE_ACTIONS);
+    }
+
+    #[test]
+    fn desktop_notice_needs_its_grant() {
+        let env = desktop_env(&[]);
+        let got = collect(&env);
+        let reply = notify(&env, json!({ "level": "info", "title": "x" }));
+        assert_eq!(reply["Err"]["kind"], "not_granted");
+        assert!(lock(&got).is_empty());
+    }
+
+    #[test]
+    fn a_plugin_gets_one_desktop_notice_per_ten_seconds() {
+        let env = desktop_env(&["desktop.notify"]);
+        let got = collect(&env);
+        let notice = json!({ "level": "info", "title": "x" });
+        assert_eq!(notify(&env, notice.clone()), json!({ "Ok": null }));
+        assert_eq!(notify(&env, notice)["Err"]["kind"], "failed");
+        assert_eq!(lock(&got).len(), 1);
+    }
+
+    #[test]
+    fn a_notice_before_the_app_listens_is_held_and_flushed_on_bind() {
+        let env = desktop_env(&["desktop.notify"]);
+        assert_eq!(
+            notify(&env, json!({ "level": "info", "title": "early" })),
+            json!({ "Ok": null })
+        );
+        let got = collect(&env);
+        assert_eq!(lock(&got).len(), 1);
+        assert_eq!(lock(&got)[0].title, "early");
     }
 
     #[test]

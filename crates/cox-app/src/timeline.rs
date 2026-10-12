@@ -11,13 +11,13 @@ use std::fmt::Display;
 
 use cox_core::permission::grants_for;
 use cox_protocol::ids::{CallId, ItemId};
-use cox_protocol::plugin::Widget;
 use cox_protocol::types::{Event, ItemKind, TodoItem, ToolCall};
 use cox_render::diffmodel;
 use cox_render::glyph::UNICODE;
 use cox_render::markdown;
 
 use crate::patch::{Block, BlockId, BlockKind, TaskState, TimelinePatch, ToolState, tail};
+use crate::plugin_ui::WidgetView;
 use crate::summary::{self, Explore, one_line};
 use crate::tasks::TaskKind;
 use crate::usage::add_to;
@@ -495,7 +495,7 @@ impl Timeline {
 
     /// A plugin's render of block `id` (T52.23.1): kept in the block, so a
     /// `Reset` carries it, and sent as the upsert every block change is.
-    pub fn land(&mut self, id: &BlockId, widget: Option<&Widget>) -> Vec<TimelinePatch> {
+    pub fn land(&mut self, id: &BlockId, widget: Option<WidgetView>) -> Vec<TimelinePatch> {
         self.update(id, |k| crate::plugin_ui::land(k, widget))
     }
 
@@ -598,8 +598,8 @@ mod tests {
         let kind = ItemKind::AssistantMessage { text: "hi".into() };
         timeline.apply(&Event::ItemStarted { item, kind });
         let id = key("item", item);
-        let widget = Widget::Text(vec![]);
-        let patches = timeline.land(&id, Some(&widget));
+        let widget = crate::plugin_ui::view(&cox_protocol::plugin::Widget::Text(vec![]));
+        let patches = timeline.land(&id, Some(widget));
         let [TimelinePatch::Upsert { block, .. }] = patches.as_slice() else {
             panic!("expected one Upsert, got {patches:?}");
         };
