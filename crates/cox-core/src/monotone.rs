@@ -96,6 +96,7 @@ impl Session {
                 "classifier_risk": call.risk,
             }),
             options: vec![],
+            items: vec![],
         };
         let Some((plugin, advice)) = self
             .ask_point(decide.risk.as_deref(), decide.risk_ms, question)
@@ -129,6 +130,7 @@ impl Session {
                 "why": why,
             }),
             options: vec![],
+            items: vec![],
         };
         let Some((plugin, mut advice)) = self
             .ask_point(
@@ -185,6 +187,7 @@ impl Session {
                 "turns": turns,
             }),
             options: vec![],
+            items: vec![],
         };
         let Some((plugin, advice)) = self
             .ask_point(decide.compact.as_deref(), decide.compact_ms, question)
@@ -206,6 +209,7 @@ impl Session {
             point: DecidePoint::Rank,
             state: json!({ "query": clip(query, INPUT_CHARS) }),
             options: found.clone(),
+            items: vec![],
         };
         let Some((plugin, advice)) = self
             .ask_point(decide.rank.as_deref(), decide.rank_ms, question)
@@ -246,6 +250,7 @@ impl Session {
             point: DecidePoint::Salience,
             state: json!({ "items": items }),
             options: vec![],
+            items: vec![],
         };
         let Some((plugin, advice)) = self
             .ask_point(decide.salience.as_deref(), decide.salience_ms, question)
