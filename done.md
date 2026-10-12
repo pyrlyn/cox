@@ -10813,3 +10813,66 @@ Done when the new test passes and fails with step 1 reverted.
 Out of scope: archiving the full answer, which is T66.2; the other inline boundary walks.
 
 Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T33.40.3 Jev provider export
+
+Depends: T33.40.2, T33.16, T33.18 · Size: ~170 · Files: `plugins/jev/src/provider.rs`, `plugins/jev/src/lib.rs`, `crates/cox-plugin-fixtures/build.rs`
+Goal: `cox_provider_stream` speaks System One over `cox_http` (PL§7a ABI form). The host injects the key.
+- A decision call (`Job::Plugin("jev")` with the JSON body in its one user message) is sent verbatim.
+- A request from a tier that names `typesafe` gets the old lossy mapping and one `Notice(Warn)`: "typesafe is a decision model; no tier should route to it" (J13).
+- Map the status codes from J4 to the ABI error kinds, so the host's retry treats 429 and 529 as transient.
+- Pass usage through unchanged; the host applies the estimate floor (T33.18).
+- Add the `[[models]]` rows.
+- `cox-plugin-fixtures` also builds `jev.wasm`.
+Check:
+- guest tests `decision_call_body_is_sent_verbatim`, `tier_request_uses_lossy_mapping_and_warns` and `status_529_maps_to_transient`;
+- `cargo build -p cox-plugin-fixtures` produces both fixtures, and with the wasm target missing it fails naming `mise install`.
+Plan:
+1. `plugins/jev/src/provider.rs` (pure, host-testable): a request with job `plugin:jev` must be one user message with one text block; that text is POSTed verbatim to `<base>/v1/systemone`. Any other job gets the old `build_body` mapping through `SystemOneRequest::new` and the J13 warning once per instance. Status: 2xx passes; 429, 529 and other 5xx are `AbiError::Transient`; 401, 422 and other 4xx are `Failed`. The response becomes `TextDelta` (body verbatim), `Stop`, and `Usage` with the response's own counts when present. The export error text is the `AbiError` as JSON, so a host can read its kind.
+2. `lib.rs`: register `provider_stream`, calling `cox_http` and `cox_notify` through the SDK.
+3. `plugin.toml`: `[[models]]` rows `jev-1.13.0` and `jev-latest`.
+4. `cox-plugin-fixtures`: build `cox-plugin-jev` in the same nested cargo run and lay out `OUT_DIR/jev` (`JEV_DIR`, `JEV_WASM`, `JEV_MANIFEST`).
+5. Verify: guest tests, guest wasm32 build and clippy, `cargo build -p cox-plugin-fixtures` (also with a `RUSTC` wrapper that hides the wasm target), the fixtures tests, workspace clippy and fmt.
+Status: done 2026-10-12
+Result:
+- `plugins/jev/src/provider.rs`: `stream(call, warned, send, notify)` is pure behind two closures, so it tests on the host with a fake transport; `lib.rs` registers `provider_stream` with the SDK's `cox_http` and `cox_notify`.
+  - A request with job `plugin:jev` must be one user message with one text block holding JSON. That text is POSTed byte for byte to `https://api.typesafe.ai/v1/systemone`. Any other shape is `Failed` and nothing is sent.
+  - Any other job gets the old `jev.rs` `build_body` mapping (system, text, tool names, tool results joined into `state`, one Noul), now through `SystemOneRequest::new` so the J6 cap applies, plus one `Notice(Warn)` per loaded instance: "typesafe is a decision model; no tier should route to it".
+  - 429, 529 and other 5xx are `AbiError::Transient`; 401, 422 and other non-2xx are `Failed`; a `cox_http` refusal keeps its own kind. The export's error text is the `AbiError` as JSON, because extism passes an export failure to the host only as text.
+  - The reply becomes `MessageStart` (when the body names a model), `TextDelta` (the body verbatim, for the advisor's `wire::parse`), `Stop`, and `Usage` with Jev's own `input_tokens`/`output_tokens` when the body has `usage`. Without it no usage event is sent, so the host's estimate fills the row (T33.18).
+- `plugin.toml`: `[[models]]` `jev-1.13.0` and `jev-latest`, `provider = "typesafe"`, `context_window = 64000`, price 0.042/0.0.
+- `cox-plugin-fixtures`: one nested cargo builds `cox-plugin-example` and `cox-plugin-jev`, laid out as `OUT_DIR/example` and `OUT_DIR/jev`; new `JEV_DIR`, `JEV_WASM`, `JEV_MANIFEST`.
+Reuse: the request side reuses `wire::SystemOneRequest`/`Question` (T33.40.2), the SDK's `http`/`notify` wrappers and `AbiError`; the lossy mapping and the status table are ported from `crates/cox-provider/src/jev.rs` (`build_body`, `http_error`), which goes away in T33.40.12. No new dependency.
+Not done:
+- The host does not yet read the JSON error kind: `cox-plugin`'s `map_plugin` still turns every export failure into `ProviderError::BadRequest`, and `PluginProvider` has no retry. T33.40.4's `jev_529_retries_max_retries_times` needs both; T33.40.1 is editing `provider.rs` now, so this card left the host alone.
+- `ProviderCall` carries no base URL, so the guest sends to the manifest's `https://api.typesafe.ai` (a test pins the two together). For T33.40.4's wiremock and T33.40.5's `[providers.typesafe] base_url`, the host must pass the bound section's base URL to the guest (for example an optional `ProviderCall.base_url`, a minor ABI addition). That overlaps T33.40.1's `abi.rs`, so it was not done here.
+Check:
+```text
+$ mise exec -- cargo test --manifest-path plugins/Cargo.toml -p cox-plugin-jev --locked
+test provider::tests::decision_call_body_is_sent_verbatim ... ok
+test provider::tests::tier_request_uses_lossy_mapping_and_warns ... ok
+test provider::tests::status_529_maps_to_transient ... ok
+test provider::tests::decision_call_with_another_shape_is_refused_unsent ... ok
+test provider::tests::missing_usage_is_left_to_the_host ... ok
+test provider::tests::transport_refusal_keeps_its_abi_kind ... ok
+test provider::tests::base_url_matches_the_manifest ... ok
+test tests::manifest_validates ... ok
+test result: ok. 15 passed; 0 failed
+$ mise exec -- cargo build --manifest-path plugins/Cargo.toml --workspace --locked --target wasm32-unknown-unknown
+Finished
+$ mise exec -- cargo clippy --manifest-path plugins/Cargo.toml -p cox-plugin-jev --locked --all-targets -- -D warnings   (also --target wasm32-unknown-unknown)
+clean
+$ mise exec -- cargo fmt --manifest-path plugins/Cargo.toml --all --check
+clean
+$ mise exec -- cargo build -p cox-plugin-fixtures
+OUT_DIR/example: example.wasm plugin.toml
+OUT_DIR/jev: jev.wasm plugin.toml   (exports cox_init, cox_provider_stream; imports cox_http, cox_notify)
+$ RUSTC=<wrapper hiding the wasm32 libdir> mise exec -- cargo build -p cox-plugin-fixtures
+error: cox-plugin-fixtures@0.1.2: the wasm32-unknown-unknown target is not installed for <wrapper>; run `mise install` in the repository root (mise.toml pins rust with that target) to build the plugin fixtures
+$ mise exec -- cargo nextest run -p cox-plugin-fixtures
+2 tests run: 2 passed (example_package_holds_its_manifest_and_a_wasm_module, jev_package_holds_its_manifest_and_a_wasm_module)
+$ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
