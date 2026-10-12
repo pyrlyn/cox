@@ -33,7 +33,7 @@ use crate::changes::{self, Changes};
 use crate::costs::{self, TurnCosts};
 use crate::info::{self, Info};
 use crate::mcp_status::McpRun;
-use crate::plugin_ui::{self, Answered, ItemWatch, PluginKey, PluginSlot, PluginUi};
+use crate::plugin_ui::{self, Answered, ItemWatch, PluginAction, PluginSlot, PluginTab, PluginUi};
 use crate::review;
 use crate::status::StatusFold;
 use crate::tasks::{self, TaskTarget};
@@ -68,7 +68,8 @@ pub struct LiveSession {
     /// Shared with each queued turn, which reports when it starts.
     controller: Arc<Controller>,
     completer: Completer,
-    /// The granted plugin slots, commands and keys (T52.14, PL§8).
+    /// The granted plugin slots and commands (T52.14, PL§8), inspector tabs
+    /// and toolbar and palette actions (PL§15.4).
     plugins: Arc<PluginUi>,
     cwd: PathBuf,
     /// The workspace roots a path Review reads is confined to.
@@ -159,6 +160,10 @@ impl LiveSession {
         session.set_hunk_reverter(crate::review::RenderHunks::shared());
         let events = session.events().ok_or(AppError::EventsTaken)?;
         let events = tee(Arc::clone(&app), session.id(), events, Arc::clone(&plugins));
+        // Declared while the session was built, before it had a stream.
+        for text in plugins.take_notices() {
+            let _ = session.notice(Level::Warn, text).await;
+        }
         let claude_home = cox_config::load::home_dir().join(".claude");
         let owner = Arc::clone(&app);
         let mut completer = Completer::load(&cwd, &app.home, &claude_home);
@@ -600,16 +605,27 @@ impl LiveSession {
         Ok(self.core("RevokeGrant")?.submit(revoke).await?)
     }
 
-    /// The plugin keys granted in this session (T52.14), for the leader
-    /// map and the help list.
-    pub fn plugin_keys(&self) -> Vec<PluginKey> {
-        self.plugins.keys()
+    /// The plugins' inspector tabs (PL§15.4), for the strip after Info.
+    pub fn plugin_tabs(&self) -> Vec<PluginTab> {
+        self.plugins.tabs()
     }
 
-    /// `<leader> <key>`: asks `plugin`'s `cox_key`, whose answer lands like
-    /// a command's. False when the key is not granted.
-    pub fn plugin_key(&self, plugin: &str, name: &str) -> bool {
-        self.plugins.key(plugin, name)
+    /// The plugins' toolbar items (PL§15.4), after their status segments.
+    pub fn plugin_toolbar(&self) -> Vec<PluginAction> {
+        self.plugins.toolbar()
+    }
+
+    /// The inspector shows `plugin`'s tab, or a built-in one (`None`),
+    /// `width`×`height` cells large; only the selected tab renders.
+    pub fn select_plugin_tab(&self, plugin: Option<&str>, width: u16, height: u16) {
+        let slots = self.plugins.step(|s| s.select_tab(plugin, width, height));
+        self.patch_slots(slots);
+    }
+
+    /// A toolbar item or palette action (`plugin:<id>:<command>`) clicked:
+    /// its command runs as if typed. False for an id no plugin declared.
+    pub fn plugin_action(&self, id: &str) -> bool {
+        self.plugins.action(id)
     }
 
     /// The window is now `width`×`height` cells; a shown panel or overlay
@@ -684,8 +700,12 @@ impl LiveSession {
                 }
                 return;
             }
-            // T33.45.5 selects the inspector tab; nothing draws it yet.
-            Some(CommandOut::OpenInspector | CommandOut::Nothing) | None => return,
+            Some(CommandOut::OpenInspector) => {
+                let slots = self.plugins.step(|s| s.open_inspector(plugin));
+                self.patch_slots(slots);
+                return;
+            }
+            Some(CommandOut::Nothing) | None => return,
         };
         if matches!(intent, Intent::Send { .. })
             && let Err(e) = self.ensure_ready().await
@@ -718,14 +738,16 @@ impl LiveSession {
     }
 
     /// The command palette's rows: `items` (the window's actions and
-    /// sessions) and this session's `/` commands and `@` files, ranked for
-    /// `query`, at most `per_kind` of each kind (T37.44.13).
+    /// sessions), the plugins' palette actions (PL§15.4) and this session's
+    /// `/` commands and `@` files, ranked for `query`, at most `per_kind`
+    /// of each kind (T37.44.13).
     pub fn palette(
         &self,
         query: &str,
-        items: Vec<crate::PaletteItem>,
+        mut items: Vec<crate::PaletteItem>,
         per_kind: usize,
     ) -> Vec<crate::PaletteHit> {
+        items.extend(self.plugins.palette());
         self.completer.palette(query, items, per_kind)
     }
 

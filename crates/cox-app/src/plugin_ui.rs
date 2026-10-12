@@ -6,7 +6,10 @@
 //! tree a plugin renders, turned into a [`WidgetView`] whose every string went
 //! through `cox_sanitize` and whose size PL§8 caps, and the per-session slot
 //! state — which slots are on screen, what area each gets, when each renders
-//! again and when three missed deadlines stop one. Separate from
+//! again and when three missed deadlines stop one — and the desktop-only
+//! contributions (PL§15.4): the inspector tab, which renders only while
+//! selected, and the toolbar and palette actions, each of which runs one of
+//! the plugin's granted commands. Separate from
 //! `cox-session`'s `plugin_ui`, which only calls the hosts: this module is
 //! what the app shows, as `cox-tui`'s `status.rs` is for the terminal.
 
@@ -14,7 +17,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cox_protocol::ids::ItemId;
 use cox_protocol::plugin::ui::Span;
-use cox_protocol::plugin::{CommandDecl, KeyDecl, RenderIn, Slot, StyleToken, Widget};
+use cox_protocol::plugin::{
+    ActionDecl, CommandDecl, DesktopOut, MAX_TOOLBAR_ACTIONS, RenderIn, Slot, StyleToken, Widget,
+    is_symbol_name,
+};
 use cox_protocol::types::{Event, ItemKind, ToolCall};
 use cox_sanitize::sanitize;
 use cox_session::plugin_ui::{ItemSource, LivePlugins, PluginAnswer, PluginRequest};
@@ -22,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::Completion;
+use crate::palette::{PaletteItem, PaletteKind};
 use crate::patch::{BlockId, BlockKind};
 use crate::timeline::key;
 
@@ -35,6 +42,9 @@ pub const PANEL_ROWS: u16 = 8;
 pub const TOO_LARGE: &str = "plugin output too large";
 /// The window's area in cells until the app reports one.
 const DEFAULT_AREA: (u16, u16) = (80, 24);
+/// What the app draws for a symbol name outside `is_symbol_name` (PL§15.4),
+/// the glyph it also falls back to for a valid name AppKit does not know.
+pub const FALLBACK_SYMBOL: &str = "puzzlepiece.extension";
 
 /// A run of sanitized text with one colour role.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,13 +210,24 @@ pub struct PluginSlot {
     pub stopped: bool,
 }
 
-/// A granted key under the plugin leader, sanitized for the help list.
+/// A plugin's inspector tab (PL§15.4), sanitized: a tab in the strip after
+/// Info whose `Slot::DesktopInspector` renders only while it is selected.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PluginKey {
+pub struct PluginTab {
     pub plugin: String,
-    pub key: String,
-    pub name: String,
-    pub description: String,
+    pub title: String,
+    pub symbol: String,
+}
+
+/// A toolbar item or palette action (PL§15.4), sanitized. `id` is
+/// `plugin:<id>:<command>`, what [`PluginUi::action`] takes and the palette
+/// row carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginAction {
+    pub id: String,
+    pub plugin: String,
+    pub title: String,
+    pub symbol: String,
 }
 
 /// A request to the serve thread with the block its answer is for, if any.
@@ -252,7 +273,13 @@ pub struct PluginSlots {
     entries: Vec<Entry>,
     panel: Option<String>,
     overlay: Option<String>,
+    /// The plugin whose inspector tab is selected; `None` while a built-in
+    /// tab is, or the inspector is closed.
+    inspector: Option<String>,
     area: (u16, u16),
+    /// The inspector's own area: it is narrower than the window and
+    /// resizes on its own.
+    inspector_area: (u16, u16),
 }
 
 impl Default for PluginSlots {
@@ -261,7 +288,9 @@ impl Default for PluginSlots {
             entries: Vec::new(),
             panel: None,
             overlay: None,
+            inspector: None,
             area: DEFAULT_AREA,
+            inspector_area: DEFAULT_AREA,
         }
     }
 }
@@ -355,6 +384,43 @@ impl PluginSlots {
         }
     }
 
+    /// The inspector now shows `plugin`'s tab, or a built-in one (`None`),
+    /// `width`×`height` cells large. Only the selected tab is visible, so
+    /// only it renders (PL§8's redraw model); a resize of the selected tab
+    /// asks it again. A plugin that declared no tab selects nothing.
+    pub fn select_tab(&mut self, plugin: Option<&str>, width: u16, height: u16) -> Step {
+        let plugin = plugin.filter(|p| self.has_tab(p));
+        let resized = self.inspector_area != (width, height);
+        self.inspector_area = (width, height);
+        let before = std::mem::replace(&mut self.inspector, plugin.map(str::to_string));
+        match (before, plugin) {
+            (before, Some(p)) if before.as_deref() != Some(p) => {
+                self.shown(Slot::DesktopInspector, before, p)
+            }
+            (_, Some(p)) if resized => self.renders(Some(p), Some(Slot::DesktopInspector)),
+            (Some(before), None) => self.shown(Slot::DesktopInspector, None, &before),
+            _ => Step::default(),
+        }
+    }
+
+    /// `CommandOut::OpenInspector`: selects `plugin`'s tab at the
+    /// inspector's last area. The patch that shows it visible is what
+    /// switches the app to it. A plugin without a tab changes nothing, so
+    /// it cannot close another plugin's.
+    pub fn open_inspector(&mut self, plugin: &str) -> Step {
+        if !self.has_tab(plugin) {
+            return Step::default();
+        }
+        let (width, height) = self.inspector_area;
+        self.select_tab(Some(plugin), width, height)
+    }
+
+    fn has_tab(&self, plugin: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.plugin == plugin && e.slot == Slot::DesktopInspector)
+    }
+
     /// The payloads of `slot` for `before` and `plugin`, whose visibility
     /// may have changed, and a render of it if it is now on screen.
     fn shown(&self, slot: Slot, before: Option<String>, plugin: &str) -> Step {
@@ -381,8 +447,7 @@ impl PluginSlots {
             Slot::StatusLeft | Slot::StatusRight => true,
             Slot::Panel => self.panel.as_deref() == Some(&e.plugin),
             Slot::Overlay => self.overlay.as_deref() == Some(&e.plugin),
-            // T33.45.5 owns the inspector's visibility (it renders while selected).
-            Slot::DesktopInspector => false,
+            Slot::DesktopInspector => self.inspector.as_deref() == Some(&e.plugin),
         }
     }
 
@@ -391,7 +456,8 @@ impl PluginSlots {
         match slot {
             Slot::StatusLeft | Slot::StatusRight => (SEGMENT_COLS, 1),
             Slot::Panel => (self.area.0, PANEL_ROWS),
-            Slot::Overlay | Slot::DesktopInspector => self.area,
+            Slot::Overlay => self.area,
+            Slot::DesktopInspector => self.inspector_area,
         }
     }
 
@@ -526,13 +592,78 @@ pub fn completions(plugin: &str, commands: &[CommandDecl]) -> Vec<Completion> {
         .collect()
 }
 
+/// The symbol as the app may pass it to AppKit.
+fn symbol(name: &str) -> String {
+    match is_symbol_name(name) {
+        true => name.to_string(),
+        false => FALLBACK_SYMBOL.to_string(),
+    }
+}
+
+/// A declared action with what its click asks: the raw plugin id and
+/// command name, which the sanitized `shown` may no longer spell.
+#[derive(Debug, Clone)]
+struct Action {
+    shown: PluginAction,
+    plugin: String,
+    command: String,
+}
+
+/// `decls` that name one of `commands`, at most `cap` of them; every other
+/// one is left out with a line in `notices`, so a plugin's mistake is told
+/// and a click can only ever reach `cox_command` with a granted command.
+fn actions(
+    plugin: &str,
+    place: &str,
+    decls: Vec<ActionDecl>,
+    commands: &[CommandDecl],
+    cap: usize,
+    notices: &mut Vec<String>,
+) -> Vec<Action> {
+    let mut kept = Vec::new();
+    for decl in decls {
+        if !commands.iter().any(|c| c.name == decl.command) {
+            notices.push(format!(
+                "plugin {}: {place} action \"{}\" names no granted command \"{}\"; dropped",
+                sanitize(plugin),
+                sanitize(&decl.title),
+                sanitize(&decl.command),
+            ));
+            continue;
+        }
+        if kept.len() == cap {
+            notices.push(format!(
+                "plugin {}: more than {cap} {place} actions; \"{}\" dropped",
+                sanitize(plugin),
+                sanitize(&decl.title),
+            ));
+            continue;
+        }
+        kept.push(Action {
+            shown: PluginAction {
+                id: format!("plugin:{}", full_name(plugin, &decl.command)),
+                plugin: sanitize(plugin),
+                title: sanitize(&decl.title),
+                symbol: symbol(&decl.symbol),
+            },
+            plugin: plugin.to_string(),
+            command: decl.command,
+        });
+    }
+    kept
+}
+
 #[derive(Debug, Default)]
 struct Declared {
     slots: PluginSlots,
     commands: Vec<(String, CommandDecl)>,
-    keys: Vec<(String, KeyDecl)>,
     /// `(plugin, target)` for each granted `cox_render_item` target.
     renderers: Vec<(String, String)>,
+    tabs: Vec<PluginTab>,
+    toolbar: Vec<Action>,
+    palette: Vec<Action>,
+    /// Why a declared action was left out, until the session tells it.
+    notices: Vec<String>,
 }
 
 /// One session's plugin UI: its slots, its plugins' grants and the queue
@@ -557,23 +688,52 @@ impl PluginUi {
     }
 
     /// Records what `plugin` was granted and asks for its visible slots.
+    /// `desktop` is `InitOut.desktop` as the host left it: already empty
+    /// off the desktop and without what was not granted (PL§15.6).
     pub fn declare(
         &self,
         plugin: &str,
         slots: &[Slot],
         commands: Vec<CommandDecl>,
-        keys: Vec<KeyDecl>,
+        desktop: DesktopOut,
         renderers: Vec<String>,
     ) {
         let step = {
             let mut d = self.lock();
+            let mut notices = Vec::new();
+            let toolbar = actions(
+                plugin,
+                "toolbar",
+                desktop.toolbar,
+                &commands,
+                MAX_TOOLBAR_ACTIONS,
+                &mut notices,
+            );
+            let palette = actions(
+                plugin,
+                "palette",
+                desktop.palette,
+                &commands,
+                usize::MAX,
+                &mut notices,
+            );
+            d.toolbar.extend(toolbar);
+            d.palette.extend(palette);
+            d.notices.extend(notices);
+            let mut slots = slots.to_vec();
+            if let Some(tab) = desktop.inspector {
+                d.tabs.push(PluginTab {
+                    plugin: sanitize(plugin),
+                    title: sanitize(&tab.title),
+                    symbol: symbol(&tab.symbol),
+                });
+                slots.push(Slot::DesktopInspector);
+            }
             d.commands
                 .extend(commands.into_iter().map(|c| (plugin.to_string(), c)));
-            d.keys
-                .extend(keys.into_iter().map(|k| (plugin.to_string(), k)));
             d.renderers
                 .extend(renderers.into_iter().map(|t| (plugin.to_string(), t)));
-            d.slots.declare(plugin, slots)
+            d.slots.declare(plugin, &slots)
         };
         self.ask(step.requests);
     }
@@ -607,18 +767,60 @@ impl PluginUi {
             .collect()
     }
 
-    /// The granted keys, sanitized.
-    pub fn keys(&self) -> Vec<PluginKey> {
-        let d = self.lock();
-        d.keys
+    /// The inspector tabs, in the order the plugins started.
+    pub fn tabs(&self) -> Vec<PluginTab> {
+        self.lock().tabs.clone()
+    }
+
+    /// The toolbar items, at most [`MAX_TOOLBAR_ACTIONS`] per plugin.
+    pub fn toolbar(&self) -> Vec<PluginAction> {
+        self.lock()
+            .toolbar
             .iter()
-            .map(|(plugin, k)| PluginKey {
-                plugin: sanitize(plugin),
-                key: sanitize(&k.key),
-                name: sanitize(&k.name),
-                description: sanitize(&k.description),
+            .map(|a| a.shown.clone())
+            .collect()
+    }
+
+    /// The palette actions as rows of its Actions group, each with its
+    /// symbol for the well and the plugin as its detail.
+    pub fn palette(&self) -> Vec<PaletteItem> {
+        self.lock()
+            .palette
+            .iter()
+            .map(|a| PaletteItem {
+                kind: PaletteKind::Action,
+                id: a.shown.id.clone(),
+                title: a.shown.title.clone(),
+                detail: a.shown.plugin.clone(),
+                symbol: Some(a.shown.symbol.clone()),
             })
             .collect()
+    }
+
+    /// A toolbar item or palette action clicked: asks its plugin's
+    /// `cox_command` with no arguments, whose answer lands like a typed
+    /// command's. False for an id no plugin declared.
+    pub fn action(&self, id: &str) -> bool {
+        let found = {
+            let d = self.lock();
+            d.toolbar
+                .iter()
+                .chain(&d.palette)
+                .find(|a| a.shown.id == id)
+                .map(|a| PluginRequest::Command {
+                    plugin: a.plugin.clone(),
+                    name: a.command.clone(),
+                    args: String::new(),
+                })
+        };
+        let asked = found.is_some();
+        self.ask(found.into_iter().collect());
+        asked
+    }
+
+    /// Why declared actions were left out, once each.
+    pub fn take_notices(&self) -> Vec<String> {
+        std::mem::take(&mut self.lock().notices)
     }
 
     /// `/<id>:<name> args` for a granted command: asks the plugin and says
@@ -666,22 +868,6 @@ impl PluginUi {
         let _ = self.requests.try_send(Ask { request, block });
         true
     }
-
-    /// The key `name` (as [`PluginKey`] shows it) of `plugin`, if granted.
-    pub fn key(&self, plugin: &str, name: &str) -> bool {
-        let found = self
-            .lock()
-            .keys
-            .iter()
-            .find(|(p, k)| p == plugin && sanitize(&k.name) == name)
-            .map(|(p, k)| PluginRequest::Key {
-                plugin: p.clone(),
-                name: k.name.clone(),
-            });
-        let asked = found.is_some();
-        self.ask(found.into_iter().collect());
-        asked
-    }
 }
 
 /// The `ServeUi` a session calls once its plugins started: the serve thread
@@ -703,11 +889,13 @@ pub fn serve_ui(
             |block, answer| Answered { block, answer },
         );
         for p in live.plugins() {
+            // Leader keys are terminal-only (PL§15.3): the app has none.
+            let desktop = p.init_out().map(|i| i.desktop.clone()).unwrap_or_default();
             ui.declare(
                 p.id(),
                 &p.granted_status(),
                 p.granted_commands(),
-                p.granted_keys(),
+                desktop,
                 p.granted_renderers(),
             );
         }
@@ -962,7 +1150,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(4);
         let ui = PluginUi::new(tx);
         let targets = vec!["tool:acme__lint".into(), ASSISTANT.into()];
-        ui.declare("acme", &[], vec![], vec![], targets);
+        ui.declare("acme", &[], vec![], DesktopOut::default(), targets);
         let mut watch = ItemWatch::default();
         let lint = call("acme__lint");
         let block = key("call", lint.id);
@@ -1005,7 +1193,13 @@ mod tests {
     fn item_renderer_widget_lands_sanitized_in_the_reply() {
         let (tx, mut rx) = mpsc::channel(4);
         let ui = PluginUi::new(tx);
-        ui.declare("acme", &[], vec![], vec![], vec![ASSISTANT.into()]);
+        ui.declare(
+            "acme",
+            &[],
+            vec![],
+            DesktopOut::default(),
+            vec![ASSISTANT.into()],
+        );
         let mut watch = ItemWatch::default();
         let item = ItemId::new();
         let started = ItemKind::AssistantMessage { text: "he".into() };
@@ -1062,7 +1256,7 @@ mod tests {
             name: "compact".into(),
             description: String::new(),
         };
-        ui.declare("acme", &[], vec![decl], vec![], vec![]);
+        ui.declare("acme", &[], vec![decl], DesktopOut::default(), vec![]);
         assert!(!ui.command("/compact now"), "the built-in stays the core's");
         assert!(ui.command("/acme:compact now"));
         assert_eq!(
@@ -1076,5 +1270,156 @@ mod tests {
                 block: None,
             })
         );
+    }
+
+    fn inspector_render(width: u16, height: u16) -> PluginRequest {
+        PluginRequest::Render {
+            plugin: "acme".into(),
+            input: RenderIn {
+                slot: Slot::DesktopInspector,
+                width,
+                height,
+            },
+        }
+    }
+
+    #[test]
+    fn inspector_tab_renders_only_while_selected() {
+        let mut slots = PluginSlots::default();
+        let step = slots.declare("acme", &[Slot::DesktopInspector]);
+        assert!(step.requests.is_empty(), "an unselected tab is not asked");
+        let redraw = || PluginAnswer::Redraw {
+            plugin: "acme".into(),
+        };
+        assert!(slots.fold(redraw()).requests.is_empty());
+
+        let step = slots.select_tab(Some("acme"), 40, 30);
+        assert_eq!(step.requests, vec![inspector_render(40, 30)]);
+        assert!(step.slots.iter().all(|s| s.visible), "{:?}", step.slots);
+        assert_eq!(
+            slots.fold(redraw()).requests,
+            vec![inspector_render(40, 30)]
+        );
+        assert_eq!(
+            slots.select_tab(Some("acme"), 50, 30).requests,
+            vec![inspector_render(50, 30)],
+            "a resized tab is asked again"
+        );
+        assert!(
+            slots.resize(120, 40).requests.is_empty(),
+            "the window's size is not the inspector's"
+        );
+
+        let step = slots.select_tab(None, 50, 30);
+        assert!(step.requests.is_empty());
+        assert!(step.slots.iter().all(|s| !s.visible), "{:?}", step.slots);
+        assert!(slots.fold(redraw()).requests.is_empty(), "hidden again");
+
+        assert_eq!(
+            slots.open_inspector("acme").requests,
+            vec![inspector_render(50, 30)],
+            "OpenInspector selects the tab at its last size"
+        );
+        assert_eq!(slots.open_inspector("other"), Step::default());
+        assert!(
+            slots
+                .select_tab(Some("other"), 50, 30)
+                .slots
+                .iter()
+                .all(|s| !s.visible),
+            "a plugin without a tab selects none and hides acme's"
+        );
+    }
+
+    fn command(name: &str) -> CommandDecl {
+        CommandDecl {
+            name: name.into(),
+            description: String::new(),
+        }
+    }
+
+    fn act(command: &str, title: &str, symbol: &str) -> ActionDecl {
+        ActionDecl {
+            command: command.into(),
+            title: title.into(),
+            symbol: symbol.into(),
+        }
+    }
+
+    #[test]
+    fn plugin_action_runs_its_command() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let ui = PluginUi::new(tx);
+        let desktop = DesktopOut {
+            inspector: Some(cox_protocol::plugin::TabDecl {
+                title: "\x1b[31mGlance".into(),
+                symbol: "eye".into(),
+            }),
+            toolbar: vec![act("go", "Go\u{202e}", "play.fill")],
+            palette: vec![act("go", "Go now", "Not A Symbol")],
+        };
+        ui.declare("acme", &[], vec![command("go")], desktop, vec![]);
+        assert!(ui.take_notices().is_empty());
+        assert_eq!(
+            ui.tabs(),
+            vec![PluginTab {
+                plugin: "acme".into(),
+                title: "Glance".into(),
+                symbol: "eye".into(),
+            }]
+        );
+        let toolbar = ui.toolbar();
+        assert_eq!(toolbar.len(), 1);
+        assert_eq!(toolbar[0].id, "plugin:acme:go");
+        assert_eq!(toolbar[0].title, sanitize("Go\u{202e}"));
+        let rows = ui.palette();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, PaletteKind::Action);
+        assert_eq!(rows[0].symbol.as_deref(), Some(FALLBACK_SYMBOL));
+        let hits = crate::palette::rank("go now", rows.clone(), 5);
+        assert_eq!(hits[0].item.id, "plugin:acme:go");
+
+        assert!(ui.action(&rows[0].id));
+        assert_eq!(
+            rx.try_recv().ok(),
+            Some(Ask {
+                request: PluginRequest::Command {
+                    plugin: "acme".into(),
+                    name: "go".into(),
+                    args: String::new(),
+                },
+                block: None,
+            })
+        );
+        assert!(!ui.action("plugin:acme:stop"), "never declared");
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn plugin_action_naming_an_undeclared_command_is_dropped() {
+        let (tx, _rx) = mpsc::channel(4);
+        let ui = PluginUi::new(tx);
+        let desktop = DesktopOut {
+            inspector: None,
+            toolbar: vec![
+                act("missing", "Ghost", "eye"),
+                act("a", "A", "eye"),
+                act("b", "B", "eye"),
+                act("c", "C", "eye"),
+            ],
+            palette: vec![act("missing", "Ghost", "eye")],
+        };
+        let commands = vec![command("a"), command("b"), command("c")];
+        ui.declare("acme", &[], commands, desktop, vec![]);
+        let ids: Vec<String> = ui.toolbar().into_iter().map(|a| a.id).collect();
+        assert_eq!(ids, ["plugin:acme:a", "plugin:acme:b"], "at most two");
+        assert!(ui.palette().is_empty());
+        assert!(!ui.action("plugin:acme:missing"));
+        let notices = ui.take_notices();
+        assert_eq!(notices.len(), 3, "{notices:?}");
+        assert!(notices[0].contains("\"missing\""), "{notices:?}");
+        assert!(notices[1].contains("\"C\" dropped"), "{notices:?}");
+        assert!(ui.take_notices().is_empty(), "told once");
+        assert!(ui.tabs().is_empty());
     }
 }

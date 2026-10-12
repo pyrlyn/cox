@@ -14,8 +14,8 @@ use cox_app::TerminalHandle as Terminal;
 use cox_app::diffmodel::DiffModel;
 use cox_app::live::LiveSession;
 use cox_app::{
-    Block, Changes, Completion, Info, Intent, PaletteHit, PaletteItem, PluginKey, TaskTarget,
-    TimelinePatch, TurnCosts,
+    Block, Changes, Completion, Info, Intent, PaletteHit, PaletteItem, TaskTarget, TimelinePatch,
+    TurnCosts,
 };
 use cox_protocol::ids::{ArchiveId, SessionId, TaskId};
 use cox_protocol::types::TodoItem;
@@ -140,16 +140,6 @@ impl SessionHandle {
     /// A terminal pane in this session's cwd, under its sandbox (T51.3).
     pub fn open_terminal(&self, cols: u16, rows: u16) -> Result<Arc<TerminalHandle>, AppError> {
         Ok(TerminalHandle::new(self.live.open_terminal(cols, rows)?))
-    }
-
-    /// The plugin keys granted in this session (T52.14).
-    pub fn plugin_keys(&self) -> Vec<PluginKey> {
-        self.live.plugin_keys()
-    }
-
-    /// `<leader> <key>`: asks `plugin`'s `cox_key`; false when not granted.
-    pub fn plugin_key(&self, plugin: String, name: String) -> bool {
-        self.live.plugin_key(&plugin, &name)
     }
 
     /// The window's area in cells, for plugin panels and overlays.
