@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// The app's host (DT§4.4, T37.30.2): `secret` reads `KeychainSecretStore`,
+// The app's host (DT§4.4, T37.30.2): `secret` reads the launch's secret store (the
+// `secretStore` dependency, DT§4.6: the Keychain, or memory under `COX_KEYRING=off`),
 // `notify` posts `NotificationActions`' content with its Allow, Deny or
 // Answer actions through `UNUserNotificationCenter`, `open` goes through
 // `NSWorkspace`, and a remote host's link only after an alert (T52.20).
@@ -14,6 +15,7 @@
 
 import AppKit
 import CoxClient
+import Dependencies
 import Foundation
 import UserNotifications
 
@@ -21,10 +23,11 @@ public struct MacHost: PlatformHost {
   private let secrets: any SecretStore
   private let browser: BrowserController?
 
-  public init(
-    secrets: any SecretStore = KeychainSecretStore(), browser: BrowserController? = nil
-  ) {
-    (self.secrets, self.browser) = (secrets, browser)
+  /// `secrets` defaults to the launch's store, the one Settings writes keys through; a test
+  /// passes its own Keychain stand-in.
+  public init(secrets: (any SecretStore)? = nil, browser: BrowserController? = nil) {
+    @Dependency(\.secretStore) var launched
+    (self.secrets, self.browser) = (secrets ?? launched, browser)
   }
 
   /// A Keychain error reads as no key: Rust then reports the key missing and

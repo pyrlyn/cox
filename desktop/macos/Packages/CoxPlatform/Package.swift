@@ -46,6 +46,7 @@ let package = Package(
       name: "CoxPlatformTests",
       dependencies: [
         "CoxPlatform", .product(name: "CoxClient", package: "CoxModel"),
+        .product(name: "Dependencies", package: "swift-dependencies"),
         .product(name: "SwiftTerm", package: "SwiftTerm"),
       ],
       plugins: [swiftLint]
