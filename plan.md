@@ -91,7 +91,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.6 | todo | P3 | 4 | 0% | |
+| T56.6 | in progress | P3 | 4 | 0% | Claude Code / opus-5.5 |
 | T56.7 | todo | P3 | 4 | 0% | |
 | T56.8 | todo | P3 | 3 | 0% | |
 | T56.9 | todo | P3 | 1 | 0% | |
@@ -1706,6 +1706,7 @@ Goal: each granted `[[cloud_agents]]` entry registers as a background-only subag
 Check: `mise exec -- cargo nextest run -p cox-session cloud_agent_refuses_a_non_github_remote cloud_agent_strips_credentials_from_the_remote cloud_agent_denied_by_engine_makes_no_request cloud_agent_stream_maps_to_task_events cloud_agent_task_cancel_cancels_the_run` (wiremock and a fixture repository).
 Done when: the tests pass.
 Out of scope: foreground (blocking) runs; follow-up messages into a run (a later card if wanted).
+Plan: `cloud_agents.rs` holds the driver: a `CloudAgentDecl` becomes an `ExternalAgent` that is background-only; on a turn it reads the `origin` remote through `cox_tools::git` (GitHub only, `https://github.com/<owner>/<repo>` rebuilt so no credentials or other parts survive), checks whether `HEAD` is on a remote-tracking ref, builds the `cloud_agent` call and asks `Engine` (an `Ask` goes to an injected approver, by default refused like the ACP driver's `RefuseAsk`, with the approval text and the HEAD warning), creates the run, inserts the `cloud_runs` row, and maps `assistant` text into one answer item, ending at `done`, `result` or a terminal status; the cancel token calls `cancel_run`. Two small core seams: `ExternalAgent::background_only` (the `agent` tool runs such a preset in the background) and `ExternalAgent::task_turn` (the task id and the child's live mode, so the row carries the core's task id). `plugins.rs` collects granted `[[cloud_agents]]` entries; `lib.rs` registers the drivers next to the external agents. Tests use wiremock and a fixture git repository; then `-p cox-session -p cox-core`, clippy, fmt.
 
 #### T56.7 Usage row and resume
 
