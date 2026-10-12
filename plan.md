@@ -137,7 +137,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T59.7 | todo | P3 | 4 | 0% | |
+| T59.7 | in progress | P3 | 4 | 10% | Claude Code / opus-5.5 |
 | T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
@@ -2068,7 +2068,7 @@ Out of scope: a persisted index, cross-session caching, rtok's tree-sitter versi
 
 #### T59.7 `rename_symbol` through the server's `textDocument/rename`
 
-Model: opus · Status: open · Depends: T59.6 · Size: ~200 · Priority: P3 · Complexity: 4
+Model: opus · Status: in progress · Depends: T59.6 · Size: ~200 · Priority: P3 · Complexity: 4
 
 Goal: one tool call renames a symbol across files using the server's `WorkspaceEdit`, applied as one approved change with the same per-file archive as `edit`, and refuses when no server runs (no text-search rename).
 
@@ -2092,6 +2092,13 @@ mise exec -- cargo fmt --check
 Done when: fake-server test renames across two files, one approval, both archived; refusal without a server; a stale-version edit is refused.
 
 Out of scope: rename without a server, file moves.
+
+Execution plan (Claude Code / opus-5.5):
+1. `server.rs`: advertise `rename.prepareSupport` and `workspace.workspaceEdit.documentChanges` (no resource operations); record `renameProvider`/`prepareProvider`; `Server::rename` syncs the file, re-syncs every file cox opened whose disk text changed, sends `prepareRename` (when offered) then `rename`, and returns the edit with the versions it synced.
+2. `lsp/rename.rs` (new): parse `changes`/`documentChanges` (create/rename/delete refused), confine every file to the writable roots, refuse a versioned edit whose version is not the synced one, apply UTF-16 ranges to each file's text (overlapping or out-of-range edits refused).
+3. `write.rs`: a multi-file `rewrite_all` that archives every pre-image, stages every temp file, then renames; a failure removes the temps and restores what was already renamed. `rename_symbol` (deferred, `Write`, `Exclusive`, subject = the symbol's file) goes through the Engine once; no server running → refused.
+4. Diagnostics delta per file via the T59.3 helpers in `mod.rs`, factored out of `AfterEdit`; register in `cox-session` `with_lsp`; `docs/tools.md`.
+5. Tests: fake server renames across two files (both archived, one call), refusal without a server, stale version refused, resource op refused, out-of-root file refused; `write_all` rollback.
 
 ### P60 — Provider readiness, composer controls and glare (goal: the desktop app never starts a turn or a Best of candidate on a provider it cannot use, shows which provider runs, picks model, provider and mode in the composer, and lets the user set the glass glare; every rule lives in `cox-app` and the shared docs, so the Windows and any later Linux client repeat it without the Swift code, A139)
 
