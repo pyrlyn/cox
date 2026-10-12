@@ -1165,6 +1165,7 @@ dependencies = [
  "trycmd",
  "vt100",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1186,6 +1187,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1219,6 +1221,7 @@ dependencies = [
  "tokio",
  "toml_edit 0.25.15+spec-1.1.0",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1232,6 +1235,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "toml_edit 0.25.15+spec-1.1.0",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1258,6 +1262,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1273,6 +1278,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1293,6 +1299,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1309,6 +1316,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uniffi",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1319,6 +1327,7 @@ dependencies = [
  "sys-locale",
  "thiserror 2.0.21",
  "unic-langid",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1338,6 +1347,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1348,6 +1358,7 @@ dependencies = [
  "figment",
  "serde",
  "thiserror 2.0.21",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1356,6 +1367,7 @@ version = "0.1.2"
 dependencies = [
  "cox-protocol",
  "proptest",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1367,6 +1379,7 @@ dependencies = [
  "globset",
  "serde_json",
  "tempfile",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1392,6 +1405,7 @@ dependencies = [
  "tracing",
  "wasmtime",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1427,6 +1441,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "ulid",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1450,6 +1465,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1469,6 +1485,7 @@ dependencies = [
  "tokio-util",
  "typify",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1484,6 +1501,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1503,6 +1521,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1514,6 +1533,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1534,6 +1554,7 @@ dependencies = [
  "toml_edit 0.25.15+spec-1.1.0",
  "two-face",
  "unicode-width",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1545,6 +1566,7 @@ dependencies = [
  "nix 0.31.3",
  "seccompiler",
  "tempfile",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1552,6 +1574,7 @@ name = "cox-sanitize"
 version = "0.1.2"
 dependencies = [
  "unicode-width",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1565,6 +1588,7 @@ dependencies = [
  "nucleo",
  "tempfile",
  "thiserror 2.0.21",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1595,6 +1619,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1612,6 +1637,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1624,6 +1650,7 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1640,6 +1667,7 @@ dependencies = [
  "tracing-appender",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1652,6 +1680,7 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1678,6 +1707,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+ "workspace-hack",
  "zstd",
 ]
 
@@ -1706,6 +1736,7 @@ dependencies = [
  "tui-textarea-2",
  "unicode-width",
  "vt100",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1721,6 +1752,7 @@ dependencies = [
  "tokio",
  "tracing",
  "whisper-rs",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1731,6 +1763,7 @@ dependencies = [
  "reqwest 0.12.28",
  "tokio",
  "tokio-util",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -8885,6 +8918,123 @@ dependencies = [
  "log",
  "thiserror 1.0.69",
  "wast 35.0.2",
+]
+
+[[package]]
+name = "workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "anyhow",
+ "bit-set 0.8.0",
+ "bit-vec 0.8.0",
+ "bitflags 2.13.2",
+ "bstr",
+ "cc",
+ "chrono",
+ "crossbeam-utils",
+ "crypto-common 0.1.7",
+ "digest 0.10.7",
+ "digest 0.11.3",
+ "either",
+ "enumflags2",
+ "errno",
+ "event-listener",
+ "event-listener-strategy",
+ "fastrand",
+ "fnv",
+ "form_urlencoded",
+ "futures-channel",
+ "futures-executor",
+ "futures-io",
+ "futures-task",
+ "futures-util",
+ "getrandom 0.2.17",
+ "getrandom 0.4.3",
+ "gimli",
+ "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "iana-time-zone",
+ "indexmap 2.14.2",
+ "itertools 0.14.0",
+ "libc",
+ "linux-raw-sys 0.12.1",
+ "lock_api",
+ "log",
+ "memchr",
+ "nix 0.31.3",
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "object",
+ "once_cell",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "parking_lot",
+ "percent-encoding",
+ "postcard",
+ "ppv-lite86",
+ "proc-macro2",
+ "pulley-interpreter",
+ "quote",
+ "rand 0.8.8",
+ "rand 0.9.5",
+ "rand_chacha 0.9.0",
+ "regex",
+ "regex-automata",
+ "regex-syntax",
+ "reqwest 0.13.5",
+ "rustc-hash",
+ "rustix 1.1.4",
+ "rustls",
+ "rustls-webpki",
+ "schemars 1.2.2",
+ "security-framework-sys",
+ "semver",
+ "serde",
+ "serde_core",
+ "serde_json",
+ "serde_spanned 1.1.1",
+ "sha2 0.10.9",
+ "similar 3.2.0",
+ "slab",
+ "smallvec",
+ "strum",
+ "syn 2.0.119",
+ "syn 3.0.6",
+ "thiserror 2.0.21",
+ "time",
+ "tinystr",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "toml 0.9.12+spec-1.1.0",
+ "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_edit 0.25.15+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+ "typenum",
+ "url",
+ "uuid",
+ "wasmtime-environ",
+ "wasmtime-internal-core",
+ "winapi",
+ "windows",
+ "windows-core",
+ "windows-sys 0.61.2",
+ "winnow 0.7.15",
+ "winnow 1.0.4",
+ "zerovec",
+ "zstd",
+ "zstd-safe",
+ "zstd-sys",
 ]
 
 [[package]]

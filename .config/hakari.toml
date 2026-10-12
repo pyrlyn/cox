@@ -1,0 +1,41 @@
+# This file contains settings for `cargo hakari`.
+# See https://docs.rs/cargo-hakari/latest/cargo_hakari/config for a full list of options.
+
+hakari-package = "workspace-hack"
+
+# Format version for hakari's output. Version 4 requires cargo-hakari 0.9.22 or above.
+dep-format-version = "4"
+
+# Setting workspace.resolver = "2" or higher in the root Cargo.toml is HIGHLY recommended.
+# Hakari works much better with the v2 resolver. (The v2 and v3 resolvers are identical from
+# hakari's perspective, so you're welcome to set either.)
+#
+# For more about the new feature resolver, see:
+# https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html#cargos-new-feature-resolver
+resolver = "2"
+
+# Add triples corresponding to platforms commonly used by developers here.
+# https://doc.rust-lang.org/rustc/platform-support.html
+platforms = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+# Write out exact versions rather than a semver range. (Defaults to false.)
+# exact-versions = true
+
+# Built for wasm32-unknown-unknown by the guest workspace (plugins/, PL§9): the host
+# feature set (getrandom `std`/`sys_rng`) does not compile there, and both crates are
+# meant to have no workspace dependency.
+[final-excludes]
+workspace-members = ["cox-plugin-api", "cox-plugin-fixtures"]
+
+# Kept out of the unified feature set so the layering tests in crates/cox/tests/deps.rs
+# still hold: crossterm must not reach the UI-agnostic cox-app (the desktop staticlib),
+# and uniffi must stay cox-ffi's alone, never in the cox binary.
+[traversal-excludes]
+third-party = [
+    { name = "crossterm" },
+    { name = "uniffi" },
+]

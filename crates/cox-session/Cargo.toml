@@ -59,6 +59,7 @@ agent-client-protocol = { workspace = true }
 # T37.11: a login shell past its timeout is killed with its process group,
 # so nothing an rc file started keeps running (as in cox-ext's hooks).
 nix = { workspace = true, features = ["signal"] }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

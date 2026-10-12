@@ -40,6 +40,7 @@ url = { workspace = true }
 sha2 = { workspace = true }
 # T65.1: decompress `https://docs.rs/crate/<name>/<version>/json.zst`.
 zstd = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 # T57.7: `bash`'s pty, `setsid`, `killpg`, poll and termios are Unix-only;
 # Windows gets its own spawn path in T57.8.

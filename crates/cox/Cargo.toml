@@ -114,6 +114,7 @@ reqwest = { workspace = true }
 sha2 = { workspace = true }
 # T5.8: the binary owns the async runtime the TUI and core loop run on.
 tokio = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 # T37.1: the plugin and scripted-session fixtures `session.rs`'s render test

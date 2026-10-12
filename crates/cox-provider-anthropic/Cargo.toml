@@ -19,6 +19,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 futures = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [build-dependencies]
 # T30.12: build.rs generates the Anthropic wire types from the vendored
