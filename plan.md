@@ -62,7 +62,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.43 | todo | P1 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
-| T33.45.7 | in progress | P2 | 4 | 5% | Claude Code / opus-5.5 |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
@@ -1156,19 +1155,6 @@ Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and a
 Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
 
 Check: insta snapshots of a linked span with and without OSC 8 and of an image's `alt`; `cox plugin list --json` shows `surfaces`.
-
-#### T33.45.7 FFI and Swift: the desktop contributions
-
-Depends: T33.45.6 · Files: `crates/cox-ffi/src/{session,types}.rs`, `desktop/macos/Packages/CoxUI/…` (Inspector, SessionToolbar, CommandPalette, PluginWidgetView), `desktop/design/DESIGN.md` §6 rows · Design: `docs/design/plugins.md` §15, A134
-
-Check: `forward_only` passes; a snapshot per new view in light and dark; an unknown SF Symbol draws `puzzlepiece.extension` (settles §15.4's **unverified** note).
-
-Execution plan (Claude Code / opus-5.5):
-1. `cox-ffi`: forward `plugin_tabs`, `plugin_toolbar`, `select_plugin_tab`, `plugin_action` and `open_link` on `SessionHandle` (`plugin_action`/`open_link` on `RemoteSessionHandle` too); `PluginTab`, `PluginAction`, `LinkClick`, `PluginAlert`, `AlertAction` as `uniffi::remote` in `types.rs`; `AppHost::plugin_notice` bridged to `Host::plugin_notice` in `host.rs`. Check: `forward_only`, a `host.rs` test that the bridge hands the alert over.
-2. CoxClient/CoxCore: `PluginRun.link`, `PluginView.image`, `PluginTab`, `PluginAction`, `LinkClick`, `PluginAlert`; `SessionClient` gains the five calls (defaults for clients with no plugins), `LiveCoreClient` forwards, `PlatformHost.pluginNotice`; conversions in `PluginConvert.swift`.
-3. CoxPlatform: the notice posted as a system notification with up to two buttons, a button routed to the session's `pluginAction` through `NotificationActions`.
-4. CoxUI: `PluginSymbol` (unknown name → `puzzlepiece.extension`, with a test), plugin tabs in `Inspector`, icon capsules in `SessionToolbar`, the symbol in `CommandPalette`'s well, image and link spans in `PluginWidgetView`; one snapshot per new view in light and dark (references from CI's artifact). App wires the store to them.
-5. Docs: DS§6 rows in `desktop/design/DESIGN.md`, DT§ behaviour in `docs/design/desktop.md`.
 
 #### T33.45.8 SDK and the surfaces example
 
