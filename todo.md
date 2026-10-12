@@ -1,6 +1,5 @@
 # Todo
 
-- T5.9. Terminal pointer shape follows what the cell does (OSC 22)
 - T33.14.2. Filesystem preopens
 - T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
