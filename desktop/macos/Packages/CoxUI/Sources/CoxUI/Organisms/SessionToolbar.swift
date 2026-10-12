@@ -5,7 +5,8 @@
 // `SessionToolbar` (DS§6.4 row `SessionToolbar`, the mockup's `.toolbar`; DT§5.1): the open
 // session's bar above the transcript — where it lives, its title renamed by a double-click
 // (A113), its cost, Stop while a turn runs, the Appearance and inspector buttons with their
-// shortcuts, and the Bypass strip. The model and the mode are the composer's chips (T60.6).
+// shortcuts, the plugins' status segments and toolbar items (PL§15.4), and the Bypass strip.
+// The model and the mode are the composer's chips (T60.6).
 // Separate so the window shell shows the session from one value the core fills, and reports what
 // the person does as intents.
 
@@ -37,16 +38,30 @@ public struct SessionToolbar: View {
     /// The plugins' `status.left` then `status.right` segments (PL§8, T52.17): the first thing
     /// the bar drops when it runs out of room.
     public var pluginStatus: [PluginWidget]
+    /// The plugins' toolbar items (PL§15.4), after the segments and dropped with them.
+    public var pluginActions: [PluginActionItem]
 
     public init(
       title: String = "", project: String = "", branch: String? = nil,
       mode: SessionMode = .ask, cost: String = "", context: String = "",
       contextFraction: Double = 0, isRunning: Bool = false, popover: Popover? = nil,
-      pluginStatus: [PluginWidget] = []
+      pluginStatus: [PluginWidget] = [], pluginActions: [PluginActionItem] = []
     ) {
       (self.title, self.project, self.branch, self.mode) = (title, project, branch, mode)
       (self.cost, self.context, self.contextFraction) = (cost, context, contextFraction)
       (self.isRunning, self.popover, self.pluginStatus) = (isRunning, popover, pluginStatus)
+      self.pluginActions = pluginActions
+    }
+  }
+
+  /// A plugin's toolbar item: `id` is the palette's `plugin:<id>:<command>`.
+  public struct PluginActionItem: Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var symbol: String?
+
+    public init(id: String, title: String, symbol: String?) {
+      (self.id, self.title, self.symbol) = (id, title, symbol)
     }
   }
 
@@ -57,6 +72,8 @@ public struct SessionToolbar: View {
     case toggleInspector
     /// The title the person typed after double-clicking it (A113).
     case rename(String)
+    /// A plugin toolbar item's `id`.
+    case pluginAction(String)
   }
 
   let state: State
@@ -95,10 +112,22 @@ public struct SessionToolbar: View {
         send(.rename($0))
       }
       Spacer(minLength: Space.ml)
-      if !state.pluginStatus.isEmpty {
+      if !state.pluginStatus.isEmpty || !state.pluginActions.isEmpty {
         // `ViewThatFits` falls back to nothing, so the segments go before the cost capsule does.
         ViewThatFits(in: .horizontal) {
-          PluginStatusSegments(widgets: state.pluginStatus)
+          HStack(spacing: Space.ml) {
+            if !state.pluginStatus.isEmpty { PluginStatusSegments(widgets: state.pluginStatus) }
+            ForEach(state.pluginActions, id: \.id) { item in
+              Button {
+                send(.pluginAction(item.id))
+              } label: {
+                Image(systemName: PluginSymbol.name(item.symbol)).symbolStyle(.transcriptH3)
+              }
+              .buttonStyle(CapsuleStyle(.plain, isIcon: true))
+              .help(item.title)
+              .accessibilityLabel(item.title)
+            }
+          }
           Color.clear.frame(width: 0, height: 0)
         }
       }

@@ -35,11 +35,16 @@ public final class SessionStore {
   @ObservationIgnored var terminalCount = 0
   /// Each plugin slot's latest state (T52.17, PL§8), in the order the slots first reported.
   public private(set) var pluginSlots: OrderedDictionary<PluginSlotKey, PluginSlot> = [:]
+  /// The plugins' inspector tabs and toolbar items (PL§15.4): declared when the session opened,
+  /// so read once.
+  public let pluginTabs: [PluginTab]
+  public let pluginToolbar: [PluginAction]
   @ObservationIgnored public let session: any SessionClient
 
   public init(session: any SessionClient) {
     self.session = session
     blocks = Self.keyed(session.snapshot())
+    (pluginTabs, pluginToolbar) = (session.pluginTabs(), session.pluginToolbar())
   }
 
   /// Pulls batches until the session closes or the task is cancelled,
@@ -100,6 +105,21 @@ public final class SessionStore {
   /// The column is now `width`×`height` cells; a shown panel or overlay renders again for it.
   public func pluginArea(width: UInt16, height: UInt16) {
     session.pluginArea(width: width, height: height)
+  }
+
+  /// The inspector shows `plugin`'s tab, `width`×`height` cells, or a built-in one (`nil`).
+  public func selectPluginTab(_ plugin: String?, width: UInt16, height: UInt16) {
+    session.selectPluginTab(plugin, width: width, height: height)
+  }
+
+  /// A toolbar item, palette action or notification button; false for an undeclared id.
+  public func pluginAction(_ id: String) async -> Bool {
+    await session.pluginAction(id)
+  }
+
+  /// A click on a plugin link: opened by the host, or a file for the app to show.
+  public func openLink(_ link: String) -> LinkClick {
+    session.openLink(link)
   }
 
   private static func keyed(_ all: [Block]) -> OrderedDictionary<BlockID, Block> {
@@ -175,5 +195,16 @@ extension SessionStore {
   /// The shown plugin views in one slot, in the order the plugins first reported.
   public func pluginViews(_ kind: PluginSlotKind) -> [PluginSlot] {
     pluginSlots.values.filter { $0.slot == kind && $0.visible && $0.view != nil }
+  }
+
+  /// `plugin`'s inspector tree, once it rendered.
+  public func pluginInspector(_ plugin: String) -> PluginView? {
+    pluginSlots[PluginSlotKey(plugin: plugin, slot: .desktopInspector)]?.view
+  }
+
+  /// The plugin whose inspector tab the core shows: the one clicked, or one a command opened
+  /// (`CommandOut::OpenInspector`), which the window then switches to.
+  public var shownInspector: String? {
+    pluginSlots.values.first { $0.slot == .desktopInspector && $0.visible }?.plugin
   }
 }

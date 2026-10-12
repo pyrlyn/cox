@@ -84,7 +84,24 @@ enum ShellState {
       mode: open.store.status.mode.map(SessionMode.init) ?? .ask,
       cost: figures.cost, context: figures.context, contextFraction: figures.contextFraction,
       isRunning: open.store.isTurnRunning, popover: popover,
-      pluginStatus: PluginWidgets.status(open.store))
+      pluginStatus: PluginWidgets.status(open.store),
+      pluginActions: open.store.pluginToolbar.map {
+        .init(id: $0.id, title: $0.title, symbol: $0.symbol)
+      })
+  }
+
+  /// The plugins' inspector tabs (PL§15.4); a tab for a plugin this session does not run shows
+  /// Changes instead, as after switching to another session.
+  static func inspector(
+    _ open: OpenedSession?, tab: InspectorTab
+  ) -> (tabs: [PluginTabItem], tab: InspectorTab) {
+    let tabs = (open?.store.pluginTabs ?? []).map {
+      PluginTabItem(plugin: $0.plugin, title: $0.title, symbol: $0.symbol)
+    }
+    guard case .plugin(let plugin) = tab, !tabs.contains(where: { $0.plugin == plugin }) else {
+      return (tabs, tab)
+    }
+    return (tabs, .changes)
   }
 
   /// What the model chip names for an external agent's session (`Claude Agent · ACP`), which has

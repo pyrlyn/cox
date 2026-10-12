@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// The inspector's tabs for one session (DT§5.1, T37.29, T37.22.5): Changes, Plan, Context, Tasks
-// and Info read from `SessionStore`, copied into CoxUI's tab states field for field. Here, where
-// CoxUI and CoxModel meet, so the app only places the view: CoxModel decided every text; the
-// intents that stay in the session (revert, rewind, compact) go to the store, a shell task's output
-// opens in a sheet here (T37.22.6), and the ones that change the window (Review, another session)
-// go to the app.
+// The inspector's tabs for one session (DT§5.1, T37.29, T37.22.5): Changes, Plan, Context, Tasks,
+// Info and each plugin's tab (PL§15.4) read from `SessionStore`, copied into CoxUI's tab states
+// field for field. Here, where CoxUI and CoxModel meet, so the app only places the view: CoxModel
+// decided every text; the intents that stay in the session (revert, rewind, compact) go to the
+// store, a shell task's output opens in a sheet here (T37.22.6), and the ones that change the
+// window (Review, another session) go to the app.
 
 import CoxClient
 import CoxModel
@@ -73,6 +73,10 @@ public struct SessionInspector: View {
         state: ContextTab.State(store.contextTab(cacheHit: cacheHit), costs: costs), send: compact)
     case .tasks: TasksTab(state: TasksTab.State(store.tasks), send: opened)
     case .info: InfoTab(state: InfoTab.State(info, agents: agents))
+    case .plugin(let plugin):
+      PluginInspectorTab(
+        title: store.pluginTabs.first { $0.plugin == plugin }?.title ?? plugin,
+        widget: store.pluginInspector(plugin).map(PluginWidget.init))
     }
   }
 
@@ -89,7 +93,7 @@ public struct SessionInspector: View {
     case .changes: changes = (try? await store.changesTab()) ?? changes
     case .plan: plan = store.session.plan()
     case .context: costs = (try? await store.costHistory()) ?? costs
-    case .tasks: break
+    case .tasks, .plugin: break
     case .info: info = (try? await store.infoTab()) ?? info
     }
   }

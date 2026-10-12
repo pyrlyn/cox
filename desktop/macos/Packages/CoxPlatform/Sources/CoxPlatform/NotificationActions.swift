@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// Actionable notifications (DT§5.6, T37.27, T37.44.15): an approval posts with Allow once, Deny
-// and Open, a question with a typed answer, and an action on either comes back as the session and
-// the `Intent` to send it, or as the session to bring forward. Separate from `MacHost` so the
-// note-to-content and action-to-intent mappings are plain functions a test checks without posting
-// a notification; `NotificationResponder` is the thin delegate the app installs, and the only
-// part that needs the notification centre.
+// Actionable notifications (DT§5.6, T37.27, T37.44.15): an approval posts with Allow once, Deny and
+// Open, a question with a typed answer, and an action on either comes back as the session and the
+// `Intent` to send it, or as the session to bring forward. A plugin's alert (PL§15.4) posts with
+// the buttons it declared, and a click comes back as the `plugin:<id>:<command>` to run. Separate
+// from `MacHost` so the note-to-content and action-to-intent mappings are plain functions a test
+// checks without posting a notification; `NotificationResponder` is the thin delegate the app
+// installs, and the only part that needs the notification centre.
 
 import CoxClient
 import Foundation
@@ -24,6 +25,16 @@ public struct NotificationRoute: Equatable, Sendable {
   }
 }
 
+/// A plugin button's click: the session and the `plugin:<id>:<command>` it runs.
+public struct PluginRoute: Equatable, Sendable {
+  public var session: String
+  public var id: String
+
+  public init(session: String, id: String) {
+    (self.session, self.id) = (session, id)
+  }
+}
+
 public enum NotificationActions {
   static let approval = "cox.approval"
   static let question = "cox.question"
@@ -33,6 +44,8 @@ public enum NotificationActions {
   static let answer = "cox.answer"
   static let sessionKey = "session"
   static let callKey = "call"
+  static let pluginPrefix = "plugin:"
+  static let pluginCategory = "cox.plugin."
 
   /// Allow once, Deny and Open on an approval (mockup 23) — allow for session and edit need the
   /// app, by design (DT§5.6) — and a typed answer on a question. Allow once asks for the unlocked
@@ -70,6 +83,43 @@ public enum NotificationActions {
       }
     }
     return content
+  }
+
+  /// What a plugin's alert posts: its plugin as subtitle, grouped by session, and its buttons in
+  /// a category named by their ids, so alerts with the same buttons share one. A button runs a
+  /// command as if typed, so it asks for the unlocked Mac, as Allow once does.
+  static func content(
+    for alert: PluginAlert
+  ) -> (content: UNMutableNotificationContent, category: UNNotificationCategory?) {
+    let content = UNMutableNotificationContent()
+    (content.title, content.subtitle, content.body) = (alert.title, alert.plugin, alert.body)
+    content.threadIdentifier = alert.session
+    content.userInfo[sessionKey] = alert.session
+    if alert.warn { content.sound = .default }
+    guard !alert.actions.isEmpty else { return (content, nil) }
+    content.categoryIdentifier = pluginCategory + alert.actions.map(\.id).joined(separator: " ")
+    let actions = alert.actions.map {
+      UNNotificationAction(identifier: $0.id, title: $0.label, options: [.authenticationRequired])
+    }
+    let category = UNNotificationCategory(
+      identifier: content.categoryIdentifier, actions: actions, intentIdentifiers: [], options: [])
+    return (content, category)
+  }
+
+  /// `adding` over `existing`: the centre keeps one set, and replacing it whole would strip the
+  /// buttons off a plugin alert still on screen.
+  static func merged(
+    _ existing: Set<UNNotificationCategory>, _ adding: Set<UNNotificationCategory>
+  ) -> Set<UNNotificationCategory> {
+    let replaced = Set(adding.map(\.identifier))
+    return existing.filter { !replaced.contains($0.identifier) }.union(adding)
+  }
+
+  /// The plugin action a button runs; `nil` for any other action.
+  public static func plugin(action: String, userInfo: [AnyHashable: Any]) -> PluginRoute? {
+    guard action.hasPrefix(pluginPrefix), let session = userInfo[sessionKey] as? String
+    else { return nil }
+    return PluginRoute(session: session, id: action)
   }
 
   /// The intent an action sends; `nil` for Open, a plain click, an unknown action or an empty
@@ -118,18 +168,20 @@ public enum NotificationActions {
 }
 
 /// The notification centre's delegate: an action on a cox notification goes to `handle`, which
-/// the app points at the session's store, and Open or a click on the notification itself goes to
-/// `show` with its session. The app keeps it alive and sets it as
+/// the app points at the session's store, a plugin's button goes to `act`, and Open or a click on
+/// the notification itself goes to `show` with its session. The app keeps it alive and sets it as
 /// `UNUserNotificationCenter.current().delegate` at launch.
 public final class NotificationResponder: NSObject, UNUserNotificationCenterDelegate, Sendable {
   private let handle: @Sendable (NotificationRoute) -> Void
   private let show: @Sendable (String) -> Void
+  private let act: @Sendable (PluginRoute) -> Void
 
   public init(
     handle: @escaping @Sendable (NotificationRoute) -> Void,
-    show: @escaping @Sendable (String) -> Void = { _ in }
+    show: @escaping @Sendable (String) -> Void = { _ in },
+    act: @escaping @Sendable (PluginRoute) -> Void = { _ in }
   ) {
-    (self.handle, self.show) = (handle, show)
+    (self.handle, self.show, self.act) = (handle, show, act)
   }
 
   public func userNotificationCenter(
@@ -137,6 +189,8 @@ public final class NotificationResponder: NSObject, UNUserNotificationCenterDele
   ) async {
     let text = (response as? UNTextInputNotificationResponse)?.userText
     let userInfo = response.notification.request.content.userInfo
+    let plugin = NotificationActions.plugin(action: response.actionIdentifier, userInfo: userInfo)
+    if let plugin { return act(plugin) }
     let route = NotificationActions.route(
       action: response.actionIdentifier, userInfo: userInfo, text: text)
     let shown = NotificationActions.shows(action: response.actionIdentifier, userInfo: userInfo)

@@ -655,7 +655,11 @@ Default window 1 440 × 900, minimum 900 × 600. A three-column
   a thin red strip under the whole toolbar for as long as it is on. The model
   and the permission mode are not here: they are the composer's chips (§5.3),
   so a client places them beside the text they apply to, and the toolbar keeps
-  only the mode it needs for the strip (T60.6, A139).
+  only the mode it needs for the strip (T60.6, A139). A plugin's toolbar items
+  (PL§15.4, at most two per plugin) follow its status segments as icon
+  capsules, the title as tooltip, and drop with them when the bar is narrow; a
+  click runs the item's `plugin:<id>:<command>` through `plugin_action`
+  (T33.45.7).
 - **Sidebar**: filter field; "Needs you" (sessions with a pending approval or
   question, orange count); "Running"; then projects as disclosure groups.
   A row: status glyph (● running, ◐ waiting for you, ○ idle, ✕ error),
@@ -676,6 +680,14 @@ Default window 1 440 × 900, minimum 900 × 600. A three-column
   - *Tasks* — subagents and background calls: label, tier, state, cost; click
     opens the child transcript in the inspector.
   - *Info* — session id, cwd, worktree, config provenance, rollout path.
+  - one tab per plugin that declares one (PL§15.4, T33.45.7): its SF Symbol
+    after Info, the title as tooltip; a name the system does not ship draws
+    `puzzlepiece.extension`. Its tree draws in an `InspectorSection`.
+    Selecting it calls `select_plugin_tab` with the inspector's width in cells
+    (the height is the screen's, since the inspector scrolls); any other tab
+    stops it rendering. A plugin command's `OpenInspector` switches to the tab
+    and shows the inspector. The strip scrolls sideways when the tabs outgrow
+    the inspector's width.
 
 ### 5.2 Transcript blocks
 
@@ -880,8 +892,10 @@ turn in the list. Per-hunk revert is M2.
 current project and slash commands (mockup 12, T37.44.13). `cox_app::palette::rank`
 orders it: actions, then sessions, then commands and files, best match first
 within each group and at most five of each, with the matched characters for the
-row to draw bold; commands and files join only once something is typed. ⏎ runs
-the selected row: an action runs, a session shows in the window, a command or
+row to draw bold; commands and files join only once something is typed. A
+plugin's palette action (PL§15.4) is an action row with id
+`plugin:<id>:<command>` and the plugin's symbol in its well; ⏎ hands it to
+`plugin_action` (T33.45.7). ⏎ runs the selected row: an action runs, a session shows in the window, a command or
 file lands at the end of the composer's draft. Esc or a click on the scrim
 closes it. The whole app is keyboard-drivable:
 
@@ -915,7 +929,17 @@ forward on the session's window, where the pending approval waits (T37.44.15).
 `NotificationActions` maps a note to its content and an action back to the
 session and `Intent`, or Open to the session it shows, as plain functions,
 tested without posting; the app sets `NotificationResponder` as the centre's
-delegate and sends the intent to that session (T37.27). Dock badge = pending approvals + questions across
+delegate and sends the intent to that session (T37.27). A plugin's
+`cox_desktop_notify` (PL§15.4, T33.45.7) reaches `Host::plugin_notice`:
+`MacHost` returns false, so the alert stays the session's notice, while
+`FrontSession` names that session (the key window's while cox is frontmost);
+otherwise it posts the title, the plugin as subtitle and the body, with up to
+two buttons in a category named by their ids (they ask for the unlocked Mac,
+since a button runs a command as if typed), and `NotificationResponder` sends a
+click to `plugin_action` in that session. Adding a plugin category keeps the
+existing ones. A link in a plugin's output goes to `open_link`: the host opens
+or confirms a web link, and a local session's confined path is revealed in
+Finder, never opened. Dock badge = pending approvals + questions across
 all sessions. The M2 menu-bar extra lists running sessions and the inbox.
 
 ### 5.7 Settings

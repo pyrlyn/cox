@@ -18,7 +18,8 @@ extension CoxFFIBindings.PaletteItem {
       case .command: .command
       case .file: .file
       }
-    self.init(kind: kind, id: value.id, title: value.title, detail: value.detail)
+    self.init(
+      kind: kind, id: value.id, title: value.title, detail: value.detail, symbol: value.symbol)
   }
 }
 
@@ -33,7 +34,8 @@ extension CoxClient.PaletteHit {
       }
     self.init(
       item: CoxClient.PaletteItem(
-        kind: kind, id: value.item.id, title: value.item.title, detail: value.item.detail),
+        kind: kind, id: value.item.id, title: value.item.title, detail: value.item.detail,
+        symbol: value.item.symbol),
       matched: value.matched.map { Int($0) })
   }
 }

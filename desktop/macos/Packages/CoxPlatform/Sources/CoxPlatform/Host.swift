@@ -10,21 +10,41 @@
 // store stays usable without it. Only `secret` and the URL
 // check are tested: the notification centre needs an app bundle, and a test
 // must never post a notification or open a URL. T51.9: with a
-// `BrowserController`, the browser methods drive its page.
+// `BrowserController`, the browser methods drive its page. T33.45.7: a plugin's
+// alert posts only while `FrontSession` shows another session or none.
 
 import AppKit
 import CoxClient
 import Foundation
+import Synchronization
 import UserNotifications
+
+/// The session the person is looking at: the key window's while cox is frontmost. Rust asks
+/// from its own threads, so the windows write it here rather than the host reading SwiftUI state.
+public final class FrontSession: Sendable {
+  public static let shared = FrontSession()
+  private let session = Mutex<String?>(nil)
+
+  public init() {}
+
+  public func show(_ id: String) { session.withLock { $0 = id } }
+
+  /// A window that loses focus clears only its own session: another may have taken over.
+  public func hide(_ id: String) { session.withLock { if $0 == id { $0 = nil } } }
+
+  public func shows(_ id: String) -> Bool { session.withLock { $0 == id } }
+}
 
 public struct MacHost: PlatformHost {
   private let secrets: any SecretStore
   private let browser: BrowserController?
+  private let front: FrontSession
 
   public init(
-    secrets: any SecretStore = KeychainSecretStore(), browser: BrowserController? = nil
+    secrets: any SecretStore = KeychainSecretStore(), browser: BrowserController? = nil,
+    front: FrontSession = .shared
   ) {
-    (self.secrets, self.browser) = (secrets, browser)
+    (self.secrets, self.browser, self.front) = (secrets, browser, front)
   }
 
   /// A Keychain error reads as no key: Rust then reports the key missing and
@@ -38,13 +58,33 @@ public struct MacHost: PlatformHost {
       let center = UNUserNotificationCenter.current()
       let allowed = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
       guard allowed == true else { return }
-      center.setNotificationCategories(NotificationActions.categories)
+      center.setNotificationCategories(
+        NotificationActions.merged(
+          await center.notificationCategories(), NotificationActions.categories))
       let request = UNNotificationRequest(
         identifier: UUID().uuidString, content: NotificationActions.content(for: note),
         trigger: nil)
       try? await center.add(request)
       try? await center.setBadgeCount(note.badge)
     }
+  }
+
+  /// PL§15.4: a session in front shows the alert as its own notice (false); any other posts.
+  public func pluginNotice(_ alert: PluginAlert) -> Bool {
+    guard !front.shows(alert.session) else { return false }
+    Task {
+      let center = UNUserNotificationCenter.current()
+      let allowed = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
+      guard allowed == true else { return }
+      let (content, category) = NotificationActions.content(for: alert)
+      if let category {
+        center.setNotificationCategories(
+          NotificationActions.merged(await center.notificationCategories(), [category]))
+      }
+      try? await center.add(
+        UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+    return true
   }
 
   public func badge(_ count: Int) {

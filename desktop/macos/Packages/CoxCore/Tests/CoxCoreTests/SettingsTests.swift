@@ -20,6 +20,7 @@ final class SilentHost: AppHost {
   func badge(badge: UInt32) {}
   func openUrl(url: String) {}
   func confirmOpenUrl(origin: String, url: String) {}
+  func pluginNotice(alert: CoxFFIBindings.PluginAlert) -> Bool { false }
   func secret(section: String) -> String? { nil }
   func hasBrowser() -> Bool { false }
   func browserLoad(url: String) async throws { throw CoxFFIBindings.BrowserFailure.NoPage }

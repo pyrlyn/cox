@@ -22,6 +22,10 @@ public protocol PlatformHost: Sendable {
   /// T52.20: a web link a session on the ssh host `origin` asked to show. That machine chose it,
   /// so the host opens it only once the person confirms.
   func confirmOpen(_ url: String, from origin: String)
+  /// PL§15.4: a plugin's notice as a system notification whose buttons run its commands. True
+  /// when posted; false while the session shows in the frontmost window, so the transcript
+  /// tells it instead.
+  func pluginNotice(_ alert: PluginAlert) -> Bool
   /// T51.8: whether there is a page the agent may drive (the browser
   /// pane). Without one, sessions get no browser tools.
   var hasBrowser: Bool { get }
@@ -41,9 +45,10 @@ extension PlatformHost {
   public func browserSnapshot() async throws(BrowserFailure) -> [UInt8] { throw .noPage }
 }
 
-/// A host that cannot ask opens no remote link.
+/// A host that cannot ask opens no remote link, nor posts a plugin's notice.
 extension PlatformHost {
   public func confirmOpen(_ url: String, from origin: String) {}
+  public func pluginNotice(_ alert: PluginAlert) -> Bool { false }
 }
 
 /// What the browser pane reports of its page (T51.8).

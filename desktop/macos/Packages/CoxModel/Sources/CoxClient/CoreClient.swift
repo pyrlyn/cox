@@ -105,6 +105,14 @@ public protocol SessionClient: AnyObject, Sendable {
   /// The window's area in cells of the plugin text's font, so a shown panel or overlay renders
   /// again for it (`cox_app::live::LiveSession::plugin_area`, PL§8 "resized", T52.17).
   func pluginArea(width: UInt16, height: UInt16)
+  /// PL§15.4's desktop contributions, as `LiveSession`'s `plugin_tabs`, `plugin_toolbar`,
+  /// `select_plugin_tab` (`nil` for a built-in tab; only the selected one renders),
+  /// `plugin_action` (false for an id no plugin declared) and `open_link` answer them.
+  func pluginTabs() -> [PluginTab]
+  func pluginToolbar() -> [PluginAction]
+  func selectPluginTab(_ plugin: String?, width: UInt16, height: UInt16)
+  func pluginAction(_ id: String) async -> Bool
+  func openLink(_ link: String) -> LinkClick
 }
 
 extension SessionClient {
@@ -272,6 +280,9 @@ public final class FixtureSession: SessionClient {
   public func pluginArea(width: UInt16, height: UInt16) {
     state.withLock { $0.areas.append([width, height]) }
   }
+
+  /// What its plugins declare for the desktop, and what was asked of them (PL§15.4).
+  public let plugins = FixturePlugins()
 
   /// A fixture starts from a fresh session: no blocks.
   public func snapshot() -> [Block] { [] }

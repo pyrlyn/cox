@@ -165,6 +165,6 @@ extension Variant {
   }
 
   @Test func inspectorTabsFollowTheDesignOrder() {
-    #expect(InspectorTab.allCases.map(\.title) == ["Changes", "Plan", "Context", "Tasks", "Info"])
+    #expect(InspectorTab.builtIn.map(\.title) == ["Changes", "Plan", "Context", "Tasks", "Info"])
   }
 }

@@ -108,7 +108,8 @@ final class AppModel {
       connector: launch.isFixture ? nil : try? launch.live.get(), settings: settings)
     let responder = NotificationResponder(
       handle: { [weak self] route in Task { @MainActor in self?.route(route) } },
-      show: { [weak self] session in Task { @MainActor in self?.bringForward(session) } })
+      show: { [weak self] session in Task { @MainActor in self?.bringForward(session) } },
+      act: { [weak self] plugin in Task { @MainActor in self?.route(plugin) } })
     // The centre holds its delegate weakly; this model lives as long as the app.
     UNUserNotificationCenter.current().delegate = responder
     self.responder = responder
@@ -170,6 +171,12 @@ final class AppModel {
   func route(_ route: NotificationRoute) {
     guard let store = sessions[route.session]?.store else { return }
     Task { _ = try? await store.send(route.intent) }
+  }
+
+  /// A plugin alert's button (PL§15.4): its command runs in the session that raised it.
+  func route(_ route: PluginRoute) {
+    guard let store = sessions[route.session]?.store else { return }
+    Task { _ = await store.pluginAction(route.id) }
   }
 
   private struct WeakSession {
