@@ -6,9 +6,11 @@
 // one row per item, an expired one read-only, in the core's words (T58.4.1). Here, not in CoxUI,
 // because the store owns what the section shows (DS§1); the app copies each row into CoxUI's
 // `Sidebar.Session` field for field and re-reads the inbox whenever the host hears of a new item
-// or a lower badge.
+// or a lower badge. The client is the launch's `DependencyValues.inboxClient` (DT§4.6), so no
+// caller threads it through.
 
 import CoxClient
+import Dependencies
 import Observation
 
 public struct InboxRow: Identifiable, Equatable, Sendable {
@@ -48,7 +50,12 @@ public final class InboxStore {
   public private(set) var items: [InboxItem] = []
   @ObservationIgnored private let client: any InboxClient
 
-  public init(client: any InboxClient) { self.client = client }
+  /// `nil` when the launch's core keeps no inbox (a failed launch), so there is no section.
+  public init?() {
+    @Dependency(\.inboxClient) var inboxClient
+    guard let inboxClient else { return nil }
+    client = inboxClient
+  }
 
   /// Reads the inbox again; the app calls it on each `PlatformHost.notify` and `badge`.
   public func refresh() {

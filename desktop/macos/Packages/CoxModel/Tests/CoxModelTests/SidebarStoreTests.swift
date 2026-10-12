@@ -9,7 +9,7 @@
 // footer counts the usable providers (A110) with the checklist's key health as its dot.
 
 import CoxClient
-import Dependencies
+import DependenciesTestSupport
 import Foundation
 import Testing
 
@@ -99,18 +99,16 @@ private func listed() -> SidebarStore {
   #expect(Set(client.lastFolded) == ["/src/acme-web"])
 }
 
+private let waiting = InboxItem(
+  session: "s1", source: nil,
+  need: .approval(call: "c1", tool: "write", subject: "a.rs", why: .risk(risk: .write)),
+  expired: false, seq: 1, title: "write a.rs", subtitle: "approval waiting", status: .waiting)
+
 /// A recording has no workspace: the inbox is still the first section.
 @MainActor
-@Test func theInboxComesFirstWithItsCount() {
-  let item = InboxItem(
-    session: "s1", source: nil,
-    need: .approval(call: "c1", tool: "write", subject: "a.rs", why: .risk(risk: .write)),
-    expired: false, seq: 1, title: "write a.rs", subtitle: "approval waiting", status: .waiting)
-  let store = withDependencies {
-    $0.inboxClient = FixedInbox(items: [item])
-  } operation: {
-    SidebarStore(workspace: nil)
-  }
+@Test(.dependency(\.inboxClient, FixedInbox(items: [waiting])))
+func theInboxComesFirstWithItsCount() {
+  let store = SidebarStore(workspace: nil)
   store.refresh()
   let needs = store.sections.first
   #expect(needs?.id == "needs-you")

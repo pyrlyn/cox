@@ -9,7 +9,6 @@
 // time it changed.
 
 import CoxClient
-import Dependencies
 import Foundation
 import Observation
 
@@ -67,11 +66,8 @@ public final class SidebarStore {
   @ObservationIgnored public var didRefresh: (@MainActor () -> Void)?
 
   /// A fixture launch has no workspace, a failed one no inbox: the list shows what there is.
-  /// The inbox is `DependencyValues.inboxClient`'s, read once here.
   public init(workspace: (any WorkspaceClient)?, locale: Locale = .current) {
-    @Dependency(\.inboxClient) var inboxClient
-    (self.workspace, self.locale) = (workspace, locale)
-    inbox = inboxClient.map { InboxStore(client: $0) }
+    (self.workspace, self.locale, inbox) = (workspace, locale, InboxStore())
   }
 
   /// The projects the list reads, and the sessions it reads of each.
