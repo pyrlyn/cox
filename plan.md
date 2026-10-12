@@ -137,7 +137,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T59.6 | in progress | P3 | 3 | 10% | Claude Code / sonnet-5.5 |
 | T59.7 | todo | P3 | 4 | 0% | |
 | T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
@@ -2066,35 +2065,6 @@ mise exec -- cargo fmt --check
 Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
 
 Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
-
-#### T59.6 LSP `definition` and `references` tools on the running servers
-
-Model: sonnet · Status: in progress · Depends: T59.3 · Size: ~190 · Priority: P3 · Complexity: 3
-
-Execution plan: `lsp/nav.rs` holds the pure part (response parsing for `Location`, `Location[]` and `LocationLink[]`, UTF-16 column conversion, grep fallback patterns, line cap with archive) and the two tools `definition` and `references` over a shared `LspPool`, registered next to `diagnostics` in `cox-session`'s `with_lsp`. `server.rs` gains `Server::definition`/`references`, which sync the file the way `diagnostics` does (the shared sync step is extracted) and then send the request. Paths go through `confine`; locations the server names outside the roots print as bare `path:line:col` and are never read. Verify with fake-server tests for both requests, the fallback and the cap.
-
-Goal: `definition(path, line, col)` and `references(path, line, col)` answer from a language server when one runs for the file and fall back to an `outline`/`grep` answer with a `(no server)` note otherwise, so navigation needs no extra `grep` round trip.
-
-Files:
-- `crates/cox-tools/src/lsp/client.rs`
-- `crates/cox-tools/src/lsp/server.rs`
-- `crates/cox-tools/src/lsp/nav.rs` (new)
-
-Steps:
-1. Hand-rolled wire types for `textDocument/definition` and `textDocument/references` next to the existing ones (`client.rs:174`; P41 rejects `lsp-types`, `plan.md:1245-1253`).
-2. `Server` methods next to `start` (`server.rs:194`); results as `path:line` lines, capped and archived over the cap.
-3. Use `LspPool::running_for` from T59.3; the fallback is a plain-text answer, never a spawn from this tool unless `diagnostics` would spawn too.
-
-Check:
-```bash
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: fake-server tests for both requests and the fallback.
-
-Out of scope: rename (T59.7), hover, workspace symbols.
 
 #### T59.7 `rename_symbol` through the server's `textDocument/rename`
 
