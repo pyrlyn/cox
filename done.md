@@ -10813,3 +10813,66 @@ Done when the new test passes and fails with step 1 reverted.
 Out of scope: archiving the full answer, which is T66.2; the other inline boundary walks.
 
 Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T33.45.3 Host: load filter, granted filter, `cox:desktop/v1`
+
+Depends: T33.45.1, T33.45.2 · Design: `docs/design/plugins.md` §15, A134
+
+The five implementation cards below split the original scope by file and keep each change under the task limit. This parent card stays open until all five cards and the combined Check pass.
+
+Check: `plugin_outside_its_surfaces_is_skipped_with_a_notice`, `other_surface_init_entries_are_dropped_with_a_notice`, `desktop_notify_on_terminal_is_not_on_this_surface` (inline WAT, no build).
+
+#### T33.45.3.1 Host functions
+Model: - · Status: done 2026-10-12 · Depends: T33.45.1, T33.45.2 · Size: ~100 · Files: `crates/cox-plugin/src/hostfn.rs`
+Goal: register the desktop host function and return `NotOnThisSurface` on terminal sessions.
+Check: `desktop_notify_on_terminal_is_not_on_this_surface` passes.
+
+#### T33.45.3.2 Live plugin state
+Model: - · Status: done 2026-10-12 · Depends: T33.45.3.1 · Size: ~140 · Files: `crates/cox-plugin/src/live.rs`
+Goal: filter granted capabilities and initialization contributions by the active surface.
+Check: `other_surface_init_entries_are_dropped_with_a_notice` passes.
+
+#### T33.45.3.3 Session plugin discovery
+Model: - · Status: done 2026-10-12 · Depends: T33.45.3.2 · Size: ~100 · Files: `crates/cox-session/src/plugins.rs`
+Goal: skip plugins that do not declare the active surface and retain an informational notice.
+Check: `plugin_outside_its_surfaces_is_skipped_with_a_notice` passes.
+
+#### T33.45.3.4 Session surface wiring
+Model: - · Status: done 2026-10-12 · Depends: T33.45.3.3 · Size: ~20 · Files: `crates/cox-session/src/lib.rs`
+Goal: pass `SessionSpec.surface` into plugin discovery and emit informational plugin notices.
+Check: the existing plugin-surface test verifies the info entry is retained; full `cox-session` tests and workspace gates pass. The assembly's `Level::Info` emission is verified by the integration path in review.
+
+#### T33.45.3.5 ACP plugin surface
+Model: - · Status: done 2026-10-12 · Depends: T33.45.3.3 · Size: ~10 · Files: `crates/cox-session/src/acp_session.rs`
+Goal: discover external-agent plugins against the ACP surface.
+Check: `cox-session` tests and workspace gates pass.
+
+Progress (2026-10-11): T33.45.3.1–.5 are implemented in commits `2908fa3b`, `9bcac57e`, `2fc5597a`, `90e02154` and `27613368`. The `cox-plugin` and `cox-session` suites pass (159/159), focused Clippy with `-D warnings` and `cargo fmt --check` pass, and `cox doctor` passes with a scratch `COX_HOME` and a test environment key. The workspace gates remain blocked before project tests by the missing `wasm32-unknown-unknown` target in `cox-plugin-fixtures` and by the packaged whisper.cpp source lacking its `tests`/`examples` directories. Keep the parent and child cards open until those gates can run cleanly.
+
+Status: done 2026-10-12 · Implemented in #211 (commits `2908fa3b`, `9bcac57e`, `2fc5597a`, `90e02154`, `27613368`); closed by Claude Code / opus-5.5 under T33.45.5 once the gates the progress note waited on could run.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin -p cox-session -p cox-plugin-api -E 'test(plugin_outside_its_surfaces_is_skipped_with_a_notice) | test(other_surface_init_entries_are_dropped_with_a_notice) | test(desktop_notify_on_terminal_is_not_on_this_surface) | test(plugin_api_reference_covers_both_schemas)'` — 4 passed; `wasm32-unknown-unknown` is installed through mise, so `cox-plugin-fixtures` builds; `mise exec -- cargo nextest run -p cox-app -p cox-ffi -p cox-plugin -p cox-session` — 431 passed; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T33.45.5 App core: inspector tab, toolbar and palette actions
+
+Depends: T33.45.3 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/palette.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: `cox-app` tests: the tab renders only while selected, an action runs its command, an action naming an undeclared command is dropped, `plugin_keys` is gone. Coordinate with T58.4 on `live.rs`.
+
+Plan: (1) `plugin_ui.rs`: `PluginSlots` tracks the selected inspector tab and its area in cells; `Slot::DesktopInspector` is visible only while its plugin's tab is selected, so it renders only then; `select_tab` and `open_inspector` (for `CommandOut::OpenInspector`). `PluginUi::declare` takes `InitOut.desktop` in place of the keys: the tab and actions are sanitized, a symbol outside `is_symbol_name` becomes `puzzlepiece.extension`, the toolbar is capped at `MAX_TOOLBAR_ACTIONS`, and an action whose command is not among the plugin's granted commands is dropped with a notice; `action(id)` asks `cox_command` for `plugin:<id>:<command>`. The keys, `PluginKey` and `key` go. (2) `palette.rs`: `PaletteItem.symbol` (optional, serde and UniFFI default, so existing callers keep compiling). (3) `live.rs`: `plugin_tabs`, `plugin_toolbar`, `select_plugin_tab`, `plugin_action`; plugin palette actions join `palette`; `OpenInspector` selects the tab; declare notices are emitted once the session is open; `plugin_keys`/`plugin_key` removed (and their `cox-ffi` forwards, which no Swift view calls). Verify with `cargo nextest run -p cox-app -p cox-ffi`, clippy and fmt.
+
+Status: done 2026-10-12 · Model: Claude Code / opus-5.5
+
+Result: `PluginSlots` keeps the selected inspector tab and the inspector's own size; `Slot::DesktopInspector` is visible only while selected, so it renders only then, and `CommandOut::OpenInspector` selects it (a plugin without a tab changes nothing). `PluginUi::declare` takes `InitOut.desktop` instead of keys: tabs and actions are sanitized, an invalid symbol becomes `puzzlepiece.extension`, the toolbar keeps at most `MAX_TOOLBAR_ACTIONS`, an action naming a command outside the plugin's granted commands is dropped with a notice that the live session emits once open; `action("plugin:<id>:<command>")` asks `cox_command`. `LiveSession` gains `plugin_tabs`, `plugin_toolbar`, `select_plugin_tab`, `plugin_action`, and `palette` adds the plugin palette actions to the Actions group; `PaletteItem.symbol` is optional with serde and UniFFI defaults. `plugin_keys`/`plugin_key`/`PluginKey` are removed from `cox-app` and their `cox-ffi` forwards (no Swift caller). Not done: the FFI exports of the new `LiveSession` methods and the Swift views (T33.45.7); no run of the real binary, since the binary's TUI does not link `cox-app` and `tests/app.rs` opens real sessions against a scratch `COX_HOME`.
+
+Check output: `mise exec -- cargo nextest run -p cox-app -p cox-ffi -p cox-plugin -p cox-session` — 431 passed, including `inspector_tab_renders_only_while_selected`, `plugin_action_runs_its_command` and `plugin_action_naming_an_undeclared_command_is_dropped`; `plugin_keys` no longer appears in `crates/cox-app` or `crates/cox-ffi` (`grep -rn plugin_key crates/cox-app crates/cox-ffi` is empty); `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T33.45.9 Docs: the three-part plugin API reference
+
+Depends: T33.45.1, T33.45.2 · Files: `docs/plugins.md` (or `docs/plugins/api.md`), its generator and drift test · Design: `docs/design/plugins.md` §15, A134
+
+Check: every field of `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` appears under its part (shared, terminal-only, desktop-only), checked by test.
+
+Status: done 2026-10-12 · Implemented in #211 (commit "T33.45.9: Document the three-part plugin API": the `docs/plugins.md` API field index generated by `scripts/plugin_api_reference.py`, each field under its part); closed by Claude Code / opus-5.5 under T33.45.5.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin-api -E 'test(plugin_api_reference_covers_both_schemas)'` — 1 passed (the drift test runs the generator against `docs/plugin.schema.json` and `docs/plugin-abi.schema.json`).

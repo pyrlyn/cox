@@ -61,18 +61,10 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.43 | todo | P1 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
-| T33.45.3 | todo | P2 | 4 | 0% | |
-| T33.45.3.1 | todo | P2 | 2 | 90% | |
-| T33.45.3.2 | todo | P2 | 2 | 90% | |
-| T33.45.3.3 | todo | P2 | 2 | 90% | |
-| T33.45.3.4 | todo | P2 | 2 | 90% | |
-| T33.45.3.5 | todo | P2 | 1 | 90% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
-| T33.45.5 | in progress | P2 | 4 | 10% | Claude Code / opus-5.5 |
 | T33.45.6 | todo | P2 | 3 | 0% | |
 | T33.45.7 | todo | P2 | 4 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
-| T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
@@ -1160,54 +1152,11 @@ Check: the API structure section is in `docs/design/plugins.md` with its §6 ame
 
 Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and amendment A134, approved by the creator; the build is T33.45.1–T33.45.10 below. This card closes when they are done.
 
-#### T33.45.3 Host: load filter, granted filter, `cox:desktop/v1`
-
-Depends: T33.45.1, T33.45.2 · Design: `docs/design/plugins.md` §15, A134
-
-The five implementation cards below split the original scope by file and keep each change under the task limit. This parent card stays open until all five cards and the combined Check pass.
-
-Check: `plugin_outside_its_surfaces_is_skipped_with_a_notice`, `other_surface_init_entries_are_dropped_with_a_notice`, `desktop_notify_on_terminal_is_not_on_this_surface` (inline WAT, no build).
-
-#### T33.45.3.1 Host functions
-Model: - · Status: open · Depends: T33.45.1, T33.45.2 · Size: ~100 · Files: `crates/cox-plugin/src/hostfn.rs`
-Goal: register the desktop host function and return `NotOnThisSurface` on terminal sessions.
-Check: `desktop_notify_on_terminal_is_not_on_this_surface` passes.
-
-#### T33.45.3.2 Live plugin state
-Model: - · Status: open · Depends: T33.45.3.1 · Size: ~140 · Files: `crates/cox-plugin/src/live.rs`
-Goal: filter granted capabilities and initialization contributions by the active surface.
-Check: `other_surface_init_entries_are_dropped_with_a_notice` passes.
-
-#### T33.45.3.3 Session plugin discovery
-Model: - · Status: open · Depends: T33.45.3.2 · Size: ~100 · Files: `crates/cox-session/src/plugins.rs`
-Goal: skip plugins that do not declare the active surface and retain an informational notice.
-Check: `plugin_outside_its_surfaces_is_skipped_with_a_notice` passes.
-
-#### T33.45.3.4 Session surface wiring
-Model: - · Status: open · Depends: T33.45.3.3 · Size: ~20 · Files: `crates/cox-session/src/lib.rs`
-Goal: pass `SessionSpec.surface` into plugin discovery and emit informational plugin notices.
-Check: the existing plugin-surface test verifies the info entry is retained; full `cox-session` tests and workspace gates pass. The assembly's `Level::Info` emission is verified by the integration path in review.
-
-#### T33.45.3.5 ACP plugin surface
-Model: - · Status: open · Depends: T33.45.3.3 · Size: ~10 · Files: `crates/cox-session/src/acp_session.rs`
-Goal: discover external-agent plugins against the ACP surface.
-Check: `cox-session` tests and workspace gates pass.
-
-Progress (2026-10-11): T33.45.3.1–.5 are implemented in commits `2908fa3b`, `9bcac57e`, `2fc5597a`, `90e02154` and `27613368`. The `cox-plugin` and `cox-session` suites pass (159/159), focused Clippy with `-D warnings` and `cargo fmt --check` pass, and `cox doctor` passes with a scratch `COX_HOME` and a test environment key. The workspace gates remain blocked before project tests by the missing `wasm32-unknown-unknown` target in `cox-plugin-fixtures` and by the packaged whisper.cpp source lacking its `tests`/`examples` directories. Keep the parent and child cards open until those gates can run cleanly.
-
 #### T33.45.4 TUI: links, image `alt`, surfaces in listings
 
 Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
 
 Check: insta snapshots of a linked span with and without OSC 8 and of an image's `alt`; `cox plugin list --json` shows `surfaces`.
-
-#### T33.45.5 App core: inspector tab, toolbar and palette actions
-
-Depends: T33.45.3 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/palette.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugins.md` §15, A134
-
-Check: `cox-app` tests: the tab renders only while selected, an action runs its command, an action naming an undeclared command is dropped, `plugin_keys` is gone. Coordinate with T58.4 on `live.rs`.
-
-Plan (Claude Code / opus-5.5): (1) `plugin_ui.rs`: `PluginSlots` tracks the selected inspector tab and its area in cells; `Slot::DesktopInspector` is visible only while its plugin's tab is selected, so it renders only then; `select_tab` and `open_inspector` (for `CommandOut::OpenInspector`). `PluginUi::declare` takes `InitOut.desktop` in place of the keys: the tab and actions are sanitized, a symbol outside `is_symbol_name` becomes `puzzlepiece.extension`, the toolbar is capped at `MAX_TOOLBAR_ACTIONS`, and an action whose command is not among the plugin's granted commands is dropped with a notice; `action(id)` asks `cox_command` for `plugin:<id>:<command>`. The keys, `PluginKey` and `key` go. (2) `palette.rs`: `PaletteItem.symbol` (optional, serde and UniFFI default, so existing callers keep compiling). (3) `live.rs`: `plugin_tabs`, `plugin_toolbar`, `select_plugin_tab`, `plugin_action`; plugin palette actions join `palette`; `OpenInspector` selects the tab; declare notices are emitted once the session is open; `plugin_keys`/`plugin_key` removed (and their `cox-ffi` forwards, which no Swift view calls). Verify with `cargo nextest run -p cox-app -p cox-ffi`, clippy and fmt.
 
 #### T33.45.6 App core: notifications, links and images
 
@@ -1226,12 +1175,6 @@ Check: `forward_only` passes; a snapshot per new view in light and dark; an unkn
 Depends: T33.45.3 · Files: `plugins/sdk/src/lib.rs`, `plugins/examples/surfaces/` (new), `crates/cox-plugin-fixtures/build.rs` · Design: `docs/design/plugins.md` §15, A134
 
 Check: a `cox-plugin` test loads the example (a command and a status segment, a leader key, an inspector tab and a notification) in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice or `NotOnThisSurface` on the other.
-
-#### T33.45.9 Docs: the three-part plugin API reference
-
-Depends: T33.45.1, T33.45.2 · Files: `docs/plugins.md` (or `docs/plugins/api.md`), its generator and drift test · Design: `docs/design/plugins.md` §15, A134
-
-Check: every field of `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` appears under its part (shared, terminal-only, desktop-only), checked by test.
 
 #### T33.45.10 Docs: Russian and Ukrainian translations
 
