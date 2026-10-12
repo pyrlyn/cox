@@ -44,7 +44,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.1 | todo | P1 | 5 | 0% | |
+| T33.40.1 | in progress | P1 | 5 | 10% | Claude Code / opus-5.5 |
 | T33.40.3 | todo | P2 | 4 | 0% | |
 | T33.40.4 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
@@ -931,6 +931,14 @@ Check:
 - `batched_question_answers_each_item`;
 - `abi_schema_matches_committed_file`;
 - invariant 8 `every_request_has_a_usage_row` still green.
+
+Execution plan (Claude Code / opus-5.5, ~300 LOC plus tests, one PR; the call-out needs a core seam, so the file list grows past the three named above):
+1. `cox-plugin-api/src/abi.rs`: `DecideOut` (untagged, so an older guest's bare `Option<Advice>` still parses), `DecideResume`, `CallTarget` flattened into `ModelCall` (the `{"tier": …}` wire stays byte-identical), `QuestionItem` + `Question.items`, `Answer::Items` and `Question::fits` (one answer per item). Regenerate `docs/plugin-abi.schema.json` and the `docs/plugins.md` field index.
+2. `cox-protocol/src/traits.rs`: `ModelCaller::call_own(id, section, model, request)`, default `Denied`; `cox-core/src/plugin_model.rs` implements it through the same budget gate → `plugin_backend` (the `Priced` `PluginProvider`) → one `usage` row as `call`, refusing a section that is not an ABI section.
+3. `cox-plugin/src/advisor.rs`: on `Call`, require `OwnProvider` naming a section bound in this plugin's own `HostEnv`, run it through `call_own`, then `cox_decide_resume`, all inside the point's budget; any failure is `None`. `live.rs` hands advisors the env and the late-bound caller.
+4. `cox-plugin/src/net.rs` + `hostfn.rs`: the provider-host branch keys on the calling export being `cox_provider_stream`, not only on the active section.
+5. `docs/design/plugins.md` §4: the context rule and the export shapes. Core `Question` literals gain `items: vec![]`; `router.rs` ignores `Answer::Items`.
+Verify: the Check tests, `cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-core -p cox-protocol`, clippy, fmt.
 
 #### T33.40.3 Jev provider export
 
