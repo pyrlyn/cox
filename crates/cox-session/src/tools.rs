@@ -21,6 +21,7 @@ use cox_tools::expand::ExpandTool;
 use cox_tools::glob::GlobTool;
 use cox_tools::grep::GrepTool;
 use cox_tools::lsp::nav::{Nav, NavTool};
+use cox_tools::lsp::rename::RenameTool;
 use cox_tools::lsp::{AfterEdit, DiagnosticsTool, LspPool};
 use cox_tools::memory::{MemoryGetTool, MemorySaveTool, MemorySearchTool};
 use cox_tools::read::ReadTool;
@@ -85,8 +86,9 @@ pub fn with_client_tools(
         .collect()
 }
 
-/// Adds the deferred `diagnostics` tool (T41.7), and `definition` and
-/// `references` over the same pool (T59.6), when `lsp.enabled`. Its
+/// Adds the deferred `diagnostics` tool (T41.7), and `definition`,
+/// `references` (T59.6) and `rename_symbol` (T59.7) over the same pool,
+/// when `lsp.enabled`. Its
 /// servers start under `sandboxed_argv`, the wrap every stdio MCP server
 /// gets, with the same `writable` roots; `danger-full-access` runs them bare
 /// because `sandboxed_argv` does. Before `with_tool_search_index`, so
@@ -111,8 +113,8 @@ pub(crate) fn with_lsp(
             )
         });
     let pool = Arc::new(LspPool::new(config.lsp.clone(), spawner));
+    let wait = std::time::Duration::from_millis(u64::from(config.lsp.after_edit_ms));
     if config.lsp.after_edit {
-        let wait = std::time::Duration::from_millis(u64::from(config.lsp.after_edit_ms));
         // Only the local tools: ACP's client `edit`/`write` keep the names
         // but write the editor's buffer, not the file the server reads.
         let local = [EditTool.spec(), WriteTool.spec()];
@@ -143,6 +145,11 @@ pub(crate) fn with_lsp(
             cox_sanitize::sanitize,
         )));
     }
+    tools.push(Arc::new(RenameTool::new(
+        pool.clone(),
+        config.lsp.after_edit.then_some(wait),
+        cox_sanitize::sanitize,
+    )));
     tools.push(Arc::new(DiagnosticsTool::from_pool(pool)));
     tools
 }
@@ -354,13 +361,13 @@ mod tests {
         );
 
         let names: Vec<_> = lsp.iter().map(|t| t.spec().name).collect();
-        for nav in ["definition", "references"] {
+        for nav in ["definition", "references", "rename_symbol"] {
             assert!(names.iter().any(|n| n == nav), "{nav} missing: {names:?}");
         }
 
         config.lsp.enabled = false;
         let without = with_lsp(tools(None, &store, tmp.path().join("memory")), &config, &[]);
-        let off = ["diagnostics", "definition", "references"];
+        let off = ["diagnostics", "definition", "references", "rename_symbol"];
         assert!(
             without
                 .iter()

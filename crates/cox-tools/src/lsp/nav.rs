@@ -288,7 +288,7 @@ impl NavTool {
 
 /// The 0-based [`Position`] of 1-based `line` and character `col` in
 /// `text`, the column converted to the UTF-16 units servers count in.
-fn position(text: &str, line: u32, col: u32) -> Result<Position, ToolError> {
+pub(super) fn position(text: &str, line: u32, col: u32) -> Result<Position, ToolError> {
     let denied = |why: String| ToolError::Denied { why };
     if line == 0 || col == 0 {
         return Err(denied("line and col are 1-based".to_string()));

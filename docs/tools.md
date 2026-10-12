@@ -113,6 +113,25 @@ note, since a name match also finds unrelated symbols. A path the server
 names outside the workspace roots is printed as given and never opened; the
 whole answer passes through `sanitize`.
 
+`rename_symbol` (T59.7, deferred, `Write`, exclusive) takes `path`, `line`,
+`col` (as above) and `new_name`, and renames the symbol through the running
+server's `prepareRename` and `rename`. Like the navigation tools it never
+starts a server; unlike them it has no `grep` fallback and refuses instead,
+since a rename by name match rewrites unrelated symbols. Before asking, cox
+re-syncs every file it opened whose disk text changed, so the server edits
+the text on disk. The server's `WorkspaceEdit` (`documentChanges` or
+`changes`) is refused whole if it creates, renames or deletes a file, names a
+file outside the writable roots (`confine`), carries a document version other
+than the one cox synced, or holds an edit outside its file or overlapping
+another. Otherwise every file's new text is computed first, each pre-image is
+archived as `edit` archives it, every new text is staged in a sibling temp
+file, and only then are the files replaced; a failed replace puts back the
+ones already replaced. The permission engine gates the call once, on the
+symbol's file: the other files are known only after the server answers, so
+the result lists them, and the loop snapshots the workspace around the call.
+With `lsp.after_edit`, the result ends with the diagnostics the rename
+introduced in each file, as for `edit`.
+
 The default servers (`[lsp.servers]`, see config.md):
 
 | Name | Program | Extensions |

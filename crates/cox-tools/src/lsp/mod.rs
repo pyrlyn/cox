@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-//! Language-server support for the `diagnostics` tool (P41) and the
-//! `definition`/`references` tools (T59.6). Lives in
+//! Language-server support for the `diagnostics` tool (P41), the
+//! `definition`/`references` tools (T59.6) and `rename_symbol` (T59.7).
+//! Lives in
 //! `cox-tools` because talking to a server means a process and its pipes,
 //! which the core never touches (D2); split into modules so the wire, the
 //! server lifecycle and the tool can each be tested alone.
@@ -11,6 +12,7 @@
 pub mod client;
 pub mod diag;
 pub mod nav;
+pub mod rename;
 pub mod server;
 
 use std::collections::HashMap;
@@ -359,56 +361,70 @@ impl AfterEdit {
         let arg = input.get("path")?.as_str()?;
         let path = confine(&cx.writable_roots, &cx.cwd, arg).ok()?;
         let server = self.pool.running_for(&path)?;
-        let baseline = match server.last(&path).await {
-            Some(known) => known,
-            // A file that does not exist yet has nothing to compare against.
-            None if !path.exists() => Vec::new(),
-            None => self.settled(&server, &path, &read_text(&path)?).await?,
-        };
+        let baseline = baseline(&server, &path, self.wait).await?;
         Some((path, server, baseline))
     }
+}
 
-    /// The server's report for `text`, only when it settled in time. A
-    /// deadline report holds whatever arrived — maybe nothing, maybe the
-    /// previous text's list — so diffing it would invent or hide errors.
-    async fn settled(&self, server: &Server, path: &Path, text: &str) -> Option<Vec<Diagnostic>> {
-        let report = server.diagnostics(path, text, self.wait).await.ok()?;
-        report.note.is_none().then_some(report.diagnostics)
+/// What the server reported for `path` before a change: its last report,
+/// or a fresh settled one when cox never synced the file. `None` when no
+/// baseline came in time, so the caller reports nothing rather than guess.
+async fn baseline(server: &Server, path: &Path, wait: Duration) -> Option<Vec<Diagnostic>> {
+    match server.last(path).await {
+        Some(known) => Some(known),
+        // A file that does not exist yet has nothing to compare against.
+        None if !path.exists() => Some(Vec::new()),
+        None => settled(server, path, &read_text(path)?, wait).await,
     }
+}
 
-    /// The lines the result gains: diagnostics absent from `baseline`, keyed
-    /// by (start line, code, message), errors first, at most ten.
-    async fn introduced(
-        &self,
-        path: &Path,
-        server: &Server,
-        baseline: &[Diagnostic],
-        root: &Path,
-    ) -> Option<String> {
-        let text = read_text(path)?;
-        let after = self.settled(server, path, &text).await?;
-        let key = |d: &Diagnostic| (d.range.start.line, d.code.clone(), d.message.clone());
-        let known: Vec<_> = baseline.iter().map(key).collect();
-        let new: Vec<Diagnostic> = after
-            .into_iter()
-            .filter(|d| !known.contains(&key(d)))
-            .collect();
-        if new.is_empty() {
-            return None;
-        }
-        let listed = diag::format(root, path, &new);
-        let mut lines: Vec<&str> = listed.lines().collect();
-        let summary = lines.pop()?;
-        let mut out = format!("\n\nnew diagnostics ({summary}):");
-        for line in lines.iter().take(MAX_INTRODUCED) {
-            out.push('\n');
-            out.push_str(line);
-        }
-        if lines.len() > MAX_INTRODUCED {
-            out.push_str("\n… more: call `diagnostics` for the full list");
-        }
-        Some((self.sanitize)(&out))
+/// The server's report for `text`, only when it settled in time. A
+/// deadline report holds whatever arrived — maybe nothing, maybe the
+/// previous text's list — so diffing it would invent or hide errors.
+async fn settled(
+    server: &Server,
+    path: &Path,
+    text: &str,
+    wait: Duration,
+) -> Option<Vec<Diagnostic>> {
+    let report = server.diagnostics(path, text, wait).await.ok()?;
+    report.note.is_none().then_some(report.diagnostics)
+}
+
+/// The lines a result gains after `path` changed: diagnostics absent from
+/// `baseline`, keyed by (start line, code, message), errors first, at most
+/// ten, through `sanitize` since a server's text is untrusted.
+async fn introduced(
+    path: &Path,
+    server: &Server,
+    baseline: &[Diagnostic],
+    root: &Path,
+    wait: Duration,
+    sanitize: fn(&str) -> String,
+) -> Option<String> {
+    let text = read_text(path)?;
+    let after = settled(server, path, &text, wait).await?;
+    let key = |d: &Diagnostic| (d.range.start.line, d.code.clone(), d.message.clone());
+    let known: Vec<_> = baseline.iter().map(key).collect();
+    let new: Vec<Diagnostic> = after
+        .into_iter()
+        .filter(|d| !known.contains(&key(d)))
+        .collect();
+    if new.is_empty() {
+        return None;
     }
+    let listed = diag::format(root, path, &new);
+    let mut lines: Vec<&str> = listed.lines().collect();
+    let summary = lines.pop()?;
+    let mut out = format!("\n\nnew diagnostics ({summary}):");
+    for line in lines.iter().take(MAX_INTRODUCED) {
+        out.push('\n');
+        out.push_str(line);
+    }
+    if lines.len() > MAX_INTRODUCED {
+        out.push_str("\n… more: call `diagnostics` for the full list");
+    }
+    Some(sanitize(&out))
 }
 
 #[async_trait]
@@ -443,7 +459,7 @@ impl Tool for AfterEdit {
         };
         let root = root_for(&path, &cx.roots, &cx.cwd);
         let added = tokio::select! {
-            a = tokio::time::timeout(grace, self.introduced(&path, &server, &baseline, &root)) => a.ok().flatten(),
+            a = tokio::time::timeout(grace, introduced(&path, &server, &baseline, &root, self.wait, self.sanitize)) => a.ok().flatten(),
             () = cx.cancel.cancelled() => None,
         };
         if let Some(added) = added {
@@ -602,8 +618,10 @@ mod tests {
     /// hang up, the way a crashed server does while its process lingers;
     /// one holding `SLOW` gets no answer, so the caller's deadline wins.
     async fn fake_server(mut r: FakeRead, mut w: FakeWrite) {
-        handshake(&mut r, &mut w, json!({"textDocumentSync": 1})).await;
+        let caps = json!({"textDocumentSync": 1, "renameProvider": {"prepareProvider": true}});
+        handshake(&mut r, &mut w, caps).await;
         let mut docs: HashMap<String, String> = HashMap::new();
+        let mut versions: HashMap<String, i64> = HashMap::new();
         while let Ok(Some(msg)) = read_message(&mut r).await {
             let params = &msg["params"];
             let uri = params["textDocument"]["uri"].as_str().unwrap_or_default();
@@ -611,10 +629,13 @@ mod tests {
                 Some("textDocument/didOpen") => {
                     let text = params["textDocument"]["text"].as_str().unwrap_or_default();
                     docs.insert(uri.to_string(), text.to_string());
+                    versions.insert(uri.to_string(), 1);
                 }
                 Some("textDocument/didChange") => {
                     let text = params["contentChanges"][0]["text"].as_str();
                     docs.insert(uri.to_string(), text.unwrap_or_default().to_string());
+                    let version = params["textDocument"]["version"].as_i64();
+                    versions.insert(uri.to_string(), version.unwrap_or_default());
                 }
                 Some("textDocument/didSave") => {
                     let text = docs.get(uri).cloned().unwrap_or_default();
@@ -639,10 +660,70 @@ mod tests {
                 Some(m @ ("textDocument/definition" | "textDocument/references")) => {
                     answer_nav(&mut w, &msg, m, docs.get(uri).map_or("", String::as_str)).await;
                 }
+                Some("textDocument/prepareRename") => {
+                    let text = docs.get(uri).map_or("", String::as_str);
+                    let at = params["position"].clone();
+                    let found =
+                        (!text.contains("NOWHERE")).then(|| json!({"start": at, "end": at}));
+                    reply(&mut w, &msg, json!(found)).await;
+                }
+                Some("textDocument/rename") => {
+                    let edit = rename_edit(&msg, &docs, &versions);
+                    reply(&mut w, &msg, edit).await;
+                }
                 Some("shutdown") => reply(&mut w, &msg, Value::Null).await,
                 _ => {}
             }
         }
+    }
+
+    /// A rename of every `main` in the requested file and in its sibling
+    /// `b.rs` (read from disk when not open), as `documentChanges` with the
+    /// version each file was synced at. Markers in the requested file:
+    /// `STALE` sends an old version, `CREATE` adds a file creation,
+    /// `OUTSIDE` an edit for a file outside the workspace.
+    fn rename_edit(
+        req: &Value,
+        docs: &HashMap<String, String>,
+        versions: &HashMap<String, i64>,
+    ) -> Value {
+        let uri = req["params"]["textDocument"]["uri"]
+            .as_str()
+            .unwrap_or_default();
+        let new_name = req["params"]["newName"].clone();
+        let sibling = uri.rsplit_once('/').map(|(dir, _)| format!("{dir}/b.rs"));
+        let asked = docs.get(uri).cloned().unwrap_or_default();
+        let mut changes = Vec::new();
+        for doc in [Some(uri.to_string()), sibling].into_iter().flatten() {
+            let text = docs
+                .get(&doc)
+                .cloned()
+                .or_else(|| std::fs::read_to_string(diag::path_for(&doc)?).ok());
+            let Some(text) = text else { continue };
+            let mut edits = Vec::new();
+            for (n, line) in text.lines().enumerate() {
+                for (col, _) in line.match_indices("main") {
+                    let p = |c: usize| json!({"line": n, "character": c});
+                    let range = json!({"start": p(col), "end": p(col + 4)});
+                    edits.push(json!({"range": range, "newText": new_name}));
+                }
+            }
+            let mut version = versions.get(&doc).copied();
+            if doc == uri && asked.contains("STALE") {
+                version = version.map(|v| v - 1);
+            }
+            changes.push(json!({"textDocument": {"uri": doc, "version": version}, "edits": edits}));
+        }
+        if asked.contains("CREATE") {
+            changes.push(json!({"kind": "create", "uri": format!("{uri}.new")}));
+        }
+        if asked.contains("OUTSIDE") {
+            let p = json!({"line": 0, "character": 0});
+            let edit = json!({"range": {"start": p, "end": p}, "newText": "x"});
+            let outside = json!({"uri": "file:///elsewhere/x.rs", "version": null});
+            changes.push(json!({"textDocument": outside, "edits": [edit]}));
+        }
+        json!({"documentChanges": changes})
     }
 
     /// Answers a navigation request about a file holding `text`. A
