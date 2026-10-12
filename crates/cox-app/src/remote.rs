@@ -29,6 +29,7 @@ use tokio::sync::{Notify, oneshot};
 
 use crate::app::{App, Host};
 use crate::coalesce;
+use crate::plugin_ui::{LinkClick, LinkTarget, link_target};
 use crate::wire::{self, Call, Line, Outcome, Reply, Request, ServerEvent, WireError};
 use crate::{Block, Changes, Completion, Intent, Project, SearchHit, SessionEntry, TimelinePatch};
 
@@ -109,6 +110,8 @@ struct Stream {
 /// and each session's patch stream.
 struct Link {
     host: String,
+    /// This machine's host: where a remote session's links are confirmed.
+    local: Arc<dyn Host>,
     writer: tokio::sync::Mutex<Box<dyn AsyncWrite + Send + Unpin>>,
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, oneshot::Sender<Outcome>>>,
@@ -134,6 +137,7 @@ impl Link {
     ) -> Arc<Self> {
         let link = Arc::new(Self {
             host: host.to_owned(),
+            local: Arc::clone(&local),
             writer: tokio::sync::Mutex::new(Box::new(writer)),
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
@@ -287,6 +291,10 @@ async fn read(link: Arc<Link>, reader: impl AsyncRead + Unpin, local: Arc<dyn Ho
                 // The badge counts this machine's sessions; a remote count
                 // would overwrite it.
                 ServerEvent::Badge { .. } => {}
+                ServerEvent::PluginNotice { alert } => {
+                    // Nothing else shows it: the remote left it to this host.
+                    local.plugin_notice(*alert);
+                }
                 ServerEvent::OpenUrl { url } => {
                     if let Some(url) = web_link(&url) {
                         local.confirm_open_url(&link.host, &url);
@@ -523,6 +531,35 @@ impl RemoteSession {
         }
     }
 
+    /// A plugin button or action (`plugin:<id>:<command>`) clicked: the
+    /// remote session runs the command, and says whether its plugins
+    /// granted it.
+    pub async fn plugin_action(&self, id: &str) -> Result<bool, RemoteError> {
+        let call = Call::PluginAction {
+            session: self.id,
+            id: id.to_owned(),
+        };
+        match self.call(call).await? {
+            Reply::Acted(done) => Ok(done),
+            _ => Err(RemoteError::Unexpected),
+        }
+    }
+
+    /// A click on a link in the remote plugin's output. That machine's
+    /// plugin chose it, so a web link only asks this host to confirm
+    /// (`Host::confirm_open_url`), and a path comes back as written, to be
+    /// read from the remote session, never from this disk.
+    pub fn open_link(&self, link: &str) -> LinkClick {
+        match link_target(link) {
+            Some(LinkTarget::Web(url)) => {
+                self.link.local.confirm_open_url(&self.link.host, &url);
+                LinkClick::Opened
+            }
+            Some(LinkTarget::File { path, line }) => LinkClick::File { path, line },
+            None => LinkClick::Refused,
+        }
+    }
+
     /// Stops the stream; the remote session keeps running.
     pub async fn close(&self) -> Result<(), RemoteError> {
         match self.call(Call::Close { session: self.id }).await? {
@@ -574,6 +611,7 @@ mod tests {
     struct Links {
         opened: Mutex<Vec<String>>,
         asked: Mutex<Vec<(String, String)>>,
+        alerts: Mutex<Vec<crate::PluginAlert>>,
     }
 
     impl Host for Links {
@@ -588,6 +626,65 @@ mod tests {
         fn confirm_open_url(&self, origin: &str, url: &str) {
             lock(&self.asked).push((origin.to_owned(), url.to_owned()));
         }
+        fn plugin_notice(&self, alert: crate::PluginAlert) -> bool {
+            lock(&self.alerts).push(alert);
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn a_remote_plugin_notice_reaches_the_local_host_and_a_link_click_asks_first() {
+        let (client, mut server) = tokio::io::duplex(4096);
+        let (reader, writer) = tokio::io::split(client);
+        let links = Arc::new(Links::default());
+        let local = Arc::clone(&links) as Arc<dyn Host>;
+        let link = Link::start("devbox", reader, writer, None, local);
+        let id = SessionId::new();
+        let alert = crate::PluginAlert {
+            session: id,
+            plugin: "clock".into(),
+            warn: false,
+            title: "Break".into(),
+            body: String::new(),
+            actions: vec![crate::AlertAction {
+                label: "Snooze".into(),
+                id: "plugin:clock:snooze".into(),
+            }],
+        };
+        let line = Line::Notification(wire::Notification {
+            v: wire::VERSION,
+            event: ServerEvent::PluginNotice {
+                alert: Box::new(alert.clone()),
+            },
+        });
+        server
+            .write_all(wire::encode(&line).expect("encodes").as_bytes())
+            .await
+            .expect("write");
+        drop(server);
+        until_dropped(&link).await;
+        assert_eq!(*lock(&links.alerts), [alert]);
+
+        let session = RemoteSession::new(Arc::clone(&link), id, Vec::new(), Vec::new());
+        assert_eq!(
+            session.open_link("https://example.com/a"),
+            LinkClick::Opened
+        );
+        assert_eq!(
+            session.open_link("src/lib.rs:3"),
+            LinkClick::File {
+                path: "src/lib.rs".into(),
+                line: Some(3)
+            }
+        );
+        for bad in ["http://example.com", "file:///etc/passwd"] {
+            assert_eq!(session.open_link(bad), LinkClick::Refused, "{bad}");
+        }
+        assert!(lock(&links.opened).is_empty(), "opened without asking");
+        assert_eq!(
+            *lock(&links.asked),
+            [("devbox".to_owned(), "https://example.com/a".to_owned())]
+        );
     }
 
     #[tokio::test]

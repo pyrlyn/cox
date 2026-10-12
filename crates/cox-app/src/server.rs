@@ -26,6 +26,7 @@ use tokio::task::JoinSet;
 use crate::InboxItem;
 use crate::app::{App, AppError, Host};
 use crate::live::LiveSession;
+use crate::plugin_ui::PluginAlert;
 use crate::wire::{self, Call, Line, Notification, Outcome, Reply, Response, ServerEvent};
 
 /// Lines waiting for the writer. A stalled client fills it; then each
@@ -78,6 +79,15 @@ impl Host for ServerHost {
         self.push(ServerEvent::OpenUrl {
             url: url.to_owned(),
         });
+    }
+
+    /// The client posts it; true, since a remote session has no frontmost
+    /// state of its own to consult.
+    fn plugin_notice(&self, alert: PluginAlert) -> bool {
+        self.push(ServerEvent::PluginNotice {
+            alert: Box::new(alert),
+        });
+        true
     }
 
     /// Never: a key does not cross the wire in either direction.
@@ -203,6 +213,9 @@ impl Server {
             } => Reply::Complete(self.live(session)?.complete(&token, limit as usize)),
             Call::Changes { session } => Reply::Changes(self.live(session)?.changes().await?),
             Call::Plan { session } => Reply::Plan(self.live(session)?.plan()),
+            Call::PluginAction { session, id } => {
+                Reply::Acted(self.live(session)?.plugin_action(&id))
+            }
             Call::Close { session } => {
                 if let Some(live) = self.sessions.remove(&session) {
                     live.close();
@@ -292,6 +305,26 @@ async fn write<W: AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_host_sends_a_plugin_notice_to_the_client() {
+        let (host, mut events) = ServerHost::channel();
+        let alert = PluginAlert {
+            session: SessionId::new(),
+            plugin: "clock".into(),
+            warn: true,
+            title: "Break".into(),
+            body: String::new(),
+            actions: Vec::new(),
+        };
+        assert!(host.plugin_notice(alert.clone()));
+        assert_eq!(
+            events.try_recv().ok(),
+            Some(ServerEvent::PluginNotice {
+                alert: Box::new(alert)
+            })
+        );
+    }
 
     #[test]
     fn server_host_turns_platform_calls_into_notifications() {

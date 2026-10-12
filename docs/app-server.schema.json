@@ -331,6 +331,35 @@
           ]
         },
         {
+          "description": "T33.45.6: a plugin button or action (`plugin:<id>:<command>`) clicked\non the client; the remote session runs the command it names.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "plugin_action"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                },
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "session",
+                "id"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
           "description": "Stops the session's patch stream; the session keeps running.",
           "type": "object",
           "properties": {
@@ -631,6 +660,23 @@
           ]
         },
         {
+          "description": "Whether the session's plugins granted the action's command.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "acted"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
           "type": "object",
           "properties": {
             "kind": {
@@ -841,6 +887,29 @@
               },
               "required": [
                 "url"
+              ]
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "description": "`Host::plugin_notice`: a plugin's desktop notice, sanitized, for the\nclient to post; a button's `id` goes back as `plugin_action`.",
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "const": "plugin_notice"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "alert": true
+              },
+              "required": [
+                "alert"
               ]
             }
           },

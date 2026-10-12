@@ -9,11 +9,13 @@
 //! caller-supplied host; this is the one place that builds the per-plugin
 //! bundle, so every surface wires the same thing and `crates/cox` stays thin.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, Weak};
 
 use async_trait::async_trait;
-use cox_plugin_api::{CommandDecl, InitOut, KeyDecl, PluginManifest, SessionInfo, Slot, Surface};
+use cox_plugin_api::{
+    CommandDecl, DesktopNotice, InitOut, KeyDecl, PluginManifest, SessionInfo, Slot, Surface,
+};
 use cox_protocol::PluginStore;
 use cox_protocol::config::PluginsConfig;
 use cox_protocol::errors::CoreError;
@@ -36,6 +38,10 @@ use crate::hostfn::{HostEnv, init_input_on_surface};
 /// block or emit synchronously (the caller forwards to a task).
 pub type Notices = Arc<dyn Fn(Vec<(Level, String)>) + Send + Sync>;
 
+/// Where a plugin's `cox_desktop_notify` notices go, with the plugin's id
+/// (PL§15.4). Called on that plugin's worker thread, so it must not block.
+pub type DesktopNotices = Arc<dyn Fn(&str, DesktopNotice) + Send + Sync>;
+
 /// One granted plugin: its single instance, the environment its host
 /// functions act on, its granted-capability lines and, once `cox_init`
 /// has run, what it declared.
@@ -45,9 +51,16 @@ pub struct Live {
     env: Arc<HostEnv>,
     granted: Vec<String>,
     init: Option<InitOut>,
+    /// The package directory, where a widget image is read from.
+    dir: Option<PathBuf>,
 }
 
 impl Live {
+    /// The package directory, when the session loader recorded it.
+    pub fn dir(&self) -> Option<&Path> {
+        self.dir.as_deref()
+    }
+
     /// The plugin id.
     pub fn id(&self) -> &str {
         &self.manifest.id
@@ -290,8 +303,27 @@ impl LivePlugins {
             env,
             granted,
             init: None,
+            dir: None,
         });
         Ok(())
+    }
+
+    /// Records where plugin `id`'s package is, so the app can read the
+    /// images its widgets name. A plugin not loaded is ignored.
+    pub fn set_dir(&mut self, id: &str, dir: &Path) {
+        if let Some(p) = self.plugins.iter_mut().find(|p| p.id() == id) {
+            p.dir = Some(dir.to_path_buf());
+        }
+    }
+
+    /// Sends every plugin's `cox_desktop_notify` notices to `sink`, those
+    /// from before this call included. The first sink stays.
+    pub fn on_desktop_notice(&self, sink: &DesktopNotices) {
+        for p in &self.plugins {
+            let (id, sink) = (p.id().to_string(), Arc::clone(sink));
+            p.env
+                .bind_desktop_sink(Arc::new(move |notice| sink(&id, notice)));
+        }
     }
 
     /// Folds the session's `SessionStarted` (the tap never sees it: the

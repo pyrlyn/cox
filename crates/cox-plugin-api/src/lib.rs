@@ -27,10 +27,10 @@ pub use manifest::{
     API_MAJOR, AgentDecl, AgentMode, Capabilities, CloudAgentDecl, CloudBackend, DesktopCaps,
     ExternalAgentDecl, FsCaps, Limits, ManifestError, McpDecl, ModelDecl, ModelTier,
     PluginManifest, PriceDecl, ProviderApi, ProviderAuth, ProviderDecl, Surface, TerminalCaps,
-    UiCaps, is_plugin_id,
+    UiCaps, is_package_path, is_plugin_id,
 };
 
-pub use ui::{StyleToken, Widget};
+pub use ui::{MAX_IMAGE_BYTES, StyleToken, Widget, is_link};
 
 #[cfg(test)]
 mod tests {

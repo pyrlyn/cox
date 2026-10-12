@@ -17,7 +17,7 @@ use cox_core::{History, Session};
 use cox_protocol::Checkpointer as _;
 use cox_protocol::SandboxPolicy;
 use cox_protocol::ids::{ArchiveId, SessionId, TaskId};
-use cox_protocol::plugin::{CommandOut, NoticeLevel};
+use cox_protocol::plugin::{CommandOut, DesktopNotice, NoticeLevel};
 use cox_protocol::traits::Store as _;
 use cox_protocol::types::{Event, Level, ModelId, Submission, Tier, TodoItem};
 use cox_render::diffmodel::DiffModel;
@@ -33,7 +33,9 @@ use crate::changes::{self, Changes};
 use crate::costs::{self, TurnCosts};
 use crate::info::{self, Info};
 use crate::mcp_status::McpRun;
-use crate::plugin_ui::{self, Answered, ItemWatch, PluginAction, PluginSlot, PluginTab, PluginUi};
+use crate::plugin_ui::{
+    self, Answered, ItemWatch, LinkClick, PluginAction, PluginSlot, PluginTab, PluginUi,
+};
 use crate::review;
 use crate::status::StatusFold;
 use crate::tasks::{self, TaskTarget};
@@ -125,6 +127,7 @@ impl LiveSession {
         let (login, keys) = (Arc::clone(&app.host), Arc::clone(&app.host));
         let (asks, requests) = mpsc::channel(PLUGIN_QUEUE);
         let (answered, answers) = mpsc::channel(PLUGIN_QUEUE);
+        let (posted, posts) = mpsc::channel(PLUGIN_QUEUE);
         let plugins = Arc::new(PluginUi::new(asks));
         let spec = SessionSpec {
             config,
@@ -139,6 +142,7 @@ impl LiveSession {
                 Arc::clone(&plugins),
                 requests,
                 answered,
+                posted,
             )),
             client: None,
             surface: "app".into(),
@@ -184,7 +188,7 @@ impl LiveSession {
             theme,
         });
         owner.register(&live);
-        pump(Arc::downgrade(&live), answers);
+        pump(Arc::downgrade(&live), answers, posts);
         Ok(live)
     }
 
@@ -628,6 +632,15 @@ impl LiveSession {
         self.plugins.action(id)
     }
 
+    /// A click on a link in a plugin's output (PL§15.4). A web link goes to
+    /// the host: opened here, or, on a session served to a remote client,
+    /// sent on for the person to confirm there. A path comes back confined
+    /// to the workspace for the UI to show; anything else is refused.
+    pub fn open_link(&self, link: &str) -> LinkClick {
+        let host = &self.app.host;
+        plugin_ui::click(link, &self.roots, &self.cwd, |url| host.open_url(url))
+    }
+
     /// The window is now `width`×`height` cells; a shown panel or overlay
     /// renders again for it (PL§8 "resized").
     pub fn plugin_area(&self, width: u16, height: u16) {
@@ -654,15 +667,34 @@ impl LiveSession {
         match answer {
             PluginAnswer::Command { plugin, out } => self.plugin_effect(&plugin, out).await,
             // A miss lands `None`, which leaves the generic card.
-            PluginAnswer::ItemRendered { widget, .. } => {
+            PluginAnswer::ItemRendered { plugin, widget } => {
                 if let Some(id) = block {
-                    self.controller.land(&id, widget.as_ref());
+                    let view = widget.as_ref().map(|w| self.plugins.view_of(&plugin, w));
+                    self.controller.land(&id, view);
                 }
             }
             other => {
                 let slots = self.plugins.step(|s| s.fold(other));
                 self.patch_slots(slots);
             }
+        }
+    }
+
+    /// A `cox_desktop_notify` notice (PL§15.4): posted through the host like
+    /// an inbox item, or, when the host would rather not (the app is in
+    /// front on this session), told in the transcript like any plugin notice.
+    async fn on_desktop_notice(&self, plugin: &str, notice: DesktopNotice) {
+        let alert = self.plugins.alert(self.id(), plugin, notice);
+        let level = match alert.warn {
+            true => Level::Warn,
+            false => Level::Info,
+        };
+        let text = format!("{}\n{}", alert.title, alert.body);
+        if self.app.host.plugin_notice(alert) {
+            return;
+        }
+        if let Ok(session) = self.core("Notice") {
+            let _ = session.notice(level, text.trim_end().to_string()).await;
         }
     }
 
@@ -800,13 +832,26 @@ impl LiveSession {
 }
 
 /// Feeds the plugin serve thread's answers to `live` until it is gone.
-fn pump(live: Weak<LiveSession>, mut answers: mpsc::Receiver<Answered>) {
+fn pump(
+    live: Weak<LiveSession>,
+    mut answers: mpsc::Receiver<Answered>,
+    mut notices: mpsc::Receiver<(String, DesktopNotice)>,
+) {
     tokio::spawn(async move {
-        while let Some(answer) = answers.recv().await {
-            let Some(live) = live.upgrade() else {
-                break;
-            };
-            live.on_plugin(answer).await;
+        loop {
+            // One owner for both queues, so a notice and an answer never
+            // run at once.
+            tokio::select! {
+                Some(answer) = answers.recv() => {
+                    let Some(live) = live.upgrade() else { break };
+                    live.on_plugin(answer).await;
+                }
+                Some((plugin, notice)) = notices.recv() => {
+                    let Some(live) = live.upgrade() else { break };
+                    live.on_desktop_notice(&plugin, notice).await;
+                }
+                else => break,
+            }
         }
     });
 }
@@ -840,4 +885,117 @@ fn tee(
         }
     });
     rx
+}
+
+#[cfg(test)]
+mod tests {
+    //! A plugin's desktop notice through a real session in a scratch
+    //! `COX_HOME` over the Scripted provider; nextest runs each test in its
+    //! own process, so the environment set here is this test's own.
+
+    use cox_protocol::plugin::{CommandDecl, DesktopOut, NoticeAction};
+
+    use super::*;
+    use crate::app::Host;
+    use crate::patch::BlockKind;
+    use crate::{InboxItem, PluginAlert};
+
+    /// A platform that posts, or declines, and remembers what it was handed.
+    struct Platform {
+        post: bool,
+        posted: Mutex<Vec<PluginAlert>>,
+    }
+
+    impl Host for Platform {
+        fn notify(&self, _: InboxItem, _: u32) {}
+        fn badge(&self, _: u32) {}
+        fn open_url(&self, _: &str) {}
+        fn secret(&self, _: &str) -> Option<String> {
+            None
+        }
+        fn plugin_notice(&self, alert: PluginAlert) -> bool {
+            self.posted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(alert);
+            self.post
+        }
+    }
+
+    #[allow(unsafe_code)]
+    async fn session(post: bool) -> (Arc<LiveSession>, Arc<Platform>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let home = dir.path().join("user");
+        std::fs::create_dir_all(dir.path().join("project")).expect("project");
+        let scenario = dir.path().join("scenario.toml");
+        std::fs::write(&scenario, "[[turn]]\ntext = \"ok\"\n").expect("scenario");
+        // SAFETY: nextest gives this test its own process.
+        unsafe {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("COX_HOME", home.join(".cox"));
+            std::env::remove_var("ANTHROPIC_API_KEY");
+            std::env::set_var("COX_PROVIDER", "scripted");
+            std::env::set_var("COX_SCENARIO", scenario);
+        }
+        let platform = Arc::new(Platform {
+            post,
+            posted: Mutex::new(Vec::new()),
+        });
+        let app = App::new(Some(home.join(".cox")), platform.clone()).expect("app");
+        let live = app
+            .open(dir.path().join("project"), None, "base16-ocean.dark".into())
+            .await
+            .expect("session");
+        let snooze = CommandDecl {
+            name: "snooze".into(),
+            description: String::new(),
+        };
+        live.plugins
+            .declare("clock", &[], vec![snooze], DesktopOut::default(), vec![]);
+        (live, platform, dir)
+    }
+
+    fn notice() -> DesktopNotice {
+        DesktopNotice {
+            level: NoticeLevel::Info,
+            title: "Break".into(),
+            body: "Stand up".into(),
+            actions: vec![NoticeAction {
+                label: "Snooze".into(),
+                command: "snooze".into(),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn a_plugin_notice_reaches_the_host_and_its_button_runs_the_command() {
+        let (live, platform, _dir) = session(true).await;
+        live.on_desktop_notice("clock", notice()).await;
+        let posted = platform.posted.lock().expect("posted");
+        let [alert] = posted.as_slice() else {
+            panic!("expected one alert, got {posted:?}");
+        };
+        assert_eq!((alert.session, alert.title.as_str()), (live.id(), "Break"));
+        assert!(
+            live.plugin_action(&alert.actions[0].id),
+            "a granted command runs"
+        );
+        assert!(!live.plugin_action("plugin:clock:ghost"));
+    }
+
+    #[tokio::test]
+    async fn a_notice_the_host_declines_is_told_in_the_transcript() {
+        let (live, _platform, _dir) = session(false).await;
+        live.on_desktop_notice("clock", notice()).await;
+        loop {
+            let batch = live.next_patches().await.expect("open stream");
+            let told = batch.iter().any(|p| {
+                matches!(p, TimelinePatch::Upsert { block, .. }
+                    if matches!(&block.kind, BlockKind::Notice { text, .. } if text.contains("Break")))
+            });
+            if told {
+                return;
+            }
+        }
+    }
 }

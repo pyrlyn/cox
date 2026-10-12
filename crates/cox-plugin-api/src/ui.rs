@@ -14,6 +14,33 @@ pub const MAX_NODES: usize = 512;
 pub const MAX_DEPTH: usize = 8;
 /// At most this many bytes of span text per render (PL§8).
 pub const MAX_TEXT_BYTES: usize = 16 * 1024;
+/// Longest `Span.link` a host passes on (PL§15.2); the text cap above counts
+/// span text, not this.
+pub const MAX_LINK_BYTES: usize = 2048;
+/// Largest package image a host reads for a [`Widget::Image`] (PL§15.4).
+pub const MAX_IMAGE_BYTES: usize = 256 * 1024;
+
+/// Whether `link` has a form a host may open for a plugin (PL§15.2): an
+/// `https://` URL, or a relative path with an optional `:line` suffix. The
+/// one rule every surface applies before it draws or opens a link, so the
+/// terminal and the app cannot drift. It checks the form only; a path that
+/// leaves the workspace is refused where the workspace is known.
+pub fn is_link(link: &str) -> bool {
+    if link.is_empty()
+        || link.len() > MAX_LINK_BYTES
+        || link.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return false;
+    }
+    if let Some(rest) = link.strip_prefix("https://") {
+        return !rest.is_empty();
+    }
+    let path = match link.rsplit_once(':') {
+        Some((p, n)) if n.parse::<u32>().is_ok() => p,
+        _ => link,
+    };
+    !path.is_empty() && !path.starts_with('/') && !path.contains([':', '\\'])
+}
 
 /// A `Theme` field. The permission-mode tints are left out on purpose: the
 /// composer's mode colour is a trust signal a plugin must not imitate.
@@ -188,6 +215,35 @@ mod tests {
                 child: Box::new(Widget::Text(vec![vec![span]])),
             }
         );
+    }
+
+    #[test]
+    fn link_is_an_https_url_or_a_relative_path() {
+        for ok in [
+            "https://example.com/a?b=c",
+            "src/a.rs",
+            "src/a.rs:12",
+            "../up.rs",
+        ] {
+            assert!(is_link(ok), "{ok}");
+        }
+        let long = format!("https://{}", "a".repeat(MAX_LINK_BYTES));
+        for bad in [
+            "",
+            "https://",
+            "http://example.com",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "/etc/passwd",
+            "C:\\x",
+            "a b",
+            "a\nb",
+            "a\u{7}b",
+            ":3",
+            long.as_str(),
+        ] {
+            assert!(!is_link(bad), "{bad:?}");
+        }
     }
 
     #[test]
