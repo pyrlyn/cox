@@ -278,7 +278,9 @@ fn check_terminal(tui_theme: &str, tui_caps: &HashMap<String, bool>) -> CheckRes
         .map(|((name, value), (_, pre_config))| {
             let source = if value != pre_config {
                 "config"
-            } else if name == "kitty_keyboard" && queried {
+            } else if (name == "kitty_keyboard" && queried.kitty_keyboard)
+                || (name == "osc22" && queried.osc22)
+            {
                 "query"
             } else {
                 "env"
