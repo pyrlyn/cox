@@ -58,17 +58,11 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.43 | todo | P1 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
-| T33.45.3 | todo | P2 | 4 | 0% | |
-| T33.45.3.1 | todo | P2 | 2 | 90% | |
-| T33.45.3.2 | todo | P2 | 2 | 90% | |
-| T33.45.3.3 | todo | P2 | 2 | 90% | |
-| T33.45.3.4 | todo | P2 | 2 | 90% | |
-| T33.45.3.5 | todo | P2 | 1 | 90% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
-| T33.45.5 | in progress | P2 | 4 | 10% | Claude Code / opus-5.5 |
 | T33.45.6 | todo | P2 | 3 | 0% | |
 | T33.45.7 | todo | P2 | 4 | 0% | |
 | T33.45.9 | todo | P2 | 3 | 0% | |
+| T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
@@ -1108,6 +1102,11 @@ Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and a
 
 
 Plan (Claude Code / opus-5.5): (1) `plugin_ui.rs`: `PluginSlots` tracks the selected inspector tab and its area in cells; `Slot::DesktopInspector` is visible only while its plugin's tab is selected, so it renders only then; `select_tab` and `open_inspector` (for `CommandOut::OpenInspector`). `PluginUi::declare` takes `InitOut.desktop` in place of the keys: the tab and actions are sanitized, a symbol outside `is_symbol_name` becomes `puzzlepiece.extension`, the toolbar is capped at `MAX_TOOLBAR_ACTIONS`, and an action whose command is not among the plugin's granted commands is dropped with a notice; `action(id)` asks `cox_command` for `plugin:<id>:<command>`. The keys, `PluginKey` and `key` go. (2) `palette.rs`: `PaletteItem.symbol` (optional, serde and UniFFI default, so existing callers keep compiling). (3) `live.rs`: `plugin_tabs`, `plugin_toolbar`, `select_plugin_tab`, `plugin_action`; plugin palette actions join `palette`; `OpenInspector` selects the tab; declare notices are emitted once the session is open; `plugin_keys`/`plugin_key` removed (and their `cox-ffi` forwards, which no Swift view calls). Verify with `cargo nextest run -p cox-app -p cox-ffi`, clippy and fmt.
+#### T33.45.4 TUI: links, image `alt`, surfaces in listings
+
+Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: insta snapshots of a linked span with and without OSC 8 and of an image's `alt`; `cox plugin list --json` shows `surfaces`.
 
 #### T33.45.6 App core: notifications, links and images
 
@@ -1126,6 +1125,11 @@ Check: `forward_only` passes; a snapshot per new view in light and dark; an unkn
 Depends: T33.45.1, T33.45.2 · Files: `docs/plugins.md` (or `docs/plugins/api.md`), its generator and drift test · Design: `docs/design/plugins.md` §15, A134
 
 Check: every field of `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` appears under its part (shared, terminal-only, desktop-only), checked by test.
+#### T33.45.8 SDK and the surfaces example
+
+Depends: T33.45.3 · Files: `plugins/sdk/src/lib.rs`, `plugins/examples/surfaces/` (new), `crates/cox-plugin-fixtures/build.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: a `cox-plugin` test loads the example (a command and a status segment, a leader key, an inspector tab and a notification) in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice or `NotOnThisSurface` on the other.
 
 #### T33.45.10 Docs: Russian and Ukrainian translations
 

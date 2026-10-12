@@ -21,6 +21,10 @@
 - T33.45.6. App core: notifications, links and images
 - T33.45.7. FFI and Swift: the desktop contributions
 - T33.45.9. Docs: the three-part plugin API reference
+- T33.45.4. TUI: links, image `alt`, surfaces in listings
+- T33.45.6. App core: notifications, links and images
+- T33.45.7. FFI and Swift: the desktop contributions
+- T33.45.8. SDK and the surfaces example
 - T33.45.10. Docs: Russian and Ukrainian translations
 - T35.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T37.32. Signing, notarization, Sparkle, bundled CLI, Homebrew cask
