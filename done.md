@@ -10813,3 +10813,15 @@ Done when the new test passes and fails with step 1 reverted.
 Out of scope: archiving the full answer, which is T66.2; the other inline boundary walks.
 
 Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T33.45.4 TUI: links, image `alt`, surfaces in listings
+
+Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: insta snapshots of a linked span with and without OSC 8 and of an image's `alt`; `cox plugin list --json` shows `surfaces`.
+
+Status: done 2026-10-12
+
+What landed: `cox-render`'s `link::mark_to` carries a plugin `Span.link` target (an `https://` URL or a workspace-relative path; any other form, a link over 2048 bytes or a full 4096-entry table draws as plain text) in the underline colour, and `link::apply` resolves it through the same workspace rule as a text-derived link, splitting adjacent links into separate runs; `cox-tui`'s `plugin_ui` marks every linked span after sanitizing its text, and without OSC 8 the run is underlined (PL§15.2). An `Image` stays its sanitized `alt` on one dim line, now pinned by a snapshot. `cox plugin list` shows `surfaces …` in each row and `--json` carries `surfaces` (every surface when the manifest names none).
+
+Check output: `mise exec -- cargo nextest run -p cox-render -p cox-tui -p cox` — 563 passed, 2 skipped, including the snapshots `linked_span_with_osc8`, `linked_span_without_osc8` and `image_alt` and `plugin_cli::list_shows_the_surfaces_a_plugin_loads_on`; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` and `mise exec -- cargo fmt --check` clean.

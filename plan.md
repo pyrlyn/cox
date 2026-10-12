@@ -67,7 +67,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.3.3 | todo | P2 | 2 | 90% | |
 | T33.45.3.4 | todo | P2 | 2 | 90% | |
 | T33.45.3.5 | todo | P2 | 1 | 90% | |
-| T33.45.4 | in progress | P2 | 3 | 10% | Claude Code / sonnet-5.5 |
 | T33.45.5 | todo | P2 | 4 | 0% | |
 | T33.45.6 | todo | P2 | 3 | 0% | |
 | T33.45.7 | todo | P2 | 4 | 0% | |
@@ -1194,14 +1193,6 @@ Goal: discover external-agent plugins against the ACP surface.
 Check: `cox-session` tests and workspace gates pass.
 
 Progress (2026-10-11): T33.45.3.1–.5 are implemented in commits `2908fa3b`, `9bcac57e`, `2fc5597a`, `90e02154` and `27613368`. The `cox-plugin` and `cox-session` suites pass (159/159), focused Clippy with `-D warnings` and `cargo fmt --check` pass, and `cox doctor` passes with a scratch `COX_HOME` and a test environment key. The workspace gates remain blocked before project tests by the missing `wasm32-unknown-unknown` target in `cox-plugin-fixtures` and by the packaged whisper.cpp source lacking its `tests`/`examples` directories. Keep the parent and child cards open until those gates can run cleanly.
-
-#### T33.45.4 TUI: links, image `alt`, surfaces in listings
-
-Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
-
-Check: insta snapshots of a linked span with and without OSC 8 and of an image's `alt`; `cox plugin list --json` shows `surfaces`.
-
-Execution plan (Claude Code / sonnet-5.5): (1) `cox-render/src/link.rs` learns an explicit link target — `mark_to(span, target)` interns the target in a bounded table and encodes its id in the reserved underline colour, `apply` splits runs by mark and looks the id up (the drawn-text rule stays for `mark`); with OSC 8 off the run is only underlined, as PL§15.2 says. (2) `cox-tui/src/plugin_ui.rs` maps `Span.link` through `mark_to` after the host's own form check (`https://` or a relative path, no control characters, capped length; anything else draws as plain text), and keeps `Image` as its `alt` on one dim line, now pinned by a snapshot. (3) `cox plugin list` prints `surfaces=…` and `--json` carries `surfaces`. (4) insta snapshots for a linked span with and without OSC 8 and for an image's `alt`; a `plugin_cli` test for `surfaces`.
 
 #### T33.45.5 App core: inspector tab, toolbar and palette actions
 

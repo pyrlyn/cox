@@ -22,7 +22,6 @@
 - T33.43. Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
 - T33.45.3. Host: load filter, granted filter, `cox:desktop/v1`
-- T33.45.4. TUI: links, image `alt`, surfaces in listings
 - T33.45.5. App core: inspector tab, toolbar and palette actions
 - T33.45.6. App core: notifications, links and images
 - T33.45.7. FFI and Swift: the desktop contributions
