@@ -48,6 +48,9 @@ pub struct Caps {
     pub osc9: bool,
     /// OSC 9;4 (ConEmu-style) progress reporting.
     pub osc9_4: bool,
+    /// OSC 22 pointer shapes (kitty's pointer-shape protocol, T5.9): the
+    /// terminal changes the mouse pointer when asked.
+    pub osc22: bool,
     /// Focus-in/out reporting (DECSET 1004).
     pub focus: bool,
     /// An inline image protocol (Kitty graphics or iTerm2's own).
@@ -97,6 +100,15 @@ impl Caps {
                     .is_some_and(|c| c == "truecolor" || c == "24bit"));
         let osc9_4 = kitty_family || env("WT_SESSION").is_some();
         let images = kitty_family || term_program == "iTerm.app";
+        // Only the terminals known to draw OSC 22: WezTerm and the rest of
+        // `modern` ignore it. Everything else stays off until `query` or
+        // `[tui.caps]` says otherwise, so an unknown terminal is sent no
+        // OSC 22 bytes at all; tmux swallows the sequence, so it is off there.
+        let osc22 = !inside_tmux
+            && (env("KITTY_WINDOW_ID").is_some()
+                || term == "xterm-kitty"
+                || term_program == "ghostty"
+                || term.starts_with("foot"));
 
         Caps {
             truecolor,
@@ -105,6 +117,7 @@ impl Caps {
             osc52: modern,
             osc9: modern,
             osc9_4,
+            osc22,
             // DECSET 1004 focus reporting is a near-universal xterm
             // extension; only a genuinely unset `TERM` (piped output, no
             // real terminal in front of us) turns it off.
@@ -115,17 +128,26 @@ impl Caps {
         }
     }
 
-    /// Asks the terminal directly whether it supports the Kitty keyboard
+    /// Asks the terminal directly what it supports: the Kitty keyboard
     /// protocol (`CSI ?u`, backstopped by a primary-device-attributes
     /// query crossterm sends right behind it so a non-supporting terminal's
-    /// reply still arrives promptly). Returns whether the query produced a
-    /// definitive answer — `false` leaves `kitty_keyboard` at whatever
-    /// `detect` already guessed, fail-open. Skipped outright when stdout is
-    /// not a tty (piped output, `doctor --json` in CI) since there is
-    /// nothing to query.
-    pub fn query(&mut self, timeout: Duration) -> bool {
+    /// reply still arrives promptly) and OSC 22 pointer shapes (T5.9, a
+    /// `?pointer` query behind the same kind of backstop). `Queried` says
+    /// which fields the probe decided — a field it did not decide keeps
+    /// whatever `detect` already guessed, fail-open. Skipped outright when
+    /// stdout is not a tty (piped output, `doctor --json` in CI) since there
+    /// is nothing to query. Both probes read stdin for the reply, so only a
+    /// caller that owns the terminal (`doctor`) may call this.
+    pub fn query(&mut self, timeout: Duration) -> Queried {
+        let mut queried = Queried::default();
         if !std::io::stdout().is_terminal() {
-            return false;
+            return queried;
+        }
+        // OSC 22 first: its reader ends on the device-attributes reply, so it
+        // leaves nothing behind to compete with crossterm's reader below.
+        if let Some(supported) = probe_osc22(timeout) {
+            self.osc22 = supported;
+            queried.osc22 = true;
         }
         let (tx, rx) = std::sync::mpsc::channel();
         // crossterm's own internal timeout is a fixed 2 s; running it on a
@@ -136,13 +158,11 @@ impl Caps {
         std::thread::spawn(move || {
             let _ = tx.send(crossterm::terminal::supports_keyboard_enhancement());
         });
-        match rx.recv_timeout(timeout) {
-            Ok(Ok(supported)) => {
-                self.kitty_keyboard = supported;
-                true
-            }
-            _ => false,
+        if let Ok(Ok(supported)) = rx.recv_timeout(timeout) {
+            self.kitty_keyboard = supported;
+            queried.kitty_keyboard = true;
         }
+        queried
     }
 
     /// `[tui.caps]`: any named field here overrides the detected/queried
@@ -158,6 +178,7 @@ impl Caps {
                 "osc52" => self.osc52 = *value,
                 "osc9" => self.osc9 = *value,
                 "osc9_4" => self.osc9_4 = *value,
+                "osc22" => self.osc22 = *value,
                 "focus" => self.focus = *value,
                 "images" => self.images = *value,
                 _ => {}
@@ -167,7 +188,7 @@ impl Caps {
 
     /// Every field as `(name, value)`, in the order `doctor::check_terminal`
     /// prints them.
-    pub fn fields(&self) -> [(&'static str, bool); 10] {
+    pub fn fields(&self) -> [(&'static str, bool); 11] {
         [
             ("truecolor", self.truecolor),
             ("kitty_keyboard", self.kitty_keyboard),
@@ -175,12 +196,89 @@ impl Caps {
             ("osc52", self.osc52),
             ("osc9", self.osc9),
             ("osc9_4", self.osc9_4),
+            ("osc22", self.osc22),
             ("focus", self.focus),
             ("images", self.images),
             ("inside_tmux", self.inside_tmux),
             ("inside_ssh", self.inside_ssh),
         ]
     }
+}
+
+/// Which `Caps` fields `Caps::query` decided from the terminal's own reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Queried {
+    pub kitty_keyboard: bool,
+    pub osc22: bool,
+}
+
+/// OSC 22 support probe: ask for the `pointer` shape, then for the primary
+/// device attributes, which every terminal answers. Replies come back in
+/// order, so an OSC 22 answer ahead of (or without) the attributes reply is
+/// the terminal's, and none by the time the attributes arrive means it does
+/// not draw OSC 22.
+const OSC22_PROBE: &str = "\x1b]22;?pointer\x1b\\\x1b[c";
+
+/// The pointer shape OSC 22 sets (T5.9). `p` is `cox_render::pointer`'s
+/// answer; the CSS name is what kitty's pointer-shape table lists.
+pub fn pointer_bytes(p: crate::pointer::Pointer) -> String {
+    format!("\x1b]22;{}\x1b\\", p.css_name())
+}
+
+/// What the terminal said to `OSC22_PROBE`: `Some(true)` for an OSC 22 reply
+/// that supports the shape, `Some(false)` when the device-attributes reply
+/// arrived with no OSC 22 one (or a `0`), `None` while the reply is still
+/// incomplete.
+fn parse_osc22_reply(buf: &[u8]) -> Option<bool> {
+    const HEAD: &[u8] = b"\x1b]22;";
+    if let Some(at) = buf.windows(HEAD.len()).position(|w| w == HEAD) {
+        let rest = &buf[at + HEAD.len()..];
+        // Terminated by ST (`ESC \`) or BEL; an unterminated reply is not
+        // yet whole.
+        if let Some(end) = rest.iter().position(|&b| b == 0x1b || b == 0x07) {
+            return Some(rest[..end].contains(&b'1'));
+        }
+        return None;
+    }
+    let da1 = buf.windows(3).position(|w| w == b"\x1b[?")?;
+    buf[da1..].contains(&b'c').then_some(false)
+}
+
+/// Writes `OSC22_PROBE` and reads the reply in raw mode. A terminal that
+/// does not answer within `timeout` counts as not supporting OSC 22, so it
+/// is sent no OSC 22 bytes; `None` only when raw mode is unavailable and
+/// nothing could be asked.
+fn probe_osc22(timeout: Duration) -> Option<bool> {
+    use std::io::{Read, Write};
+    crossterm::terminal::enable_raw_mode().ok()?;
+    let verdict = (|| {
+        let mut out = std::io::stdout();
+        out.write_all(OSC22_PROBE.as_bytes()).ok()?;
+        out.flush().ok()?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        // A blocking read cannot be cancelled, so a silent terminal leaves
+        // this thread parked on stdin; `doctor` exits right after, and the
+        // channel send just fails once nothing listens.
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 64];
+            while let Ok(n) = std::io::stdin().read(&mut chunk) {
+                if n == 0 || tx.send(chunk[..n].to_vec()).is_err() {
+                    return;
+                }
+            }
+        });
+        let deadline = std::time::Instant::now() + timeout;
+        let mut buf = Vec::new();
+        loop {
+            let left = deadline.checked_duration_since(std::time::Instant::now())?;
+            buf.extend(rx.recv_timeout(left).ok()?);
+            if let Some(supported) = parse_osc22_reply(&buf) {
+                return Some(supported);
+            }
+        }
+    })();
+    let _ = crossterm::terminal::disable_raw_mode();
+    Some(verdict.unwrap_or(false))
 }
 
 /// Where a turn is, as OSC 9;4 shows it on the tab or taskbar (T23.6).
@@ -283,6 +381,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: true,
+                    osc22: true,
                     focus: true,
                     images: true,
                     inside_tmux: false,
@@ -303,6 +402,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: true,
+                    osc22: true,
                     focus: true,
                     images: true,
                     inside_tmux: false,
@@ -323,6 +423,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: true,
+                    osc22: false,
                     focus: true,
                     images: true,
                     inside_tmux: false,
@@ -343,6 +444,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: false,
+                    osc22: false,
                     focus: true,
                     images: true,
                     inside_tmux: false,
@@ -362,6 +464,7 @@ mod tests {
                     osc52: false,
                     osc9: false,
                     osc9_4: false,
+                    osc22: false,
                     focus: true,
                     images: false,
                     inside_tmux: false,
@@ -378,6 +481,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: false,
+                    osc22: false,
                     focus: true,
                     images: false,
                     inside_tmux: false,
@@ -398,6 +502,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: true,
+                    osc22: false,
                     focus: true,
                     images: false,
                     inside_tmux: false,
@@ -418,6 +523,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: false,
+                    osc22: false,
                     focus: true,
                     images: false,
                     inside_tmux: false,
@@ -434,6 +540,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: true,
+                    osc22: true,
                     focus: true,
                     images: true,
                     inside_tmux: false,
@@ -457,6 +564,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: true,
+                    osc22: false,
                     focus: true,
                     images: true,
                     inside_tmux: true,
@@ -473,6 +581,7 @@ mod tests {
                     osc52: false,
                     osc9: false,
                     osc9_4: false,
+                    osc22: false,
                     focus: true,
                     images: false,
                     inside_tmux: false,
@@ -498,6 +607,7 @@ mod tests {
                     osc52: true,
                     osc9: true,
                     osc9_4: true,
+                    osc22: true,
                     focus: true,
                     images: true,
                     inside_tmux: false,
@@ -544,11 +654,57 @@ mod tests {
     #[test]
     fn query_skips_a_non_tty_stdout_without_blocking() {
         // The test harness's stdout is never a tty, so this must return
-        // `false` (no change) well within the timeout rather than hang.
+        // nothing decided well within the timeout rather than hang.
         let mut caps = Caps::default();
-        let changed = caps.query(Duration::from_millis(50));
-        assert!(!changed);
+        let queried = caps.query(Duration::from_millis(50));
+        assert_eq!(queried, Queried::default());
         assert!(!caps.kitty_keyboard);
+        assert!(!caps.osc22);
+    }
+
+    #[test]
+    fn osc22_reply_is_read_from_the_probe_answer() {
+        // kitty's documented reply to `?pointer`: `1` per supported name.
+        assert_eq!(parse_osc22_reply(b"\x1b]22;1\x1b\\\x1b[?62;c"), Some(true));
+        assert_eq!(parse_osc22_reply(b"\x1b]22;1\x07"), Some(true));
+        assert_eq!(parse_osc22_reply(b"\x1b]22;0\x1b\\"), Some(false));
+        // Only the device-attributes backstop came back: no OSC 22.
+        assert_eq!(parse_osc22_reply(b"\x1b[?62;4c"), Some(false));
+        // Still arriving.
+        assert_eq!(parse_osc22_reply(b"\x1b]22;"), None);
+        assert_eq!(parse_osc22_reply(b"\x1b[?62;"), None);
+        assert_eq!(parse_osc22_reply(b""), None);
+    }
+
+    #[test]
+    fn detect_enables_osc22_only_where_the_terminal_draws_it() {
+        for vars in [
+            &[("TERM_PROGRAM", "ghostty")][..],
+            &[("KITTY_WINDOW_ID", "1")][..],
+            &[("TERM", "foot")][..],
+        ] {
+            assert!(caps_from(vars).osc22, "{vars:?}");
+        }
+        for vars in [
+            &[("TERM_PROGRAM", "WezTerm")][..],
+            &[("TERM_PROGRAM", "Apple_Terminal")][..],
+            &[("TERM_PROGRAM", "ghostty"), ("TMUX", "/tmp/t,1,0")][..],
+            &[][..],
+        ] {
+            assert!(!caps_from(vars).osc22, "{vars:?}");
+        }
+    }
+
+    #[test]
+    fn pointer_bytes_set_the_css_shape_through_osc22() {
+        use crate::pointer::{Edge, Pointer};
+        assert_eq!(pointer_bytes(Pointer::Action), "\x1b]22;pointer\x1b\\");
+        assert_eq!(pointer_bytes(Pointer::Text), "\x1b]22;text\x1b\\");
+        assert_eq!(pointer_bytes(Pointer::Default), "\x1b]22;default\x1b\\");
+        assert_eq!(
+            pointer_bytes(Pointer::Resize(Edge::Vertical)),
+            "\x1b]22;ns-resize\x1b\\"
+        );
     }
 
     /// T23.4, kept through the switch to the `base64` crate (A81): the

@@ -538,6 +538,38 @@ fn pty_progress_only_with_the_capability() {
     );
 }
 
+/// T5.9: a terminal with OSC 22 and the mouse on gets the pointer put back to
+/// `default` on exit; one without OSC 22, or with the mouse off, sees no
+/// OSC 22 at all.
+#[test]
+fn pty_restores_the_pointer_only_with_the_capability() {
+    let count =
+        |raw: &[u8], needle: &[u8]| raw.windows(needle.len()).filter(|w| *w == needle).count();
+    let with = pty::run_probe(
+        &[("COX_PROBE_MOUSE", "1"), ("COX_PROBE_OSC22", "1")],
+        24,
+        80,
+    );
+    assert_eq!(
+        count(&with, b"\x1b]22;default\x1b\\"),
+        1,
+        "{:?}",
+        String::from_utf8_lossy(&with)
+    );
+    for env in [
+        &[("COX_PROBE_MOUSE", "1")][..],
+        &[("COX_PROBE_OSC22", "1")][..],
+    ] {
+        let without = pty::run_probe(env, 24, 80);
+        assert_eq!(
+            count(&without, b"\x1b]22;"),
+            0,
+            "{env:?}: {:?}",
+            String::from_utf8_lossy(&without)
+        );
+    }
+}
+
 /// T23.4: `y` on the probe's one streaming cell writes OSC 52 with the
 /// cell's text, base64-encoded, only when the terminal draws it.
 #[test]
