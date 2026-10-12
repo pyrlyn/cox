@@ -1,5 +1,6 @@
 [tools]
 "cargo:cargo-cache" = "0.8.3" # `just cache` / `just cache-autoclean`; the shared cargo home fills up
+"cargo:https://github.com/pyrlyn/tools" = "rev:d8658b36d8384c24696b183ee07c8f418502dceb" # `just cache`, `just swarfr` (ptools, pyrlyn/tools#1; repin to a v0.1.0 tag once merged)
 rust = { version = "1.98.1", components = "rustfmt,clippy", targets = ["wasm32-unknown-unknown"] } # the one Rust version for local work, CI and releases; wasm32: the guest workspace `plugins/` (T33.27, PL§13)
 node = "24.21.0" # latest LTS; runs Style Dictionary, the desktop token generator (`just desktop-tokens`, T37.17, DS§2)
 zig = "0.16.0" # linker for `cargo zigbuild`: the Linux cox build the Terminal-Bench containers run (T30.9)
