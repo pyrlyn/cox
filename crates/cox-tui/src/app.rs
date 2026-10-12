@@ -123,6 +123,8 @@ pub async fn run(
     let focus = state.caps.focus;
     // T23.6: a quit mid-turn must not leave the tab spinning.
     let progress = state.caps.osc9_4;
+    // T5.9: only a pointer shape this run could have set is put back.
+    let pointer = state.caps.osc22 && state.mouse;
     if focus {
         execute!(io::stdout(), EnableFocusChange)?;
     }
@@ -135,7 +137,7 @@ pub async fn run(
     let vte = crate::term::is_vte(&|k| std::env::var(k).ok());
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        restore(kitty, focus, progress, mouse);
+        restore(kitty, focus, progress, pointer, mouse);
         hook(info);
     }));
     let mut terminal = inline_terminal(crossterm::terminal::size()?.1)?;
@@ -222,6 +224,12 @@ pub async fn run(
                         out.write_all(crate::term::progress(p).as_bytes())?;
                         out.flush()?;
                     }
+                    Cmd::Pointer(shape) => {
+                        use std::io::Write;
+                        let mut out = io::stdout();
+                        out.write_all(crate::term::pointer_bytes(shape).as_bytes())?;
+                        out.flush()?;
+                    }
                     Cmd::Notify { title, body } => {
                         use std::io::Write;
                         let bytes = crate::term::notification(&state.caps, vte, &title, &body);
@@ -304,7 +312,7 @@ pub async fn run(
     }
     .await;
     stop.store(true, Ordering::Relaxed);
-    restore(kitty, focus, progress, mouse);
+    restore(kitty, focus, progress, pointer, mouse);
     result
 }
 
@@ -360,14 +368,23 @@ fn spawn_input(stop: Arc<AtomicBool>) -> tokio::sync::mpsc::Receiver<io::Result<
 /// pushed is a no-op on every terminal that implements the spec, but `run`
 /// only pays for the round trip when its own push actually happened; `focus`
 /// likewise turns off the focus reports only `run` turned on, `progress`
-/// clears an OSC 9;4 state only a capable terminal was sent, and `mouse`
+/// clears an OSC 9;4 state only a capable terminal was sent, `pointer` puts
+/// the OSC 22 shape back to `default` (T5.9; cox-tui has no suspend path, so
+/// exit and the panic hook are the only places it can be left set), and `mouse`
 /// (T22.4) releases capture only when `tui.mouse` asked for it, so a `false`
 /// config never touches the terminal's mouse reporting at all.
-fn restore(kitty: bool, focus: bool, progress: bool, mouse: bool) {
+fn restore(kitty: bool, focus: bool, progress: bool, pointer: bool, mouse: bool) {
     if progress {
         use std::io::Write;
         let mut out = io::stdout();
         let _ = out.write_all(crate::term::progress(crate::term::Progress::Idle).as_bytes());
+        let _ = out.flush();
+    }
+    if pointer {
+        use std::io::Write;
+        let mut out = io::stdout();
+        let _ =
+            out.write_all(crate::term::pointer_bytes(crate::pointer::Pointer::Default).as_bytes());
         let _ = out.flush();
     }
     if kitty {
