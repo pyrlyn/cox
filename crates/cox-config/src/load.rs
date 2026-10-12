@@ -616,8 +616,9 @@ fn build_figment(
         // not leak into the config tree as `expect.sandbox` either.
         // `COX_PLAIN` and `COX_AX_STARTUP_QUIET_MS` are read by the plain
         // surface (T29.1) itself. `COX_KEYRING` switches the OS keyring
-        // off (A49). The ignore list matches pre-split keys
-        // (`EXPECT_SANDBOX`, not dotted): it runs before the `map` below.
+        // off (A49). `COX_CURSOR_CLOUD_URL` points the cloud-agent client at
+        // a loopback test server (T56.8). The ignore list matches pre-split
+        // keys (`EXPECT_SANDBOX`, not dotted): it runs before the `map` below.
         Env::prefixed("COX_")
             .ignore(&[
                 "home",
@@ -628,6 +629,7 @@ fn build_figment(
                 "plain",
                 "ax_startup_quiet_ms",
                 "keyring",
+                "cursor_cloud_url",
             ])
             .map(move |name| env_key(&key_tree, name.as_str()).into()),
     ));
@@ -1237,6 +1239,7 @@ mod tests {
                 ("COX_PLAIN", Some("1")),
                 ("COX_AX_STARTUP_QUIET_MS", Some("300")),
                 ("COX_KEYRING", Some("off")),
+                ("COX_CURSOR_CLOUD_URL", Some("http://127.0.0.1:9")),
             ],
             || {
                 let loaded = load_plain(cwd.path()).expect("load succeeds");

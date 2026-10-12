@@ -46,7 +46,6 @@
 - T53.7. `cox-plugin-sdk` ready for crates.io
 - T53.8. Go SDK module ready to tag
 - T53.9. Templates and docs use the published SDKs
-- T56.8. Offline end-to-end over hand-written fixtures
 - T56.9. Docs: cloud agents for users and in EA
 - T56.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T57.1. Windows CI job: `cargo check` over a growing crate list
