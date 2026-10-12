@@ -10813,3 +10813,15 @@ Done when the new test passes and fails with step 1 reverted.
 Out of scope: archiving the full answer, which is T66.2; the other inline boundary walks.
 
 Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T33.45.8 SDK and the surfaces example
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-12 · Depends: T33.45.3 · Files: `plugins/sdk/src/lib.rs`, `plugins/examples/surfaces/` (new), `crates/cox-plugin-fixtures/build.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Execution plan: (1) SDK: link `cox_desktop_notify` from `cox:desktop/v1`, wrap it as `desktop_notify`, add `surface_of(&InitIn)` (absence reads as terminal); unit tests on the wire. (2) `plugins/examples/surfaces` (guest member, `plugins/Cargo.lock` updated): one `plugin.toml` with `ui`, `terminal.keys` and all four `desktop` parts; `cox_init` declares every part unconditionally so the host does the filtering; `cox_command`/`cox_key` try `desktop_notify` and fall back to `notify` on `NotOnThisSurface`. (3) `crates/cox-plugin-fixtures/build.rs`: a `FIXTURES` list of guest packages (same shape as PR #217) plus `SURFACES_*` constants. (4) A `cox-plugin` test (`surfaces_example`, dev-dependency on the fixtures crate) loads the package in a terminal and a desktop `LivePlugins` and checks each part and notice.
+
+Check: a `cox-plugin` test loads the example (a command and a status segment, a leader key, an inspector tab and a notification) in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice or `NotOnThisSurface` on the other.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin-fixtures -p cox-plugin` - 105 passed, including `surfaces_example::terminal_session_keeps_the_key_and_drops_the_desktop_parts`, `desktop_session_keeps_the_desktop_parts_and_drops_the_key`, `the_command_falls_back_to_a_notice_on_the_terminal` (the host answered `cox_desktop_notify` with `NotOnThisSurface`), `the_command_opens_the_inspector_on_the_desktop` and `each_surface_renders_its_slots_with_the_live_count`. In `plugins/`: `cargo test -p cox-plugin-sdk -p cox-plugin-surfaces` - 15 passed; `cargo clippy --locked --target wasm32-unknown-unknown -p cox-plugin-sdk -p cox-plugin-surfaces -- -D warnings` clean. `cargo nextest run -p cox --test deps` and `--test plugins` pass; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` and `mise exec -- cargo fmt --check` clean.
+
+Not done: the desktop `cox_desktop_notify` still answers `Failed` ("not connected to the app yet") until T33.45.5/T33.45.6 wire it to `cox_app::app::Host`; the example treats that as a refused notification and still opens the inspector.

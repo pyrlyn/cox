@@ -53,6 +53,9 @@ workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 # keeps cox-plugin beside cox-core, not above it (crates/cox/tests/deps.rs).
 cox-core = { path = "../cox-core", version = "0.1.2" }
 cox-provider = { path = "../cox-provider", version = "0.1.2" }
+# T33.45.8: `surfaces_example` loads the built `plugins/examples/surfaces`
+# package in a terminal and a desktop session; no dependencies of its own.
+cox-plugin-fixtures = { path = "../cox-plugin-fixtures" }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 # T33.12: a test builds the `ToolCx` a `WasmTool` runs under, whose

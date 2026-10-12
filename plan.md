@@ -71,7 +71,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.5 | todo | P2 | 4 | 0% | |
 | T33.45.6 | todo | P2 | 3 | 0% | |
 | T33.45.7 | todo | P2 | 4 | 0% | |
-| T33.45.8 | in progress | P2 | 3 | 10% | Claude Code / sonnet-5.5 |
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
@@ -1218,14 +1217,6 @@ Check: a plugin notice with actions reaches `Host::notify`'s test double and its
 Depends: T33.45.6 · Files: `crates/cox-ffi/src/{session,types}.rs`, `desktop/macos/Packages/CoxUI/…` (Inspector, SessionToolbar, CommandPalette, PluginWidgetView), `desktop/design/DESIGN.md` §6 rows · Design: `docs/design/plugins.md` §15, A134
 
 Check: `forward_only` passes; a snapshot per new view in light and dark; an unknown SF Symbol draws `puzzlepiece.extension` (settles §15.4's **unverified** note).
-
-#### T33.45.8 SDK and the surfaces example
-
-Depends: T33.45.3 · Files: `plugins/sdk/src/lib.rs`, `plugins/examples/surfaces/` (new), `crates/cox-plugin-fixtures/build.rs` · Design: `docs/design/plugins.md` §15, A134
-
-Execution plan: (1) SDK: link `cox_desktop_notify` from `cox:desktop/v1`, wrap it as `desktop_notify`, add `surface_of(&InitIn)` (absence reads as terminal); unit tests on the wire. (2) `plugins/examples/surfaces` (guest member, `plugins/Cargo.lock` updated): one `plugin.toml` with `ui`, `terminal.keys` and all four `desktop` parts; `cox_init` declares every part unconditionally so the host does the filtering; `cox_command`/`cox_key` try `desktop_notify` and fall back to `notify` on `NotOnThisSurface`. (3) `crates/cox-plugin-fixtures/build.rs`: a `FIXTURES` list of guest packages (same shape as PR #217) plus `SURFACES_*` constants. (4) A `cox-plugin` test (`surfaces_example`, dev-dependency on the fixtures crate) loads the package in a terminal and a desktop `LivePlugins` and checks each part and notice.
-
-Check: a `cox-plugin` test loads the example (a command and a status segment, a leader key, an inspector tab and a notification) in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice or `NotOnThisSurface` on the other.
 
 #### T33.45.9 Docs: the three-part plugin API reference
 
