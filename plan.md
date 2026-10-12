@@ -153,10 +153,10 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T63.4 | todo | P2 | 4 | 0% | |
-| T63.4.1 | todo | P2 | 2 | 0% | |
-| T63.4.2 | todo | P2 | 3 | 0% | |
-| T63.4.3 | todo | P2 | 3 | 0% | |
+| T63.4 | in progress | P2 | 4 | 10% | Claude Code / opus-5.5 |
+| T63.4.1 | in progress | P2 | 2 | 10% | Claude Code / opus-5.5 |
+| T63.4.2 | in progress | P2 | 3 | 10% | Claude Code / opus-5.5 |
+| T63.4.3 | in progress | P2 | 3 | 10% | Claude Code / opus-5.5 |
 
 ## Reference
 
@@ -2584,6 +2584,12 @@ Out of scope: caching `.build` and DerivedData (T61.4, T61.9); splitting the job
 Model: sonnet · Status: open · Depends: — · Size: ~350 across T63.4.1–T63.4.3 below (`AGENTS.md` task size) · Priority: P2 · Complexity: 4
 
 In progress on branch `feature/swift-dependencies`, in its own pull request with tests; that pull request claims this card, keeps the table and `todo.md` in sync, and moves the card to `done.md`.
+
+Execution plan (Claude Code / opus-5.5, branch `t63.4`). Most of this card landed in #184 (`refactor(desktop): adopt swift-dependencies for DI`), which did not close it: `coreClient`, `secretStore` and `inboxClient` keys in `CoxClient`, `SettingsStore` and `SidebarStore` reading them, `prepareDependencies` with `LaunchCore.prepare` in `AppModel.init`, `project.yml`, every `Package.resolved`, `toolchain.md`, §1 and DT§4.6. #184's deliberate choices stay: `inboxClient` is optional (`nil` for a failed launch) instead of `NoInbox`, a failed core registers `UnavailableCoreClient`, `SessionClient` gets no key (nothing reads one), and the pins stay `from: "1.17.1"` as in `project.yml`. What is left, one commit per sub-card:
+1. T63.4.1: `CoxPlatform` depends on `Dependencies` and gives `SecretStoreKey` its live value (`Dependencies+Live.swift`, the `COX_KEYRING=off` rule moved out of `LaunchCore`, testable through `SecretStoreKey.live(environment:)`); `CoxModelTests` gets `DependenciesTestSupport`; `DependenciesTests.swift` proves the test values are the stand-ins and that opening the test core is reported.
+2. T63.4.2: `InboxStore` reads `\.inboxClient` (`init?()`, `nil` when the launch keeps no inbox), so no store takes `CoreClient`, `InboxClient` or `SecretStore` as an argument; its tests and the sidebar's override the client with `.dependency` traits.
+3. T63.4.3: `LaunchCore` loses `secrets` and `prepare` no longer sets `secretStore`; `MacHost` reads `\.secretStore` unless a test passes one; DT§4.6 says where each live value comes from.
+Check: `swift test --build-system swiftbuild` in `CoxModel`, `CoxPlatform` and `CoxCore`; `just desktop-app`; launch with and without `-CoxFixture`.
 
 Goal: the stores in `CoxModel` read `CoreClient`, `InboxClient` and `SecretStore` through `@Dependency` instead of initializer arguments threaded from `AppModel`; `LaunchCore` still makes the one live-or-fixture choice and hands it over once with `prepareDependencies`; tests override a client per test with a trait; Xcode previews get fixture values without a core.
 
