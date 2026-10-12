@@ -91,7 +91,6 @@
 - T58.28. Packaging
 - T58.29. UI automation smoke test
 - T58.30. Snapshot spike: WinUI controls to PNG
-- T59.7. `rename_symbol` through the server's `textDocument/rename`
 - T61.1. Build-time baseline
 - T61.2. Fast profile for the XCFramework outside a release
 - T61.3. Bindings generator on the host dev profile, skipped when the library did not change

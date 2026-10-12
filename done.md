@@ -10844,3 +10844,41 @@ Done when: fake-server tests for both requests and the fallback.
 Out of scope: rename (T59.7), hover, workspace symbols.
 
 Check output: `mise exec -- cargo nextest run -p cox-tools -p cox-session` — 292 of 293 passed, including the new `lsp::nav` tests (definition and references against a fake server, UTF-16 columns, sort and dedup, an out-of-root path printed bare and sanitized, the 100-row cap archived, an empty answer, the grep fallback with no server and after a server error, input refusals) and the `definition`/`references` assertions in `cox-session` `tool_search_finds_diagnostics`; `mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print` timed out once under load, outside this task, and passed on its own rerun. `mise exec -- cargo nextest run -p cox --test lsp` (the real binary against a fake sandboxed server) — 2 passed. `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T59.7 `rename_symbol` through the server's `textDocument/rename`
+
+Model: opus · Status: done 2026-10-13 · Depends: T59.6 · Size: ~200 · Priority: P3 · Complexity: 4
+
+Goal: one tool call renames a symbol across files using the server's `WorkspaceEdit`, applied as one approved change with the same per-file archive as `edit`, and refuses when no server runs (no text-search rename).
+
+Files:
+- `crates/cox-tools/src/lsp/rename.rs` (new)
+- `crates/cox-tools/src/lsp/client.rs`
+- `crates/cox-tools/src/write.rs`
+
+Steps:
+1. `prepareRename` then `rename`; convert `WorkspaceEdit` (`changes` and `documentChanges` text edits only; file create/rename ops are refused) into per-file new contents (Empryo idea: `rename-symbol.ts`).
+2. Apply through `write.rs`'s path (`write.rs:42`) with the archive-before-write pattern of `edit.rs:126`; one `Engine` approval for the whole set, listing the files.
+3. After apply, T59.3's diagnostics delta per file.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: fake-server test renames across two files, one approval, both archived; refusal without a server; a stale-version edit is refused.
+
+Out of scope: rename without a server, file moves.
+
+Execution plan (Claude Code / opus-5.5):
+1. `server.rs`: advertise `rename.prepareSupport` and `workspace.workspaceEdit.documentChanges` (no resource operations); record `renameProvider`/`prepareProvider`; `Server::rename` syncs the file, re-syncs every file cox opened whose disk text changed, sends `prepareRename` (when offered) then `rename`, and returns the edit with the versions it synced.
+2. `lsp/rename.rs` (new): parse `changes`/`documentChanges` (create/rename/delete refused), confine every file to the writable roots, refuse a versioned edit whose version is not the synced one, apply UTF-16 ranges to each file's text (overlapping or out-of-range edits refused).
+3. `write.rs`: a multi-file `rewrite_all` that archives every pre-image, stages every temp file, then renames; a failure removes the temps and restores what was already renamed. `rename_symbol` (deferred, `Write`, `Exclusive`, subject = the symbol's file) goes through the Engine once; no server running → refused.
+4. Diagnostics delta per file via the T59.3 helpers in `mod.rs`, factored out of `AfterEdit`; register in `cox-session` `with_lsp`; `docs/tools.md`.
+5. Tests: fake server renames across two files (both archived, one call), refusal without a server, stale version refused, resource op refused, out-of-root file refused; `rewrite_all` rollback.
+
+Not done: the approval cannot list the files. The Engine gates the call before `call` runs, on `subject`, which is computed from the input alone, and the file set exists only once the server answers; so the gate is one approval on the symbol's file (risk `Write`, like `edit`), the result lists every file, and `touches` is `None`, so the loop snapshots the workspace around the call. A consequence: an `edit` path rule (allow or deny) is not consulted for the other files the rename writes; `confine` against the writable roots still is.
+
+Check output: `mise exec -- cargo nextest run --workspace` — 2284 passed, 8 skipped, including the new `lsp::rename` tests (a two-file rename in one call with both pre-images archived, the T59.3 delta after a rename, refusal without a running server and no server started, a stale version / file create / out-of-root file / `prepareRename` null each refused with nothing written or archived, a file changed on disk re-synced before the rename, UTF-16 offsets, CRLF and end-of-line clamping, overlapping and out-of-range edits refused, `changes` parsing) and `write::tests::rewrite_all_puts_back_what_it_replaced_when_a_later_file_fails`; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean. The real binary (`cargo run -p cox -- run -p` with the scripted provider, a scratch `COX_HOME` and a scratch crate under the worktree) started the real `rust-analyzer` through `diagnostics` and `rename_symbol` answered "renamed to `renamed_f` in 2 file(s): src/a.rs, src/main.rs", both files rewritten; no server process left after exit.
