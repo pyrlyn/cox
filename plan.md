@@ -62,7 +62,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.43 | todo | P1 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
-| T33.45.6 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T33.45.7 | todo | P2 | 4 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
@@ -1157,14 +1156,6 @@ Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and a
 Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
 
 Check: insta snapshots of a linked span with and without OSC 8 and of an image's `alt`; `cox plugin list --json` shows `surfaces`.
-
-#### T33.45.6 App core: notifications, links and images
-
-Depends: T33.45.5 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/app.rs`, `crates/cox-app/src/wire.rs` · Design: `docs/design/plugins.md` §15, A134
-
-Check: a plugin notice with actions reaches `Host::notify`'s test double and its action runs the command; a remote link goes through `confirm_open_url`; the app-server wire round-trips the new payloads.
-
-Plan: (1) `cox-plugin-api`: `ui::is_link` is the one rule for a plugin link (`https://` or workspace-relative path with an optional `:line`, at most 2048 bytes, no control or space character); the manifest's `is_package_md` shares `is_package_path` with the image path rule. (2) `cox-plugin`: `cox_desktop_notify` sanitizes, caps the level, keeps at most one notice per 10 s per plugin and hands it to a sink bound with `LivePlugins::on_desktop_notice` (queued until bound, so `cox_init` can notify); `Live` keeps the package directory, and `package_image` reads a package PNG (regular file, no symlink, at most 256 KiB). `cox-session` records the directory and re-exports both. (3) `cox-app`: `SpanView.link` and `WidgetView::Image { alt, png }` through the same `view`; `PluginUi` turns a notice into `PluginNotice` (actions naming no granted command dropped) and gives it to the new `Host::plugin_notice`, which returns whether the platform posted it, else it is a timeline `Notice`; `LiveSession::notice_action` runs a button's command and `open_link` opens an `https://` link through `Host::open_url` or answers a workspace-relative path for the UI to show; `RemoteSession` sends the same through `Call::PluginAction` and opens a link through `Host::confirm_open_url`; `ServerEvent::PluginNotice` carries a remote notice. Verify with `cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-session -p cox-app -p cox-ffi`, clippy and fmt.
 
 #### T33.45.7 FFI and Swift: the desktop contributions
 
