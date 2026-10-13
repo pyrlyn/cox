@@ -18,7 +18,6 @@
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
 - T33.43. Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
-- T33.45.4. TUI: links, image `alt`, surfaces in listings
 - T33.45.7. FFI and Swift: the desktop contributions
 - T33.45.9. Docs: the three-part plugin API reference
 - T33.45.10. Docs: Russian and Ukrainian translations

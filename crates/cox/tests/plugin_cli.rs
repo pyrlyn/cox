@@ -259,6 +259,50 @@ fn headless_never_loads_ungranted_plugin() {
     );
 }
 
+/// T33.45.4 Check: `list --json` carries `surfaces` (every surface when the
+/// manifest says nothing, else the declared subset) and the text row names them.
+#[test]
+fn list_shows_the_surfaces_a_plugin_loads_on() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let everywhere = tempfile::tempdir().unwrap();
+    write_plugin(everywhere.path(), "everywhere");
+    let desk = tempfile::tempdir().unwrap();
+    write_plugin(desk.path(), "desk");
+    let narrowed = manifest("desk").replace("api = 1", "api = 1\nsurfaces = [\"desktop\"]");
+    std::fs::write(desk.path().join("plugin.toml"), narrowed).unwrap();
+    for dir in [&everywhere, &desk] {
+        cox_plugin(
+            home.path(),
+            cwd.path(),
+            &["install", dir.path().to_str().unwrap(), "--yes"],
+        )
+        .assert()
+        .success();
+    }
+
+    let listed = list_json(home.path(), cwd.path());
+    let surfaces = |id: &str| {
+        let row = listed["plugins"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|r| r["id"] == id))
+            .unwrap_or_else(|| panic!("{id} missing: {listed}"));
+        row["surfaces"].clone()
+    };
+    assert_eq!(
+        surfaces("everywhere"),
+        serde_json::json!(["terminal", "desktop", "headless", "acp"])
+    );
+    assert_eq!(surfaces("desk"), serde_json::json!(["desktop"]));
+
+    let text = list_text(home.path(), cwd.path());
+    assert!(text.contains("surfaces desktop)"), "{text}");
+    assert!(
+        text.contains("surfaces terminal+desktop+headless+acp"),
+        "{text}"
+    );
+}
+
 /// T33.7 Check: `install` (declined by default: stdin is closed, so the
 /// prompt reads EOF and the grant is not written) → `enable --yes` grants
 /// it → `list` reports `loaded` → `disable` → `list` reports `not loaded`.
