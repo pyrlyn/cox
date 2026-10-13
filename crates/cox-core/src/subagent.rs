@@ -572,10 +572,18 @@ impl Tool for AgentTool {
             cancel: cx.cancel.clone(),
             progress: cx.output.clone(),
         };
-        if input
-            .get("background")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
+        // T56.6: a hosted run may take hours, so its driver can insist on
+        // the background whatever the call asked for.
+        let background_only = io
+            .spec
+            .external
+            .as_ref()
+            .is_some_and(|a| a.background_only());
+        if background_only
+            || input
+                .get("background")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
         {
             let parent = self.parent.clone();
             tokio::spawn(async move {

@@ -28,6 +28,8 @@ use cox_tools::send_message::SendMessageTool;
 
 #[cfg(feature = "plugins")]
 pub mod acp_session;
+#[cfg(feature = "plugins")]
+mod cloud_agents;
 pub mod doctor;
 pub mod env;
 #[cfg(feature = "plugins")]
@@ -435,6 +437,8 @@ pub async fn open_reporting(
     // this directory (D2); an empty result (header only, disabled, minimal,
     // or a zero budget) appends nothing.
     let memory_index = memory_index_for(&config, &mdir);
+    #[cfg(feature = "plugins")]
+    let cloud_store = store.clone();
     let session = match resume {
         Some((id, history)) => Session::resume(
             config,
@@ -472,7 +476,7 @@ pub async fn open_reporting(
     // whose CLI or key is missing is left out with one warning (EA§7).
     #[cfg(feature = "plugins")]
     let plugin_warnings = {
-        let (drivers, left_out) = external_agents::drivers(
+        let (mut drivers, left_out) = external_agents::drivers(
             plugins.external_agents,
             &base,
             cwd,
@@ -480,10 +484,22 @@ pub async fn open_reporting(
             std::env::var_os("PATH").as_deref(),
             cox_provider::http::resolve_key,
         );
+        // T56.6: a granted `[[cloud_agents]]` entry dispatches by the same
+        // `agent(preset)` path, background only.
+        let (cloud, cloud_left_out) = cloud_agents::drivers(
+            plugins.cloud_agents,
+            &base,
+            id,
+            cwd,
+            cloud_store,
+            cox_provider::http::resolve_key,
+        );
+        drivers.extend(cloud);
         session.set_external_agents(drivers);
         plugin_warnings
             .into_iter()
             .chain(left_out)
+            .chain(cloud_left_out)
             .collect::<Vec<_>>()
     };
     // T33.44: each granted plugin's `cox_init` ran once, in `plugin_tools`

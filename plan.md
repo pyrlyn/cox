@@ -86,7 +86,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.6 | todo | P3 | 4 | 0% | |
 | T56.7 | todo | P3 | 4 | 0% | |
 | T56.8 | todo | P3 | 3 | 0% | |
 | T56.9 | todo | P3 | 1 | 0% | |
@@ -207,7 +206,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 |-------|------|------|
 | `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15 |
 | `cox-config` | the one config owner (T32.16; split out of `cox`): figment layering (default/user/project/env/flag), validation, `cox config set` editing and the `docs/config.jsonschema` drift test. Errors are a `thiserror` enum | figment, toml_edit 0.25, thiserror |
-| `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents; login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell) |
+| `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents, cloud agent drivers (T56.6); login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell), cox-cursor-cloud and futures (T56.6: the cloud agent driver and its run stream; both already in the tree) |
 | `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
 | `cox-ffi` | the macOS app's UniFFI surface (T37.14): one tokio runtime, `App` and `SessionHandle` objects, the foreign `AppHost` trait, `#[uniffi::remote]` mirrors of cox-app types, a fixture recorder. `staticlib` + `lib`; the only crate that depends on uniffi | uniffi 0.32.2 (proc-macros, no UDL; default features off); dev: syn 3.0.5 (`full`, `parsing`; T37.39.1: `tests/forward_only.rs` parses the FFI sources); async-trait (MIT OR Apache-2.0): the async `AppHost` methods UniFFI exports (P51, P52) |
 | `desktop/` | the macOS app (P37, not a Cargo crate): Swift packages under `desktop/macos/Packages/`, the design tokens and their generator under `desktop/design/` | node 24.21.0 (mise) with npm `style-dictionary` 5.5.5 (T37.17: DTCG tokens → Swift, asset colours, CSS); SwiftLint 0.65.1 (mise, aqua; T37.18: DS§9 no-literal rules); watchexec 2.7.4 (mise, aqua; `just desktop-open` rebuilds the XCFramework on Rust changes) and SwiftLintPlugins at the same version in each package; `swift-format` from the Xcode toolchain; swift-collections 1.7.1 (T37.16: `OrderedDictionary` timeline store); swift-dependencies 1.17.1 (the stores' launch-wide services as `@Dependency` values, DT§4.6); swift-snapshot-testing 1.19.6 (T37.19: `CoxUI` snapshot tests); swift-property-based 2.0.1 (T63.1: `CoxModel` property tests) |
@@ -1638,14 +1637,6 @@ Every card in this phase:
 - reads the key from `CURSOR_API_KEY` through `cox_provider::http::resolve_key` (tests inject `resolve_key_with`; no test touches a real key or keychain) and never writes it to a log, an error or the rollout;
 - runs every string from Cursor (stream text, tool names, artifact names, errors) through `cox_sanitize::sanitize`;
 - makes no network call in tests (wiremock and hand-written fixtures only, D12).
-
-#### T56.6 Host driver: a background task becomes a Cursor Cloud run
-
-Depends: T56.2, T56.3, T56.4, T56.5 · Size: ~190 · Files: `crates/cox-session/src/cloud_agents.rs` (new), `crates/cox-session/src/lib.rs`; manifest `crates/cox-session/Cargo.toml`
-Goal: each granted `[[cloud_agents]]` entry registers as a background-only subagent preset through the path P35's external agents use. On dispatch the driver resolves the repository's GitHub remote (any other host is refused before any call; credentials in the URL are stripped), warns in the approval text when local `HEAD` is not on the remote, asks `Engine` for `CloudAgent(<repo>)`, creates the run, stores it (T56.5), and maps the stream onto the T34.8 task events: `TaskCreated` at create, assistant text accumulated into the result item, and `TaskCompleted` at `done` or a terminal status. Cancelling the task cancels the run. Every string passes `sanitize`.
-Check: `mise exec -- cargo nextest run -p cox-session cloud_agent_refuses_a_non_github_remote cloud_agent_strips_credentials_from_the_remote cloud_agent_denied_by_engine_makes_no_request cloud_agent_stream_maps_to_task_events cloud_agent_task_cancel_cancels_the_run` (wiremock and a fixture repository).
-Done when: the tests pass.
-Out of scope: foreground (blocking) runs; follow-up messages into a run (a later card if wanted).
 
 #### T56.7 Usage row and resume
 
