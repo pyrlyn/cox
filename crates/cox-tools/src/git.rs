@@ -635,8 +635,9 @@ async fn git_or_err(dir: &Path, args: &[&str]) -> Result<String, WorktreeError> 
 
 /// One `git` run in `dir`; `None` on a non-zero exit or a missing binary.
 /// `GIT_OPTIONAL_LOCKS=0` because the status line polls: it must never take
-/// the index lock out from under the user's own git.
-async fn git(dir: &Path, args: &[&str]) -> Option<String> {
+/// the index lock out from under the user's own git. Public for the cloud
+/// agent driver (T56.6), which reads the remote and `HEAD` the same way.
+pub async fn git(dir: &Path, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
         .current_dir(dir)
         .args(args)
