@@ -1,7 +1,8 @@
-//! Builds `plugins/examples/rust` and `plugins/examples/surfaces` for
-//! `wasm32-unknown-unknown` with the guest workspace's own cargo and lays
-//! each out as an installable package in `OUT_DIR/example` and
-//! `OUT_DIR/surfaces` (PL§13, T33.45.8). A nested cargo, not a dependency, because a
+//! Builds `plugins/examples/rust`, `plugins/examples/surfaces` and
+//! `plugins/jev` for `wasm32-unknown-unknown` with the guest workspace's own
+//! cargo and lays each out as an installable package in `OUT_DIR/example`,
+//! `OUT_DIR/surfaces` and `OUT_DIR/jev` (PL§13, T33.45.8, T33.40.3). A nested
+//! cargo, not a dependency, because a
 //! dependency would build for the host target of the main workspace.
 //!
 //! The nested build gets its own `--target-dir` under `OUT_DIR`, so it never
@@ -26,7 +27,7 @@ struct Fixture {
     wasm: &'static str,
 }
 
-const FIXTURES: [Fixture; 2] = [
+const FIXTURES: [Fixture; 3] = [
     Fixture {
         krate: "cox-plugin-example",
         dir: "examples/rust",
@@ -40,6 +41,13 @@ const FIXTURES: [Fixture; 2] = [
         artifact: "cox_plugin_surfaces.wasm",
         package: "surfaces",
         wasm: "surfaces.wasm",
+    },
+    Fixture {
+        krate: "cox-plugin-jev",
+        dir: "jev",
+        artifact: "cox_plugin_jev.wasm",
+        package: "jev",
+        wasm: "jev.wasm",
     },
 ];
 
