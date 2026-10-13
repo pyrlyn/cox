@@ -16,11 +16,11 @@ pub mod manifest;
 pub mod ui;
 
 pub use abi::{
-    AbiError, ActionDecl, Advice, Answer, CommandDecl, CommandIn, CommandOut, DecidePoint,
-    DesktopNotice, DesktopOut, Effects, EventBatch, HookCall, HttpReq, HttpResp, InitIn, InitOut,
-    KeyDecl, MAX_NOTICE_ACTIONS, MAX_TOOLBAR_ACTIONS, ModelCall, NoticeAction, NoticeLevel,
-    PluginNotice, ProviderCall, Question, RenderIn, RenderItemIn, SessionInfo, Slot, TabDecl,
-    ToolCallIn, is_symbol_name,
+    AbiError, ActionDecl, Advice, Answer, CallTarget, CommandDecl, CommandIn, CommandOut,
+    DecideOut, DecidePoint, DecideResume, DesktopNotice, DesktopOut, Effects, EventBatch, HookCall,
+    HttpReq, HttpResp, InitIn, InitOut, KeyDecl, MAX_NOTICE_ACTIONS, MAX_TOOLBAR_ACTIONS,
+    ModelCall, NoticeAction, NoticeLevel, OwnProvider, PluginNotice, ProviderCall, Question,
+    QuestionItem, RenderIn, RenderItemIn, SessionInfo, Slot, TabDecl, ToolCallIn, is_symbol_name,
 };
 
 pub use manifest::{
@@ -96,6 +96,8 @@ mod tests {
             HttpResp,
             Question,
             Advice,
+            DecideOut,
+            DecideResume,
             AbiError,
             Widget,
             DesktopNotice,
