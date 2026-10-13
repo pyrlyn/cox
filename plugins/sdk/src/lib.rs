@@ -1,5 +1,6 @@
 //! `cox-plugin-sdk`: write a cox plugin in Rust. Typed wrappers over every
-//! guest export and `cox:host/v1` host function of ABI v1 (PL§4), on top of
+//! guest export and host function of ABI v1 (PL§4, `cox:host/v1`, and
+//! `cox:desktop/v1` from PL§15), on top of
 //! extism-pdk's memory and I/O, with the payload types from `cox-plugin-api`.
 //! A crate of its own in the guest workspace `plugins/` because it builds for
 //! `wasm32-unknown-unknown` and must never build for the host in the main
@@ -83,6 +84,13 @@ mod ffi {
         pub fn cox_cancelled(args: u64) -> u64;
         pub fn cox_redraw(args: u64) -> u64;
     }
+
+    // Its own import module (PL§15.4): a plugin that never calls it imports
+    // nothing from it, so it still loads in a cox that predates the section.
+    #[link(wasm_import_module = "cox:desktop/v1")]
+    unsafe extern "C" {
+        pub fn cox_desktop_notify(args: u64) -> u64;
+    }
 }
 
 /// Decodes a host function's reply block: `{"Ok": T}` or `{"Err": AbiError}`.
@@ -154,6 +162,18 @@ host_fns! {
     cancelled => cox_cancelled() -> bool = ();
     /// `cox_redraw` (any `ui` capability): marks the plugin's slots dirty.
     redraw => cox_redraw() -> () = ();
+    /// `cox_desktop_notify` (capability `desktop.notify`, `cox:desktop/v1`,
+    /// PL§15.4): a notification whose buttons run the plugin's own commands.
+    /// Off the desktop it is `Err(NotOnThisSurface)`, which a plugin treats as
+    /// "use `notify`", not as a failure.
+    desktop_notify => cox_desktop_notify(notice: &DesktopNotice) -> () = notice;
+}
+
+/// The surface `init` says the session runs on. A cox older than PL§15 omits
+/// it and only ever loaded plugins into a terminal session, so absence reads
+/// as `terminal`.
+pub fn surface_of(init: &InitIn) -> Surface {
+    init.surface.unwrap_or(Surface::Terminal)
 }
 
 /// Runs one export on its raw input and returns its raw output, or the
@@ -300,6 +320,30 @@ mod tests {
     }
 
     #[test]
+    fn surface_is_terminal_when_the_host_does_not_say() {
+        let mut init: InitIn = serde_json::from_value(serde_json::json!({
+            "api": 1, "plugin_id": "p", "config": null,
+            "session": { "id": "s", "cwd": "/w" }, "granted": {},
+        }))
+        .expect("an InitIn from a pre-PL§15 host");
+        assert_eq!(surface_of(&init), Surface::Terminal);
+        init.surface = Some(Surface::Desktop);
+        assert_eq!(surface_of(&init), Surface::Desktop);
+    }
+
+    #[test]
+    fn surface_refusal_reaches_the_plugin_as_a_value() {
+        let bytes = br#"{"Err":{"kind":"not_on_this_surface","surface":"terminal"}}"#;
+        let err = decode_reply::<()>(bytes).expect_err("a refusal");
+        assert!(matches!(
+            err,
+            SdkError::Host(AbiError::NotOnThisSurface {
+                surface: Surface::Terminal
+            })
+        ));
+    }
+
+    #[test]
     fn empty_input_reaches_a_unit_export() {
         let out = run_export(b"", |(): ()| Ok::<_, SdkError>(())).expect("runs");
         assert_eq!(out, b"null");
@@ -333,6 +377,13 @@ mod tests {
     #[test]
     fn host_fns_refuse_off_wasm() {
         assert!(matches!(redraw(), Err(SdkError::Wire(_))));
+        let notice = DesktopNotice {
+            level: NoticeLevel::Info,
+            title: "t".into(),
+            body: String::new(),
+            actions: Vec::new(),
+        };
+        assert!(matches!(desktop_notify(&notice), Err(SdkError::Wire(_))));
     }
 
     /// Every `register!` key, so a key whose types drift from `cox-plugin-api`
