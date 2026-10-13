@@ -1,0 +1,15 @@
+---
+source: crates/cox-tui/src/plugin_ui.rs
+expression: "format!(\"{buf:?}\")"
+---
+Buffer {
+    area: Rect { x: 0, y: 0, width: 24, height: 1 },
+    content: [
+        "see docs now            ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 0, fg: Magenta, bg: Reset, underline: Reset, modifier: UNDERLINED,
+        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}
