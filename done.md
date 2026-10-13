@@ -11187,3 +11187,19 @@ clean
 $ mise exec -- cargo fmt --check
 clean
 ```
+
+#### T7.9 Replace serde_yaml with serde-saphyr in cox-ext
+
+Model: Claude / claude-opus-5-5 · Status: done 2026-10-12 · Depends: — · Size: ~130 (plus tests) · Priority: P2 · Complexity: 2 · Files: `crates/cox-ext/src/{frontmatter,agents,commands,skills}.rs`, `crates/cox-ext/Cargo.toml`, `Cargo.toml`, `Cargo.lock`, `workspace-hack/Cargo.toml`, `deny.toml`, `toolchain.md`
+Goal: drop the deprecated `serde_yaml` 0.9 and the unmaintained `unsafe-libyaml` it pulls (RUSTSEC-2024-0449, ignored in `deny.toml` until 2026-12-31) by parsing frontmatter with `serde-saphyr`, which `rust.md` already lists (A154). Behaviour stays the same: the existing frontmatter tests pass unchanged; any reading that differs gets a test.
+
+Plan:
+1. `frontmatter.rs` owns the YAML crate: `parse` calls `serde_saphyr::from_str_with_options` with `strict_booleans` (YAML 1.2: `yes`/`on` stay strings, `disabled: yes` stays an error) and `reject_non_finite_typeless_float: false` (`.inf` in metadata stays text), and reports the error without its source snippet so a `Notice` stays one line. `Value` is `serde_json::Value`, serde-saphyr's documented typeless target; `text` renders a non-string metadata value as YAML (moved from `skills.rs`).
+2. `agents.rs`, `commands.rs`, `skills.rs` use `frontmatter::Value` and `frontmatter::text`.
+3. Workspace and `cox-ext` manifests swap the crate; `cargo hakari generate`; `deny.toml` drops the ignore; `toolchain.md`, `plan.md` §1.1 and the shared `rust.md` updated.
+
+Check: a throwaway program parsed 34 headers (lists vs comma strings, YAML 1.1 booleans, numbers, nulls, maps with integer keys, anchors, tags, CRLF, `.inf`, octal/hex, duplicate keys, malformed input) with both crates; every result matched except a quoted `'true'` for a bool field, which serde-saphyr accepts. New tests: `frontmatter_reads_yaml_1_2_booleans_as_strings`, `frontmatter_names_ignores_non_string_shapes`, `frontmatter_text_renders_non_strings_as_yaml`, `frontmatter_error_is_one_line`, `frontmatter_quoted_true_is_a_bool`.
+
+Check output: `mise exec -- cargo nextest run -p cox-ext`: 61 tests run, 61 passed. `cargo fmt --check` clean. `cargo deny --locked check`: advisories ok, bans ok, licenses ok, sources ok (no RUSTSEC-2024-0449 ignore). `cargo hakari verify`: workspace-hack works correctly (hakari added `anstyle`). `Cargo.lock`: + serde-saphyr 1.3.0, granit-parser, annotate-snippets, arraydeque, nohash-hasher; − serde_yaml, unsafe-libyaml. `cargo clippy --workspace --all-targets --exclude cox-plugin-fixtures --exclude cox -- -D warnings` and `cargo clippy -p cox --bins -- -D warnings` clean. Real binary: `COX_HOME=<scratch> cox ext list` in a scratch project lists a skill with `allowed-tools: Read, Bash grep` and list/number metadata and an agent with a string `tools`, and skips an agent with `disabled: yes`, as before.
+
+Not done: `cargo clippy --workspace --all-targets` fails in `cox-plugin-fixtures`, also on `main`: `crates/cox-plugin-api` now depends on `workspace-hack` (cargo-hakari commit), which `plugins/Cargo.lock` lacks, so the `--locked` guest build stops. Not part of this task.

@@ -103,8 +103,8 @@ Programs the project uses and the direct packages from its manifests.
 | schemars 0.8 | local (build-dependency) | https://crates.io/crates/schemars | cox-provider `build.rs`: typify 0.8's `TypeSpace` takes schemars 0.8 schema types |
 | seccompiler | local | https://crates.io/crates/seccompiler | Rust dependency |
 | serde | local | https://crates.io/crates/serde | cox-protocol |
+| serde-saphyr | local | https://crates.io/crates/serde-saphyr | cox-ext: SKILL.md, command and subagent frontmatter (T7.9); maintained, serde_yaml is deprecated and pulled the unmaintained unsafe-libyaml |
 | serde_json | local | https://crates.io/crates/serde_json | preserve_order: agent-client-protocol-schema requires it, which unifies the feature into every workspace build anyway; pinning it here makes JSON key order (snapshots, rollout lines, ledger JSON) identical for per-crate and full-workspace runs instead of depending on the invocation. |
-| serde_yaml | local | https://crates.io/crates/serde_yaml | cox-ext |
 | sha2 | local | https://crates.io/crates/sha2 | Rust dependency |
 | shlex | local | https://crates.io/crates/shlex | Rust dependency |
 | similar | local | https://crates.io/crates/similar | Rust dependency |

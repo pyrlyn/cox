@@ -54,7 +54,6 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 ignore = [
     "RUSTSEC-2025-0141", # bincode 1.3.3 via syntect
     "RUSTSEC-2024-0320", # yaml-rust 0.4.5 via syntect
-    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml 0.2.11 via serde_yaml 0.9 in cox-ext (SKILL.md and agent frontmatter): unmaintained, no vulnerability attached. Remove when cox-ext moves to serde-saphyr, the YAML crate rust.md already lists; review by 2026-12-31" },
     # T33.3 (A52): wasmtime 43.0.2 via extism 1.30.0 (research.md R§4.3.5
     # P39). Ignored with a deadline, not forever.
     { id = "RUSTSEC-2026-0222", reason = "wasmtime 43 via extism 1.30.0: not guest-triggerable; needs the embedder to put an object from one Engine into another Engine's Store through specific APIs (debug_register_module, StructRefPre/ArrayRefPre/ExnRefPre::new, Tag::new, breakpoints). Neither extism nor cox calls them, and each extism Plugin keeps its own Engine and Store with no cross-plugin objects. Remove when extism ships wasmtime >= 48 (extism main already pins 48; no release since v1.30.0, 2026-06-04); review by 2026-12-31" },

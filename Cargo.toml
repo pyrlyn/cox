@@ -124,7 +124,9 @@ keyring = "4"
 sha2 = "0.11"
 
 # cox-ext
-serde_yaml = "0.9"
+# T7.9: frontmatter; maintained, and serde_yaml (deprecated) pulled the
+# unmaintained unsafe-libyaml (RUSTSEC-2024-0449).
+serde-saphyr = "1.3.0"
 # T22.3: hook `matcher` regexes; `regex` 1.x is already built in this tree
 # (syntect/fancy-regex, tree-sitter), so this adds no new crate to the lock.
 regex = "1"
