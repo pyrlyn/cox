@@ -4,9 +4,11 @@
 
 // MacHost over the in-memory Keychain (A49): `secret` answers the stored
 // provider key and `nil` otherwise, and only web links pass the URL check.
-// Nothing here posts a notification or opens a URL.
+// Nothing here posts a notification or opens a URL. Without a store passed in, the host reads
+// the launch's `secretStore` dependency, the one Settings writes keys through (T63.4.3).
 
 import CoxClient
+import Dependencies
 import Security
 import Testing
 
@@ -18,6 +20,15 @@ import Testing
   let host = MacHost(secrets: KeychainSecretStore(calls: keychain.calls))
   #expect(host.secret(for: "anthropic") == "sk-ant")
   #expect(host.secret(for: "openai") == nil)
+}
+
+@Test func withoutAStoreTheHostReadsTheLaunchsSecretStore() {
+  let host = withDependencies {
+    $0.secretStore = MemorySecretStore(["anthropic": "sk-launch"])
+  } operation: {
+    MacHost()
+  }
+  #expect(host.secret(for: "anthropic") == "sk-launch")
 }
 
 @Test func aFailingKeychainReadsAsNoKey() {

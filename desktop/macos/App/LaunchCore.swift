@@ -24,28 +24,24 @@ struct LaunchCore {
   let core: Result<any CoreClient, any Error>
   /// The Rust core at `COX_HOME`, `~/.cox` when unset: settings and the checklist.
   let live: Result<LiveCoreClient, any Error>
-  /// Where provider keys live; the host's `secret` and Settings' key fields read the same one.
-  let secrets: any SecretStore
   let isFixture: Bool
   /// The page the agent's browser tools drive and the browser pane shows.
   let browser: BrowserController
 
   /// `-CoxFixture <path>` (a launch argument, read through `UserDefaults`' argument domain)
-  /// replays that fixture; otherwise sessions open on the live core. `COX_KEYRING=off`, as
-  /// cargo sets it for every development run, keeps provider keys out of the Keychain here too
-  /// (A49, A51): a dev launch never raises a Keychain prompt.
+  /// replays that fixture; otherwise sessions open on the live core. Provider keys are not
+  /// chosen here: the host and Settings read the `secretStore` dependency, whose live value
+  /// (`CoxPlatform`) keeps them out of the Keychain under `COX_KEYRING=off` (A49, A51).
   @MainActor
   static func pick(
     _ defaults: UserDefaults = .standard,
     environment: [String: String] = ProcessInfo.processInfo.environment
   ) -> LaunchCore {
-    let secrets: any SecretStore =
-      environment["COX_KEYRING"] == "off" ? MemorySecretStore() : KeychainSecretStore()
     let browser = BrowserController()
     let live = Result {
       try LiveCoreClient(
         home: environment["COX_HOME"],
-        host: HostBridge(MacHost(secrets: secrets, browser: browser)))
+        host: HostBridge(MacHost(browser: browser)))
     }
     let fixture = defaults.string(forKey: "CoxFixture")
     let core: Result<any CoreClient, any Error> =
@@ -54,8 +50,7 @@ struct LaunchCore {
       } else {
         live.map { $0 }
       }
-    return LaunchCore(
-      core: core, live: live, secrets: secrets, isFixture: fixture != nil, browser: browser)
+    return LaunchCore(core: core, live: live, isFixture: fixture != nil, browser: browser)
   }
 
   /// The directory a new session works in: `-CoxProject <path>` or the folder first run chose,
@@ -67,15 +62,15 @@ struct LaunchCore {
   static let projectKey = "CoxProject"
 
   /// This launch's choice as the dependencies the stores and the windows read: sessions open on
-  /// `core` (a core that failed to start throws its error on open, so a window says why), keys
-  /// live in `secrets`, and the inbox is the core's when it keeps one.
+  /// `core` (a core that failed to start throws its error on open, so a window says why), and
+  /// the inbox is the core's when it keeps one. The secret store needs no choice: its live value
+  /// is `CoxPlatform`'s.
   func prepare(_ values: inout DependencyValues) {
     values.coreClient =
       switch core {
       case .success(let core): core
       case .failure(let error): UnavailableCoreClient(error)
       }
-    values.secretStore = secrets
     values.inboxClient = try? core.get() as? any InboxClient
   }
 }

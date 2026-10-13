@@ -49,6 +49,8 @@ let package = Package(
       dependencies: [
         "CoxModel",
         .product(name: "Dependencies", package: "swift-dependencies"),
+        // T63.4: the `.dependency` and `.dependencies` test traits, a fresh value cache per test.
+        .product(name: "DependenciesTestSupport", package: "swift-dependencies"),
         .product(name: "PropertyBased", package: "swift-property-based"),
       ],
       plugins: [swiftLint]

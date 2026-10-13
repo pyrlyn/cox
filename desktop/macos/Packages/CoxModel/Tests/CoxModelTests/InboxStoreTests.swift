@@ -4,9 +4,12 @@
 
 // The "Needs you" store's check (T37.27.7): with the `approve-write` fixture it lists one row,
 // which clears once the card is answered; and a row copies the core's words (T58.4.2; the words
-// themselves are `cox_app::inbox`'s tests), an expired one read-only.
+// themselves are `cox_app::inbox`'s tests), an expired one read-only. The store reads its client
+// from `DependencyValues` (T63.4.2): a launch with no inbox has no store.
 
 import CoxClient
+import Dependencies
+import DependenciesTestSupport
 import Foundation
 import Testing
 
@@ -16,7 +19,12 @@ import Testing
 @Test func theRecordedApprovalIsOneRowThatClearsOnceAnswered() async throws {
   let fixture = try Fixture(contentsOf: try #require(approveWrite))
   let client = FixtureCoreClient(fixture: fixture, waitsForYou: true)
-  let inbox = InboxStore(client: client)
+  let inbox = try #require(
+    withDependencies {
+      $0.inboxClient = client
+    } operation: {
+      InboxStore()
+    })
   let session = try await client.open(OpenSession(cwd: "/", theme: "base16-ocean.dark"))
   let store = SessionStore(session: session)
   let run = Task { await store.run() }
@@ -56,4 +64,10 @@ import Testing
     isReadOnly: false)
   #expect(InboxRow(item(expired: false)) == expected)
   #expect(InboxRow(item(expired: true)).isReadOnly)
+}
+
+/// A failed launch registers no inbox, and the test value is the same: no section to show.
+@MainActor
+@Test(.dependencies) func noInboxClientMeansNoStore() {
+  #expect(InboxStore() == nil)
 }

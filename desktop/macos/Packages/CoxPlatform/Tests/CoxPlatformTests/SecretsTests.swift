@@ -4,8 +4,10 @@
 
 // KeychainSecretStore over an in-memory Keychain (A49): the items it asks
 // for are the CLI's `cox/<section>` generic passwords, a second store
-// replaces rather than duplicates, and a failing status surfaces.
+// replaces rather than duplicates, and a failing status surfaces. The live dependency value
+// picks memory under `COX_KEYRING=off`; making a Keychain store touches nothing until it is read.
 
+import CoxClient
 import Foundation
 import Security
 import Synchronization
@@ -104,4 +106,10 @@ final class MemoryKeychain: Sendable {
   keychain.items.withLock { $0["cox/anthropic"] = Data([0xFF, 0xFE]) }
   let store = KeychainSecretStore(calls: keychain.calls)
   #expect(throws: KeychainError.notText) { try store.secret(for: "anthropic") }
+}
+
+@Test func theLiveStoreIsMemoryUnderKeyringOffAndTheKeychainOtherwise() {
+  #expect(SecretStoreKey.live(["COX_KEYRING": "off"]) is MemorySecretStore)
+  #expect(SecretStoreKey.live([:]) is KeychainSecretStore)
+  #expect(SecretStoreKey.live(["COX_KEYRING": "on"]) is KeychainSecretStore)
 }
