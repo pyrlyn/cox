@@ -27,6 +27,9 @@ def fields(schema, prefix=""):
     elif "enum" in schema:
         for value in schema["enum"]:
             yield f"{prefix}.{value}" if prefix else value
+    # Untagged enums (a flattened `CallTarget`, `DecideOut`) list each shape's fields.
+    for case in schema.get("anyOf", []):
+        yield from fields(case, prefix)
 def part(schema_name, type_name, field):
     if schema_name == "manifest":
         if type_name == "TerminalCaps" or type_name == "UiCaps" and field == "keys":
