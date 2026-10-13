@@ -126,7 +126,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T59.7 | todo | P3 | 4 | 0% | |
 | T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
@@ -1966,33 +1965,6 @@ mise exec -- cargo fmt --check
 Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
 
 Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
-
-#### T59.7 `rename_symbol` through the server's `textDocument/rename`
-
-Model: opus · Status: open · Depends: T59.6 · Size: ~200 · Priority: P3 · Complexity: 4
-
-Goal: one tool call renames a symbol across files using the server's `WorkspaceEdit`, applied as one approved change with the same per-file archive as `edit`, and refuses when no server runs (no text-search rename).
-
-Files:
-- `crates/cox-tools/src/lsp/rename.rs` (new)
-- `crates/cox-tools/src/lsp/client.rs`
-- `crates/cox-tools/src/write.rs`
-
-Steps:
-1. `prepareRename` then `rename`; convert `WorkspaceEdit` (`changes` and `documentChanges` text edits only; file create/rename ops are refused) into per-file new contents (Empryo idea: `rename-symbol.ts`).
-2. Apply through `write.rs`'s path (`write.rs:42`) with the archive-before-write pattern of `edit.rs:126`; one `Engine` approval for the whole set, listing the files.
-3. After apply, T59.3's diagnostics delta per file.
-
-Check:
-```bash
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: fake-server test renames across two files, one approval, both archived; refusal without a server; a stale-version edit is refused.
-
-Out of scope: rename without a server, file moves.
 
 ### P60 — Provider readiness, composer controls and glare (goal: the desktop app never starts a turn or a Best of candidate on a provider it cannot use, shows which provider runs, picks model, provider and mode in the composer, and lets the user set the glass glare; every rule lives in `cox-app` and the shared docs, so the Windows and any later Linux client repeat it without the Swift code, A139)
 

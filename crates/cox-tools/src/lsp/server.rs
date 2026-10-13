@@ -181,6 +181,9 @@ pub struct Server {
     state: tokio::sync::Mutex<State>,
     /// The server advertised `diagnosticProvider`, so it is asked (pull).
     pull: bool,
+    /// `renameProvider`: `None` when the server cannot rename, else whether
+    /// it answers `prepareRename` (T59.7).
+    rename: Option<bool>,
     opts: Options,
     stopped: AtomicBool,
 }
@@ -188,6 +191,9 @@ pub struct Server {
 struct State {
     notes: UnboundedReceiver<Notification>,
     versions: HashMap<PathBuf, i32>,
+    /// A digest of the text each synced file was last sent as, so a rename
+    /// notices a file changed on disk behind the server's back (T59.7).
+    synced: HashMap<PathBuf, u64>,
     /// The latest diagnostics each file got, pushed or pulled.
     latest: HashMap<PathBuf, Vec<Diagnostic>>,
     /// `$/progress` tokens begun and not yet ended: the server is working.
@@ -217,9 +223,17 @@ impl Server {
                 // there is nothing to wait on for a freshly started one
                 // (research.md §4.8).
                 "window": {"workDoneProgress": true},
-                "workspace": {"workspaceFolders": true, "configuration": true},
+                // Versioned edits let a rename refuse one made against text
+                // cox no longer holds; no file operations, which
+                // `rename_symbol` refuses anyway (T59.7).
+                "workspace": {
+                    "workspaceFolders": true,
+                    "configuration": true,
+                    "workspaceEdit": {"documentChanges": true, "resourceOperations": []},
+                },
                 "textDocument": {
                     "synchronization": {"didSave": true},
+                    "rename": {"prepareSupport": true},
                     "publishDiagnostics": {"versionSupport": true},
                     "diagnostic": {"dynamicRegistration": false},
                 },
@@ -236,6 +250,11 @@ impl Server {
         let pull = result
             .pointer("/capabilities/diagnosticProvider")
             .is_some_and(|p| !p.is_null() && *p != Value::Bool(false));
+        let rename = match result.pointer("/capabilities/renameProvider") {
+            Some(Value::Bool(true)) => Some(false),
+            Some(p @ Value::Object(_)) => Some(p["prepareProvider"] == Value::Bool(true)),
+            _ => None,
+        };
         client.notify("initialized", json!({})).await?;
         Ok(Self {
             client,
@@ -243,10 +262,12 @@ impl Server {
             state: tokio::sync::Mutex::new(State {
                 notes,
                 versions: HashMap::new(),
+                synced: HashMap::new(),
                 latest: HashMap::new(),
                 busy: HashSet::new(),
             }),
             pull,
+            rename,
             opts,
             stopped: AtomicBool::new(false),
         })
@@ -365,6 +386,7 @@ impl Server {
             }
         };
         st.versions.insert(path.to_path_buf(), version);
+        st.synced.insert(path.to_path_buf(), digest(text));
         Ok(version)
     }
 
@@ -392,6 +414,65 @@ impl Server {
             .request(nav.method(), nav.params(&uri, at), self.opts.timeout)
             .await?;
         nav::parse_locations(reply)
+    }
+
+    /// Whether the server advertised `renameProvider`.
+    pub fn can_rename(&self) -> bool {
+        self.rename.is_some()
+    }
+
+    /// The `WorkspaceEdit` that renames the symbol at `at` in `path`
+    /// (absolute, holding `text`) to `new_name`, and the version each file
+    /// was synced at, for checking a versioned edit (T59.7). `None` when
+    /// `prepareRename` says nothing renamable is there. Every other file cox
+    /// opened is synced first if its disk text changed, since the server
+    /// computes edits against the text it was sent, not the disk's.
+    pub async fn rename(
+        &self,
+        path: &Path,
+        text: &str,
+        at: Position,
+        new_name: &str,
+    ) -> Result<Option<(Value, HashMap<PathBuf, i32>)>, LspError> {
+        let uri = uri_for(path).ok_or_else(|| {
+            LspError::Parse(format!("{} is not an absolute path", path.display()))
+        })?;
+        let mut st = self.state.lock().await;
+        while let Ok(note) = st.notes.try_recv() {
+            st.absorb(note, path, 0);
+        }
+        self.sync(&mut st, &uri, path, text).await?;
+        let others: Vec<PathBuf> = st.versions.keys().filter(|p| *p != path).cloned().collect();
+        for other in others {
+            // A file gone or too large stays as the server knows it; an
+            // edit for it then fails to load and the rename is refused.
+            let (Some(now), Some(other_uri)) = (super::read_text(&other), uri_for(&other)) else {
+                continue;
+            };
+            if st.synced.get(&other) != Some(&digest(&now)) {
+                self.sync(&mut st, &other_uri, &other, &now).await?;
+            }
+        }
+        let doc = json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": at.line, "character": at.character},
+        });
+        if self.rename == Some(true) {
+            let prepared = self
+                .client
+                .request("textDocument/prepareRename", doc.clone(), self.opts.timeout)
+                .await?;
+            if prepared.is_null() {
+                return Ok(None);
+            }
+        }
+        let mut params = doc;
+        params["newName"] = json!(new_name);
+        let edit = self
+            .client
+            .request("textDocument/rename", params, self.opts.timeout)
+            .await?;
+        Ok(Some((edit, st.versions.clone())))
     }
 
     /// The diagnostics the server last reported for `path`, without sending
@@ -576,6 +657,15 @@ fn language_id(path: &Path) -> String {
         other => other,
     }
     .to_string()
+}
+
+/// A digest of a synced text, stable within the process; equal texts
+/// always match, and a 64-bit collision is not a practical concern.
+fn digest(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish()
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {

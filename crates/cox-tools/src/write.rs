@@ -12,7 +12,7 @@
 //! boundary); the pre-write content (empty, for a new file) is archived
 //! before anything on disk changes, so `cox expand` can restore it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use cox_protocol::{ArchivePut, Concurrency, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolSpec};
@@ -44,6 +44,16 @@ pub(crate) fn str_field(input: &Value, field: &str) -> Result<String, ToolError>
 /// file at `path` — the temp file must be a sibling (not `/tmp`) because a
 /// rename across filesystems is neither atomic nor guaranteed to succeed.
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
+    let tmp = stage(path, bytes)?;
+    std::fs::rename(&tmp, path).map_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+        ToolError::Io
+    })
+}
+
+/// Writes `bytes` to a fresh sibling temp file of `path` and returns it,
+/// the first half of [`atomic_write`].
+fn stage(path: &Path, bytes: &[u8]) -> Result<PathBuf, ToolError> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(dir).map_err(|_| ToolError::Io)?;
 
@@ -58,12 +68,70 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
         .unwrap_or("cox-write");
     let tmp = dir.join(format!(".{name}.cox-tmp-{pid}-{nanos}"));
 
-    std::fs::write(&tmp, bytes).map_err(|_| ToolError::Io)?;
-    std::fs::rename(&tmp, path).map_err(|_| {
+    std::fs::write(&tmp, bytes).map_err(|_| {
         let _ = std::fs::remove_file(&tmp);
         ToolError::Io
     })?;
+    Ok(tmp)
+}
+
+/// One file a multi-file change rewrites (`rename_symbol`, T59.7).
+pub(crate) struct Rewrite {
+    /// The confined absolute path.
+    pub path: PathBuf,
+    pub before: String,
+    pub after: String,
+}
+
+/// Writes every rewrite or none: each pre-image is archived first (lossless
+/// by default), every new text is staged in a sibling temp file before any
+/// target is replaced, so a full disk fails with nothing changed, and a
+/// replace that fails puts back the files already replaced.
+pub(crate) async fn rewrite_all(
+    tool: &str,
+    rewrites: &[Rewrite],
+    cx: &ToolCx,
+) -> Result<(), ToolError> {
+    for r in rewrites {
+        cx.archive
+            .put(ArchivePut {
+                session: cx.session,
+                call: cx.call,
+                tool: tool.to_string(),
+                // The archive row `edit` writes for the same file.
+                subject: Some(r.path.display().to_string()),
+                bytes: r.before.clone().into_bytes(),
+            })
+            .await
+            .map_err(|_| ToolError::Io)?;
+    }
+    let mut staged = Vec::with_capacity(rewrites.len());
+    for r in rewrites {
+        match stage(&r.path, r.after.as_bytes()) {
+            Ok(tmp) => staged.push(tmp),
+            Err(e) => {
+                discard(&staged);
+                return Err(e);
+            }
+        }
+    }
+    for (i, (r, tmp)) in rewrites.iter().zip(&staged).enumerate() {
+        if std::fs::rename(tmp, &r.path).is_err() {
+            discard(&staged[i..]);
+            for done in &rewrites[..i] {
+                // Best effort: the archive above still holds each pre-image.
+                let _ = atomic_write(&done.path, done.before.as_bytes());
+            }
+            return Err(ToolError::Io);
+        }
+    }
     Ok(())
+}
+
+fn discard(temps: &[PathBuf]) {
+    for t in temps {
+        let _ = std::fs::remove_file(t);
+    }
 }
 
 pub struct WriteTool;
@@ -299,5 +367,36 @@ mod tests {
         let puts = archive.0.lock().expect("lock");
         assert_eq!(puts.len(), 1);
         assert_eq!(puts[0].bytes, b"old\n");
+    }
+
+    #[tokio::test]
+    async fn rewrite_all_puts_back_what_it_replaced_when_a_later_file_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let a = dir.path().join("a.txt");
+        std::fs::write(&a, "old a\n").expect("seed");
+        // A non-empty directory cannot be replaced by a file, so the second
+        // rename fails after the first has landed.
+        let b = dir.path().join("b");
+        std::fs::create_dir_all(b.join("inside")).expect("seed dir");
+        let rewrite = |path: &Path, before: &str| Rewrite {
+            path: path.to_path_buf(),
+            before: before.to_string(),
+            after: "new\n".to_string(),
+        };
+
+        let out = rewrite_all(
+            "t",
+            &[rewrite(&a, "old a\n"), rewrite(&b, "")],
+            &cx(dir.path()),
+        )
+        .await;
+        assert!(matches!(out, Err(ToolError::Io)), "{out:?}");
+        assert_eq!(std::fs::read_to_string(&a).expect("a"), "old a\n");
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("list")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains("cox-tmp"))
+            .collect();
+        assert!(left.is_empty(), "temp files left: {left:?}");
     }
 }

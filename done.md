@@ -11101,6 +11101,46 @@ Out of scope: rename (T59.7), hover, workspace symbols.
 
 Check output: `mise exec -- cargo nextest run -p cox-tools -p cox-session` — 292 of 293 passed, including the new `lsp::nav` tests (definition and references against a fake server, UTF-16 columns, sort and dedup, an out-of-root path printed bare and sanitized, the 100-row cap archived, an empty answer, the grep fallback with no server and after a server error, input refusals) and the `definition`/`references` assertions in `cox-session` `tool_search_finds_diagnostics`; `mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print` timed out once under load, outside this task, and passed on its own rerun. `mise exec -- cargo nextest run -p cox --test lsp` (the real binary against a fake sandboxed server) — 2 passed. `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
+#### T59.7 `rename_symbol` through the server's `textDocument/rename`
+
+Model: opus · Status: done 2026-10-13 · Depends: T59.6 · Size: ~200 · Priority: P3 · Complexity: 4
+
+Goal: one tool call renames a symbol across files using the server's `WorkspaceEdit`, applied as one approved change with the same per-file archive as `edit`, and refuses when no server runs (no text-search rename).
+
+Files:
+- `crates/cox-tools/src/lsp/rename.rs` (new)
+- `crates/cox-tools/src/lsp/client.rs`
+- `crates/cox-tools/src/write.rs`
+
+Steps:
+1. `prepareRename` then `rename`; convert `WorkspaceEdit` (`changes` and `documentChanges` text edits only; file create/rename ops are refused) into per-file new contents (Empryo idea: `rename-symbol.ts`).
+2. Apply through `write.rs`'s path (`write.rs:42`) with the archive-before-write pattern of `edit.rs:126`; one `Engine` approval for the whole set, listing the files.
+3. After apply, T59.3's diagnostics delta per file.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: fake-server test renames across two files, one approval, both archived; refusal without a server; a stale-version edit is refused.
+
+Out of scope: rename without a server, file moves.
+
+Execution plan (Claude Code / opus-5.5):
+1. `server.rs`: advertise `rename.prepareSupport` and `workspace.workspaceEdit.documentChanges` (no resource operations); record `renameProvider`/`prepareProvider`; `Server::rename` syncs the file, re-syncs every file cox opened whose disk text changed, sends `prepareRename` (when offered) then `rename`, and returns the edit with the versions it synced.
+2. `lsp/rename.rs` (new): parse `changes`/`documentChanges` (create/rename/delete refused), confine every file to the writable roots, refuse a versioned edit whose version is not the synced one, apply UTF-16 ranges to each file's text (overlapping or out-of-range edits refused).
+3. `write.rs`: a multi-file `rewrite_all` that archives every pre-image, stages every temp file, then renames; a failure removes the temps and restores what was already renamed. `rename_symbol` (deferred, `Write`, `Exclusive`, subject = the symbol's file) goes through the Engine before it runs and again for every file once the server answers (see Result); no server running → refused.
+4. Diagnostics delta per file via the T59.3 helpers in `mod.rs`, factored out of `AfterEdit`; register in `cox-session` `with_lsp`; `docs/tools.md`.
+5. Tests: fake server renames across two files (both archived, one call), refusal without a server, stale version refused, resource op refused, out-of-root file refused; `rewrite_all` rollback.
+
+Result (permission review fix, Claude Code / opus-5.5): every file the rename writes is judged by the Engine, and the one approval lists them all. The file set exists only once the server answers, so the core gives the tool a seam rather than letting it judge anything itself: `Relay::approve_writes(call_id, tool, paths)` in `cox-protocol` (its default refuses, so a surface with no session behind it, `cox mcp`, never writes unjudged files), implemented by `Session` in `cox-core` (`turn::approve_writes`). It asks the Engine about each file as a `Write` of that path under the tool's name; `canonical_tool` maps `rename_symbol` onto `edit`, as `project` maps onto `bash`, so `Edit(...)` rules and session grants apply. A deny on any file refuses the whole rename with nothing written, and the error names the file; any ask becomes one `ApprovalRequired` whose subject and `files` input list every file, answered once (`AllowForSession` grants each file; an edit of the list is a no); all allowed writes as before. The tool calls it after the server answers and before `rewrite_all`, and refuses when no relay is bound. `Tool::defers_write_approval` (true for `rename_symbol` only) lets the pre-call gate pass an `Ask` on to that one approval instead of asking twice, while a pre-call `Deny` (rule, plan mode) still stops the call before it runs. Since the approval may wait on a person, a file whose disk text changed meanwhile refuses the rename. `confine` against the writable roots is unchanged, and `touches` stays `None`, so the loop still snapshots the workspace around the call.
+
+Check output: `mise exec -- cargo nextest run --workspace` — 2284 passed, 8 skipped, including the new `lsp::rename` tests (a two-file rename in one call with both pre-images archived, the T59.3 delta after a rename, refusal without a running server and no server started, a stale version / file create / out-of-root file / `prepareRename` null each refused with nothing written or archived, a file changed on disk re-synced before the rename, UTF-16 offsets, CRLF and end-of-line clamping, overlapping and out-of-range edits refused, `changes` parsing) and `write::tests::rewrite_all_puts_back_what_it_replaced_when_a_later_file_fails`; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean. The real binary (`cargo run -p cox -- run -p` with the scripted provider, a scratch `COX_HOME` and a scratch crate under the worktree) started the real `rust-analyzer` through `diagnostics` and `rename_symbol` answered "renamed to `renamed_f` in 2 file(s): src/a.rs, src/main.rs", both files rewritten; no server process left after exit.
+
+Check output (permission fix): `mise exec -- cargo nextest run -p cox-permission -p cox-core -p cox-tools -p cox-session -p cox` — 896 run, 893 passed, 4 skipped; the 3 failures (`cox::plain plain_transcript_snapshot`, `cox::plain plain_has_no_csi_cursor_moves`, `cox::ide acp_image_block_reaches_the_provider_as_an_image`) hit 30–40 s under load and passed on their own rerun (3 passed). New tests: `cox-core/tests/approve_writes.rs` (a deny rule on the second file refuses the rename and writes neither file; in `default` mode exactly one approval, subject `a.txt, b.txt` and input `files` listing both, and a no writes nothing; a yes writes both; `Edit` allow rules on both files write without asking; plan mode still refuses before the call runs), `lsp::rename` `every_file_goes_to_the_engine_and_a_refusal_writes_nothing`, `without_a_session_to_judge_the_files_it_writes_nothing`, `a_file_edited_while_the_approval_waits_is_not_overwritten`, and the `rename_symbol` ↔ `edit` cases in `rules::tests::permission_rule_grammar_matches_claude_code_forms`. With the fix reverted (mapping, gate deferral, relay call), 4 of the 5 core tests and both new `lsp::rename` engine tests fail; the plan-mode test is a guard and passes either way. `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean. The real binary (`target/debug/cox run -p --output-format stream-json`, scripted provider, scratch `COX_HOME`, scratch crate under the worktree, real `rust-analyzer`): `auto` with `deny = ["Edit(src/main.rs)"]` refused with "permission denied: src/main.rs: denied by rule Edit(src/main.rs)", both files unchanged; `default` with `--approve on-request` raised one `approval_required` for `rename_symbol` with subject "src/a.rs, src/main.rs", the headless driver denied it, both files unchanged; `auto` with no rules renamed `f` to `renamed_f` in both files; no `rust-analyzer` left after exit.
+
 #### T5.9 Terminal pointer shape follows what the cell does (OSC 22)
 
 Depends: T37.50 · Size: ~150 · Files: `crates/cox-tui/src/term.rs` (`Caps`), `crates/cox-tui/src/state.rs` (`on_mouse`), `crates/cox-tui/src/app.rs` (`restore`)

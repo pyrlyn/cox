@@ -113,6 +113,34 @@ note, since a name match also finds unrelated symbols. A path the server
 names outside the workspace roots is printed as given and never opened; the
 whole answer passes through `sanitize`.
 
+`rename_symbol` (T59.7, deferred, `Write`, exclusive) takes `path`, `line`,
+`col` (as above) and `new_name`, and renames the symbol through the running
+server's `prepareRename` and `rename`. Like the navigation tools it never
+starts a server; unlike them it has no `grep` fallback and refuses instead,
+since a rename by name match rewrites unrelated symbols. Before asking, cox
+re-syncs every file it opened whose disk text changed, so the server edits
+the text on disk. The server's `WorkspaceEdit` (`documentChanges` or
+`changes`) is refused whole if it creates, renames or deletes a file, names a
+file outside the writable roots (`confine`), carries a document version other
+than the one cox synced, or holds an edit outside its file or overlapping
+another. Otherwise every file's new text is computed first, each pre-image is
+archived as `edit` archives it, every new text is staged in a sibling temp
+file, and only then are the files replaced; a failed replace puts back the
+ones already replaced. Permission rules treat `rename_symbol` as `edit`
+(`Edit(secrets/**)` covers it). Before the call runs, the engine judges the
+symbol's file: a deny or plan mode refuses there, but an ask waits, since
+the other files are known only after the server answers. Once they are, the
+tool hands every file to the session (`Relay::approve_writes`) and the
+engine judges each as an edit of that path: a deny on any one refuses the
+whole rename with nothing written and names the file; any ask becomes one
+approval listing every file, answered once for the set; all allowed writes
+as above. A file that changes on disk while that approval waits refuses the
+rename. A surface with no session behind the call (`cox mcp`) cannot have
+the files judged, so the rename is refused there. The result lists the
+files, and the loop snapshots the workspace around the call.
+With `lsp.after_edit`, the result ends with the diagnostics the rename
+introduced in each file, as for `edit`.
+
 The default servers (`[lsp.servers]`, see config.md):
 
 | Name | Program | Extensions |

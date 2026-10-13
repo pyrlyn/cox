@@ -265,6 +265,14 @@ pub trait Tool: Send + Sync {
     fn touches(&self, _input: &Value) -> Option<Vec<String>> {
         None
     }
+    /// Whether the call learns the files it writes only while it runs and
+    /// hands every one to [`Relay::approve_writes`] before writing
+    /// (`rename_symbol`, T59.7). The gate then lets a pre-call `Ask` wait for
+    /// that one approval, which can name the files; a pre-call `Deny` (a
+    /// rule, plan mode) still stops the call before it runs.
+    fn defers_write_approval(&self) -> bool {
+        false
+    }
     /// Runs the tool. `text` in the returned `ToolOutput` is untruncated;
     /// the core archives it and truncates what the model sees.
     async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError>;
@@ -646,6 +654,24 @@ pub trait Relay: Send + Sync {
         let _ = (call_id, question, options, source);
         Err(ToolError::Denied {
             why: "no surface is listening for questions".into(),
+        })
+    }
+
+    /// Puts every file `tool`'s call is about to write to the session's
+    /// permission engine, each as an edit of that path, once the call has
+    /// learned them (T59.7): one deny refuses them all, any ask becomes one
+    /// approval listing every file. `Ok(())` means write them all. The
+    /// default refuses, so a surface with no engine behind it never writes
+    /// a file no rule has seen.
+    async fn approve_writes(
+        &self,
+        call_id: CallId,
+        tool: &str,
+        paths: &[PathBuf],
+    ) -> Result<(), ToolError> {
+        let _ = (call_id, tool, paths);
+        Err(ToolError::Denied {
+            why: "no permission engine can approve the files this call writes".into(),
         })
     }
 }

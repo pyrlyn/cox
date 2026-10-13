@@ -1007,6 +1007,15 @@ impl Relay for Session {
             .await
     }
 
+    async fn approve_writes(
+        &self,
+        call_id: CallId,
+        tool: &str,
+        paths: &[std::path::PathBuf],
+    ) -> Result<(), ToolError> {
+        crate::turn::approve_writes(self, call_id, tool, paths).await
+    }
+
     async fn send_message(&self, to: &str, text: &str) -> Result<(), ToolError> {
         match self.self_task() {
             Some(me) => {
