@@ -5,8 +5,8 @@
 //! `cox_http` (PL§4, PL§7d, T33.14.1): which URLs a plugin may reach and
 //! the one request path to them. Separate from `hostfn` because that module
 //! decides what an import may do in general, while this one owns the network
-//! rule, which T33.40.1 extends with provider hosts reachable only from
-//! `cox_provider_stream`.
+//! rule, including the provider hosts reachable only from
+//! `cox_provider_stream` (T33.18, T33.40.1).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock, PoisonError};
@@ -102,6 +102,13 @@ impl Net {
         true
     }
 
+    pub(crate) fn has_section(&self, name: &str) -> bool {
+        self.sections
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(name)
+    }
+
     pub(crate) fn activate(&self, name: &str) {
         *self.active.lock().unwrap_or_else(PoisonError::into_inner) = Some(name.to_string());
     }
@@ -110,11 +117,14 @@ impl Net {
         *self.active.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
-    /// Where `url` may go. A provider host is allowed only while its
-    /// section is the active `cox_provider_stream` (T33.18); any other
-    /// caller gets `NotInThisContext`, ahead of the `net` grant. T33.40.1
-    /// keys that same branch on the calling export.
-    pub(crate) fn target(&self, url: &str) -> Result<Url, AbiError> {
+    /// Where `url` may go. A provider host is allowed only from inside
+    /// `cox_provider_stream` (`in_stream`, T33.40.1) while its section is
+    /// the active one (T33.18); any other caller gets `NotInThisContext`,
+    /// ahead of the `net` grant. Both are needed: the section is activated
+    /// before the call is queued, so another export the worker is still
+    /// running (`cox_on_event`, `cox_decide`) would otherwise see it open
+    /// and reach a paid API with the host's key, past the ledger.
+    pub(crate) fn target(&self, url: &str, in_stream: bool) -> Result<Url, AbiError> {
         let url = Url::parse(url).map_err(|e| failed(&format!("bad url: {e}")))?;
         if !matches!(url.scheme(), "http" | "https") {
             return Err(failed("only http and https urls"));
@@ -122,7 +132,7 @@ impl Net {
         let host = url
             .host_str()
             .ok_or_else(|| failed("the url has no host"))?;
-        if self.active_host_matches(host) {
+        if in_stream && self.active_host_matches(host) {
             return Ok(url);
         }
         if self.covers_provider_host(host) {
@@ -370,20 +380,21 @@ mod tests {
     fn target_matches_the_url_host_not_its_userinfo() {
         let granted = BTreeSet::from(["net:api.github.com".to_owned()]);
         let net = Net::new(&granted);
-        assert!(net.target("https://api.github.com/repos").is_ok());
+        assert!(net.target("https://api.github.com/repos", false).is_ok());
         assert_eq!(
-            net.target("https://api.github.com@evil.example/").err(),
+            net.target("https://api.github.com@evil.example/", false)
+                .err(),
             Some(AbiError::NotGranted {
                 capability: "net:evil.example".into()
             })
         );
         assert!(matches!(
-            net.target("file:///etc/passwd"),
+            net.target("file:///etc/passwd", false),
             Err(AbiError::Failed { .. })
         ));
         assert_eq!(
             Net::new(&BTreeSet::new())
-                .target("https://api.github.com/")
+                .target("https://api.github.com/", false)
                 .err(),
             Some(AbiError::NotGranted {
                 capability: "net".into()
@@ -400,23 +411,28 @@ mod tests {
             Some(("authorization".into(), "Bearer secret".into()))
         ));
         assert_eq!(
-            net.target("https://llm.example.com/v1").err(),
+            net.target("https://llm.example.com/v1", false).err(),
             Some(AbiError::NotInThisContext)
         );
         net.activate("acme");
+        assert_eq!(
+            net.target("https://llm.example.com/v1", false).err(),
+            Some(AbiError::NotInThisContext),
+            "an active section is still closed to any other export"
+        );
         assert!(
-            net.target("https://User:pw@LLM.example.com:8443/v1")
+            net.target("https://User:pw@LLM.example.com:8443/v1", true)
                 .is_ok()
         );
         assert_eq!(
-            net.target("https://other.example/v1").err(),
+            net.target("https://other.example/v1", true).err(),
             Some(AbiError::NotGranted {
                 capability: "net".into()
             })
         );
         net.deactivate();
         assert_eq!(
-            net.target("https://llm.example.com/v1").err(),
+            net.target("https://llm.example.com/v1", false).err(),
             Some(AbiError::NotInThisContext)
         );
     }
