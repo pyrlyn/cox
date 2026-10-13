@@ -709,6 +709,38 @@ pub trait ExternalAgent: Send + Sync {
         events: mpsc::Sender<crate::types::Event>,
         cancel: CancellationToken,
     ) -> Result<Option<Usage>, crate::errors::CoreError>;
+
+    /// Whether `agent(preset: <name>)` always runs as a background task
+    /// (T56.6): a hosted run may last hours, so it never holds the turn
+    /// that dispatched it.
+    fn background_only(&self) -> bool {
+        false
+    }
+
+    /// [`ExternalAgent::turn`] with the task it runs for. The core calls
+    /// this one; a driver that records its work against the task, or asks
+    /// `Engine` in the child's live mode, overrides it (T56.6).
+    async fn task_turn(
+        &self,
+        cx: TaskTurn,
+        turn: crate::ids::TurnId,
+        prompt: String,
+        events: mpsc::Sender<crate::types::Event>,
+        cancel: CancellationToken,
+    ) -> Result<Option<Usage>, crate::errors::CoreError> {
+        let _ = cx;
+        self.turn(turn, prompt, events, cancel).await
+    }
+}
+
+/// What the core knows about an external-agent turn that the driver does
+/// not (T56.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskTurn {
+    /// The parent's id for this child's task; `None` outside a task.
+    pub task: Option<crate::ids::TaskId>,
+    /// The child's permission mode now, which follows the parent's.
+    pub mode: crate::types::PermissionMode,
 }
 
 /// A plugin's `cox_model_call` (PL§7d, T33.15): the router, the budget gate
