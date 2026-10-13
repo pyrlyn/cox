@@ -631,21 +631,44 @@
     },
     "ModelCall": {
       "type": "object",
-      "properties": {
-        "tier": {
-          "$ref": "#/$defs/ModelTier",
-          "description": "The tier to route at; the host clamps it to the grant, never `think`."
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "tier": {
+              "$ref": "#/$defs/ModelTier",
+              "description": "The tier to route at."
+            }
+          },
+          "required": [
+            "tier"
+          ],
+          "description": "The router's pick for a tier; the host clamps it to the grant, never\n`think`. The only target `cox_model_call` takes."
         },
+        {
+          "type": "object",
+          "properties": {
+            "own_provider": {
+              "$ref": "#/$defs/OwnProvider",
+              "description": "The section and the model to send."
+            }
+          },
+          "required": [
+            "own_provider"
+          ],
+          "description": "One of the plugin's own `[[provider]]` sections, run by the host\nafter `cox_decide` returns (`DecideOut::Call`), never from inside an\nexport: the plugin's one worker would be waiting on itself."
+        }
+      ],
+      "description": "`cox_model_call` input (PL§7d), and what `DecideOut::Call` asks the host\nto run (T33.40.1); the output is `Vec<ProviderEvent>`.",
+      "properties": {
         "request": {
           "description": "The request; the host sets its tier, model and job.",
           "x-cox-protocol": "Request"
         }
       },
       "required": [
-        "tier",
         "request"
-      ],
-      "description": "`cox_model_call` input (PL§7d); the output is `Vec<ProviderEvent>`."
+      ]
     },
     "ModelTier": {
       "oneOf": [
@@ -661,6 +684,24 @@
         }
       ],
       "description": "The highest tier a plugin may ask the router for. `think` is not a\nvariant, so no manifest can request it (D5)."
+    },
+    "OwnProvider": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The `[[provider]]` section name."
+        },
+        "model": {
+          "type": "string",
+          "description": "The model id to send."
+        }
+      },
+      "required": [
+        "name",
+        "model"
+      ],
+      "description": "A plugin's own provider section and the model to ask it for."
     },
     "HttpReq": {
       "type": "object",
@@ -742,6 +783,14 @@
           },
           "description": "The choices the core offers (tiers for `route`, candidates for\n`rank`); empty for a score or yes/no point.",
           "default": []
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionItem"
+          },
+          "description": "A batched question (J10): one request covers every item a point\nneeds, such as each call of one tool batch, instead of one request\nper item. Empty for a single question; otherwise `state` holds what\nthe items share and the answer is [`Answer::Items`].",
+          "default": []
         }
       },
       "required": [
@@ -785,6 +834,26 @@
       ],
       "description": "A decision point (PL§4 \"Decision points\")."
     },
+    "QuestionItem": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "description": "What this item is about, redacted."
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "This item's choices; empty for a score or yes/no point.",
+          "default": []
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "description": "One item of a batched [`Question`]."
+    },
     "Advice": {
       "type": "object",
       "properties": {
@@ -813,7 +882,7 @@
       "required": [
         "answer"
       ],
-      "description": "`cox_decide` output. The core applies the point's monotone rule and\nuses its local default when confidence is below `min_confidence`."
+      "description": "`cox_decide`'s answer. The core applies the point's monotone rule and\nuses its local default when confidence is below `min_confidence`."
     },
     "Answer": {
       "oneOf": [
@@ -898,10 +967,81 @@
             "kind",
             "values"
           ],
-          "description": "One score per item of a batched question (`salience`, T33.21.1):\n`Question` has no `items` field yet (that is T33.40.1's batched-ABI\ncard), so the items travel in `Question.state[\"items\"]` and the\nanswer carries one value per item, aligned by index."
+          "description": "One score per memory item for `salience` (T33.21.1), which predates\n`Question.items`: its items travel in `Question.state[\"items\"]` and\nthe answer carries one value per item, aligned by index."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "answers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Answer"
+              },
+              "description": "The answers."
+            },
+            "kind": {
+              "type": "string",
+              "const": "items"
+            }
+          },
+          "required": [
+            "kind",
+            "answers"
+          ],
+          "description": "One answer per item of a batched question (`Question.items`), same\nlength and order; none of them is itself `Items`."
         }
       ],
       "description": "The three question kinds a decision model answers."
+    },
+    "DecideOut": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "call": {
+              "$ref": "#/$defs/ModelCall",
+              "description": "The call to run."
+            }
+          },
+          "required": [
+            "call"
+          ],
+          "description": "Run this call on the plugin's own provider, then ask\n`cox_decide_resume` with its events. The target must be\n[`CallTarget::OwnProvider`]."
+        },
+        {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Advice"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The answer, or silence."
+        }
+      ],
+      "description": "`cox_decide` output. Untagged so a guest written before the call-out\nexisted, which returns a bare `Option<Advice>`, still parses."
+    },
+    "DecideResume": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "$ref": "#/$defs/Question",
+          "description": "The question `cox_decide` was asked."
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "x-cox-protocol": "ProviderEvent"
+          },
+          "description": "The provider's events, usage included."
+        }
+      },
+      "required": [
+        "question",
+        "events"
+      ],
+      "description": "`cox_decide_resume` input (optional export, T33.40.1): the question\nagain, with the events the host's run of `DecideOut::Call` produced.\nThe output is `Option<Advice>`."
     },
     "AbiError": {
       "oneOf": [

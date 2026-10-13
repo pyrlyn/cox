@@ -43,7 +43,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.1 | todo | P1 | 5 | 0% | |
 | T33.40.3 | todo | P2 | 4 | 0% | |
 | T33.40.4 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
@@ -900,30 +899,6 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 #### T33.40 Jev as the first plugin
 
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
-
-#### T33.40.1 ABI: two-phase decide, own-provider call-out, batched questions — blocker
-
-Depends: T33.2, T33.14.1, T33.15, T33.18, T33.20 · Size: ~180 · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin/src/advisor.rs`, `crates/cox-plugin/src/net.rs`
-Goal: close the gap that PL§12 falsifier 3 predicts (J§4.1–4.3). Today a decision plugin can reach its own provider only through a deadlock (`cox_model_call` into its own `cox_provider_stream`) or a ledger bypass (`cox_http` from `cox_decide`). This card adds a path with neither.
-Plan:
-1. ABI changes:
-   - `DecideOut = Advice(Option<Advice>) | Call(ModelCall)`;
-   - the new optional export `cox_decide_resume(DecideResume { question, events }) -> Option<Advice>`;
-   - `ModelCall.target = Tier(t) | OwnProvider { name, model }`;
-   - `Question.items: Vec<QuestionItem>` (one answer per item).
-   
-   These are minor additions: `api` stays 1. Regenerate `docs/plugin-abi.schema.json`.
-2. `PluginAdvisor`: on `Call`, check that the target is a `[[provider]]` of the same plugin. Then run it through the budget gate → the provider registry (`PluginProvider`) → `Priced`, which writes one `usage` row with `job = plugin:<id>`. Then call `cox_decide_resume` with the events. The point's latency budget covers all three steps. Any failure along the way is `None`, and the local default applies.
-3. `net.rs`: `cox_http` to a provider section's host is allowed only inside `cox_provider_stream`. Everywhere else it returns `NotInThisContext`.
-4. PL§4: add the exports and state the context rule.
-Check:
-- `decide_call_out_writes_one_usage_row`: a WAT guest returns `Call`, and its own `cox_provider_stream` returns fixed events;
-- `decide_call_out_over_budget_falls_back`;
-- `decide_cannot_target_another_plugins_provider`;
-- `http_to_provider_host_outside_provider_stream_is_refused`;
-- `batched_question_answers_each_item`;
-- `abi_schema_matches_committed_file`;
-- invariant 8 `every_request_has_a_usage_row` still green.
 
 #### T33.40.3 Jev provider export
 
