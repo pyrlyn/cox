@@ -43,7 +43,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.3 | todo | P2 | 4 | 0% | |
 | T33.40.4 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
@@ -899,19 +898,6 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
-#### T33.40.3 Jev provider export
-
-Depends: T33.40.2, T33.16, T33.18 · Size: ~170 · Files: `plugins/jev/src/provider.rs`, `plugins/jev/src/lib.rs`, `crates/cox-plugin-fixtures/build.rs`
-Goal: `cox_provider_stream` speaks System One over `cox_http` (PL§7a ABI form). The host injects the key.
-- A decision call (`Job::Plugin("jev")` with the JSON body in its one user message) is sent verbatim.
-- A request from a tier that names `typesafe` gets the old lossy mapping and one `Notice(Warn)`: "typesafe is a decision model; no tier should route to it" (J13).
-- Map the status codes from J4 to the ABI error kinds, so the host's retry treats 429 and 529 as transient.
-- Pass usage through unchanged; the host applies the estimate floor (T33.18).
-- Add the `[[models]]` rows.
-- `cox-plugin-fixtures` also builds `jev.wasm`.
-Check:
-- guest tests `decision_call_body_is_sent_verbatim`, `tier_request_uses_lossy_mapping_and_warns` and `status_529_maps_to_transient`;
-- `cargo build -p cox-plugin-fixtures` produces both fixtures, and with the wasm target missing it fails naming `mise install`.
 
 #### T33.40.4 Jev plugin as a provider, end to end and offline
 
