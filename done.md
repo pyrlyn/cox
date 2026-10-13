@@ -35,6 +35,20 @@ clean
 ```
 `cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
 
+#### T64.12 Keep the timeout on the `web_fetch` fallback client
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
+Goal: every client `cox_web::client()` returns carries `TIMEOUT` and the private-address guard, including the fallback built when the primary build fails. The fallback had dropped `.timeout(TIMEOUT)`, so a stalled `web_fetch` had no bound.
+What landed:
+- `configured(builder, resolver, timeout)` applies the timeout, the redirect guard and the DNS resolver. Both branches of `client()` build through it. The fallback still drops only the user agent. If its build also fails, `unwrap_or_default` panics inside reqwest, so no unguarded client is returned.
+- Test `configured_client_times_out_when_name_resolution_stalls`: a resolver that never answers and a 100 ms timeout; the request must end with a timeout error within 5 s.
+Not done: the fallback branch runs only when a TLS backend fails to build, which no test can force, so the test covers the settings both branches share. The `plan.md` findings row for T64.12 is marked `done`, as T64.1 is.
+Check:
+- Mutation: with `.timeout(timeout)` removed from `configured`, the new test failed (it hung until the 5 s outer timeout). Restored.
+- `cargo nextest run -p cox-web -p cox-tools`: 223 run, 223 passed, 1 skipped (pre-existing).
+- `cargo clippy -p cox-web --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.1 Revert project hook commands
 
 Model: Grok 4.7 · Status: done 2026-10-09 · Depends: — · Size: ~140 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox/src/config_load.rs`, `crates/cox-protocol/default.toml`
