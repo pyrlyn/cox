@@ -3,8 +3,6 @@
 - T33.14.2. Filesystem preopens
 - T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
-- T33.40.1. ABI: two-phase decide, own-provider call-out, batched questions
-- T33.40.3. Jev provider export
 - T33.40.4. Jev plugin as a provider, end to end and offline
 - T33.40.5. Parity: the `typesafe` table configures the plugin's section
 - T33.40.6. `risk` advisor: raise only
@@ -25,7 +23,6 @@
 - T33.45.5. App core: inspector tab, toolbar and palette actions
 - T33.45.6. App core: notifications, links and images
 - T33.45.7. FFI and Swift: the desktop contributions
-- T33.45.8. SDK and the surfaces example
 - T33.45.9. Docs: the three-part plugin API reference
 - T33.45.10. Docs: Russian and Ukrainian translations
 - T35.10. Optional: live check against a real Cursor account (needs the creator's key)
@@ -45,11 +42,12 @@
 - T53.7. `cox-plugin-sdk` ready for crates.io
 - T53.8. Go SDK module ready to tag
 - T53.9. Templates and docs use the published SDKs
-- T56.6. Host driver: a background task becomes a Cursor Cloud run
 - T56.7. Usage row and resume
 - T56.8. Offline end-to-end over hand-written fixtures
 - T56.9. Docs: cloud agents for users and in EA
 - T56.10. Optional: live check against a real Cursor account (needs the creator's key)
+- T56.11. No usage row for a cloud run that never started
+- T56.12. A refused cloud run tells the user why
 - T57.1. Windows CI job: `cargo check` over a growing crate list
 - T57.4. `path::confine` on Windows paths
 - T57.5. One kill path for process trees: hooks and the session environment

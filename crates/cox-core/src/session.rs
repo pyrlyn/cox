@@ -1563,7 +1563,11 @@ impl Session {
         let (tx, mut rx) = mpsc::channel(64);
         let started = std::time::Instant::now();
         let (driver, cancel) = (agent.clone(), self.cancel_token());
-        let run = tokio::spawn(async move { driver.turn(turn, prompt, tx, cancel).await });
+        let cx = cox_protocol::traits::TaskTurn {
+            task: self.self_task(),
+            mode: self.permission_mode().await,
+        };
+        let run = tokio::spawn(async move { driver.task_turn(cx, turn, prompt, tx, cancel).await });
         let mut stop = None;
         while let Some(ev) = rx.recv().await {
             match ev {

@@ -11,17 +11,17 @@ New bugs, dead code and moves from a read-only Cursor cloud review of clean `mai
 | ID | Priority | Kind | Status | Where | Fix |
 | --- | --- | --- | --- | --- | --- |
 | T64.1 | P0 | bug | done | `cox-config/src/load.rs` project guards | Project and `.claude` hooks ran unsandboxed. Project hook commands are reverted; user config and `~/.claude` hooks stay. |
-| T64.2 | P0 | bug | confirmed | `load.rs:453-470`; `cox-session/src/lib.rs:231-235`; `cox-core/src/turn.rs:505` | A project `core.workspace_roots` is not guarded and becomes `ToolCx.roots` for `confine`. Revert project roots outside the git root and the user's roots. |
-| T64.3 | P0 | bug | confirmed | `cox-protocol/src/config.rs:515-517`; `GUARDED_KEYS` at `load.rs:453-470` | A project can set `providers.*.base_url` or add providers, and the user's API keys follow that URL. Revert project `base_url`, `api_key_env` and new `[providers.*]` tables. |
+| T64.2 | P0 | bug | done | `load.rs:453-470`; `cox-session/src/lib.rs:231-235`; `cox-core/src/turn.rs:505` | A project `core.workspace_roots` is not guarded and becomes `ToolCx.roots` for `confine`. Revert project roots outside the git root and the user's roots. |
+| T64.3 | P0 | bug | done | `cox-protocol/src/config.rs:515-517`; `GUARDED_KEYS` at `load.rs:453-470` | A project can set `providers.*.base_url` or add providers, and the user's API keys follow that URL. Revert project `base_url`, `api_key_env` and new `[providers.*]` tables. |
 | T64.4 | P1 | bug | confirmed | `load.rs:197-206`; `cox-permission/src/lib.rs:317-318` | A project may set `permissions.mode = auto` (only `bypass` is reverted). Revert any project mode wider than the user layer. |
 | T64.5 | P1 | bug | confirmed | `load.rs:228-237`; `cox-sandbox/src/sandbox/mod.rs:199-207` | A project may set `sandbox.network = true` and extra `sandbox.writable`. Revert them unless the user layer already allows them. |
 | T64.6 | P1 | bug | confirmed | `cox-permission/src/policy.rs:33-37`; no approval check in the project guards | A project may set `permissions.approval = on-failure`, which auto-runs confined `Exec`. Refuse a project approval looser than the user layer. |
 | T64.7 | P1 | bug | confirmed | `load.rs:1085-1120` (test keeps `mcp.servers["new"]`); LSP revert at `:295-323` | A project may add MCP stdio servers. Revert project-added or changed `mcp.servers` the way `lsp.servers` is reverted. |
-| T64.8 | P1 | bug | confirmed (no test run) | `cox-core/src/turn.rs:286-291`; `cox-tools/src/write.rs:102-107`; `cox-tools/src/edit.rs:80-85` | `write`/`edit` are `Concurrency::Parallel`, so same-path calls in one batch race and the last rename wins. Group the parallel batch by `touches()` path. |
+| T64.8 | P1 | bug | done | `cox-core/src/turn.rs:286-291`; `cox-tools/src/write.rs:102-107`; `cox-tools/src/edit.rs:80-85` | `write`/`edit` are `Concurrency::Parallel`, so same-path calls in one batch race and the last rename wins. Group the parallel batch by `touches()` path. |
 | T64.9 | P1 | bug | confirmed (documented design) | `cox-sandbox/src/sandbox/landlock.rs:53-65` | Landlock grants read of `/`, so read-only and workspace-write sandboxes can read the whole disk. Narrow reads to the workspace roots, or refuse Landlock where read isolation is required. |
 | T64.10 | P1 | bug | confirmed | `cox-session/src/mcp.rs:122-130`, `:158-165`; `cox-session/src/sandbox.rs:89-97` | An MCP stdio server that cannot be wrapped under Landlock runs with host privileges plus a notice. Refuse or quarantine it. |
 | T64.11 | P1 | bug | confirmed | `.github/workflows/ci.yml:3-11`, `:470-481` | `revert-on-failure` needs a push to `main`, but `ci.yml` has no `push` trigger, so the job never runs. Add the trigger or delete the job. |
-| T64.12 | P2 | bug | confirmed | `cox-web/src/lib.rs:48-66` | The `web_fetch` client fallback drops `.timeout(TIMEOUT)`. Fail closed, or set the timeout on the fallback. |
+| T64.12 | P2 | bug | done | `cox-web/src/lib.rs:48-66` | The `web_fetch` client fallback drops `.timeout(TIMEOUT)`. Fail closed, or set the timeout on the fallback. |
 | T64.13 | P2 | bug | confirmed | `cox-mcp/src/auth.rs:228-256` | The OAuth loopback forwards the first TCP connection's query; `state` is checked only later. Accept only `GET /callback` and keep listening until `state` matches. |
 | T64.14 | P2 | bug | confirmed | `cox-store/src/lock.rs:100-105` | An unreadable or corrupt session lock file becomes `Holder::default()` (pid 0). Treat it as busy with an unknown holder. |
 | T64.15 | P2 | bug | suspected | `cox-sandbox/src/path.rs:41-76`; `cox-tools/src/read.rs:89-96` | `confine` then `std::fs::read`/`write` leaves a symlink-swap window. Open with `O_NOFOLLOW`/`openat`, or serialize readers and writers per path. |
@@ -43,8 +43,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.1 | todo | P1 | 5 | 0% | |
-| T33.40.3 | todo | P2 | 4 | 0% | |
 | T33.40.4 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
@@ -70,7 +68,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.5 | todo | P2 | 4 | 0% | |
 | T33.45.6 | todo | P2 | 3 | 0% | |
 | T33.45.7 | todo | P2 | 4 | 0% | |
-| T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
@@ -90,11 +87,12 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.6 | todo | P3 | 4 | 0% | |
 | T56.7 | todo | P3 | 4 | 0% | |
 | T56.8 | todo | P3 | 3 | 0% | |
 | T56.9 | todo | P3 | 1 | 0% | |
 | T56.10 | todo | P3 | 2 | 0% | |
+| T56.11 | todo | P3 | 2 | 0% | |
+| T56.12 | todo | P3 | 2 | 0% | |
 | T57.1 | todo | P1 | 2 | 90% | |
 | T57.4 | todo | P1 | 4 | 0% | |
 | T57.5 | todo | P1 | 4 | 0% | |
@@ -136,7 +134,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T59.6 | todo | P3 | 3 | 0% | |
 | T59.7 | todo | P3 | 4 | 0% | |
 | T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
@@ -210,7 +207,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 |-------|------|------|
 | `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15 |
 | `cox-config` | the one config owner (T32.16; split out of `cox`): figment layering (default/user/project/env/flag), validation, `cox config set` editing and the `docs/config.jsonschema` drift test. Errors are a `thiserror` enum | figment, toml_edit 0.25, thiserror |
-| `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents; login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell) |
+| `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents, cloud agent drivers (T56.6); login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell), cox-cursor-cloud and futures (T56.6: the cloud agent driver and its run stream; both already in the tree) |
 | `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
 | `cox-ffi` | the macOS app's UniFFI surface (T37.14): one tokio runtime, `App` and `SessionHandle` objects, the foreign `AppHost` trait, `#[uniffi::remote]` mirrors of cox-app types, a fixture recorder. `staticlib` + `lib`; the only crate that depends on uniffi | uniffi 0.32.2 (proc-macros, no UDL; default features off); dev: syn 3.0.5 (`full`, `parsing`; T37.39.1: `tests/forward_only.rs` parses the FFI sources); async-trait (MIT OR Apache-2.0): the async `AppHost` methods UniFFI exports (P51, P52) |
 | `desktop/` | the macOS app (P37, not a Cargo crate): Swift packages under `desktop/macos/Packages/`, the design tokens and their generator under `desktop/design/` | node 24.21.0 (mise) with npm `style-dictionary` 5.5.5 (T37.17: DTCG tokens → Swift, asset colours, CSS); SwiftLint 0.65.1 (mise, aqua; T37.18: DS§9 no-literal rules); watchexec 2.7.4 (mise, aqua; `just desktop-open` rebuilds the XCFramework on Rust changes) and SwiftLintPlugins at the same version in each package; `swift-format` from the Xcode toolchain; swift-collections 1.7.1 (T37.16: `OrderedDictionary` timeline store); swift-dependencies 1.17.1 (the stores' launch-wide services as `@Dependency` values, DT§4.6); swift-snapshot-testing 1.19.6 (T37.19: `CoxUI` snapshot tests); swift-property-based 2.0.1 (T63.1: `CoxModel` property tests) |
@@ -534,7 +531,7 @@ endpoint = ""
 redact = true
 ```
 
-Precedence (D13): embedded defaults < `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `.claude/settings.json` (permissions/hooks/env only, imported) < `COX_<SECTION>_<KEY>` (e.g. `COX_TIERS_CODE_MODEL`) < CLI flags. Before figment runs, `dotenvy` loads `.env` then `.env.local` walking up from cwd (T0.7); missing files are ignored; already-set variables are left alone, so a key that arrived only via `.env` still shows as `env` in `cox config show --sources`. Project config may not raise `budget.*`, set `permissions.mode = "bypass"`, set `sandbox.mode = "danger-full-access"`, set `tiers.think.confirm = false` or add hook commands (T64.1); violations are reported by `cox config show` and ignored. `cox config show --sources` prints every effective key with its origin; `cox config set <key> <value>` edits the user file with `toml_edit` preserving comments.
+Precedence (D13): embedded defaults < `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `.claude/settings.json` (permissions/hooks/env only, imported) < `COX_<SECTION>_<KEY>` (e.g. `COX_TIERS_CODE_MODEL`) < CLI flags. Before figment runs, `dotenvy` loads `.env` then `.env.local` walking up from cwd (T0.7); missing files are ignored; already-set variables are left alone, so a key that arrived only via `.env` still shows as `env` in `cox config show --sources`. Project config may not raise `budget.*`, set `permissions.mode = "bypass"`, set `sandbox.mode = "danger-full-access"`, set `tiers.think.confirm = false`, add hook commands (T64.1), name a `core.workspace_roots` entry outside its git root that the user does not list (T64.2), change a provider section's `base_url` or `api_key_env` or add a `[providers.<name>]` table (T64.3); violations are reported by `cox config show` and ignored. `cox config show --sources` prints every effective key with its origin; `cox config set <key> <value>` edits the user file with `toml_edit` preserving comments.
 
 ### 1.7 Storage schema (`cox-store`)
 
@@ -900,43 +897,6 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
-#### T33.40.1 ABI: two-phase decide, own-provider call-out, batched questions — blocker
-
-Depends: T33.2, T33.14.1, T33.15, T33.18, T33.20 · Size: ~180 · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin/src/advisor.rs`, `crates/cox-plugin/src/net.rs`
-Goal: close the gap that PL§12 falsifier 3 predicts (J§4.1–4.3). Today a decision plugin can reach its own provider only through a deadlock (`cox_model_call` into its own `cox_provider_stream`) or a ledger bypass (`cox_http` from `cox_decide`). This card adds a path with neither.
-Plan:
-1. ABI changes:
-   - `DecideOut = Advice(Option<Advice>) | Call(ModelCall)`;
-   - the new optional export `cox_decide_resume(DecideResume { question, events }) -> Option<Advice>`;
-   - `ModelCall.target = Tier(t) | OwnProvider { name, model }`;
-   - `Question.items: Vec<QuestionItem>` (one answer per item).
-   
-   These are minor additions: `api` stays 1. Regenerate `docs/plugin-abi.schema.json`.
-2. `PluginAdvisor`: on `Call`, check that the target is a `[[provider]]` of the same plugin. Then run it through the budget gate → the provider registry (`PluginProvider`) → `Priced`, which writes one `usage` row with `job = plugin:<id>`. Then call `cox_decide_resume` with the events. The point's latency budget covers all three steps. Any failure along the way is `None`, and the local default applies.
-3. `net.rs`: `cox_http` to a provider section's host is allowed only inside `cox_provider_stream`. Everywhere else it returns `NotInThisContext`.
-4. PL§4: add the exports and state the context rule.
-Check:
-- `decide_call_out_writes_one_usage_row`: a WAT guest returns `Call`, and its own `cox_provider_stream` returns fixed events;
-- `decide_call_out_over_budget_falls_back`;
-- `decide_cannot_target_another_plugins_provider`;
-- `http_to_provider_host_outside_provider_stream_is_refused`;
-- `batched_question_answers_each_item`;
-- `abi_schema_matches_committed_file`;
-- invariant 8 `every_request_has_a_usage_row` still green.
-
-#### T33.40.3 Jev provider export
-
-Depends: T33.40.2, T33.16, T33.18 · Size: ~170 · Files: `plugins/jev/src/provider.rs`, `plugins/jev/src/lib.rs`, `crates/cox-plugin-fixtures/build.rs`
-Goal: `cox_provider_stream` speaks System One over `cox_http` (PL§7a ABI form). The host injects the key.
-- A decision call (`Job::Plugin("jev")` with the JSON body in its one user message) is sent verbatim.
-- A request from a tier that names `typesafe` gets the old lossy mapping and one `Notice(Warn)`: "typesafe is a decision model; no tier should route to it" (J13).
-- Map the status codes from J4 to the ABI error kinds, so the host's retry treats 429 and 529 as transient.
-- Pass usage through unchanged; the host applies the estimate floor (T33.18).
-- Add the `[[models]]` rows.
-- `cox-plugin-fixtures` also builds `jev.wasm`.
-Check:
-- guest tests `decision_call_body_is_sent_verbatim`, `tier_request_uses_lossy_mapping_and_warns` and `status_529_maps_to_transient`;
-- `cargo build -p cox-plugin-fixtures` produces both fixtures, and with the wasm target missing it fails naming `mise install`.
 
 #### T33.40.4 Jev plugin as a provider, end to end and offline
 
@@ -1210,12 +1170,6 @@ Check: a plugin notice with actions reaches `Host::notify`'s test double and its
 Depends: T33.45.6 · Files: `crates/cox-ffi/src/{session,types}.rs`, `desktop/macos/Packages/CoxUI/…` (Inspector, SessionToolbar, CommandPalette, PluginWidgetView), `desktop/design/DESIGN.md` §6 rows · Design: `docs/design/plugins.md` §15, A134
 
 Check: `forward_only` passes; a snapshot per new view in light and dark; an unknown SF Symbol draws `puzzlepiece.extension` (settles §15.4's **unverified** note).
-
-#### T33.45.8 SDK and the surfaces example
-
-Depends: T33.45.3 · Files: `plugins/sdk/src/lib.rs`, `plugins/examples/surfaces/` (new), `crates/cox-plugin-fixtures/build.rs` · Design: `docs/design/plugins.md` §15, A134
-
-Check: a `cox-plugin` test loads the example (a command and a status segment, a leader key, an inspector tab and a notification) in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice or `NotOnThisSurface` on the other.
 
 #### T33.45.9 Docs: the three-part plugin API reference
 
@@ -1691,14 +1645,6 @@ Every card in this phase:
 - runs every string from Cursor (stream text, tool names, artifact names, errors) through `cox_sanitize::sanitize`;
 - makes no network call in tests (wiremock and hand-written fixtures only, D12).
 
-#### T56.6 Host driver: a background task becomes a Cursor Cloud run
-
-Depends: T56.2, T56.3, T56.4, T56.5 · Size: ~190 · Files: `crates/cox-session/src/cloud_agents.rs` (new), `crates/cox-session/src/lib.rs`; manifest `crates/cox-session/Cargo.toml`
-Goal: each granted `[[cloud_agents]]` entry registers as a background-only subagent preset through the path P35's external agents use. On dispatch the driver resolves the repository's GitHub remote (any other host is refused before any call; credentials in the URL are stripped), warns in the approval text when local `HEAD` is not on the remote, asks `Engine` for `CloudAgent(<repo>)`, creates the run, stores it (T56.5), and maps the stream onto the T34.8 task events: `TaskCreated` at create, assistant text accumulated into the result item, and `TaskCompleted` at `done` or a terminal status. Cancelling the task cancels the run. Every string passes `sanitize`.
-Check: `mise exec -- cargo nextest run -p cox-session cloud_agent_refuses_a_non_github_remote cloud_agent_strips_credentials_from_the_remote cloud_agent_denied_by_engine_makes_no_request cloud_agent_stream_maps_to_task_events cloud_agent_task_cancel_cancels_the_run` (wiremock and a fixture repository).
-Done when: the tests pass.
-Out of scope: foreground (blocking) runs; follow-up messages into a run (a later card if wanted).
-
 #### T56.7 Usage row and resume
 
 Depends: T56.6 · Size: ~160 · Files: `crates/cox-session/src/cloud_agents.rs`, `crates/cox-session/src/lineage.rs`
@@ -1730,6 +1676,22 @@ Goal: with an opt-in env var and the creator's `CURSOR_API_KEY`, one real run on
 Check: the recorded fixture replays through T56.8's test unchanged; the script's own test asserts it refuses to run without the opt-in env var.
 Done when: the fixture is committed and the replay passes.
 Out of scope: any automated or scheduled live call.
+
+#### T56.11 No usage row for a cloud run that never started
+
+Depends: T56.8 · Size: ~40 · Files: `crates/cox-core/src/session.rs` (`external_turn`), `crates/cox/tests/cloud_agents.rs`
+Goal: when the driver refuses a cloud run before any request (no `CloudAgent(<repo>)` allow rule, a non-GitHub origin, plan mode), the ledger gets no row for it. Today `external_turn` falls back to an all-zero `Usage` whenever the driver returns an error and writes it through `insert_external_usage`, so every refused task leaves an empty `billed_externally` row (found in T56.8, whose `cloud_agent_without_an_allow_rule_makes_no_request` had to accept zero-token rows). A row means a request was made (§0 ledger rule), so a refused run writes none; a run that started and reported usage still writes exactly one row (T56.7), and an external agent that ran but reported no usage keeps today's row so its latency is not lost.
+Check: `mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_no_request` asserts no `External` row at all (fails before the fix); `mise exec -- cargo nextest run -p cox-core external_agent_turn_writes_a_billed_externally_usage_row` and `-p cox-session cloud_agent_usage_row_is_written_once` still pass.
+Done when: the tests pass.
+Out of scope: showing the refusal text in the stream (T56.12).
+
+#### T56.12 A refused cloud run tells the user why
+
+Depends: T56.8 · Size: ~60 · Files: `crates/cox-core/src/session.rs` (`external_turn`), `crates/cox-core/src/subagent.rs`, `crates/cox/tests/cloud_agents.rs`
+Goal: when the driver refuses a cloud run (no `CloudAgent(<repo>)` allow rule, a non-GitHub origin, plan mode), the parent and the user see the driver's reason, which names the rule to add, the repository and the HEAD warning. Today `external_turn` emits the driver's error as a non-fatal `Event::Error` in the child session only; the child's history holds no assistant message, so `subagent.rs` closes the task with "(the subagent produced no answer)" and that is all the stream, the TUI notice and the model see (found in T56.8). The task's result becomes the refusal text, passed through `sanitize` (it carries repository names from the remote) and marked as an error so the model does not read it as the run's answer; the same text reaches `TaskCompleted` and the notice. A run that produced an answer is unchanged.
+Check: `mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_no_request` asserts the `task_completed` event and the task result carry the refusal text naming `CloudAgent(acme/widgets)` and not "produced no answer" (fails before the fix); `mise exec -- cargo nextest run -p cox-core subagent` still passes.
+Done when: the tests pass.
+Out of scope: an approval prompt from a background task (needs core work: a background task has no way to show one yet, T56.6).
 
 ### P57 — Windows build of the core (goal: the workspace builds and its tests run on Windows, and `cox` runs there under D7's rule — no sandbox, a loud warning, `on-request` forced)
 
@@ -2058,33 +2020,6 @@ mise exec -- cargo fmt --check
 Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
 
 Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
-
-#### T59.6 LSP `definition` and `references` tools on the running servers
-
-Model: sonnet · Status: open · Depends: T59.3 · Size: ~190 · Priority: P3 · Complexity: 3
-
-Goal: `definition(path, line, col)` and `references(path, line, col)` answer from a language server when one runs for the file and fall back to an `outline`/`grep` answer with a `(no server)` note otherwise, so navigation needs no extra `grep` round trip.
-
-Files:
-- `crates/cox-tools/src/lsp/client.rs`
-- `crates/cox-tools/src/lsp/server.rs`
-- `crates/cox-tools/src/lsp/nav.rs` (new)
-
-Steps:
-1. Hand-rolled wire types for `textDocument/definition` and `textDocument/references` next to the existing ones (`client.rs:174`; P41 rejects `lsp-types`, `plan.md:1245-1253`).
-2. `Server` methods next to `start` (`server.rs:194`); results as `path:line` lines, capped and archived over the cap.
-3. Use `LspPool::running_for` from T59.3; the fallback is a plain-text answer, never a spawn from this tool unless `diagnostics` would spawn too.
-
-Check:
-```bash
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: fake-server tests for both requests and the fallback.
-
-Out of scope: rename (T59.7), hover, workspace symbols.
 
 #### T59.7 `rename_symbol` through the server's `textDocument/rename`
 

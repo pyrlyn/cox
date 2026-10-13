@@ -1,4 +1,3 @@
-
 #### T33.18 Providers, ABI form (`PluginProvider`)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-09 · Depends: T33.14.1, T33.17 · Size: ~190 (landed larger; see Not done) · Priority: P2 · Complexity: 5 · Files: `crates/cox-plugin/src/provider.rs`, `crates/cox-plugin/src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-session/src/provider.rs`
@@ -36,6 +35,20 @@ clean
 ```
 `cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
 
+#### T64.12 Keep the timeout on the `web_fetch` fallback client
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
+Goal: every client `cox_web::client()` returns carries `TIMEOUT` and the private-address guard, including the fallback built when the primary build fails. The fallback had dropped `.timeout(TIMEOUT)`, so a stalled `web_fetch` had no bound.
+What landed:
+- `configured(builder, resolver, timeout)` applies the timeout, the redirect guard and the DNS resolver. Both branches of `client()` build through it. The fallback still drops only the user agent. If its build also fails, `unwrap_or_default` panics inside reqwest, so no unguarded client is returned.
+- Test `configured_client_times_out_when_name_resolution_stalls`: a resolver that never answers and a 100 ms timeout; the request must end with a timeout error within 5 s.
+Not done: the fallback branch runs only when a TLS backend fails to build, which no test can force, so the test covers the settings both branches share. The `plan.md` findings row for T64.12 is marked `done`, as T64.1 is.
+Check:
+- Mutation: with `.timeout(timeout)` removed from `configured`, the new test failed (it hung until the 5 s outer timeout). Restored.
+- `cargo nextest run -p cox-web -p cox-tools`: 223 run, 223 passed, 1 skipped (pre-existing).
+- `cargo clippy -p cox-web --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.1 Revert project hook commands
 
 Model: Grok 4.7 · Status: done 2026-10-09 · Depends: — · Size: ~140 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox/src/config_load.rs`, `crates/cox-protocol/default.toml`
@@ -58,6 +71,51 @@ $ mise exec rust@1.98.1 -- cargo clippy -p cox-config -p cox-protocol -p cox --a
 clean
 ```
 `mise` is not on the default PATH in this environment; the commands used `~/.local/bin/mise` after `mise install rust`. A full `cargo nextest run -p cox` also ran two `external_agents_cursor` tests that fail here because Landlock cannot wrap the fixture agent's argv (`cannot run under the sandbox`). That warning is unrelated to hook loading; CI's sandbox host is the check for it.
+
+#### T64.2 Guard project `core.workspace_roots`
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~110 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot widen the roots `confine` checks against. Its `core.workspace_roots` becomes `ToolCx.roots` (`cox-session/src/lib.rs`, `cox-core/src/turn.rs`), so `workspace_roots = ["/"]` opened the whole disk to `read`, `write` and `edit`.
+Plan:
+1. Test first in `load.rs`: a project root outside the git root reverts the whole list to the user's roots with a `core.workspace_roots` violation; a root inside the git root and one the user already lists stay.
+2. `apply_project_guards` takes the git root. A project root is kept when the layers without the project already list it, or when it is absolute and its canonical path is inside the canonical git root. Any other root reverts the list to `without_project`'s, the way `lsp.servers` reverts. Relative roots are refused: `confine` resolves them against the process cwd, not the repository.
+3. `core.workspace_roots` joins `GUARDED_KEYS` with its own reason; plan §1.6 lists the guard.
+What landed: `root_inside` and the guard in `apply_project_guards`; `load_in` finds the git root once and passes it (`project_config_in` shares the `.cox/config.toml` join with `project_config_path`). Test `project_config_cannot_widen_workspace_roots` covers `/`, a relative `src`, a symlink inside the repo pointing out, and `<git root>/..`; the user's root survives and `--sources` names the user layer.
+Not done: a project root that is a subdirectory of the checkout is still canonicalized again by `confine` at call time, so a directory later swapped for a symlink widens it; that is the symlink-swap class tracked by T64.15. No `docs/config.md` change: `default.toml`'s `workspace_roots` comment feeds a `cox-app` settings snapshot. The real binary was not run (disk was at 99%); `cox-config`'s own loader tests cover the path `cox config show` takes.
+Check:
+```text
+$ CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 mise exec -- cargo nextest run -p cox-config
+39 tests run: 39 passed, 0 skipped
+  PASS load::tests::project_config_cannot_widen_workspace_roots
+  PASS load::tests::every_guarded_key_has_its_own_reason
+$ mise exec -- cargo clippy -p cox-config --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+Before the fix the new test failed: `'/' must revert the list to the user's`, left `[<git>/src, "/"]`.
+
+#### T64.3 Guard project provider endpoints and keys
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~150 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot send the user's API keys somewhere else. It could set `providers.<name>.base_url` or `api_key_env`, or add a `[providers.<name>]` table naming any env var, and the key resolved for that section followed the request.
+Plan:
+1. Test first in `load.rs`: a project `base_url` and `api_key_env` on a native and a compatible section revert to the user's values, a new `[providers.evil]` table is dropped, and `timeout_s` stays project-settable; each attempt is its own violation with its own reason, and `--sources` still names the project for the untouched keys.
+2. `apply_project_guards` pins every section's `base_url` and `api_key_env` to `without_project`'s (through the existing `transport()` accessor) and removes `custom` tables the layers without the project do not have. Violations: `providers.*.base_url`, `providers.*.api_key_env`, `providers` (added tables).
+3. `LoadedConfig::source_of` matches a `*` segment in a guarded key, so `providers.anthropic.base_url` (and the existing `mcp.servers.*.sandbox`) takes the pre-project provenance when reverted.
+What landed: the guard after the `external_agents` one, three reasons, two `GUARDED_KEYS` rows (`providers` is left out on purpose: its keys never reach the effective config, and listing it would send every project-set provider key to the pre-project figment), the wildcard-aware `under` in `source_of`, and plan §1.6. Test `project_config_cannot_redirect_provider_keys`.
+Not done: a project may still set a tier's `provider` to a name the guard dropped; the router then rejects it as unknown. The real binary was not run (disk was at 99%).
+Check:
+```text
+$ CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 mise exec -- cargo nextest run -p cox-config
+39 tests run: 39 passed, 0 skipped
+  PASS load::tests::project_config_cannot_redirect_provider_keys
+$ mise exec -- cargo clippy -p cox-config --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+Before the fix the new test failed: `providers.anthropic.base_url` was `https://evil.example`, expected `https://api.anthropic.com`.
 
 #### T59.11 Fold a JSON tool result into one line per node
 
@@ -10814,6 +10872,160 @@ Out of scope: archiving the full answer, which is T66.2; the other inline bounda
 
 Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
+#### T56.6 Host driver: a background task becomes a Cursor Cloud run
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-12 · Priority: P3 · Complexity: 4 · Depends: T56.2, T56.3, T56.4, T56.5 · Size: ~190 · Files: `crates/cox-session/src/cloud_agents.rs` (new), `crates/cox-session/src/lib.rs`; manifest `crates/cox-session/Cargo.toml`
+Goal: each granted `[[cloud_agents]]` entry registers as a background-only subagent preset through the path P35's external agents use. On dispatch the driver resolves the repository's GitHub remote (any other host is refused before any call; credentials in the URL are stripped), warns in the approval text when local `HEAD` is not on the remote, asks `Engine` for `CloudAgent(<repo>)`, creates the run, stores it (T56.5), and maps the stream onto the T34.8 task events: `TaskCreated` at create, assistant text accumulated into the result item, and `TaskCompleted` at `done` or a terminal status. Cancelling the task cancels the run. Every string passes `sanitize`.
+Check: `mise exec -- cargo nextest run -p cox-session cloud_agent_refuses_a_non_github_remote cloud_agent_strips_credentials_from_the_remote cloud_agent_denied_by_engine_makes_no_request cloud_agent_stream_maps_to_task_events cloud_agent_task_cancel_cancels_the_run` (wiremock and a fixture repository).
+Done when: the tests pass.
+Out of scope: foreground (blocking) runs; follow-up messages into a run (a later card if wanted).
+Plan: `cloud_agents.rs` holds the driver: a `CloudAgentDecl` becomes an `ExternalAgent` that is background-only; on a turn it reads the `origin` remote through `cox_tools::git` (GitHub only, `https://github.com/<owner>/<repo>` rebuilt so no credentials or other parts survive), checks whether `HEAD` is on a remote-tracking ref, builds the `cloud_agent` call and asks `Engine` (an `Ask` goes to an injected approver, by default refused like the ACP driver's `RefuseAsk`, with the approval text and the HEAD warning), creates the run, inserts the `cloud_runs` row, and maps `assistant` text into one answer item, ending at `done`, `result` or a terminal status; the cancel token calls `cancel_run`. Two small core seams: `ExternalAgent::background_only` (the `agent` tool runs such a preset in the background) and `ExternalAgent::task_turn` (the task id and the child's live mode, so the row carries the core's task id). `plugins.rs` collects granted `[[cloud_agents]]` entries; `lib.rs` registers the drivers next to the external agents. Tests use wiremock and a fixture git repository; then `-p cox-session -p cox-core`, clippy, fmt.
+Result: `crates/cox-session/src/cloud_agents.rs` (new) turns each granted `[[cloud_agents]]` entry into an `ExternalAgent` driver, registered next to the external agents in `lib.rs` (`plugins.rs` now collects the granted entries). A turn reads `origin` through `cox_tools::git::git` (made public), refuses any host but `github.com` before a request, and rebuilds `https://github.com/<owner>/<repo>` so userinfo, ports, paths and queries never leave; it reads the branch (or the commit when detached) as the starting ref and whether a remote-tracking ref of `origin` has `HEAD`. `Engine` decides `CloudAgent(<owner>/<repo>)` in the child's live mode; a deny stops the run, and an `Ask` is refused with `cloud_agent_approval_text`, the unpushed-HEAD warning and the allow rule to add, since a background task has no route to the approval prompt yet (as `RefuseAsk` for ACP agents). Then it creates the run (`autoCreatePR` off), inserts the `cloud_runs` row (a failed insert cancels the run), and follows the stream: `assistant` text accumulates (thinking and tool calls are not shown), statuses update the row, and `done`, `result`, a terminal status or the end of the stream ends it; the answer (warning first when HEAD is unpushed) is sanitized and sent as one assistant item, which the core turns into the task's result and `TaskCompleted`. Cancelling the task calls `cancel_run` and marks the row `CANCELLED`. Every error passes `sanitize`.
+Deviations: two default methods on `ExternalAgent` in `cox-protocol` — `background_only` (the `agent` tool in `cox-core/src/subagent.rs` runs such a preset in the background whatever `background` says) and `task_turn` (the core passes the task id and the child's live mode from `Session::external_turn`), since the driver needs the core's task id for the `cloud_runs` row; existing drivers keep their behaviour through the defaults. `TaskCreated` is the core's own at dispatch, just before the create. `cox-cursor-cloud`'s `Live::open`/`terminal` took `&self` across an await, which made `stream_run`'s stream not `Send`; fixed with a compile-time test `client_stream_is_send`. Not done: asking the user for an `Ask` verdict (needs a relay from a driver to the approval prompt); usage rows and resume are T56.7.
+Check output: `mise exec -- cargo nextest run -p cox-session -p cox-cursor-cloud cloud_agent client_stream_is_send` — 6 passed (cloud_agent_refuses_a_non_github_remote, cloud_agent_strips_credentials_from_the_remote, cloud_agent_denied_by_engine_makes_no_request, cloud_agent_stream_maps_to_task_events, cloud_agent_task_cancel_cancels_the_run, client_stream_is_send); `mise exec -- cargo nextest run -p cox-session -p cox-core -p cox-cursor-cloud -p cox-protocol` — 582 passed, 1 skipped; `-p cox --test deps` — 10 passed; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean; `cargo hakari verify` ok; `cox doctor` and a scripted `cox run -p` against a scratch `COX_HOME` ran.
+
+#### T33.40.3 Jev provider export
+
+Depends: T33.40.2, T33.16, T33.18 · Size: ~170 · Files: `plugins/jev/src/provider.rs`, `plugins/jev/src/lib.rs`, `crates/cox-plugin-fixtures/build.rs`
+Goal: `cox_provider_stream` speaks System One over `cox_http` (PL§7a ABI form). The host injects the key.
+- A decision call (`Job::Plugin("jev")` with the JSON body in its one user message) is sent verbatim.
+- A request from a tier that names `typesafe` gets the old lossy mapping and one `Notice(Warn)`: "typesafe is a decision model; no tier should route to it" (J13).
+- Map the status codes from J4 to the ABI error kinds, so the host's retry treats 429 and 529 as transient.
+- Pass usage through unchanged; the host applies the estimate floor (T33.18).
+- Add the `[[models]]` rows.
+- `cox-plugin-fixtures` also builds `jev.wasm`.
+Check:
+- guest tests `decision_call_body_is_sent_verbatim`, `tier_request_uses_lossy_mapping_and_warns` and `status_529_maps_to_transient`;
+- `cargo build -p cox-plugin-fixtures` produces both fixtures, and with the wasm target missing it fails naming `mise install`.
+Plan:
+1. `plugins/jev/src/provider.rs` (pure, host-testable): a request with job `plugin:jev` must be one user message with one text block; that text is POSTed verbatim to `<base>/v1/systemone`. Any other job gets the old `build_body` mapping through `SystemOneRequest::new` and the J13 warning once per instance. Status: 2xx passes; 429, 529 and other 5xx are `AbiError::Transient`; 401, 422 and other 4xx are `Failed`. The response becomes `TextDelta` (body verbatim), `Stop`, and `Usage` with the response's own counts when present. The export error text is the `AbiError` as JSON, so a host can read its kind.
+2. `lib.rs`: register `provider_stream`, calling `cox_http` and `cox_notify` through the SDK.
+3. `plugin.toml`: `[[models]]` rows `jev-1.13.0` and `jev-latest`.
+4. `cox-plugin-fixtures`: build `cox-plugin-jev` in the same nested cargo run and lay out `OUT_DIR/jev` (`JEV_DIR`, `JEV_WASM`, `JEV_MANIFEST`).
+5. Verify: guest tests, guest wasm32 build and clippy, `cargo build -p cox-plugin-fixtures` (also with a `RUSTC` wrapper that hides the wasm target), the fixtures tests, workspace clippy and fmt.
+Status: done 2026-10-12
+Result:
+- `plugins/jev/src/provider.rs`: `stream(call, warned, send, notify)` is pure behind two closures, so it tests on the host with a fake transport; `lib.rs` registers `provider_stream` with the SDK's `cox_http` and `cox_notify`.
+  - A request with job `plugin:jev` must be one user message with one text block holding JSON. That text is POSTed byte for byte to `https://api.typesafe.ai/v1/systemone`. Any other shape is `Failed` and nothing is sent.
+  - Any other job gets the old `jev.rs` `build_body` mapping (system, text, tool names, tool results joined into `state`, one Noul), now through `SystemOneRequest::new` so the J6 cap applies, plus one `Notice(Warn)` per loaded instance: "typesafe is a decision model; no tier should route to it".
+  - 429, 529 and other 5xx are `AbiError::Transient`; 401, 422 and other non-2xx are `Failed`; a `cox_http` refusal keeps its own kind. The export's error text is the `AbiError` as JSON, because extism passes an export failure to the host only as text.
+  - The reply becomes `MessageStart` (when the body names a model), `TextDelta` (the body verbatim, for the advisor's `wire::parse`), `Stop`, and `Usage` with Jev's own `input_tokens`/`output_tokens` when the body has `usage`. Without it no usage event is sent, so the host's estimate fills the row (T33.18).
+- `plugin.toml`: `[[models]]` `jev-1.13.0` and `jev-latest`, `provider = "typesafe"`, `context_window = 64000`, price 0.042/0.0.
+- `cox-plugin-fixtures`: one nested cargo builds `cox-plugin-example` and `cox-plugin-jev`, laid out as `OUT_DIR/example` and `OUT_DIR/jev`; new `JEV_DIR`, `JEV_WASM`, `JEV_MANIFEST`.
+Reuse: the request side reuses `wire::SystemOneRequest`/`Question` (T33.40.2), the SDK's `http`/`notify` wrappers and `AbiError`; the lossy mapping and the status table are ported from `crates/cox-provider/src/jev.rs` (`build_body`, `http_error`), which goes away in T33.40.12. No new dependency.
+Not done:
+- The host does not yet read the JSON error kind: `cox-plugin`'s `map_plugin` still turns every export failure into `ProviderError::BadRequest`, and `PluginProvider` has no retry. T33.40.4's `jev_529_retries_max_retries_times` needs both; T33.40.1 is editing `provider.rs` now, so this card left the host alone.
+- `ProviderCall` carries no base URL, so the guest sends to the manifest's `https://api.typesafe.ai` (a test pins the two together). For T33.40.4's wiremock and T33.40.5's `[providers.typesafe] base_url`, the host must pass the bound section's base URL to the guest (for example an optional `ProviderCall.base_url`, a minor ABI addition). That overlaps T33.40.1's `abi.rs`, so it was not done here.
+Check:
+```text
+$ mise exec -- cargo test --manifest-path plugins/Cargo.toml -p cox-plugin-jev --locked
+test provider::tests::decision_call_body_is_sent_verbatim ... ok
+test provider::tests::tier_request_uses_lossy_mapping_and_warns ... ok
+test provider::tests::status_529_maps_to_transient ... ok
+test provider::tests::decision_call_with_another_shape_is_refused_unsent ... ok
+test provider::tests::missing_usage_is_left_to_the_host ... ok
+test provider::tests::transport_refusal_keeps_its_abi_kind ... ok
+test provider::tests::base_url_matches_the_manifest ... ok
+test tests::manifest_validates ... ok
+test result: ok. 15 passed; 0 failed
+$ mise exec -- cargo build --manifest-path plugins/Cargo.toml --workspace --locked --target wasm32-unknown-unknown
+Finished
+$ mise exec -- cargo clippy --manifest-path plugins/Cargo.toml -p cox-plugin-jev --locked --all-targets -- -D warnings   (also --target wasm32-unknown-unknown)
+clean
+$ mise exec -- cargo fmt --manifest-path plugins/Cargo.toml --all --check
+clean
+$ mise exec -- cargo build -p cox-plugin-fixtures
+OUT_DIR/example: example.wasm plugin.toml
+OUT_DIR/jev: jev.wasm plugin.toml   (exports cox_init, cox_provider_stream; imports cox_http, cox_notify)
+$ RUSTC=<wrapper hiding the wasm32 libdir> mise exec -- cargo build -p cox-plugin-fixtures
+error: cox-plugin-fixtures@0.1.2: the wasm32-unknown-unknown target is not installed for <wrapper>; run `mise install` in the repository root (mise.toml pins rust with that target) to build the plugin fixtures
+$ mise exec -- cargo nextest run -p cox-plugin-fixtures
+2 tests run: 2 passed (example_package_holds_its_manifest_and_a_wasm_module, jev_package_holds_its_manifest_and_a_wasm_module)
+$ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
+#### T33.45.8 SDK and the surfaces example
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-12 · Depends: T33.45.3 · Files: `plugins/sdk/src/lib.rs`, `plugins/examples/surfaces/` (new), `crates/cox-plugin-fixtures/build.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Execution plan: (1) SDK: link `cox_desktop_notify` from `cox:desktop/v1`, wrap it as `desktop_notify`, add `surface_of(&InitIn)` (absence reads as terminal); unit tests on the wire. (2) `plugins/examples/surfaces` (guest member, `plugins/Cargo.lock` updated): one `plugin.toml` with `ui`, `terminal.keys` and all four `desktop` parts; `cox_init` declares every part unconditionally so the host does the filtering; `cox_command`/`cox_key` try `desktop_notify` and fall back to `notify` on `NotOnThisSurface`. (3) `crates/cox-plugin-fixtures/build.rs`: a `FIXTURES` list of guest packages (same shape as PR #217) plus `SURFACES_*` constants. (4) A `cox-plugin` test (`surfaces_example`, dev-dependency on the fixtures crate) loads the package in a terminal and a desktop `LivePlugins` and checks each part and notice.
+
+Check: a `cox-plugin` test loads the example (a command and a status segment, a leader key, an inspector tab and a notification) in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice or `NotOnThisSurface` on the other.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin-fixtures -p cox-plugin` - 105 passed, including `surfaces_example::terminal_session_keeps_the_key_and_drops_the_desktop_parts`, `desktop_session_keeps_the_desktop_parts_and_drops_the_key`, `the_command_falls_back_to_a_notice_on_the_terminal` (the host answered `cox_desktop_notify` with `NotOnThisSurface`), `the_command_opens_the_inspector_on_the_desktop` and `each_surface_renders_its_slots_with_the_live_count`. In `plugins/`: `cargo test -p cox-plugin-sdk -p cox-plugin-surfaces` - 15 passed; `cargo clippy --locked --target wasm32-unknown-unknown -p cox-plugin-sdk -p cox-plugin-surfaces -- -D warnings` clean. `cargo nextest run -p cox --test deps` and `--test plugins` pass; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` and `mise exec -- cargo fmt --check` clean.
+
+Not done: the desktop `cox_desktop_notify` still answers `Failed` ("not connected to the app yet") until T33.45.5/T33.45.6 wire it to `cox_app::app::Host`; the example treats that as a refused notification and still opens the inspector.
+
+#### T33.40.1 ABI: two-phase decide, own-provider call-out, batched questions — blocker
+
+Status: done 2026-10-12 · Model: Claude Code / opus-5.5
+
+Depends: T33.2, T33.14.1, T33.15, T33.18, T33.20 · Size: ~180 · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin/src/advisor.rs`, `crates/cox-plugin/src/net.rs`
+Goal: close the gap that PL§12 falsifier 3 predicts (J§4.1–4.3). Today a decision plugin can reach its own provider only through a deadlock (`cox_model_call` into its own `cox_provider_stream`) or a ledger bypass (`cox_http` from `cox_decide`). This card adds a path with neither.
+Plan:
+1. ABI changes:
+   - `DecideOut = Advice(Option<Advice>) | Call(ModelCall)`;
+   - the new optional export `cox_decide_resume(DecideResume { question, events }) -> Option<Advice>`;
+   - `ModelCall.target = Tier(t) | OwnProvider { name, model }`;
+   - `Question.items: Vec<QuestionItem>` (one answer per item).
+   
+   These are minor additions: `api` stays 1. Regenerate `docs/plugin-abi.schema.json`.
+2. `PluginAdvisor`: on `Call`, check that the target is a `[[provider]]` of the same plugin. Then run it through the budget gate → the provider registry (`PluginProvider`) → `Priced`, which writes one `usage` row with `job = plugin:<id>`. Then call `cox_decide_resume` with the events. The point's latency budget covers all three steps. Any failure along the way is `None`, and the local default applies.
+3. `net.rs`: `cox_http` to a provider section's host is allowed only inside `cox_provider_stream`. Everywhere else it returns `NotInThisContext`.
+4. PL§4: add the exports and state the context rule.
+Check:
+- `decide_call_out_writes_one_usage_row`: a WAT guest returns `Call`, and its own `cox_provider_stream` returns fixed events;
+- `decide_call_out_over_budget_falls_back`;
+- `decide_cannot_target_another_plugins_provider`;
+- `http_to_provider_host_outside_provider_stream_is_refused`;
+- `batched_question_answers_each_item`;
+- `abi_schema_matches_committed_file`;
+- invariant 8 `every_request_has_a_usage_row` still green.
+
+Execution plan (Claude Code / opus-5.5, ~300 LOC plus tests, one PR; the call-out needs a core seam, so the file list grows past the three named above):
+1. `cox-plugin-api/src/abi.rs`: `DecideOut` (untagged, so an older guest's bare `Option<Advice>` still parses), `DecideResume`, `CallTarget` flattened into `ModelCall` (the `{"tier": …}` wire stays byte-identical), `QuestionItem` + `Question.items`, `Answer::Items` and `Question::fits` (one answer per item). Regenerate `docs/plugin-abi.schema.json` and the `docs/plugins.md` field index.
+2. `cox-protocol/src/traits.rs`: `ModelCaller::call_own(id, section, model, request)`, default `Denied`; `cox-core/src/plugin_model.rs` implements it through the same budget gate → `plugin_backend` (the `Priced` `PluginProvider`) → one `usage` row as `call`, refusing a section that is not an ABI section.
+3. `cox-plugin/src/advisor.rs`: on `Call`, require `OwnProvider` naming a section bound in this plugin's own `HostEnv`, run it through `call_own`, then `cox_decide_resume`, all inside the point's budget; any failure is `None`. `live.rs` hands advisors the env and the late-bound caller.
+4. `cox-plugin/src/net.rs` + `hostfn.rs`: the provider-host branch keys on the calling export being `cox_provider_stream`, not only on the active section.
+5. `docs/design/plugins.md` §4: the context rule and the export shapes. Core `Question` literals gain `items: vec![]`; `router.rs` ignores `Answer::Items`.
+Verify: the Check tests, `cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-core -p cox-protocol`, clippy, fmt.
+
+Check output: `mise exec -- cargo nextest run --workspace --no-fail-fast` — 2274 passed, 8 skipped, including decide_call_out_writes_one_usage_row (cox-core and cox-plugin), decide_call_out_over_budget_falls_back (cox-core and cox-plugin), decide_cannot_target_another_plugins_provider, decide_call_out_refuses_a_section_that_is_not_abi, http_to_provider_host_outside_provider_stream_is_refused, batched_question_answers_each_item, decide_out_reads_an_older_guests_bare_advice, model_call_keeps_the_tier_wire_and_adds_own_provider, question_fits_one_flat_answer_per_item, abi_schema_matches_committed_file, protocol_jsonschema_matches_committed_file and every_request_has_a_usage_row; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean; `COX_HOME=<scratch> cargo run -- doctor` ran (plugin cache ok, provider key missing as expected).
+
+#### T59.6 LSP `definition` and `references` tools on the running servers
+
+Model: sonnet · Status: done 2026-10-12 · Depends: T59.3 · Size: ~190 · Priority: P3 · Complexity: 3
+
+Execution plan: `lsp/nav.rs` holds the pure part (response parsing for `Location`, `Location[]` and `LocationLink[]`, UTF-16 column conversion, grep fallback patterns, line cap with archive) and the two tools `definition` and `references` over a shared `LspPool`, registered next to `diagnostics` in `cox-session`'s `with_lsp`. `server.rs` gains `Server::definition`/`references`, which sync the file the way `diagnostics` does (the shared sync step is extracted) and then send the request. Paths go through `confine`; locations the server names outside the roots print as bare `path:line:col` and are never read. Verify with fake-server tests for both requests, the fallback and the cap.
+
+Goal: `definition(path, line, col)` and `references(path, line, col)` answer from a language server when one runs for the file and fall back to an `outline`/`grep` answer with a `(no server)` note otherwise, so navigation needs no extra `grep` round trip.
+
+Files:
+- `crates/cox-tools/src/lsp/client.rs`
+- `crates/cox-tools/src/lsp/server.rs`
+- `crates/cox-tools/src/lsp/nav.rs` (new)
+
+Steps:
+1. Hand-rolled wire types for `textDocument/definition` and `textDocument/references` next to the existing ones (`client.rs:174`; P41 rejects `lsp-types`, `plan.md:1245-1253`).
+2. `Server` methods next to `start` (`server.rs:194`); results as `path:line` lines, capped and archived over the cap.
+3. Use `LspPool::running_for` from T59.3; the fallback is a plain-text answer, never a spawn from this tool unless `diagnostics` would spawn too.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: fake-server tests for both requests and the fallback.
+
+Out of scope: rename (T59.7), hover, workspace symbols.
+
+Check output: `mise exec -- cargo nextest run -p cox-tools -p cox-session` — 292 of 293 passed, including the new `lsp::nav` tests (definition and references against a fake server, UTF-16 columns, sort and dedup, an out-of-root path printed bare and sanitized, the 100-row cap archived, an empty answer, the grep fallback with no server and after a server error, input refusals) and the `definition`/`references` assertions in `cox-session` `tool_search_finds_diagnostics`; `mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print` timed out once under load, outside this task, and passed on its own rerun. `mise exec -- cargo nextest run -p cox --test lsp` (the real binary against a fake sandboxed server) — 2 passed. `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
 #### T5.9 Terminal pointer shape follows what the cell does (OSC 22)
 
 Depends: T37.50 · Size: ~150 · Files: `crates/cox-tui/src/term.rs` (`Caps`), `crates/cox-tui/src/state.rs` (`on_mouse`), `crates/cox-tui/src/app.rs` (`restore`)
@@ -10826,6 +11038,28 @@ Status: done 2026-10-12
 Implementation: `Caps.osc22` (`detect` sets it for kitty, Ghostty and foot outside tmux; `Caps::query` probes `OSC 22 ; ?pointer` behind a device-attributes backstop and returns `Queried`; `[tui.caps] osc22` overrides; `cox doctor` prints it). `term::pointer_bytes` writes the OSC 22 sequence from `Pointer::css_name()`. `view.rs` records `State.text_rows` beside `cell_rows`; `state::on_mouse` turns a `Moved` event into an `Interaction` for `cox_render::pointer::pointer` and emits `Cmd::Pointer` only when `caps.osc22`, `tui.mouse` is on and the shape changed. `app.rs` writes it and `restore` writes `default` on exit and in the panic hook. cox-tui has no suspend path, so there is nothing to hook for suspend.
 
 Check output: `mise exec -- cargo nextest run -p cox-tui -p cox-protocol -p cox-render` - 484 passed, including `mouse_move_asks_for_the_pointer_the_shared_rule_picks` (card row `pointer`, text row `text`, empty row `default`), `mouse_move_inside_the_same_shape_writes_nothing`, `mouse_move_writes_nothing_without_osc22_or_with_the_mouse_off`, `pty_restores_the_pointer_only_with_the_capability`; `cargo nextest run -p cox` - 194 passed; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: a live kitty or Ghostty window (none on this machine).
+
+#### T64.8 Serialize same-path `write`/`edit` calls in one parallel batch
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~110 · Priority: P1 · Complexity: 2 · Files: `crates/cox-core/src/turn.rs`, `crates/cox-core/tests/same_path.rs`, `crates/cox-core/tests/scenarios/same_path_batch.toml`
+Goal: `write` and `edit` are `Concurrency::Parallel`, so two calls on one path in one batch raced and the last rename won, not the model's last call. The parallel batch is grouped by `Tool::touches()` path; calls that share a path run one after another in model order, calls on different paths and read-only calls stay parallel under `core.parallel_tools`.
+Plan:
+1. Regression test first (`tests/same_path.rs`): a parallel write stub with a slow first call and a second call on `./x.txt`; it fails while both start at once.
+2. In `run_tools`, key each non-read-only parallel call by `touches()` paths made absolute against the session cwd and folded lexically (`x.txt`, `./x.txt`); `group_by_path` chains calls that share a path directly or through a third call. Each group is one task in the existing `JoinSet`.
+3. Unit tests for `group_by_path` and the path key; run `cox-core` and `cox-tools` tests, clippy and fmt.
+What landed: the plan above, with no new mechanism: the existing `touches()` and the existing `JoinSet` loop, where a task is now a path group instead of a single call. Keys are lexical (no symlink resolution), so two different names for one file through a symlink still race; `confine` is unchanged.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-core --test same_path   (before the fix)
+FAIL same_path_calls_run_in_model_order_while_other_paths_overlap
+["start:a", "start:b", "start:c", "end:b", "end:c", "end:a"]
+$ CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 mise exec -- cargo nextest run -p cox-core -p cox-tools
+598 tests run: 598 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-core -p cox-tools --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
 
 #### T7.9 Replace serde_yaml with serde-saphyr in cox-ext
 

@@ -23,7 +23,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
 use super::client::{Client, LspError, Notification};
-use super::diag::{Diagnostic, PublishDiagnosticsParams, path_for, uri_for};
+use super::diag::{Diagnostic, Position, PublishDiagnosticsParams, path_for, uri_for};
+use super::nav::{self, Location, Nav};
 
 /// How much of the server's stderr is kept for error text.
 const STDERR_TAIL: usize = 4 * 1024;
@@ -270,24 +271,7 @@ impl Server {
         while let Ok(note) = st.notes.try_recv() {
             st.absorb(note, path, 0);
         }
-        let version = match st.versions.get(path).copied() {
-            None => {
-                let open = json!({"textDocument": {
-                    "uri": uri, "languageId": language_id(path), "version": 1, "text": text,
-                }});
-                self.client.notify("textDocument/didOpen", open).await?;
-                1
-            }
-            Some(prev) => {
-                let change = json!({
-                    "textDocument": {"uri": uri, "version": prev + 1},
-                    "contentChanges": [{"text": text}],
-                });
-                self.client.notify("textDocument/didChange", change).await?;
-                prev + 1
-            }
-        };
-        st.versions.insert(path.to_path_buf(), version);
+        let version = self.sync(&mut st, &uri, path, text).await?;
         // rust-analyzer runs its check on save, not on change.
         let save = json!({"textDocument": {"uri": uri}});
         self.client.notify("textDocument/didSave", save).await?;
@@ -351,6 +335,63 @@ impl Server {
                 Err(_) => {}
             }
         }
+    }
+
+    /// Tells the server `text` is now the content of `path`: `didOpen` the
+    /// first time, `didChange` with the whole text after. Returns the
+    /// document version it sent.
+    async fn sync(
+        &self,
+        st: &mut State,
+        uri: &str,
+        path: &Path,
+        text: &str,
+    ) -> Result<i32, LspError> {
+        let version = match st.versions.get(path).copied() {
+            None => {
+                let open = json!({"textDocument": {
+                    "uri": uri, "languageId": language_id(path), "version": 1, "text": text,
+                }});
+                self.client.notify("textDocument/didOpen", open).await?;
+                1
+            }
+            Some(prev) => {
+                let change = json!({
+                    "textDocument": {"uri": uri, "version": prev + 1},
+                    "contentChanges": [{"text": text}],
+                });
+                self.client.notify("textDocument/didChange", change).await?;
+                prev + 1
+            }
+        };
+        st.versions.insert(path.to_path_buf(), version);
+        Ok(version)
+    }
+
+    /// Where `nav` says the symbol at `at` in `path` (absolute, holding
+    /// `text`) is defined or used (T59.6).
+    pub async fn locations(
+        &self,
+        nav: Nav,
+        path: &Path,
+        text: &str,
+        at: Position,
+    ) -> Result<Vec<Location>, LspError> {
+        let uri = uri_for(path).ok_or_else(|| {
+            LspError::Parse(format!("{} is not an absolute path", path.display()))
+        })?;
+        // Held across the request: a concurrent `diagnostics` call changes
+        // the document version this answer is about.
+        let mut st = self.state.lock().await;
+        while let Ok(note) = st.notes.try_recv() {
+            st.absorb(note, path, 0);
+        }
+        self.sync(&mut st, &uri, path, text).await?;
+        let reply = self
+            .client
+            .request(nav.method(), nav.params(&uri, at), self.opts.timeout)
+            .await?;
+        nav::parse_locations(reply)
     }
 
     /// The diagnostics the server last reported for `path`, without sending

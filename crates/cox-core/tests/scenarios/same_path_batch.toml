@@ -1,0 +1,10 @@
+[[turn]]
+text = "two writes to one path and one to another"
+tool_calls = [
+  { name = "stamp", input = { path = "x.txt", label = "a", ms = 80 } },
+  { name = "stamp", input = { path = "./x.txt", label = "b", ms = 0 } },
+  { name = "stamp", input = { path = "y.txt", label = "c", ms = 0 } },
+]
+
+[[turn]]
+text = "done"
