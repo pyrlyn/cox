@@ -40,7 +40,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T5.9 | todo | P3 | 3 | 0% | |
 | T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
@@ -137,7 +136,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T59.6 | todo | P3 | 3 | 0% | |
 | T59.7 | todo | P3 | 4 | 0% | |
 | T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
@@ -773,13 +771,6 @@ P22–P30 (A27): P22 first; T22.1–T22.6 may proceed independently, then T22.7 
 ### P4 — Sandbox (goal: `workspace-write` enforced on macOS and Linux)
 
 ### P5 — TUI (goal: a daily-driver terminal UI with snapshots for every state)
-
-#### T5.9 Terminal pointer shape follows what the cell does (OSC 22)
-
-Depends: T37.50 · Size: ~150 · Files: `crates/cox-tui/src/term.rs` (`Caps`), `crates/cox-tui/src/state.rs` (`on_mouse`), `crates/cox-tui/src/app.rs` (`restore`)
-Goal: the TUI shows T37.50's shared pointer (A148) where the terminal can: with `tui.mouse` on, a mouse move builds the `Interaction` of what is under it (a row in `cell_rows` that a click acts on — a fold toggle, T22.9 — is clickable; transcript text is selectable), calls `cox_render::pointer::pointer` and writes `Pointer::css_name()` through OSC 22 (`ESC ] 22 ; <name> ST`). The TUI keeps no rule of its own. The shape is written only when it changes. `Caps::query` (T23.0) asks the terminal with OSC 22's `?` query and records support; a terminal that does not answer gets no OSC 22 bytes at all. `restore` puts the pointer back to `default` on exit and on suspend.
-Check: `on_mouse` unit tests: a move onto a fold row asks for `pointer`, onto plain text `text`, onto empty space `default`, a second move inside the same row writes nothing; a `Caps` without OSC 22 support writes no bytes; in kitty or Ghostty the pointer changes over a tool-call header and returns to the arrow after `cox` exits.
-Out of scope: terminals without OSC 22 (nothing changes there).
 
 ### P6 — Headless and MCP server (goal: scripts and other agents can drive cox)
 
@@ -2062,33 +2053,6 @@ mise exec -- cargo fmt --check
 Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
 
 Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
-
-#### T59.6 LSP `definition` and `references` tools on the running servers
-
-Model: sonnet · Status: open · Depends: T59.3 · Size: ~190 · Priority: P3 · Complexity: 3
-
-Goal: `definition(path, line, col)` and `references(path, line, col)` answer from a language server when one runs for the file and fall back to an `outline`/`grep` answer with a `(no server)` note otherwise, so navigation needs no extra `grep` round trip.
-
-Files:
-- `crates/cox-tools/src/lsp/client.rs`
-- `crates/cox-tools/src/lsp/server.rs`
-- `crates/cox-tools/src/lsp/nav.rs` (new)
-
-Steps:
-1. Hand-rolled wire types for `textDocument/definition` and `textDocument/references` next to the existing ones (`client.rs:174`; P41 rejects `lsp-types`, `plan.md:1245-1253`).
-2. `Server` methods next to `start` (`server.rs:194`); results as `path:line` lines, capped and archived over the cap.
-3. Use `LspPool::running_for` from T59.3; the fallback is a plain-text answer, never a spawn from this tool unless `diagnostics` would spawn too.
-
-Check:
-```bash
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: fake-server tests for both requests and the fallback.
-
-Out of scope: rename (T59.7), hover, workspace symbols.
 
 #### T59.7 `rename_symbol` through the server's `textDocument/rename`
 
