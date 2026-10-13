@@ -70,3 +70,6 @@ pub use hostfn::{DesktopSink, HostEnv, init_input};
 pub use image::{ImageError, package_image};
 pub use live::{DesktopNotices, Live, LivePlugins, Notices, SessionTap};
 pub use tool::WasmTool;
+
+#[cfg(test)]
+mod surfaces_example;

@@ -20,7 +20,7 @@
 - T33.43. Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
 - T33.45.4. TUI: links, image `alt`, surfaces in listings
-- T33.45.8. SDK and the surfaces example
+- T33.45.9. Docs: the three-part plugin API reference
 - T33.45.10. Docs: Russian and Ukrainian translations
 - T35.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T37.32. Signing, notarization, Sparkle, bundled CLI, Homebrew cask

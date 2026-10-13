@@ -1,0 +1,18 @@
+[package]
+name = "cox-plugin-surfaces"
+description = "The PL§15 example: shared, terminal-only and desktop-only parts in one plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# rlib alongside cdylib so `just plugin-test` runs the pure declarations on
+# the host target; only the cdylib ships, as the package's `surfaces.wasm`,
+# built by `crates/cox-plugin-fixtures`.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cox-plugin-sdk = { path = "../../sdk" }
