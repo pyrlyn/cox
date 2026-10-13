@@ -34,6 +34,11 @@ pub struct PaletteItem {
     pub title: String,
     /// Keys, usage, or where and when a session ran.
     pub detail: String,
+    /// The SF Symbol a plugin action shows in its well (PL§15.4); `None`
+    /// for every built-in row, which the app draws by kind. Defaulted so a
+    /// caller that predates it still builds a row.
+    #[serde(default)]
+    pub symbol: Option<String>,
 }
 
 /// A row the query matched, and the offsets of its title's matched
@@ -90,6 +95,7 @@ mod tests {
             id: title.to_string(),
             title: title.to_string(),
             detail: String::new(),
+            symbol: None,
         }
     }
 

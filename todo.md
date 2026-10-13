@@ -18,8 +18,6 @@
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
 - T33.43. Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
-- T33.45.3. Host: load filter, granted filter, `cox:desktop/v1`
-- T33.45.5. App core: inspector tab, toolbar and palette actions
 - T33.45.6. App core: notifications, links and images
 - T33.45.7. FFI and Swift: the desktop contributions
 - T33.45.9. Docs: the three-part plugin API reference

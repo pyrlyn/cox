@@ -41,7 +41,7 @@ use cox_app::{
 };
 use cox_app::{Fact, TurnFiles};
 use cox_app::{KeyError, PermissionRule, RuleKind, SessionGrant, SettingsGroup};
-use cox_app::{KeyValueRow, PluginKey, PluginSlot, SpanView, WidgetView};
+use cox_app::{KeyValueRow, PluginSlot, SpanView, WidgetView};
 use cox_app::{MenuModel, ModelSection, Readiness};
 use cox_app::{SettingControl, SettingInput, SettingOption};
 use cox_app::{Suggestion, Welcome};
@@ -342,14 +342,6 @@ pub struct SpanView {
 pub struct KeyValueRow {
     pub key: SpanView,
     pub value: Vec<SpanView>,
-}
-
-#[uniffi::remote(Record)]
-pub struct PluginKey {
-    pub plugin: String,
-    pub key: String,
-    pub name: String,
-    pub description: String,
 }
 
 #[uniffi::remote(Record)]
@@ -1202,6 +1194,8 @@ pub struct PaletteItem {
     pub id: String,
     pub title: String,
     pub detail: String,
+    #[uniffi(default)]
+    pub symbol: Option<String>,
 }
 
 #[uniffi::remote(Record)]

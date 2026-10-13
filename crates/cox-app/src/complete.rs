@@ -141,12 +141,14 @@ impl Completer {
                 id: c.insert.clone(),
                 title: c.insert.clone(),
                 detail: c.detail.clone(),
+                symbol: None,
             }));
             items.extend(self.files.iter().map(|f| PaletteItem {
                 kind: PaletteKind::File,
                 id: format!("@{f}"),
                 title: f.clone(),
                 detail: self.project.clone(),
+                symbol: None,
             }));
         }
         rank(query, items, per_kind)
@@ -300,6 +302,7 @@ mod tests {
             id: "review".into(),
             title: "Review changes".into(),
             detail: "⌘⇧R".into(),
+            symbol: None,
         };
 
         assert_eq!(c.palette("", vec![action.clone()], 5).len(), 1);
