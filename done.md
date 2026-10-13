@@ -10887,3 +10887,46 @@ Status: done 2026-10-13 · `cox-plugin-api`: `ui::is_link` is the one rule for a
 
 Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-session -p cox-app -p cox-ffi` — 491 passed, including `desktop_notice_reaches_the_sink_cleaned_capped_and_trimmed`, `a_plugin_notice_reaches_the_host_and_its_button_runs_the_command`, `a_notice_button_runs_a_granted_command_and_an_ungranted_one_is_dropped`, `a_remote_plugin_notice_reaches_the_local_host_and_a_link_click_asks_first`, `wire_round_trips_every_message` and `app_server_schema_drift`; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean; `COX_HOME=<scratch> cargo run -- doctor` and `plugin list` run.
 
+#### T59.6 LSP `definition` and `references` tools on the running servers
+
+Model: sonnet · Status: done 2026-10-12 · Depends: T59.3 · Size: ~190 · Priority: P3 · Complexity: 3
+
+Execution plan: `lsp/nav.rs` holds the pure part (response parsing for `Location`, `Location[]` and `LocationLink[]`, UTF-16 column conversion, grep fallback patterns, line cap with archive) and the two tools `definition` and `references` over a shared `LspPool`, registered next to `diagnostics` in `cox-session`'s `with_lsp`. `server.rs` gains `Server::definition`/`references`, which sync the file the way `diagnostics` does (the shared sync step is extracted) and then send the request. Paths go through `confine`; locations the server names outside the roots print as bare `path:line:col` and are never read. Verify with fake-server tests for both requests, the fallback and the cap.
+
+Goal: `definition(path, line, col)` and `references(path, line, col)` answer from a language server when one runs for the file and fall back to an `outline`/`grep` answer with a `(no server)` note otherwise, so navigation needs no extra `grep` round trip.
+
+Files:
+- `crates/cox-tools/src/lsp/client.rs`
+- `crates/cox-tools/src/lsp/server.rs`
+- `crates/cox-tools/src/lsp/nav.rs` (new)
+
+Steps:
+1. Hand-rolled wire types for `textDocument/definition` and `textDocument/references` next to the existing ones (`client.rs:174`; P41 rejects `lsp-types`, `plan.md:1245-1253`).
+2. `Server` methods next to `start` (`server.rs:194`); results as `path:line` lines, capped and archived over the cap.
+3. Use `LspPool::running_for` from T59.3; the fallback is a plain-text answer, never a spawn from this tool unless `diagnostics` would spawn too.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: fake-server tests for both requests and the fallback.
+
+Out of scope: rename (T59.7), hover, workspace symbols.
+
+Check output: `mise exec -- cargo nextest run -p cox-tools -p cox-session` — 292 of 293 passed, including the new `lsp::nav` tests (definition and references against a fake server, UTF-16 columns, sort and dedup, an out-of-root path printed bare and sanitized, the 100-row cap archived, an empty answer, the grep fallback with no server and after a server error, input refusals) and the `definition`/`references` assertions in `cox-session` `tool_search_finds_diagnostics`; `mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print` timed out once under load, outside this task, and passed on its own rerun. `mise exec -- cargo nextest run -p cox --test lsp` (the real binary against a fake sandboxed server) — 2 passed. `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T5.9 Terminal pointer shape follows what the cell does (OSC 22)
+
+Depends: T37.50 · Size: ~150 · Files: `crates/cox-tui/src/term.rs` (`Caps`), `crates/cox-tui/src/state.rs` (`on_mouse`), `crates/cox-tui/src/app.rs` (`restore`)
+Goal: the TUI shows T37.50's shared pointer (A148) where the terminal can: with `tui.mouse` on, a mouse move builds the `Interaction` of what is under it (a row in `cell_rows` that a click acts on — a fold toggle, T22.9 — is clickable; transcript text is selectable), calls `cox_render::pointer::pointer` and writes `Pointer::css_name()` through OSC 22 (`ESC ] 22 ; <name> ST`). The TUI keeps no rule of its own. The shape is written only when it changes. `Caps::query` (T23.0) asks the terminal with OSC 22's `?` query and records support; a terminal that does not answer gets no OSC 22 bytes at all. `restore` puts the pointer back to `default` on exit and on suspend.
+Check: `on_mouse` unit tests: a move onto a fold row asks for `pointer`, onto plain text `text`, onto empty space `default`, a second move inside the same row writes nothing; a `Caps` without OSC 22 support writes no bytes; in kitty or Ghostty the pointer changes over a tool-call header and returns to the arrow after `cox` exits.
+Out of scope: terminals without OSC 22 (nothing changes there).
+
+Status: done 2026-10-12
+
+Implementation: `Caps.osc22` (`detect` sets it for kitty, Ghostty and foot outside tmux; `Caps::query` probes `OSC 22 ; ?pointer` behind a device-attributes backstop and returns `Queried`; `[tui.caps] osc22` overrides; `cox doctor` prints it). `term::pointer_bytes` writes the OSC 22 sequence from `Pointer::css_name()`. `view.rs` records `State.text_rows` beside `cell_rows`; `state::on_mouse` turns a `Moved` event into an `Interaction` for `cox_render::pointer::pointer` and emits `Cmd::Pointer` only when `caps.osc22`, `tui.mouse` is on and the shape changed. `app.rs` writes it and `restore` writes `default` on exit and in the panic hook. cox-tui has no suspend path, so there is nothing to hook for suspend.
+
+Check output: `mise exec -- cargo nextest run -p cox-tui -p cox-protocol -p cox-render` - 484 passed, including `mouse_move_asks_for_the_pointer_the_shared_rule_picks` (card row `pointer`, text row `text`, empty row `default`), `mouse_move_inside_the_same_shape_writes_nothing`, `mouse_move_writes_nothing_without_osc22_or_with_the_mouse_off`, `pty_restores_the_pointer_only_with_the_capability`; `cargo nextest run -p cox` - 194 passed; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: a live kitty or Ghostty window (none on this machine).
