@@ -1,6 +1,7 @@
-//! Builds `plugins/examples/rust` for `wasm32-unknown-unknown` with the
-//! guest workspace's own cargo and lays it out in `OUT_DIR/example` as an
-//! installable package (PL§13). A nested cargo, not a dependency, because a
+//! Builds `plugins/examples/rust` and `plugins/examples/surfaces` for
+//! `wasm32-unknown-unknown` with the guest workspace's own cargo and lays
+//! each out as an installable package in `OUT_DIR/example` and
+//! `OUT_DIR/surfaces` (PL§13, T33.45.8). A nested cargo, not a dependency, because a
 //! dependency would build for the host target of the main workspace.
 //!
 //! The nested build gets its own `--target-dir` under `OUT_DIR`, so it never
@@ -13,8 +14,34 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const TARGET: &str = "wasm32-unknown-unknown";
-const CRATE: &str = "cox-plugin-example";
-const ARTIFACT: &str = "cox_plugin_example.wasm";
+
+/// One package to build: the guest crate, its directory under `plugins/`,
+/// the cargo artifact, and the package folder and `.wasm` name its
+/// `plugin.toml` expects.
+struct Fixture {
+    krate: &'static str,
+    dir: &'static str,
+    artifact: &'static str,
+    package: &'static str,
+    wasm: &'static str,
+}
+
+const FIXTURES: [Fixture; 2] = [
+    Fixture {
+        krate: "cox-plugin-example",
+        dir: "examples/rust",
+        artifact: "cox_plugin_example.wasm",
+        package: "example",
+        wasm: "example.wasm",
+    },
+    Fixture {
+        krate: "cox-plugin-surfaces",
+        dir: "examples/surfaces",
+        artifact: "cox_plugin_surfaces.wasm",
+        package: "surfaces",
+        wasm: "surfaces.wasm",
+    },
+];
 
 fn main() {
     if let Err(e) = build() {
@@ -31,32 +58,31 @@ fn build() -> Result<(), String> {
     let manifest_dir = PathBuf::from(var("CARGO_MANIFEST_DIR")?);
     let root = manifest_dir.join("../..");
     let plugins = root.join("plugins");
-    let example = plugins.join("examples/rust");
-    for watched in [
+    let watched = [
         plugins.join("Cargo.toml"),
         plugins.join("Cargo.lock"),
         plugins.join("sdk"),
-        example.clone(),
         root.join("crates/cox-plugin-api"),
-    ] {
-        println!("cargo::rerun-if-changed={}", watched.display());
+    ];
+    let sources = FIXTURES.iter().map(|f| plugins.join(f.dir));
+    for path in watched.into_iter().chain(sources) {
+        println!("cargo::rerun-if-changed={}", path.display());
     }
     let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
     require_target(&rustc)?;
 
     let out = PathBuf::from(var("OUT_DIR")?);
     let target_dir = out.join("wasm-target");
-    let status = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+    // One nested cargo for every fixture: the shared dependencies (the SDK,
+    // extism-pdk, serde) build once.
+    let mut cargo = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
+    cargo
         .current_dir(&plugins)
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "--target",
-            TARGET,
-            "-p",
-            CRATE,
-        ])
+        .args(["build", "--release", "--locked", "--target", TARGET]);
+    for fixture in &FIXTURES {
+        cargo.args(["-p", fixture.krate]);
+    }
+    let status = cargo
         .arg("--target-dir")
         .arg(&target_dir)
         .env("CARGO_INCREMENTAL", "0")
@@ -67,18 +93,23 @@ fn build() -> Result<(), String> {
         .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CLIPPY_ARGS")
         .status()
-        .map_err(|e| format!("cannot run cargo for {CRATE}: {e}"))?;
+        .map_err(|e| format!("cannot run cargo for the plugin fixtures: {e}"))?;
     if !status.success() {
-        return Err(format!("building {CRATE} for {TARGET} failed ({status})"));
+        return Err(format!(
+            "building the plugin fixtures for {TARGET} failed ({status})"
+        ));
     }
 
-    let package = out.join("example");
-    fs::create_dir_all(&package).map_err(|e| format!("{}: {e}", package.display()))?;
-    copy(
-        &target_dir.join(TARGET).join("release").join(ARTIFACT),
-        &package.join("example.wasm"),
-    )?;
-    copy(&example.join("plugin.toml"), &package.join("plugin.toml"))?;
+    let release = target_dir.join(TARGET).join("release");
+    for fixture in &FIXTURES {
+        let package = out.join(fixture.package);
+        fs::create_dir_all(&package).map_err(|e| format!("{}: {e}", package.display()))?;
+        copy(&release.join(fixture.artifact), &package.join(fixture.wasm))?;
+        copy(
+            &plugins.join(fixture.dir).join("plugin.toml"),
+            &package.join("plugin.toml"),
+        )?;
+    }
     // ~130 MB of guest build output would otherwise stay in every OUT_DIR
     // (the disk is shared by parallel worktrees). Cargo reruns this script
     // only when a watched source changes, so the price is one full guest
