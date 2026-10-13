@@ -46,13 +46,14 @@ jobs:
     if: >-
       !cancelled()
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@9748fe1e5a2007d695e4e1a1d9b16492660dd8bc # main 2026-10-11 (mold input)
     # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
     # `actions: write` on the calling job.
     permissions:
       contents: read
       actions: write
     with:
+      mold: true # mold + clang on Linux runners (mise.toml [env])
       # The shared matrix minus Windows: the workspace does not build there
       # yet (P57); the `windows` job below checks the crates that do.
       matrix: >-
