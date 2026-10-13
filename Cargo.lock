@@ -1389,6 +1389,7 @@ dependencies = [
  "async-trait",
  "cox-core",
  "cox-plugin-api",
+ "cox-plugin-fixtures",
  "cox-protocol",
  "cox-provider",
  "cox-sanitize",
