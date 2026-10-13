@@ -20,6 +20,7 @@ use cox_tools::edit::EditTool;
 use cox_tools::expand::ExpandTool;
 use cox_tools::glob::GlobTool;
 use cox_tools::grep::GrepTool;
+use cox_tools::lsp::nav::{Nav, NavTool};
 use cox_tools::lsp::{AfterEdit, DiagnosticsTool, LspPool};
 use cox_tools::memory::{MemoryGetTool, MemorySaveTool, MemorySearchTool};
 use cox_tools::read::ReadTool;
@@ -84,7 +85,8 @@ pub fn with_client_tools(
         .collect()
 }
 
-/// Adds the deferred `diagnostics` tool (T41.7) when `lsp.enabled`. Its
+/// Adds the deferred `diagnostics` tool (T41.7), and `definition` and
+/// `references` over the same pool (T59.6), when `lsp.enabled`. Its
 /// servers start under `sandboxed_argv`, the wrap every stdio MCP server
 /// gets, with the same `writable` roots; `danger-full-access` runs them bare
 /// because `sandboxed_argv` does. Before `with_tool_search_index`, so
@@ -133,6 +135,13 @@ pub(crate) fn with_lsp(
                 }
             })
             .collect();
+    }
+    for nav in [Nav::Definition, Nav::References] {
+        tools.push(Arc::new(NavTool::new(
+            pool.clone(),
+            nav,
+            cox_sanitize::sanitize,
+        )));
     }
     tools.push(Arc::new(DiagnosticsTool::from_pool(pool)));
     tools
@@ -307,11 +316,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(Store::open(tmp.path()).expect("open store"));
         let mut config = cox_protocol::Config::default();
-        let built = with_tool_search_index(with_lsp(
-            tools(None, &store, tmp.path().join("memory")),
-            &config,
-            &[],
-        ));
+        let lsp = with_lsp(tools(None, &store, tmp.path().join("memory")), &config, &[]);
+        let built = with_tool_search_index(lsp.clone());
         let search = built
             .iter()
             .find(|t| t.spec().name == "tool_search")
@@ -347,9 +353,19 @@ mod tests {
             out.text
         );
 
+        let names: Vec<_> = lsp.iter().map(|t| t.spec().name).collect();
+        for nav in ["definition", "references"] {
+            assert!(names.iter().any(|n| n == nav), "{nav} missing: {names:?}");
+        }
+
         config.lsp.enabled = false;
         let without = with_lsp(tools(None, &store, tmp.path().join("memory")), &config, &[]);
-        assert!(without.iter().all(|t| t.spec().name != "diagnostics"));
+        let off = ["diagnostics", "definition", "references"];
+        assert!(
+            without
+                .iter()
+                .all(|t| !off.contains(&t.spec().name.as_str()))
+        );
     }
 
     /// `memory_get` sits with the other memory tools and stays deferred, so
