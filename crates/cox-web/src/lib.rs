@@ -565,7 +565,7 @@ mod tests {
         let outcome = runtime.block_on(async {
             tokio::time::timeout(
                 Duration::from_secs(5),
-                http.get("http://stalled.invalid/").send(),
+                http.get("https://stalled.invalid/").send(),
             )
             .await
         });
