@@ -47,6 +47,10 @@ pub struct Plugins {
     /// Never an ungranted plugin's; empty without `writable`.
     #[cfg(feature = "plugins")]
     pub external_agents: Vec<cox_plugin::external_agent::ExternalAgentCommand>,
+    /// Each granted plugin's `[[cloud_agents]]` entries (T56.6), for
+    /// `cloud_agents::drivers`; never an ungranted plugin's.
+    #[cfg(feature = "plugins")]
+    pub cloud_agents: Vec<cox_plugin_api::CloudAgentDecl>,
     /// Each granted plugin's `[[agents]]` definitions by plugin id (T45.4),
     /// for `cox_ext::agents::merge`; never an ungranted plugin's.
     pub agent_defs: Vec<(String, Vec<cox_protocol::agent::AgentDef>)>,
@@ -198,6 +202,10 @@ pub fn load_plugins_for_surface(
                 }
                 if loaded.is_ok() && !manifest.models.is_empty() {
                     out.models.push((id.clone(), manifest.models.clone()));
+                }
+                if loaded.is_ok() {
+                    out.cloud_agents
+                        .extend(manifest.cloud_agents.iter().cloned());
                 }
                 if loaded.is_ok() && !manifest.agents.is_empty() {
                     let defs = plugin_agent_defs(id, &p.dir, manifest, notices);
