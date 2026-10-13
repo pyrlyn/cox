@@ -3,11 +3,12 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 // `PluginWidgetView` (DS§6.3 row `PluginWidgetView`, PL§8, T52.16): a plugin's closed widget
-// tree — text, list, table, key–value rows, gauge, stack, block — drawn natively. Separate so a
+// tree — text, list, table, key–value rows, gauge, stack, block, image — drawn natively. Separate so a
 // panel, a status segment, an overlay and a tool card draw one tree the same way. A plugin names
 // colour roles, never colours: each role maps to a DS§3.1 token here, so light, dark and Increase
 // Contrast keep working for plugin output. The app hands over values cox-app already sanitized
-// and bounded; CoxUI imports no cox package.
+// and bounded; CoxUI imports no cox package. A link span (PL§15.4) never opens anything itself:
+// the click goes to `pluginLinkAction`, and the app asks cox-app what the link may open.
 
 import SwiftUI
 
@@ -26,9 +27,15 @@ public struct PluginSpan: Equatable, Sendable {
   public var role: Role
   public var isBold: Bool
   public var isItalic: Bool
+  /// What a click hands to `pluginLinkAction`, unopened.
+  public var link: String?
 
-  public init(_ text: String, _ role: Role = .text, isBold: Bool = false, isItalic: Bool = false) {
-    (self.text, self.role, self.isBold, self.isItalic) = (text, role, isBold, isItalic)
+  public init(
+    _ text: String, _ role: Role = .text, isBold: Bool = false, isItalic: Bool = false,
+    link: String? = nil
+  ) {
+    (self.text, self.role, self.isBold, self.isItalic, self.link) =
+      (text, role, isBold, isItalic, link)
   }
 
   /// A line of spans as one attributed string, so one `Text` draws it.
@@ -45,8 +52,33 @@ public struct PluginSpan: Equatable, Sendable {
     if isBold { intent.insert(.stronglyEmphasized) }
     if isItalic { intent.insert(.emphasized) }
     run.inlinePresentationIntent = intent
+    if let link, let url = PluginLink.url(link) {
+      run.link = url
+      run.underlineStyle = .single
+    }
     return run
   }
+}
+
+/// A plugin link rides through `Text` as a URL in a private scheme, so a click lands in the
+/// widget's `OpenURLAction` and never reaches the system's URL handler.
+enum PluginLink {
+  static let scheme = "cox-plugin-link"
+
+  static func url(_ link: String) -> URL? {
+    link.addingPercentEncoding(withAllowedCharacters: .alphanumerics)
+      .flatMap { URL(string: "\(scheme):\($0)") }
+  }
+
+  static func link(_ url: URL) -> String? {
+    guard url.scheme == scheme else { return nil }
+    return url.absoluteString.dropFirst(scheme.count + 1).removingPercentEncoding
+  }
+}
+
+extension EnvironmentValues {
+  /// What a click on a plugin link does; the app hands the link to cox-app's `open_link`.
+  @Entry public var pluginLinkAction: @MainActor @Sendable (String) -> Void = { _ in }
 }
 
 extension PluginSpan.Role {
@@ -77,6 +109,8 @@ public indirect enum PluginWidget: Equatable, Sendable {
   case gauge(ratio: Double, label: PluginSpan)
   case stack(vertical: Bool, children: [PluginWidget])
   case block(title: PluginSpan?, child: PluginWidget)
+  /// A PNG cox-app already decoded and bounded; `alt` stands in when it does not draw.
+  case image(alt: String, png: Data)
 
   /// One `key: value` row.
   public struct KeyValue: Equatable, Sendable {
@@ -92,6 +126,7 @@ public indirect enum PluginWidget: Equatable, Sendable {
 /// One widget tree, one view per variant, in the monospaced code face a plugin lays out for.
 public struct PluginWidgetView: View {
   let widget: PluginWidget
+  @Environment(\.pluginLinkAction) private var linkAction
 
   public init(_ widget: PluginWidget) {
     self.widget = widget
@@ -107,10 +142,18 @@ public struct PluginWidgetView: View {
       case .gauge(let ratio, let label): PluginGauge(ratio: ratio, label: label)
       case .stack(let vertical, let children): PluginStack(vertical: vertical, children: children)
       case .block(let title, let child): PluginBlock(title: title, child: child)
+      case .image(let alt, let png): PluginImage(alt: alt, png: png)
       }
     }
     .textStyle(.monoCode)
     .foregroundStyle(Color(.textPrimary))
+    .environment(
+      \.openURL,
+      OpenURLAction { url in
+        guard let link = PluginLink.link(url) else { return .discarded }
+        linkAction(link)
+        return .handled
+      })
   }
 }
 
@@ -238,6 +281,27 @@ private struct PluginBlock: View {
       RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
         .strokeBorder(Color(.separator))
     )
+  }
+}
+
+/// Drawn at most at its own size, so a small icon is not blown up to the panel's width.
+private struct PluginImage: View {
+  let alt: String
+  let png: Data
+
+  var body: some View {
+    if let image = NSImage(data: png) {
+      Image(nsImage: image)
+        .resizable()
+        .scaledToFit()
+        .frame(
+          idealWidth: image.size.width, maxWidth: image.size.width,
+          idealHeight: image.size.height, maxHeight: image.size.height, alignment: .leading
+        )
+        .accessibilityLabel(alt)
+    } else {
+      Text(alt).foregroundStyle(Color(.textSecondary))
+    }
   }
 }
 

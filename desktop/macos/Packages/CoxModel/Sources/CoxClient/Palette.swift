@@ -20,9 +20,13 @@ public struct PaletteItem: Equatable, Sendable {
   public var title: String
   /// Keys, or where and when: `⌘⇧R`, `cox · 2 hr. ago`.
   public var detail: String
+  /// A plugin action's SF Symbol (PL§15.4); `nil` for every built-in row.
+  public var symbol: String?
 
-  public init(kind: PaletteKind, id: String, title: String, detail: String = "") {
-    (self.kind, self.id, self.title, self.detail) = (kind, id, title, detail)
+  public init(
+    kind: PaletteKind, id: String, title: String, detail: String = "", symbol: String? = nil
+  ) {
+    (self.kind, self.id, self.title, self.detail, self.symbol) = (kind, id, title, detail, symbol)
   }
 }
 

@@ -43,6 +43,15 @@ import Testing
     #expect(run?.inlinePresentationIntent == [.stronglyEmphasized, .emphasized])
   }
 
+  @Test func aLinkSpanCarriesItsLinkUnopenedInThePrivateScheme() throws {
+    for link in ["src/http.rs:42", "https://example.com/a b?c=d&e#f"] {
+      let url = try #require(PluginSpan.attributed([.init("x", link: link)]).runs.first?.link)
+      #expect(url.scheme == PluginLink.scheme)
+      #expect(PluginLink.link(url) == link)
+    }
+    #expect(PluginLink.link(try #require(URL(string: "https://example.com"))) == nil)
+  }
+
   @Test func noRoleWearsThePlanModeTint() {
     #expect(!PluginSpan.Role.allCases.contains { $0.colour == Color(.statusPlan) })
   }

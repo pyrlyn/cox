@@ -4,7 +4,8 @@
 
 // SessionStore's plugin slots (T52.17's Check): a slot patch replaces only its own slot, and a
 // reset of the timeline leaves the slots alone, as `cox_app::coalesce` keeps them beside it; the
-// column's area reaches the session, which renders a shown panel again for it.
+// column's area reaches the session, which renders a shown panel again for it. T33.45.7: the
+// desktop contributions (PL§15.4) read from the session, and the inspector tab the core shows.
 
 import CoxClient
 import Testing
@@ -72,4 +73,34 @@ private func slot(
   ])
 
   #expect(store.pluginViews(.panel).map(\.plugin) == ["todo"])
+}
+
+@MainActor
+@Test func theDesktopContributionsReachTheStoreAndItsClicksTheSession() async {
+  let session = FixtureSession(fixture: Fixture(batches: [], snapshot: []))
+  let tab = PluginTab(plugin: "clock", title: "Clock", symbol: "clock")
+  let item = PluginAction(
+    id: "plugin:clock:snooze", plugin: "clock", title: "Snooze", symbol: "zzz")
+  session.plugins.declare(tabs: [tab], toolbar: [item])
+  let store = SessionStore(session: session)
+  #expect(store.pluginTabs == [tab])
+  #expect(store.pluginToolbar == [item])
+
+  let (columns, rows): (UInt16, UInt16) = (40, 20)
+  store.selectPluginTab("clock", width: columns, height: rows)
+  store.selectPluginTab(nil, width: columns, height: rows)
+  #expect(session.plugins.selected == ["clock", nil])
+  #expect(await store.pluginAction(item.id))
+  #expect(await !store.pluginAction("plugin:clock:ghost"))
+}
+
+@MainActor
+@Test func theShownInspectorTabIsTheVisibleInspectorSlot() {
+  let store = SessionStore(session: FixtureSession(fixture: Fixture(batches: [], snapshot: [])))
+  store.apply([.pluginSlot(slot: slot("clock", .desktopInspector, "12:00", visible: false))])
+  #expect(store.shownInspector == nil)
+  #expect(store.pluginInspector("clock") == .text(lines: [[PluginRun("12:00")]]))
+
+  store.apply([.pluginSlot(slot: slot("clock", .desktopInspector, "12:01"))])
+  #expect(store.shownInspector == "clock")
 }

@@ -54,6 +54,8 @@ module, and a drift test keeps it current.
   - `send` sends one intent to a session: a prompt, an approval, an answer, a
     mode or model switch.
   - `snapshot`, `expand`, `complete`, `changes` and `plan` read one session.
+  - `plugin_action` runs the command a plugin button or action (`plugin:<id>:<command>`)
+    names, and answers whether the session's plugins granted it.
   - `close` stops a session's stream.
 
   The server answers each with a `response` that carries the same `id`. The
@@ -68,6 +70,11 @@ module, and a drift test keeps it current.
   - `open_url`: a page a tool asked to show. The app drops anything but an
     `http` or `https` link, then asks the person first, naming the host the
     link came from; it opens the page only on Open.
+  - `plugin_notice`: a plugin's desktop notice (PL§15.4), already sanitized,
+    with at most two buttons that name granted commands. The app posts it as a
+    system notification; a button comes back as `plugin_action`. A link in a
+    plugin's widget is checked again on the app and goes through the same
+    confirmation as `open_url`.
 
 A stalled client never delays a turn. The server keeps at most 64 lines queued
 for the writer. Past that, each session's patches fold into the latest state

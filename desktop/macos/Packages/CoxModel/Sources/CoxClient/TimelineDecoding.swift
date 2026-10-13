@@ -226,6 +226,7 @@ extension PluginView: Decodable {
       self = try .stack(vertical: keys("vertical"), children: keys("children"))
     case "block":
       self = try .block(title: keys.optional("title"), child: keys("child"))
+    case "image": self = try .image(alt: keys("alt"), png: keys("png"))
     default: throw keys.unknown(tag)
     }
   }
@@ -237,7 +238,8 @@ extension PluginRun: Decodable {
     let keys = try decoder.fields()
     try self.init(
       keys.optional("text") ?? "", token: keys.optional("style") ?? .text,
-      bold: keys.optional("bold") ?? false, italic: keys.optional("italic") ?? false)
+      bold: keys.optional("bold") ?? false, italic: keys.optional("italic") ?? false,
+      link: keys.optional("link"))
   }
 }
 

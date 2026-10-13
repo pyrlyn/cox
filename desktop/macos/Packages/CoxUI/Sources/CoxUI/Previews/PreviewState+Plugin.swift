@@ -47,6 +47,42 @@ extension PreviewState {
     title: .init("acme", .accent, isBold: true),
     child: .stack(vertical: true, children: [pluginKeyValue, pluginList, pluginTable]))
 
+  /// A line with a file link and a web link, as a plugin points the reader somewhere (PL§15.4).
+  static let pluginLink = PluginWidget.text([
+    [
+      .init("failed in ", .dim), .init("src/http.rs:42", .accent, link: "src/http.rs:42"),
+      .init(" · ", .dim), .init("docs", .accent, link: "https://example.com/docs"),
+    ]
+  ])
+
+  /// A checkerboard drawn here rather than shipped as a file, so the sample needs no resource and
+  /// draws the same on every macOS.
+  static let pluginImage = PluginWidget.image(alt: "build graph", png: checkerboard(side: 24))
+
+  private static func checkerboard(side: Int) -> Data {
+    guard
+      let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+        samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+        bytesPerRow: 0, bitsPerPixel: 0)
+    else { return Data() }
+    let cell = side / 4
+    // Fixed greys, not tokens: the bytes are made once, before any appearance applies. Drawn
+    // through a context because `setColor(_:atX:y:)` leaves a device-RGB rep's pixels clear.
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSColor.lightGray.setFill()
+    NSRect(x: 0, y: 0, width: side, height: side).fill()
+    NSColor.darkGray.setFill()
+    for col in 0..<4 {
+      for row in 0..<4 where (col + row).isMultiple(of: 2) {
+        NSRect(x: col * cell, y: row * cell, width: cell, height: cell).fill()
+      }
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    return rep.representation(using: .png, properties: [:]) ?? Data()
+  }
+
   static let pluginWidgets = [
     PluginSample(name: "text", widget: pluginText),
     PluginSample(name: "list", widget: pluginList),
@@ -55,6 +91,8 @@ extension PreviewState {
     PluginSample(name: "gauge", widget: pluginGauge),
     PluginSample(name: "stack", widget: pluginStack),
     PluginSample(name: "block", widget: pluginBlock),
+    PluginSample(name: "link", widget: pluginLink),
+    PluginSample(name: "image", widget: pluginImage),
   ]
 
   /// Two status segments, the second longer than a segment's width, so it truncates (T52.17).
@@ -68,4 +106,27 @@ extension PreviewState {
     PluginPanelItem(plugin: "acme", widget: pluginBlock),
     PluginPanelItem(plugin: "usage", widget: pluginStack),
   ]
+
+  /// A plugin's inspector tab, selected, after a second plugin's tab whose symbol this macOS does
+  /// not ship, so the fallback glyph shows (PL§15.4).
+  static let pluginTabs = [
+    PluginTabItem(plugin: "acme", title: "Acme", symbol: "chart.bar"),
+    PluginTabItem(plugin: "later", title: "Later", symbol: "not.a.symbol"),
+  ]
+
+  @MainActor static var pluginInspector: some View {
+    Inspector(
+      selection: .plugin("acme"), pluginTabs: pluginTabs,
+      content: PluginInspectorTab(title: "Acme", widget: pluginBlock)
+    ) { _ in }
+  }
+
+  /// The bar with a status segment and two toolbar items, the second on the fallback glyph.
+  static let pluginToolbar = SessionToolbar.State(
+    title: "Fix the retry loop", project: "cox", cost: "$0.42", context: "38%",
+    contextFraction: 0.38, pluginStatus: [pluginStatus[0]],
+    pluginActions: [
+      .init(id: "plugin:acme:sync", title: "Sync", symbol: "arrow.triangle.2.circlepath"),
+      .init(id: "plugin:acme:later", title: "Later", symbol: "not.a.symbol"),
+    ])
 }

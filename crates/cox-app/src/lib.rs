@@ -71,7 +71,10 @@ pub use onboarding::{CheckId, CheckRow, CheckStatus};
 pub use palette::{PaletteHit, PaletteItem, PaletteKind};
 pub use patch::{Block, BlockId, BlockKind, Status, TaskState, TimelinePatch, ToolState};
 pub use permissions::{PermissionRule, RuleKind, SessionGrant};
-pub use plugin_ui::{KeyValueRow, PluginAction, PluginSlot, PluginTab, SpanView, WidgetView};
+pub use plugin_ui::{
+    AlertAction, KeyValueRow, LinkClick, LinkTarget, PluginAction, PluginAlert, PluginSlot,
+    PluginTab, SpanView, WidgetView, link_target,
+};
 pub use readiness::Readiness;
 pub use settings::{Dropped, Layer, Setting, SettingKind, SettingsError, SettingsView};
 pub use settings_fields::{KeyError, SettingControl, SettingInput, SettingOption, SettingsGroup};

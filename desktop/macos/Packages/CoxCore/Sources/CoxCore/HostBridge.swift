@@ -26,6 +26,10 @@ public final class HostBridge: AppHost {
 
   public func confirmOpenUrl(origin: String, url: String) { host.confirmOpen(url, from: origin) }
 
+  public func pluginNotice(alert: CoxFFIBindings.PluginAlert) -> Bool {
+    host.pluginNotice(CoxClient.PluginAlert(alert))
+  }
+
   public func secret(section: String) -> String? { host.secret(for: section) }
 
   public func hasBrowser() -> Bool { host.hasBrowser }

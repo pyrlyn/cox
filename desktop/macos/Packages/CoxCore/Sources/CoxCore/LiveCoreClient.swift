@@ -127,6 +127,15 @@ final class LiveSession: SessionClient {
   func close() { handle.close() }
   func closePluginOverlay() { handle.closePluginOverlay() }
   func pluginArea(width: UInt16, height: UInt16) { handle.pluginArea(width: width, height: height) }
+  func pluginTabs() -> [CoxClient.PluginTab] { handle.pluginTabs().map { .init($0) } }
+  func pluginToolbar() -> [CoxClient.PluginAction] { handle.pluginToolbar().map { .init($0) } }
+
+  func selectPluginTab(_ plugin: String?, width: UInt16, height: UInt16) {
+    handle.selectPluginTab(plugin: plugin, width: width, height: height)
+  }
+
+  func pluginAction(_ id: String) async -> Bool { handle.pluginAction(id: id) }
+  func openLink(_ link: String) -> CoxClient.LinkClick { .init(handle.openLink(link: link)) }
 }
 
 // A local and a remote session build the one review prompt the same way (T52.21).

@@ -39,6 +39,7 @@ use cox_app::{
     SessionEntry, Setting, SettingKind, SettingsView, Tally, TaskKind, TaskTarget, TurnCosts,
     TurnUsage, UsageView,
 };
+use cox_app::{AlertAction, LinkClick, PluginAction, PluginAlert, PluginTab};
 use cox_app::{Fact, TurnFiles};
 use cox_app::{KeyError, PermissionRule, RuleKind, SessionGrant, SettingsGroup};
 use cox_app::{KeyValueRow, PluginSlot, SpanView, WidgetView};
@@ -324,6 +325,11 @@ pub enum WidgetView {
         children: Vec<WidgetView>,
         sizes: Vec<u16>,
     },
+    /// A package PNG (PL§15.4); `alt` is its accessibility label.
+    Image {
+        alt: String,
+        png: Vec<u8>,
+    },
     Block {
         title: Option<SpanView>,
         child: Vec<WidgetView>,
@@ -336,12 +342,52 @@ pub struct SpanView {
     pub style: StyleToken,
     pub bold: bool,
     pub italic: bool,
+    /// What a click opens, already checked (`cox_app::plugin_ui::link_target`).
+    pub link: Option<String>,
 }
 
 #[uniffi::remote(Record)]
 pub struct KeyValueRow {
     pub key: SpanView,
     pub value: Vec<SpanView>,
+}
+
+#[uniffi::remote(Record)]
+pub struct PluginTab {
+    pub plugin: String,
+    pub title: String,
+    pub symbol: String,
+}
+
+#[uniffi::remote(Record)]
+pub struct PluginAction {
+    pub id: String,
+    pub plugin: String,
+    pub title: String,
+    pub symbol: String,
+}
+
+#[uniffi::remote(Enum)]
+pub enum LinkClick {
+    Opened,
+    File { path: String, line: Option<u32> },
+    Refused,
+}
+
+#[uniffi::remote(Record)]
+pub struct AlertAction {
+    pub label: String,
+    pub id: String,
+}
+
+#[uniffi::remote(Record)]
+pub struct PluginAlert {
+    pub session: SessionId,
+    pub plugin: String,
+    pub warn: bool,
+    pub title: String,
+    pub body: String,
+    pub actions: Vec<AlertAction>,
 }
 
 #[uniffi::remote(Record)]

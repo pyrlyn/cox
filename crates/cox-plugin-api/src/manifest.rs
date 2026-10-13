@@ -607,15 +607,20 @@ impl PluginManifest {
     }
 }
 
-/// A `.md` path inside the package: `/`-separated, relative, no empty,
-/// `..`, `\` or `:` (a Windows drive) component. The loader still confines
-/// the joined path under the package directory (T45.4); this refuses an
-/// escape before approval shows it.
-fn is_package_md(s: &str) -> bool {
-    s.ends_with(".md")
-        && !s.starts_with('/')
+/// A path inside the package: `/`-separated, relative, no empty, `..`, `\`
+/// or `:` (a Windows drive) component. The loader still confines the joined
+/// path under the package directory (T45.4); this refuses an escape before
+/// approval shows it. `pub` so a host reading a widget image (PL§15.4) applies
+/// the rule an `[[agents]]` file does.
+pub fn is_package_path(s: &str) -> bool {
+    !s.starts_with('/')
         && s.split('/')
             .all(|c| !c.is_empty() && c != ".." && !c.contains(['\\', ':']))
+}
+
+/// A `.md` file inside the package, by [`is_package_path`].
+fn is_package_md(s: &str) -> bool {
+    s.ends_with(".md") && is_package_path(s)
 }
 
 /// `^[a-z][a-z0-9-]{1,23}$`. The charset has no `_`, which is what keeps the
@@ -1148,5 +1153,23 @@ key_env = "CURSOR_API_KEY"
         // 64 on its own, but not after `git-glance-`.
         m.external_agents[0].name = "c".repeat(64);
         assert_eq!(m.validate(), Err(ManifestError::ToolName("c".repeat(64))));
+    }
+
+    #[test]
+    fn package_path_refuses_every_way_out_of_the_package() {
+        for ok in ["a.png", "img/a.png", "./a.png"] {
+            assert!(is_package_path(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "/a.png",
+            "../a.png",
+            "a/../b.png",
+            "a//b.png",
+            "a\\b.png",
+            "c:a.png",
+        ] {
+            assert!(!is_package_path(bad), "{bad}");
+        }
     }
 }
