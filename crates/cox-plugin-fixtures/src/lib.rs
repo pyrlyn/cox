@@ -2,7 +2,8 @@
 //! end-to-end tests and `just bench` (PL§13). A crate of its own so only
 //! the crates that dev-depend on it pay for the `wasm32-unknown-unknown`
 //! build its `build.rs` runs; no `.wasm` is committed, so nothing drifts
-//! from `plugins/examples/rust` or `plugins/examples/surfaces` (A48).
+//! from `plugins/examples/rust`, `plugins/examples/surfaces` or `plugins/jev`
+//! (A48).
 
 // why: this crate was not under `missing_docs` before the workspace lints;
 // drop this allow once its public items are documented.
@@ -30,6 +31,16 @@ pub const SURFACES_WASM: &[u8] =
 /// The surfaces example's manifest text.
 pub const SURFACES_MANIFEST: &str = include_str!(concat!(env!("OUT_DIR"), "/surfaces/plugin.toml"));
 
+/// The Jev plugin (`plugins/jev`, T33.40.3) as an installable package
+/// directory: its `plugin.toml` and `jev.wasm`.
+pub const JEV_DIR: &str = concat!(env!("OUT_DIR"), "/jev");
+
+/// The Jev module bytes, for a host test that loads it directly.
+pub const JEV_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/jev/jev.wasm"));
+
+/// The Jev manifest text.
+pub const JEV_MANIFEST: &str = include_str!(concat!(env!("OUT_DIR"), "/jev/plugin.toml"));
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,5 +67,17 @@ mod tests {
             .collect();
         files.sort();
         assert_eq!(files, ["plugin.toml", "surfaces.wasm"]);
+    }
+
+    #[test]
+    fn jev_package_holds_its_manifest_and_a_wasm_module() {
+        assert!(JEV_WASM.starts_with(b"\0asm"), "not a wasm module");
+        assert!(JEV_MANIFEST.contains("wasm = \"jev.wasm\""));
+        let mut files: Vec<_> = std::fs::read_dir(JEV_DIR)
+            .expect("package dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        files.sort();
+        assert_eq!(files, ["jev.wasm", "plugin.toml"]);
     }
 }
