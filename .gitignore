@@ -20,3 +20,5 @@ desktop/design/diff/out/
 # WinUI / dotnet build output (T58.3).
 desktop/windows/**/bin/
 desktop/windows/**/obj/
+# Gradle's per-project cache (Kotlin plugin SDK).
+.gradle/

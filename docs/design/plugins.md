@@ -219,7 +219,7 @@ Every payload is JSON through extism's `Json<T>` conversion. The types sit in `c
 | `cox_init` | `InitIn { api, plugin_id, config: Value, session: SessionInfo, granted }` → `InitOut { tools: Vec<ToolSpec>, commands, keys, status, panels, renderers, subscribe }` | once per session; anything not granted is dropped with a notice |
 | `cox_on_event` | `EventBatch { first_seq, dropped, events }` → `Effects { redraw, notices }` | §5 |
 | `cox_hook` | `HookCall { event, payload }` → `HookOutcome` | §6 |
-| `cox_decide` | `Question` → `DecideOut { Advice(Option<Advice>) \| Call(ModelCall) }` | §6b; `ModelCall.target = Tier(t) \| OwnProvider { name, model }` (2026-09-26, T33.40.1) |
+| `cox_decide` | `Question` → `DecideOut { Advice(Option<Advice>) \| Call(ModelCall) }` | §6b; `ModelCall.target = Tier(t) \| OwnProvider { name, model }` (2026-09-26, T33.40.1). On the wire `DecideOut` is untagged: `{"call": ModelCall}` or a bare `Option<Advice>`, so a guest written before the call-out still parses; the target is flattened, so a tier call stays `{"tier", "request"}` and an own-provider call is `{"own_provider": {"name", "model"}, "request"}`. A `Call` must name an `OwnProvider` section bound to this plugin (one whose name it won, §7a); anything else is silence |
 | `cox_decide_resume` (optional) | `DecideResume { question, events }` → `Option<Advice>` | §6b; called after the host runs a `Call`'s `ModelCall` through the plugin's own provider, budget-gated and ledgered (2026-09-26, T33.40.1) |
 | `cox_tool_subject` / `cox_tool_risk` / `cox_tool_call` | the `Tool` trait, serialised (`traits.rs:212-234`) | §7 |
 | `cox_provider_stream` | `ProviderCall { request: Request, model }` → `Vec<ProviderEvent>` | §7a |
@@ -239,9 +239,9 @@ Every payload is JSON through extism's `Json<T>` conversion. The types sit in `c
 | `cox_kv_get/put/delete` | `kv` | all but render | `PluginStore`, quota |
 | `cox_context()` | `context` | all | the host's event-folded snapshot (§5) |
 | `cox_invoke_tool(name, input)` | `invoke` lists the name | `on_event`, `command`, `key`, `tool_call` | builds a `ToolCall` and runs `PreToolUse` → `Engine::decide` (`permission/mod.rs:106`) → sandbox → archive, like a model call; `Ask` shows "plugin <id> asks to run …" in the TUI and is denied in headless mode (`run.rs:331`) |
-| `cox_model_call(ModelCall)` | `model` | all but render | router → provider registry with `Job::Plugin(id)` at or below the granted tier: budget gate first, then one `usage` row (§7d) |
+| `cox_model_call(ModelCall)` | `model` | all but render | router → provider registry with `Job::Plugin(id)` at or below the granted tier: budget gate first, then one `usage` row (§7d). A `Tier` target only: `OwnProvider` answers `NotInThisContext`, since the plugin's one worker is inside an export and its `cox_provider_stream` could not run (T33.40.1) |
 | `cox_http(HttpReq)` to a `net`-listed host | `net` | all but render | host-side reqwest; host must match the allow-list; body cap `max_http_response_bytes` |
-| `cox_http(HttpReq)` to a provider section's `base_url` host | that `[[provider]]` section | `cox_provider_stream` only (2026-09-26; `NotInThisContext` everywhere else, including `cox_decide`) | host-side reqwest; the host injects the provider's auth header (§7a); the only path a decision plugin may reach its own paid provider from (T33.40.1) |
+| `cox_http(HttpReq)` to a provider section's `base_url` host | that `[[provider]]` section | `cox_provider_stream` only (2026-09-26; `NotInThisContext` everywhere else, including `cox_decide`). Keyed on the calling export as well as the active section, because the section is activated before its call is queued and another export may still be running | host-side reqwest; the host injects the provider's auth header (§7a); the only path a decision plugin may reach its own paid provider from (T33.40.1) |
 | `cox_output(line)` / `cox_cancelled()` | inside `tool_call` | `tool_call` | `ToolCx.output` / `ToolCx.cancel` (`traits.rs:187`) |
 | `cox_redraw()` | any `ui` | all | marks the plugin's slots dirty (§8) |
 
@@ -275,7 +275,7 @@ A decision plugin (A25/P21; Jev is the first) needs to *answer* questions the co
 
 These points are not a `HookEvent`, on purpose. A hook's `Modify` rewrites input and has no monotone rule, so a hook-shaped router could route up.
 
-`Question` carries `items: Vec<QuestionItem>`, so one request covers every item a point needs in one tool batch or one turn instead of one request per item — 12× cheaper and 10× faster for a 13-item batch, measured against System One's own batching cookbook (2026-09-26, T33.40.1, R§4.3.6 J10).
+`Question` carries `items: Vec<QuestionItem>` (each a `state` and its `options`), so one request covers every item a point needs in one tool batch or one turn instead of one request per item. The answer is `Answer::Items { answers }`, exactly one flat answer per item in order; the host treats any other shape as silence (`Question::fits`) — 12× cheaper and 10× faster for a 13-item batch, measured against System One's own batching cookbook (2026-09-26, T33.40.1, R§4.3.6 J10).
 
 ## 5. Events
 
