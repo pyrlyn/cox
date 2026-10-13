@@ -7,11 +7,26 @@ wasm = "jev.wasm"
 
 # The System One wire (J1): the host injects the key from `api_key_env` and
 # `cox_http` may reach only this host from inside `cox_provider_stream`.
-# `capabilities.decide`/`[[models]]` are added once a decision point calls in
-# (T33.40.6, T33.40.9); `capabilities.model` is not requested here — this
-# plugin only ever answers through its own provider, never through a tier.
+# `capabilities.decide` is added once a decision point calls in (T33.40.6,
+# T33.40.9); `capabilities.model` is not requested here — this plugin only
+# ever answers through its own provider, never through a tier.
 [[provider]]
 name = "typesafe"
 api = "plugin"
 base_url = "https://api.typesafe.ai"
 api_key_env = "TYPESAFE_API_KEY"
+
+# J5: `jev-1.13.0` is the stable model and `jev-latest` its alias. 64k per
+# request (J6), input $0.042/MTok and output free (J7). The plugin layer
+# only fills rows the built-in catalog lacks (T33.16).
+[[models]]
+id = "jev-1.13.0"
+provider = "typesafe"
+context_window = 64000
+price = { input = 0.042, output = 0.0 }
+
+[[models]]
+id = "jev-latest"
+provider = "typesafe"
+context_window = 64000
+price = { input = 0.042, output = 0.0 }
