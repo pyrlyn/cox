@@ -16,7 +16,7 @@ default = ["plugins"]
 # PL§12 falsifier 1: the WASM plugin host (extism, wasmtime) is optional;
 # `crates/cox`'s own `plugins` feature forwards here, so its slim build
 # still drops it.
-plugins = ["dep:cox-plugin", "dep:cox-plugin-api"]
+plugins = ["dep:cox-plugin", "dep:cox-plugin-api", "dep:cox-cursor-cloud"]
 # Plugin and scripted-session fixtures for `crates/cox`'s own tests (a
 # dev-dependency feature), so both crates share one copy.
 test-util = []
@@ -40,8 +40,14 @@ cox-plugin = { path = "../cox-plugin", version = "0.1.2", optional = true }
 # A plugin's `[[mcp]]`/`[[external_agents]]` declarations are manifest
 # types; `cox-plugin` (the extism host) does not re-export them.
 cox-plugin-api = { path = "../cox-plugin-api", version = "0.1.2", optional = true }
+# T56.6: a granted `[[cloud_agents]]` entry runs on Cursor Cloud Agents;
+# the client is the one place a socket to its API opens.
+cox-cursor-cloud = { path = "../cox-cursor-cloud", version = "0.1.2", optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+# T56.6: reads the cloud run's event stream (`StreamExt::next`); already
+# in the tree through `cox-cursor-cloud`.
+futures = { workspace = true }
 # `write_grant` stores a grant's capability list as JSON (T33.8).
 serde_json = { workspace = true }
 # `doctor::CheckResult` is `cox doctor --json`'s row (T37.31 moved it here).
