@@ -1,0 +1,15 @@
+---
+source: crates/cox-tui/src/plugin_ui.rs
+expression: "format!(\"{buf:?}\")"
+---
+Buffer {
+    area: Rect { x: 0, y: 0, width: 24, height: 2 },
+    content: [
+        "cox logo red            ",
+        "after                   ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}

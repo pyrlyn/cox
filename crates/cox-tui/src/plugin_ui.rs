@@ -8,7 +8,10 @@
 //! every plugin string passes `sanitize_with`, the same boundary as
 //! `cells::cell_lines`. A tree over the PL§8 caps draws one placeholder line.
 //! `lines` (T33.26) reads a drawn tree back as transcript lines, for a
-//! plugin-rendered cell.
+//! plugin-rendered cell. A `Span.link` (PL§15.2) is marked with
+//! `link::mark_to`, which keeps a plugin to `https://` and workspace paths;
+//! `link::apply` then makes an OSC 8 hyperlink or an underline, like every
+//! other link in the frame.
 
 use cox_protocol::plugin::ui::{self, StyleToken, Widget};
 use ratatui::buffer::Buffer;
@@ -22,6 +25,7 @@ use ratatui::widgets::{
 
 use unicode_width::UnicodeWidthStr;
 
+use crate::link;
 use crate::text;
 use crate::theme::Theme;
 
@@ -143,7 +147,11 @@ impl Pen<'_> {
             style = style.add_modifier(Modifier::ITALIC);
         }
         let clean = text::sanitize_with(&s.text, self.marks).replace(['\n', '\t'], " ");
-        Span::styled(clean, style)
+        let span = Span::styled(clean, style);
+        match &s.link {
+            Some(target) => link::mark_to(span, target),
+            None => span,
+        }
     }
 
     fn line(&self, spans: &[ui::Span]) -> Line<'static> {
@@ -157,7 +165,7 @@ impl Pen<'_> {
                     .render(area, buf)
             }
             // The terminal cannot show the picture, so the label stands in
-            // for it (PL§15.6 case 5); T33.45.4 owns the finished look.
+            // for it as one dim line (PL§15.6 case 5).
             Widget::Image { alt, .. } => {
                 let alt = ui::Span {
                     text: alt.clone(),
@@ -390,5 +398,91 @@ mod tests {
                 format!("{TOO_LARGE}\n\n")
             );
         }
+    }
+
+    fn linked(text: &str, target: &str) -> Widget {
+        Widget::Text(vec![vec![
+            s("see ", StyleToken::Text),
+            ui::Span {
+                link: Some(target.into()),
+                ..s(text, StyleToken::Accent)
+            },
+            s(" now", StyleToken::Text),
+        ]])
+    }
+
+    fn after_apply(widget: &Widget, osc8: bool) -> Buffer {
+        let mut buf = drawn(widget, &Theme::dark(), 24, 1);
+        link::apply(&mut buf, std::path::Path::new("/work"), osc8);
+        buf
+    }
+
+    #[test]
+    fn linked_span_is_an_osc8_hyperlink_when_the_terminal_speaks_it() {
+        let buf = after_apply(&linked("docs", "https://x.dev/a"), true);
+        insta::assert_snapshot!("linked_span_with_osc8", format!("{buf:?}"));
+    }
+
+    #[test]
+    fn linked_span_is_underlined_text_without_osc8() {
+        let buf = after_apply(&linked("docs", "https://x.dev/a"), false);
+        assert_eq!(buffer_to_string(&buf), "see docs now");
+        insta::assert_snapshot!("linked_span_without_osc8", format!("{buf:?}"));
+    }
+
+    #[test]
+    fn link_outside_the_contract_draws_as_plain_text() {
+        for bad in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "../../etc/passwd",
+        ] {
+            for osc8 in [true, false] {
+                let buf = after_apply(&linked("docs", bad), osc8);
+                assert_eq!(buffer_to_string(&buf), "see docs now", "{bad}");
+                assert!(
+                    buf.content
+                        .iter()
+                        .all(|c| !c.modifier.contains(Modifier::UNDERLINED)),
+                    "{bad}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn image_draws_its_sanitized_alt_as_one_dim_line() {
+        let image = Widget::Stack {
+            vertical: true,
+            sizes: vec![1, 1],
+            children: vec![
+                Widget::Image {
+                    path: "img/logo.png".into(),
+                    alt: "cox logo \u{1b}[31mred\u{1b}[0m".into(),
+                },
+                text("after"),
+            ],
+        };
+        let buf = drawn(&image, &Theme::dark(), 24, 2);
+        assert_eq!(buffer_to_string(&buf), "cox logo red\nafter");
+        insta::assert_snapshot!("image_alt", format!("{buf:?}"));
+    }
+
+    #[test]
+    fn transcript_cell_lines_keep_the_link() {
+        let rows = lines(
+            &linked("docs", "https://x.dev/a"),
+            24,
+            &Theme::dark(),
+            false,
+        );
+        let mut buf = Buffer::empty(Rect::new(0, 0, 24, 1));
+        Paragraph::new(rows).render(buf.area, &mut buf);
+        link::apply(&mut buf, std::path::Path::new("/work"), true);
+        assert!(
+            buf[(4, 0)]
+                .symbol()
+                .starts_with("\u{1b}]8;;https://x.dev/a")
+        );
     }
 }

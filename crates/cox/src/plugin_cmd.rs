@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use cox_plugin::discover::{self, Source, State};
 use cox_plugin::grant::{self, Verdict};
 use cox_plugin::install;
-use cox_plugin_api::{Capabilities, PluginManifest};
+use cox_plugin_api::{Capabilities, PluginManifest, Surface};
 use cox_protocol::{Config, GrantScope, PluginGrant, PluginStore as _, Store as _};
 use cox_sanitize::sanitize;
 use cox_store::Store;
@@ -1001,6 +1001,24 @@ fn grant_words(v: &Verdict) -> (String, &'static str) {
     }
 }
 
+/// Every surface a plugin can load on, in the order listings show them.
+const SURFACES: [Surface; 4] = [
+    Surface::Terminal,
+    Surface::Desktop,
+    Surface::Headless,
+    Surface::Acp,
+];
+
+/// The surfaces `manifest` loads on, an absent `surfaces` being all of them
+/// (PL§15.1), so a listing never shows an empty answer for "everywhere".
+fn surface_names(manifest: &PluginManifest) -> Vec<&'static str> {
+    SURFACES
+        .into_iter()
+        .filter(|s| manifest.runs_on(*s))
+        .map(Surface::name)
+        .collect()
+}
+
 /// " dev" for a `cox plugin link`ed plugin (T33.41), shown in every
 /// listing surface: `list`'s text and JSON here, `cox doctor` and the TUI
 /// grant dialog (`PluginGrantDialog`) elsewhere.
@@ -1021,11 +1039,12 @@ fn row_line(p: &discover::Plugin, store: Option<&Store>, project_root: Option<&P
             let verdict = verdict_for(p, manifest, digest, store, project_root);
             let (grant_word, loaded_word) = grant_words(&verdict);
             format!(
-                "{} ({}{}, v{}, digest {digest12}, grant {grant_word}, {loaded_word}): {}",
+                "{} ({}{}, v{}, digest {digest12}, grant {grant_word}, {loaded_word}, surfaces {}): {}",
                 p.id,
                 p.source,
                 dev_tag(p.dev),
                 manifest.version,
+                surface_names(manifest).join("+"),
                 declared_summary(&manifest.capabilities)
             )
         }
@@ -1064,6 +1083,7 @@ fn row_json(
                 "loaded": loaded,
                 "state": "discovered",
                 "dev": p.dev,
+                "surfaces": surface_names(manifest),
                 "declared": serde_json::to_value(&manifest.capabilities).unwrap_or_default(),
             });
             if let (Some(added), Some(removed)) = (added, removed) {
