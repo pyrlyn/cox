@@ -1,4 +1,3 @@
-
 #### T33.18 Providers, ABI form (`PluginProvider`)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-09 · Depends: T33.14.1, T33.17 · Size: ~190 (landed larger; see Not done) · Priority: P2 · Complexity: 5 · Files: `crates/cox-plugin/src/provider.rs`, `crates/cox-plugin/src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-session/src/provider.rs`
@@ -58,6 +57,51 @@ $ mise exec rust@1.98.1 -- cargo clippy -p cox-config -p cox-protocol -p cox --a
 clean
 ```
 `mise` is not on the default PATH in this environment; the commands used `~/.local/bin/mise` after `mise install rust`. A full `cargo nextest run -p cox` also ran two `external_agents_cursor` tests that fail here because Landlock cannot wrap the fixture agent's argv (`cannot run under the sandbox`). That warning is unrelated to hook loading; CI's sandbox host is the check for it.
+
+#### T64.2 Guard project `core.workspace_roots`
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~110 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot widen the roots `confine` checks against. Its `core.workspace_roots` becomes `ToolCx.roots` (`cox-session/src/lib.rs`, `cox-core/src/turn.rs`), so `workspace_roots = ["/"]` opened the whole disk to `read`, `write` and `edit`.
+Plan:
+1. Test first in `load.rs`: a project root outside the git root reverts the whole list to the user's roots with a `core.workspace_roots` violation; a root inside the git root and one the user already lists stay.
+2. `apply_project_guards` takes the git root. A project root is kept when the layers without the project already list it, or when it is absolute and its canonical path is inside the canonical git root. Any other root reverts the list to `without_project`'s, the way `lsp.servers` reverts. Relative roots are refused: `confine` resolves them against the process cwd, not the repository.
+3. `core.workspace_roots` joins `GUARDED_KEYS` with its own reason; plan §1.6 lists the guard.
+What landed: `root_inside` and the guard in `apply_project_guards`; `load_in` finds the git root once and passes it (`project_config_in` shares the `.cox/config.toml` join with `project_config_path`). Test `project_config_cannot_widen_workspace_roots` covers `/`, a relative `src`, a symlink inside the repo pointing out, and `<git root>/..`; the user's root survives and `--sources` names the user layer.
+Not done: a project root that is a subdirectory of the checkout is still canonicalized again by `confine` at call time, so a directory later swapped for a symlink widens it; that is the symlink-swap class tracked by T64.15. No `docs/config.md` change: `default.toml`'s `workspace_roots` comment feeds a `cox-app` settings snapshot. The real binary was not run (disk was at 99%); `cox-config`'s own loader tests cover the path `cox config show` takes.
+Check:
+```text
+$ CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 mise exec -- cargo nextest run -p cox-config
+39 tests run: 39 passed, 0 skipped
+  PASS load::tests::project_config_cannot_widen_workspace_roots
+  PASS load::tests::every_guarded_key_has_its_own_reason
+$ mise exec -- cargo clippy -p cox-config --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+Before the fix the new test failed: `'/' must revert the list to the user's`, left `[<git>/src, "/"]`.
+
+#### T64.3 Guard project provider endpoints and keys
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~150 · Priority: P0 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot send the user's API keys somewhere else. It could set `providers.<name>.base_url` or `api_key_env`, or add a `[providers.<name>]` table naming any env var, and the key resolved for that section followed the request.
+Plan:
+1. Test first in `load.rs`: a project `base_url` and `api_key_env` on a native and a compatible section revert to the user's values, a new `[providers.evil]` table is dropped, and `timeout_s` stays project-settable; each attempt is its own violation with its own reason, and `--sources` still names the project for the untouched keys.
+2. `apply_project_guards` pins every section's `base_url` and `api_key_env` to `without_project`'s (through the existing `transport()` accessor) and removes `custom` tables the layers without the project do not have. Violations: `providers.*.base_url`, `providers.*.api_key_env`, `providers` (added tables).
+3. `LoadedConfig::source_of` matches a `*` segment in a guarded key, so `providers.anthropic.base_url` (and the existing `mcp.servers.*.sandbox`) takes the pre-project provenance when reverted.
+What landed: the guard after the `external_agents` one, three reasons, two `GUARDED_KEYS` rows (`providers` is left out on purpose: its keys never reach the effective config, and listing it would send every project-set provider key to the pre-project figment), the wildcard-aware `under` in `source_of`, and plan §1.6. Test `project_config_cannot_redirect_provider_keys`.
+Not done: a project may still set a tier's `provider` to a name the guard dropped; the router then rejects it as unknown. The real binary was not run (disk was at 99%).
+Check:
+```text
+$ CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 mise exec -- cargo nextest run -p cox-config
+39 tests run: 39 passed, 0 skipped
+  PASS load::tests::project_config_cannot_redirect_provider_keys
+$ mise exec -- cargo clippy -p cox-config --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+Before the fix the new test failed: `providers.anthropic.base_url` was `https://evil.example`, expected `https://api.anthropic.com`.
 
 #### T59.11 Fold a JSON tool result into one line per node
 
@@ -10814,6 +10858,18 @@ Out of scope: archiving the full answer, which is T66.2; the other inline bounda
 
 Check output: before the fix, `mise exec -- cargo nextest run -p cox-core --test subagent over_cap_non_ascii` failed: `panicked at crates/cox-core/src/subagent.rs:1149:20: assertion failed: self.is_char_boundary(new_len)`. After it: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed, including over_cap_non_ascii_answer_is_cut_on_a_char_boundary; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
+#### T33.45.8 SDK and the surfaces example
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-12 · Depends: T33.45.3 · Files: `plugins/sdk/src/lib.rs`, `plugins/examples/surfaces/` (new), `crates/cox-plugin-fixtures/build.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Execution plan: (1) SDK: link `cox_desktop_notify` from `cox:desktop/v1`, wrap it as `desktop_notify`, add `surface_of(&InitIn)` (absence reads as terminal); unit tests on the wire. (2) `plugins/examples/surfaces` (guest member, `plugins/Cargo.lock` updated): one `plugin.toml` with `ui`, `terminal.keys` and all four `desktop` parts; `cox_init` declares every part unconditionally so the host does the filtering; `cox_command`/`cox_key` try `desktop_notify` and fall back to `notify` on `NotOnThisSurface`. (3) `crates/cox-plugin-fixtures/build.rs`: a `FIXTURES` list of guest packages (same shape as PR #217) plus `SURFACES_*` constants. (4) A `cox-plugin` test (`surfaces_example`, dev-dependency on the fixtures crate) loads the package in a terminal and a desktop `LivePlugins` and checks each part and notice.
+
+Check: a `cox-plugin` test loads the example (a command and a status segment, a leader key, an inspector tab and a notification) in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice or `NotOnThisSurface` on the other.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin-fixtures -p cox-plugin` - 105 passed, including `surfaces_example::terminal_session_keeps_the_key_and_drops_the_desktop_parts`, `desktop_session_keeps_the_desktop_parts_and_drops_the_key`, `the_command_falls_back_to_a_notice_on_the_terminal` (the host answered `cox_desktop_notify` with `NotOnThisSurface`), `the_command_opens_the_inspector_on_the_desktop` and `each_surface_renders_its_slots_with_the_live_count`. In `plugins/`: `cargo test -p cox-plugin-sdk -p cox-plugin-surfaces` - 15 passed; `cargo clippy --locked --target wasm32-unknown-unknown -p cox-plugin-sdk -p cox-plugin-surfaces -- -D warnings` clean. `cargo nextest run -p cox --test deps` and `--test plugins` pass; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` and `mise exec -- cargo fmt --check` clean.
+
+Not done: the desktop `cox_desktop_notify` still answers `Failed` ("not connected to the app yet") until T33.45.5/T33.45.6 wire it to `cox_app::app::Host`; the example treats that as a refused notification and still opens the inspector.
+
 #### T33.40.1 ABI: two-phase decide, own-provider call-out, batched questions — blocker
 
 Status: done 2026-10-12 · Model: Claude Code / opus-5.5
@@ -10933,3 +10989,25 @@ Status: done 2026-10-12
 Implementation: `Caps.osc22` (`detect` sets it for kitty, Ghostty and foot outside tmux; `Caps::query` probes `OSC 22 ; ?pointer` behind a device-attributes backstop and returns `Queried`; `[tui.caps] osc22` overrides; `cox doctor` prints it). `term::pointer_bytes` writes the OSC 22 sequence from `Pointer::css_name()`. `view.rs` records `State.text_rows` beside `cell_rows`; `state::on_mouse` turns a `Moved` event into an `Interaction` for `cox_render::pointer::pointer` and emits `Cmd::Pointer` only when `caps.osc22`, `tui.mouse` is on and the shape changed. `app.rs` writes it and `restore` writes `default` on exit and in the panic hook. cox-tui has no suspend path, so there is nothing to hook for suspend.
 
 Check output: `mise exec -- cargo nextest run -p cox-tui -p cox-protocol -p cox-render` - 484 passed, including `mouse_move_asks_for_the_pointer_the_shared_rule_picks` (card row `pointer`, text row `text`, empty row `default`), `mouse_move_inside_the_same_shape_writes_nothing`, `mouse_move_writes_nothing_without_osc22_or_with_the_mouse_off`, `pty_restores_the_pointer_only_with_the_capability`; `cargo nextest run -p cox` - 194 passed; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: a live kitty or Ghostty window (none on this machine).
+
+#### T64.8 Serialize same-path `write`/`edit` calls in one parallel batch
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~110 · Priority: P1 · Complexity: 2 · Files: `crates/cox-core/src/turn.rs`, `crates/cox-core/tests/same_path.rs`, `crates/cox-core/tests/scenarios/same_path_batch.toml`
+Goal: `write` and `edit` are `Concurrency::Parallel`, so two calls on one path in one batch raced and the last rename won, not the model's last call. The parallel batch is grouped by `Tool::touches()` path; calls that share a path run one after another in model order, calls on different paths and read-only calls stay parallel under `core.parallel_tools`.
+Plan:
+1. Regression test first (`tests/same_path.rs`): a parallel write stub with a slow first call and a second call on `./x.txt`; it fails while both start at once.
+2. In `run_tools`, key each non-read-only parallel call by `touches()` paths made absolute against the session cwd and folded lexically (`x.txt`, `./x.txt`); `group_by_path` chains calls that share a path directly or through a third call. Each group is one task in the existing `JoinSet`.
+3. Unit tests for `group_by_path` and the path key; run `cox-core` and `cox-tools` tests, clippy and fmt.
+What landed: the plan above, with no new mechanism: the existing `touches()` and the existing `JoinSet` loop, where a task is now a path group instead of a single call. Keys are lexical (no symlink resolution), so two different names for one file through a symlink still race; `confine` is unchanged.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-core --test same_path   (before the fix)
+FAIL same_path_calls_run_in_model_order_while_other_paths_overlap
+["start:a", "start:b", "start:c", "end:b", "end:c", "end:a"]
+$ CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 mise exec -- cargo nextest run -p cox-core -p cox-tools
+598 tests run: 598 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-core -p cox-tools --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```

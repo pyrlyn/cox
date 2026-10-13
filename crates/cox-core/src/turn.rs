@@ -6,8 +6,8 @@
 //! the loop's `step` stays a state transition, not a grab-bag of I/O.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -289,7 +289,17 @@ pub(crate) async fn run_signed_tools(
         if tool.spec().concurrency == Concurrency::Exclusive || needs_snapshot {
             serial.push((id, tool, call.input));
         } else {
-            parallel.push((id, tool, call.input));
+            // Read-only tools are never asked for paths (see `Tool::touches`).
+            let paths = if call.risk == Risk::ReadOnly {
+                Vec::new()
+            } else {
+                tool.touches(&call.input)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|p| lexical_path(&session.cwd, p))
+                    .collect()
+            };
+            parallel.push((paths, (id, tool, call.input)));
         }
     }
     for (id, tool, input) in serial {
@@ -299,16 +309,25 @@ pub(crate) async fn run_signed_tools(
     let cap = session.config.core.parallel_tools.max(1) as usize;
     let mut set = JoinSet::new();
     let mut inflight = 0usize;
-    let mut rest = parallel.into_iter();
+    let mut rest = group_by_path(parallel).into_iter();
     loop {
         while inflight < cap {
-            let Some((id, tool, input)) = rest.next() else {
+            let Some(group) = rest.next() else {
                 break;
             };
             let session = session.clone_handle();
             let parent = tracing::Span::current();
             set.spawn(
-                async move { run_one(&session, turn, id, tool, input).await }.instrument(parent),
+                async move {
+                    // One task per path group: calls on a shared path run in
+                    // model order, so the last rename is the model's last call.
+                    let mut out = Vec::with_capacity(group.len());
+                    for (id, tool, input) in group {
+                        out.push(run_one(&session, turn, id, tool, input).await);
+                    }
+                    out
+                }
+                .instrument(parent),
             );
             inflight += 1;
         }
@@ -317,9 +336,7 @@ pub(crate) async fn run_signed_tools(
         };
         inflight -= 1;
         match joined {
-            Ok((id, result)) => {
-                done.insert(id, result);
-            }
+            Ok(finished) => done.extend(finished),
             Err(_) => return Err(CoreError::Interrupted),
         }
     }
@@ -341,6 +358,58 @@ pub(crate) async fn run_signed_tools(
             .await?;
     }
     Ok(results)
+}
+
+/// `path` made absolute against `cwd` with `.` and `..` folded lexically, so
+/// `x.txt`, `./x.txt` and `d/../x.txt` name one group key. No filesystem
+/// access: the file may not exist yet, and `confine` still judges the real
+/// path when the call runs.
+fn lexical_path(cwd: &Path, path: &str) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in cwd.join(path).components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Splits a parallel batch into groups that may run side by side: items that
+/// share a path (directly or through a third item) land in one group in
+/// their original order, everything else is its own group. Groups keep the
+/// order of their first item.
+fn group_by_path<T>(items: Vec<(Vec<PathBuf>, T)>) -> Vec<Vec<T>> {
+    type Group<T> = (HashSet<PathBuf>, Vec<(usize, T)>);
+    let mut groups: Vec<Group<T>> = Vec::new();
+    for (index, (paths, item)) in items.into_iter().enumerate() {
+        let linked: Vec<usize> = groups
+            .iter()
+            .enumerate()
+            .filter(|(_, (seen, _))| paths.iter().any(|p| seen.contains(p)))
+            .map(|(i, _)| i)
+            .collect();
+        let Some((&first, others)) = linked.split_first() else {
+            groups.push((paths.into_iter().collect(), vec![(index, item)]));
+            continue;
+        };
+        // Back to front so removing one group does not shift the next index.
+        for &other in others.iter().rev() {
+            let (seen, members) = groups.remove(other);
+            groups[first].0.extend(seen);
+            groups[first].1.extend(members);
+        }
+        groups[first].0.extend(paths);
+        groups[first].1.push((index, item));
+        groups[first].1.sort_by_key(|(i, _)| *i);
+    }
+    groups
+        .into_iter()
+        .map(|(_, members)| members.into_iter().map(|(_, item)| item).collect())
+        .collect()
 }
 
 /// Asks the permission engine and, when it escalates, the user. Returns the
@@ -932,7 +1001,6 @@ pub(crate) fn results_message(results: Vec<(CallId, ToolResult)>) -> Message {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
 
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD;
@@ -942,6 +1010,33 @@ mod tests {
 
     use super::*;
     use crate::MemoryStore;
+
+    fn p(path: &str) -> PathBuf {
+        PathBuf::from(path)
+    }
+
+    #[test]
+    fn group_by_path_chains_shared_paths_and_keeps_model_order() {
+        let groups = group_by_path(vec![
+            (vec![p("/w/a")], 0),
+            (vec![p("/w/b")], 1),
+            (vec![], 2),
+            (vec![p("/w/a"), p("/w/b")], 3),
+            (vec![p("/w/c")], 4),
+            (vec![p("/w/b")], 5),
+        ]);
+        assert_eq!(groups, vec![vec![0, 1, 3, 5], vec![2], vec![4]]);
+    }
+
+    #[test]
+    fn lexical_path_folds_dot_segments_against_the_cwd() {
+        let cwd = Path::new("/w");
+        let key = lexical_path(cwd, "x.txt");
+        assert_eq!(key, p("/w/x.txt"));
+        assert_eq!(lexical_path(cwd, "./x.txt"), key);
+        assert_eq!(lexical_path(cwd, "d/../x.txt"), key);
+        assert_eq!(lexical_path(cwd, "/w/x.txt"), key);
+    }
 
     /// T39.1: a signature the wire streamed between a call's start and end
     /// is kept under that call's id, and the call itself still commits.
