@@ -2002,7 +2002,7 @@
         ]
       },
       "Advice": {
-        "description": "`cox_decide` output. The core applies the point's monotone rule and\nuses its local default when confidence is below `min_confidence`.",
+        "description": "`cox_decide`'s answer. The core applies the point's monotone rule and\nuses its local default when confidence is below `min_confidence`.",
         "type": "object",
         "properties": {
           "answer": {
@@ -2096,7 +2096,7 @@
             ]
           },
           {
-            "description": "One score per item of a batched question (`salience`, T33.21.1):\n`Question` has no `items` field yet (that is T33.40.1's batched-ABI\ncard), so the items travel in `Question.state[\"items\"]` and the\nanswer carries one value per item, aligned by index.",
+            "description": "One score per memory item for `salience` (T33.21.1), which predates\n`Question.items`: its items travel in `Question.state[\"items\"]` and\nthe answer carries one value per item, aligned by index.",
             "type": "object",
             "properties": {
               "values": {
@@ -2115,6 +2115,27 @@
             "required": [
               "kind",
               "values"
+            ]
+          },
+          {
+            "description": "One answer per item of a batched question (`Question.items`), same\nlength and order; none of them is itself `Items`.",
+            "type": "object",
+            "properties": {
+              "answers": {
+                "description": "The answers.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Answer"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "const": "items"
+              }
+            },
+            "required": [
+              "kind",
+              "answers"
             ]
           }
         ]

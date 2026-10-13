@@ -173,14 +173,18 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 - ABI `RenderIn`: `slot`, `width`, `height`
 - ABI `RenderItemIn`: `target`, `call`, `result`, `width`
 - ABI `ProviderCall`: `request`, `model`
-- ABI `ModelCall`: `tier`, `request`
+- ABI `ModelCall`: `request`, `tier`, `own_provider`
 - ABI `ModelTier`: `cheap`, `code`
+- ABI `OwnProvider`: `name`, `model`
 - ABI `HttpReq`: `method`, `url`, `headers`, `body`
 - ABI `HttpResp`: `status`, `headers`, `body`
-- ABI `Question`: `point`, `state`, `options`
+- ABI `Question`: `point`, `state`, `options`, `items`
 - ABI `DecidePoint`: `route`, `risk`, `approve_hint`, `compact`, `rank`, `salience`
+- ABI `QuestionItem`: `state`, `options`
 - ABI `Advice`: `answer`, `confidence`, `note`
-- ABI `Answer`: `choice`, `choice.order`, `choice.kind`, `score`, `score.value`, `score.kind`, `noul`, `noul.p_yes`, `noul.kind`, `scores`, `scores.values`, `scores.kind`
+- ABI `Answer`: `choice`, `choice.order`, `choice.kind`, `score`, `score.value`, `score.kind`, `noul`, `noul.p_yes`, `noul.kind`, `scores`, `scores.values`, `scores.kind`, `items`, `items.answers`, `items.kind`
+- ABI `DecideOut`: `call`
+- ABI `DecideResume`: `question`, `events`
 - ABI `AbiError`: `not_in_this_context`, `not_in_this_context.kind`, `not_on_this_surface`, `not_on_this_surface.surface`, `not_on_this_surface.kind`, `not_granted`, `not_granted.capability`, `not_granted.kind`, `denied`, `denied.reason`, `denied.kind`, `budget`, `budget.kind`, `too_large`, `too_large.limit`, `too_large.kind`, `timeout`, `timeout.kind`, `transient`, `transient.message`, `transient.kind`, `failed`, `failed.message`, `failed.kind`
 - ABI `Widget`: `text`, `list`, `list.items`, `list.selected`, `table`, `table.header`, `table.rows`, `table.widths`, `key_value`, `gauge`, `gauge.ratio`, `gauge.label`, `stack`, `stack.vertical`, `stack.children`, `stack.sizes`, `block`, `block.title`, `block.child`
 - ABI `Span`: `text`, `style`, `bold`, `italic`, `link`

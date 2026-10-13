@@ -197,6 +197,18 @@ impl ModelCaller for LateCaller {
     ) -> Result<Vec<ProviderEvent>, CoreError> {
         self.session("model calls")?.call(id, tier, request).await
     }
+
+    async fn call_own(
+        &self,
+        id: &str,
+        section: &str,
+        model: &str,
+        request: Request,
+    ) -> Result<Vec<ProviderEvent>, CoreError> {
+        self.session("model calls")?
+            .call_own(id, section, model, request)
+            .await
+    }
 }
 
 #[async_trait]
@@ -395,13 +407,18 @@ impl LivePlugins {
 
     /// Each started plugin as a decision-point source (T33.20); the session
     /// asks only the one `[plugins.decide]` names for a point, and a plugin
-    /// without that point's grant answers nothing.
+    /// without that point's grant answers nothing. A `DecideOut::Call`
+    /// reaches the session through the same late-bound caller as
+    /// `cox_model_call` (T33.40.1).
     pub fn advisors(&self) -> Vec<Arc<dyn Advisor>> {
         self.plugins
             .iter()
             .filter(|p| p.init.is_some())
             .map(|p| {
-                Arc::new(PluginAdvisor::new(p.id(), p.host.clone(), &p.granted)) as Arc<dyn Advisor>
+                let caller: Arc<dyn ModelCaller> = self.caller.clone();
+                let advisor = PluginAdvisor::new(p.id(), p.host.clone(), &p.granted)
+                    .with_call_out(p.env.clone(), caller);
+                Arc::new(advisor) as Arc<dyn Advisor>
             })
             .collect()
     }

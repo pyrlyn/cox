@@ -43,7 +43,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.1 | todo | P1 | 5 | 0% | |
 | T33.40.3 | todo | P2 | 4 | 0% | |
 | T33.40.4 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
@@ -87,6 +86,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T56.8 | todo | P3 | 3 | 0% | |
 | T56.9 | todo | P3 | 1 | 0% | |
 | T56.10 | todo | P3 | 2 | 0% | |
+| T56.11 | todo | P3 | 2 | 0% | |
+| T56.12 | todo | P3 | 2 | 0% | |
 | T57.1 | todo | P1 | 2 | 90% | |
 | T57.4 | todo | P1 | 4 | 0% | |
 | T57.5 | todo | P1 | 4 | 0% | |
@@ -891,30 +892,6 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
-#### T33.40.1 ABI: two-phase decide, own-provider call-out, batched questions — blocker
-
-Depends: T33.2, T33.14.1, T33.15, T33.18, T33.20 · Size: ~180 · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin/src/advisor.rs`, `crates/cox-plugin/src/net.rs`
-Goal: close the gap that PL§12 falsifier 3 predicts (J§4.1–4.3). Today a decision plugin can reach its own provider only through a deadlock (`cox_model_call` into its own `cox_provider_stream`) or a ledger bypass (`cox_http` from `cox_decide`). This card adds a path with neither.
-Plan:
-1. ABI changes:
-   - `DecideOut = Advice(Option<Advice>) | Call(ModelCall)`;
-   - the new optional export `cox_decide_resume(DecideResume { question, events }) -> Option<Advice>`;
-   - `ModelCall.target = Tier(t) | OwnProvider { name, model }`;
-   - `Question.items: Vec<QuestionItem>` (one answer per item).
-   
-   These are minor additions: `api` stays 1. Regenerate `docs/plugin-abi.schema.json`.
-2. `PluginAdvisor`: on `Call`, check that the target is a `[[provider]]` of the same plugin. Then run it through the budget gate → the provider registry (`PluginProvider`) → `Priced`, which writes one `usage` row with `job = plugin:<id>`. Then call `cox_decide_resume` with the events. The point's latency budget covers all three steps. Any failure along the way is `None`, and the local default applies.
-3. `net.rs`: `cox_http` to a provider section's host is allowed only inside `cox_provider_stream`. Everywhere else it returns `NotInThisContext`.
-4. PL§4: add the exports and state the context rule.
-Check:
-- `decide_call_out_writes_one_usage_row`: a WAT guest returns `Call`, and its own `cox_provider_stream` returns fixed events;
-- `decide_call_out_over_budget_falls_back`;
-- `decide_cannot_target_another_plugins_provider`;
-- `http_to_provider_host_outside_provider_stream_is_refused`;
-- `batched_question_answers_each_item`;
-- `abi_schema_matches_committed_file`;
-- invariant 8 `every_request_has_a_usage_row` still green.
-
 #### T33.40.3 Jev provider export
 
 Depends: T33.40.2, T33.16, T33.18 · Size: ~170 · Files: `plugins/jev/src/provider.rs`, `plugins/jev/src/lib.rs`, `crates/cox-plugin-fixtures/build.rs`
@@ -1674,6 +1651,22 @@ Goal: with an opt-in env var and the creator's `CURSOR_API_KEY`, one real run on
 Check: the recorded fixture replays through T56.8's test unchanged; the script's own test asserts it refuses to run without the opt-in env var.
 Done when: the fixture is committed and the replay passes.
 Out of scope: any automated or scheduled live call.
+
+#### T56.11 No usage row for a cloud run that never started
+
+Depends: T56.8 · Size: ~40 · Files: `crates/cox-core/src/session.rs` (`external_turn`), `crates/cox/tests/cloud_agents.rs`
+Goal: when the driver refuses a cloud run before any request (no `CloudAgent(<repo>)` allow rule, a non-GitHub origin, plan mode), the ledger gets no row for it. Today `external_turn` falls back to an all-zero `Usage` whenever the driver returns an error and writes it through `insert_external_usage`, so every refused task leaves an empty `billed_externally` row (found in T56.8, whose `cloud_agent_without_an_allow_rule_makes_no_request` had to accept zero-token rows). A row means a request was made (§0 ledger rule), so a refused run writes none; a run that started and reported usage still writes exactly one row (T56.7), and an external agent that ran but reported no usage keeps today's row so its latency is not lost.
+Check: `mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_no_request` asserts no `External` row at all (fails before the fix); `mise exec -- cargo nextest run -p cox-core external_agent_turn_writes_a_billed_externally_usage_row` and `-p cox-session cloud_agent_usage_row_is_written_once` still pass.
+Done when: the tests pass.
+Out of scope: showing the refusal text in the stream (T56.12).
+
+#### T56.12 A refused cloud run tells the user why
+
+Depends: T56.8 · Size: ~60 · Files: `crates/cox-core/src/session.rs` (`external_turn`), `crates/cox-core/src/subagent.rs`, `crates/cox/tests/cloud_agents.rs`
+Goal: when the driver refuses a cloud run (no `CloudAgent(<repo>)` allow rule, a non-GitHub origin, plan mode), the parent and the user see the driver's reason, which names the rule to add, the repository and the HEAD warning. Today `external_turn` emits the driver's error as a non-fatal `Event::Error` in the child session only; the child's history holds no assistant message, so `subagent.rs` closes the task with "(the subagent produced no answer)" and that is all the stream, the TUI notice and the model see (found in T56.8). The task's result becomes the refusal text, passed through `sanitize` (it carries repository names from the remote) and marked as an error so the model does not read it as the run's answer; the same text reaches `TaskCompleted` and the notice. A run that produced an answer is unchanged.
+Check: `mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_no_request` asserts the `task_completed` event and the task result carry the refusal text naming `CloudAgent(acme/widgets)` and not "produced no answer" (fails before the fix); `mise exec -- cargo nextest run -p cox-core subagent` still passes.
+Done when: the tests pass.
+Out of scope: an approval prompt from a background task (needs core work: a background task has no way to show one yet, T56.6).
 
 ### P57 — Windows build of the core (goal: the workspace builds and its tests run on Windows, and `cox` runs there under D7's rule — no sandbox, a loud warning, `on-request` forced)
 
