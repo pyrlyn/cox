@@ -10962,6 +10962,18 @@ Status: done 2026-10-13 · `cox-ffi` forwards `plugin_tabs`, `plugin_toolbar`, `
 
 Check output: `mise exec -- cargo nextest run -p cox-ffi` — 15 passed, including `every_ffi_body_is_one_forward_expression` and `the_bridge_hands_a_plugin_notice_to_the_host_and_returns_its_answer`; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. `swift test` passes for CoxModel (162), CoxCore (28) and CoxPlatform (35, including `aPluginAlertPostsItsButtonsAndEachRunsItsAction` and `theSessionInFrontKeepsItsAlertAsANotice`), CoxTranscript's `anImageAndALinkReachTheWidget`, and CoxUI's `anUnknownSymbolDrawsTheExtensionGlyph`, `aLinkSpanCarriesItsLinkUnopenedInThePrivateScheme` and `inspectorTabsFollowTheDesignOrder`. CoxUI's snapshot tests, the new ones in light and dark × Solid and Frosted among them, fail locally against every reference because local macOS 27 is not the runner's macOS 26; their references come from CI. `scripts/desktop/app.sh` builds Cox.app; swift-format and SwiftLint `--strict` are clean on every changed file.
 
+#### T33.45.4 TUI: links, image `alt`, surfaces in listings
+
+Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
+
+Check: insta snapshots of a linked span with and without OSC 8 and of an image's `alt`; `cox plugin list --json` shows `surfaces`.
+
+Status: done 2026-10-12
+
+What landed: `cox-render`'s `link::mark_to` carries a plugin `Span.link` target (an `https://` URL or a workspace-relative path; any other form, a link over 2048 bytes or a full 4096-entry table draws as plain text) in the underline colour, and `link::apply` resolves it through the same workspace rule as a text-derived link, splitting adjacent links into separate runs; `cox-tui`'s `plugin_ui` marks every linked span after sanitizing its text, and without OSC 8 the run is underlined (PL§15.2). An `Image` stays its sanitized `alt` on one dim line, now pinned by a snapshot. `cox plugin list` shows `surfaces …` in each row and `--json` carries `surfaces` (every surface when the manifest names none).
+
+Check output: `mise exec -- cargo nextest run -p cox-render -p cox-tui -p cox` — 563 passed, 2 skipped, including the snapshots `linked_span_with_osc8`, `linked_span_without_osc8` and `image_alt` and `plugin_cli::list_shows_the_surfaces_a_plugin_loads_on`; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` and `mise exec -- cargo fmt --check` clean.
+
 #### T56.6 Host driver: a background task becomes a Cursor Cloud run
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-12 · Priority: P3 · Complexity: 4 · Depends: T56.2, T56.3, T56.4, T56.5 · Size: ~190 · Files: `crates/cox-session/src/cloud_agents.rs` (new), `crates/cox-session/src/lib.rs`; manifest `crates/cox-session/Cargo.toml`
