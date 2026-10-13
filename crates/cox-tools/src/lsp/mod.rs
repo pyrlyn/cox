@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-//! Language-server support for the `diagnostics` tool (P41). Lives in
+//! Language-server support for the `diagnostics` tool (P41) and the
+//! `definition`/`references` tools (T59.6). Lives in
 //! `cox-tools` because talking to a server means a process and its pipes,
 //! which the core never touches (D2); split into modules so the wire, the
 //! server lifecycle and the tool can each be tested alone.
 
 pub mod client;
 pub mod diag;
+pub mod nav;
 pub mod server;
 
 use std::collections::HashMap;
@@ -257,18 +259,7 @@ impl Tool for DiagnosticsTool {
                 use_bash(name)
             )));
         }
-        let meta = std::fs::metadata(&path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => ToolError::NotFound,
-            _ => ToolError::Io,
-        })?;
-        if meta.len() > MAX_FILE_BYTES {
-            return Err(ToolError::TooLarge {
-                bytes: meta.len(),
-                cap: MAX_FILE_BYTES,
-            });
-        }
-        let bytes = std::fs::read(&path).map_err(|_| ToolError::Io)?;
-        let text = String::from_utf8(bytes).map_err(|_| ToolError::Binary)?;
+        let text = load(&path)?;
         let root = root_for(&path, &cx.roots, &cx.cwd);
         let timeout = Duration::from_secs(u64::from(self.pool.cfg.timeout_s));
         let wait = input.wait_ms.map_or(timeout, Duration::from_millis);
@@ -466,6 +457,23 @@ impl Tool for AfterEdit {
     }
 }
 
+/// The file a tool is asked about, as UTF-8 text under the size cap a
+/// server is sent; the error says which way it failed.
+fn load(path: &Path) -> Result<String, ToolError> {
+    let meta = std::fs::metadata(path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => ToolError::NotFound,
+        _ => ToolError::Io,
+    })?;
+    if meta.len() > MAX_FILE_BYTES {
+        return Err(ToolError::TooLarge {
+            bytes: meta.len(),
+            cap: MAX_FILE_BYTES,
+        });
+    }
+    let bytes = std::fs::read(path).map_err(|_| ToolError::Io)?;
+    String::from_utf8(bytes).map_err(|_| ToolError::Binary)
+}
+
 /// `path` as UTF-8 text under the size cap a server is sent.
 fn read_text(path: &Path) -> Option<String> {
     let meta = std::fs::metadata(path).ok()?;
@@ -547,12 +555,12 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
-    use crate::lsp::client::read_message;
+    use crate::lsp::client::{read_message, write_message};
     use crate::lsp::server::tests::{
         FakeRead, FakeWrite, diag, fake_pipes, handshake, push, reply,
     };
 
-    struct NoopArchive;
+    pub(super) struct NoopArchive;
 
     #[async_trait]
     impl Archive for NoopArchive {
@@ -564,7 +572,7 @@ mod tests {
         }
     }
 
-    fn cx(root: &Path) -> ToolCx {
+    pub(super) fn cx(root: &Path) -> ToolCx {
         let (tx, _rx) = mpsc::channel(16);
         ToolCx {
             roots: vec![root.to_path_buf()],
@@ -628,18 +636,57 @@ mod tests {
                     let params = json!({"uri": uri, "diagnostics": diags});
                     push(&mut w, "textDocument/publishDiagnostics", params).await;
                 }
+                Some(m @ ("textDocument/definition" | "textDocument/references")) => {
+                    answer_nav(&mut w, &msg, m, docs.get(uri).map_or("", String::as_str)).await;
+                }
                 Some("shutdown") => reply(&mut w, &msg, Value::Null).await,
                 _ => {}
             }
         }
     }
 
+    /// Answers a navigation request about a file holding `text`. A
+    /// definition is a `LocationLink` echoing the requested position, so a
+    /// test reads back the position the tool computed; references are fixed.
+    /// `NOWHERE` gets `null`, `FAIL` an error, `MANY` 150 references.
+    async fn answer_nav(w: &mut FakeWrite, req: &Value, method: &str, text: &str) {
+        let uri = req["params"]["textDocument"]["uri"].clone();
+        let at = req["params"]["position"].clone();
+        let at_range = json!({"start": at, "end": at});
+        let loc = |uri: &Value, line: u32, character: u32| {
+            let p = json!({"line": line, "character": character});
+            json!({"uri": uri, "range": {"start": p, "end": p}})
+        };
+        let result = if text.contains("NOWHERE") {
+            Value::Null
+        } else if text.contains("FAIL") {
+            let err = json!({"code": -32603, "message": "boom"});
+            let msg = json!({"jsonrpc": "2.0", "id": req["id"], "error": err});
+            write_message(w, &msg).await.unwrap();
+            return;
+        } else if method == "textDocument/definition" {
+            json!([{"targetUri": uri, "targetRange": at_range, "targetSelectionRange": at_range}])
+        } else if text.contains("MANY") {
+            Value::Array((0..150).map(|i| loc(&uri, 0, i)).collect())
+        } else {
+            // Out of order, one twice, one outside the workspace behind an
+            // escape sequence (untrusted text).
+            json!([
+                loc(&uri, 2, 0),
+                loc(&uri, 0, 3),
+                loc(&uri, 0, 3),
+                loc(&json!("file:///elsewhere/%1B%5B31mx.rs"), 4, 1),
+            ])
+        };
+        reply(w, req, result).await;
+    }
+
     /// Kill flags of every fake the launcher started.
-    type Started = Arc<Mutex<Vec<Arc<AtomicBool>>>>;
+    pub(super) type Started = Arc<Mutex<Vec<Arc<AtomicBool>>>>;
 
     /// A tool whose servers are `servers` (name, command, extension) and
     /// whose launcher starts in-memory fakes.
-    fn tool(servers: &[(&str, &str, &str)]) -> (DiagnosticsTool, Started) {
+    pub(super) fn tool(servers: &[(&str, &str, &str)]) -> (DiagnosticsTool, Started) {
         let cfg = LspConfig {
             servers: servers
                 .iter()
@@ -669,7 +716,7 @@ mod tests {
         )
     }
 
-    fn workspace(files: &[&str]) -> (tempfile::TempDir, PathBuf) {
+    pub(super) fn workspace(files: &[&str]) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
         for file in files {
