@@ -255,7 +255,9 @@ struct Live {
 }
 
 impl Live {
-    async fn open(&self) -> Result<Frames, CloudError> {
+    // why: `&mut self`, not `&self`: `Frames` is `Send` but not `Sync`, so a
+    // `&Live` held across an await would make the stream's future not `Send`.
+    async fn open(&mut self) -> Result<Frames, CloudError> {
         let mut req = self
             .client
             .req(Method::GET, &format!("{}/stream", self.path))
@@ -271,7 +273,7 @@ impl Live {
 
     /// The run's state after the stream ended without `done`: `Ok(true)` when
     /// terminal.
-    async fn terminal(&self) -> Result<bool, CloudError> {
+    async fn terminal(&mut self) -> Result<bool, CloudError> {
         let run: Run = self.client.get(&self.path).await?;
         Ok(run.status.is_terminal())
     }
@@ -520,6 +522,15 @@ mod tests {
             .collect()
             .await;
         assert_eq!(events.len(), 1);
+    }
+
+    /// T56.6: a driver holds the stream across awaits in a spawned task, so
+    /// the stream (and its future) must be `Send`.
+    #[test]
+    fn client_stream_is_send() {
+        fn send<T: Send>(_: &T) {}
+        let client = Client::new(KEY).expect("client");
+        send(&client.stream_run("bc-1", "run-1").expect("stream"));
     }
 
     #[test]
