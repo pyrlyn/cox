@@ -102,6 +102,17 @@ deadline; the server's text passes through `sanitize` first. ACP's
 client-backed `edit` and `write` are left alone: they write the editor's
 buffer, not the file the server reads.
 
+`definition` and `references` (T59.6, deferred, `ReadOnly`) take `path`, a
+1-based `line` and a 1-based `col` counted in characters, and answer with
+`path:line:col: source line` rows, sorted and deduplicated, the first 100
+listed and the rest archived. They ask a server that already runs for the
+file (started by `diagnostics`); they never start one. With none running, or
+one that fails, they `grep` the identifier under the position (for
+`definition`, only the lines that declare it) and end with a `(no server...)`
+note, since a name match also finds unrelated symbols. A path the server
+names outside the workspace roots is printed as given and never opened; the
+whole answer passes through `sanitize`.
+
 The default servers (`[lsp.servers]`, see config.md):
 
 | Name | Program | Extensions |
