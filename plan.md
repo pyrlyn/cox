@@ -79,7 +79,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.7 | todo | P3 | 4 | 0% | |
 | T56.8 | todo | P3 | 3 | 0% | |
 | T56.9 | todo | P3 | 1 | 0% | |
 | T56.10 | todo | P3 | 2 | 0% | |
@@ -1589,14 +1588,6 @@ Every card in this phase:
 - reads the key from `CURSOR_API_KEY` through `cox_provider::http::resolve_key` (tests inject `resolve_key_with`; no test touches a real key or keychain) and never writes it to a log, an error or the rollout;
 - runs every string from Cursor (stream text, tool names, artifact names, errors) through `cox_sanitize::sanitize`;
 - makes no network call in tests (wiremock and hand-written fixtures only, D12).
-
-#### T56.7 Usage row and resume
-
-Depends: T56.6 · Size: ~160 · Files: `crates/cox-session/src/cloud_agents.rs`, `crates/cox-session/src/lineage.rs`
-Goal: at a terminal state the driver reads the run's usage and writes one `usage` row through the path an external agent's reported usage already takes (EA§6; `external_agent_turn_writes_a_billed_externally_usage_row` in `cox-core`): `billed_externally`, cost $0, Cursor's input, output, cache read and cache write tokens, the requested model (or `cursor:auto` when none was named), the task's job tag; `mark_usage_recorded` makes it exactly once. On resume, a session reattaches to its non-terminal runs, and finalizes runs that finished while cox was not running (result item and usage row), which is the number the gate doc asks for.
-Check: `mise exec -- cargo nextest run -p cox-session cloud_agent_usage_row_is_billed_externally_with_cursor_tokens cloud_agent_usage_row_is_written_once resume_reattaches_to_a_running_cloud_run resume_finalizes_a_run_that_finished_while_closed`.
-Done when: the tests pass.
-Out of scope: pricing the tokens in USD (the spend is on the user's Cursor plan).
 
 #### T56.8 Offline end-to-end over hand-written fixtures
 

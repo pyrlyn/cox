@@ -2,7 +2,7 @@
 //! Diesel's typed DSL. Kept out of `queries.rs` because it is a write path
 //! with its own row type, not a ledger aggregation. The table lets a run
 //! outlive the session that started it: a resumed session lists the runs
-//! still going, and `mark_usage_recorded` decides which resumer writes the
+//! still going or not yet in the ledger, and `mark_usage_recorded` decides which resumer writes the
 //! run's ledger row, exactly once.
 
 use diesel::prelude::*;
@@ -128,16 +128,15 @@ impl Store {
         row.map(CloudRun::from_row).transpose()
     }
 
-    /// The runs a session started that have not reached a terminal status,
-    /// oldest first: what a resumed session has to pick up again.
-    pub fn cloud_runs_non_terminal(
-        &self,
-        session: &SessionId,
-    ) -> Result<Vec<CloudRun>, StoreError> {
+    /// The runs a session started that it still owes something, oldest
+    /// first: not terminal (a resumed session follows or finalizes them), or
+    /// terminal with no ledger row yet (T56.7: a usage read that failed when
+    /// the run ended is retried, so the tokens are not lost).
+    pub fn cloud_runs_unsettled(&self, session: &SessionId) -> Result<Vec<CloudRun>, StoreError> {
         let mut conn = self.conn.lock().map_err(|_| StoreError::Io)?;
         let rows: Vec<CloudRunDbRow> = c::cloud_runs
             .filter(c::session_id.eq(session.to_string()))
-            .filter(c::terminal.eq(false))
+            .filter(c::terminal.eq(false).or(c::usage_recorded.eq(false)))
             .order((c::created_at.asc(), c::run_id.asc()))
             .select(CloudRunDbRow::as_select())
             .load(&mut *conn)
@@ -239,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn cloud_runs_lists_only_non_terminal_runs() {
+    fn cloud_runs_lists_runs_not_yet_settled() {
         let (_home, store) = store();
         let mine = SessionId::new();
         let other = SessionId::new();
@@ -256,8 +255,11 @@ mod tests {
             .cloud_run_insert(&new_run(other, "theirs", false))
             .expect("insert");
 
+        store
+            .cloud_run_mark_usage_recorded("cursor", "done-1")
+            .expect("mark");
         let ids: Vec<String> = store
-            .cloud_runs_non_terminal(&mine)
+            .cloud_runs_unsettled(&mine)
             .expect("list")
             .into_iter()
             .map(|run| run.run_id)
@@ -268,7 +270,18 @@ mod tests {
             .cloud_run_set_status("cursor", "live-1", "CANCELLED", true)
             .expect("set");
         let ids: Vec<String> = store
-            .cloud_runs_non_terminal(&mine)
+            .cloud_runs_unsettled(&mine)
+            .expect("list")
+            .into_iter()
+            .map(|run| run.run_id)
+            .collect();
+        assert_eq!(ids, ["live-1", "live-2"], "terminal, but no usage row yet");
+
+        store
+            .cloud_run_mark_usage_recorded("cursor", "live-1")
+            .expect("mark");
+        let ids: Vec<String> = store
+            .cloud_runs_unsettled(&mine)
             .expect("list")
             .into_iter()
             .map(|run| run.run_id)

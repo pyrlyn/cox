@@ -30,7 +30,9 @@ use cox_protocol::ArchivePut;
 use cox_protocol::errors::{CoreError, ToolError};
 use cox_protocol::ids::{ArchiveId, CallId, ItemId, TaskId, TurnId};
 use cox_protocol::traits::ToolCx;
-use cox_protocol::types::{Content, Event, Level, Message, Role, Tier, ToolOutput, ToolResult};
+use cox_protocol::types::{
+    Content, Event, Job, Level, Message, Role, Tier, ToolOutput, ToolResult, Usage,
+};
 use serde_json::Value;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -542,6 +544,36 @@ impl Session {
             text: notice_text(label, task, answer, detail),
         })
         .await
+    }
+
+    /// T56.7: a background task whose work outlived the process that
+    /// dispatched it (a hosted cloud run) ends in the resumed session as a
+    /// live one does: `TaskCompleted`, the pointer line and the notice. The
+    /// task is not in this process's registry, so there is nothing to free.
+    pub async fn complete_resumed_task(
+        &self,
+        task: TaskId,
+        label: &str,
+        answer: &str,
+    ) -> Result<(), CoreError> {
+        self.emit(Event::TaskCompleted {
+            task,
+            result_item: ItemId::new(),
+            cost_usd: 0.0,
+            exit_code: None,
+            archive: None,
+        })
+        .await?;
+        let detail = agent_detail(0.0, None);
+        self.publish_task_result(task, label, answer, &detail).await
+    }
+
+    /// T56.7: the ledger row of a resumed task's external work, the one its
+    /// live turn would have written (job `agent` at this session's tier,
+    /// $0), so a run that ended while cox was closed still has its row.
+    pub fn record_resumed_task_usage(&self, model: &str, usage: Usage) -> Result<(), CoreError> {
+        self.insert_external_usage(Job::Agent, self.tier, model, usage)
+            .map(|_| ())
     }
 
     /// Arms `Submission::Background` for a call about to run. `bash` with

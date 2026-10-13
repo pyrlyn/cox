@@ -438,7 +438,7 @@ pub async fn open_reporting(
     // or a zero budget) appends nothing.
     let memory_index = memory_index_for(&config, &mdir);
     #[cfg(feature = "plugins")]
-    let cloud_store = store.clone();
+    let (cloud_store, resumed) = (store.clone(), resume.is_some());
     let session = match resume {
         Some((id, history)) => Session::resume(
             config,
@@ -494,8 +494,16 @@ pub async fn open_reporting(
             cloud_store,
             cox_provider::http::resolve_key,
         );
-        drivers.extend(cloud);
+        let shared = cloud
+            .iter()
+            .map(|d| d.clone() as Arc<dyn cox_protocol::traits::ExternalAgent>);
+        drivers.extend(shared);
         session.set_external_agents(drivers);
+        // T56.7: the runs this session's tasks left going are followed or
+        // finalized behind the open, which never waits on the network.
+        if resumed && !cloud.is_empty() {
+            tokio::spawn(cloud_agents::resume_runs(session.clone(), cloud));
+        }
         plugin_warnings
             .into_iter()
             .chain(left_out)
