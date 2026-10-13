@@ -2,7 +2,7 @@
 //! end-to-end tests and `just bench` (PL§13). A crate of its own so only
 //! the crates that dev-depend on it pay for the `wasm32-unknown-unknown`
 //! build its `build.rs` runs; no `.wasm` is committed, so nothing drifts
-//! from `plugins/examples/rust` (A48).
+//! from `plugins/examples/rust` or `plugins/examples/surfaces` (A48).
 
 // why: this crate was not under `missing_docs` before the workspace lints;
 // drop this allow once its public items are documented.
@@ -19,6 +19,17 @@ pub const EXAMPLE_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/exampl
 /// The example's manifest text.
 pub const EXAMPLE_MANIFEST: &str = include_str!(concat!(env!("OUT_DIR"), "/example/plugin.toml"));
 
+/// The surfaces example (`plugins/examples/surfaces`, T33.45.8) as an
+/// installable package directory: its `plugin.toml` and `surfaces.wasm`.
+pub const SURFACES_DIR: &str = concat!(env!("OUT_DIR"), "/surfaces");
+
+/// The surfaces example's module bytes, for a host test that loads it directly.
+pub const SURFACES_WASM: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/surfaces/surfaces.wasm"));
+
+/// The surfaces example's manifest text.
+pub const SURFACES_MANIFEST: &str = include_str!(concat!(env!("OUT_DIR"), "/surfaces/plugin.toml"));
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -33,5 +44,17 @@ mod tests {
             .collect();
         files.sort();
         assert_eq!(files, ["example.wasm", "plugin.toml"]);
+    }
+
+    #[test]
+    fn surfaces_package_holds_its_manifest_and_a_wasm_module() {
+        assert!(SURFACES_WASM.starts_with(b"\0asm"), "not a wasm module");
+        assert!(SURFACES_MANIFEST.contains("wasm = \"surfaces.wasm\""));
+        let mut files: Vec<_> = std::fs::read_dir(SURFACES_DIR)
+            .expect("package dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        files.sort();
+        assert_eq!(files, ["plugin.toml", "surfaces.wasm"]);
     }
 }
