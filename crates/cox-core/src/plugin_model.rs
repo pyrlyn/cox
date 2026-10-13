@@ -15,6 +15,8 @@
 //! (`Job::Plugin(id)`), and that its tier is already resolved by the
 //! caller (grant-clamped, never `think`) instead of looked up in `[jobs]`
 //! (`router.rs`'s `Job::Plugin` arm passes it straight through).
+//! A decision plugin's call-out (`call_own`, T33.40.1) takes the same gate
+//! and ledger to one of its own ABI provider sections instead of a tier.
 //!
 //! `ToolInvoker for Session` (T33.13, PL§4) is here for the same reason:
 //! a plugin's `cox_invoke_tool` reaches the session's tool path over a
@@ -25,12 +27,14 @@ use async_trait::async_trait;
 use cox_protocol::errors::CoreError;
 use cox_protocol::ids::{CallId, TurnId};
 use cox_protocol::traits::{ModelCaller, ToolInvoker};
-use cox_protocol::types::{Event, Job, Level, ProviderEvent, Request, Tier, ToolResult};
+use cox_protocol::types::{
+    Event, Job, Level, ModelId, ProviderEvent, ProviderId, Request, Tier, ToolResult,
+};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::budget;
-use crate::router::{Overrides, Router};
+use crate::router::{Overrides, Route, Router};
 use crate::session::{Session, State};
 use crate::turn::{ORIGIN, run_tools};
 
@@ -58,6 +62,47 @@ impl ModelCaller for Session {
                 key: "tiers".into(),
                 message: error.notice(),
             })?;
+        self.plugin_call(job, route, request).await
+    }
+
+    async fn call_own(
+        &self,
+        id: &str,
+        section: &str,
+        model: &str,
+        request: Request,
+    ) -> Result<Vec<ProviderEvent>, CoreError> {
+        // Only an ABI section has a plugin backend; any other name would
+        // fall through `plugin_backend` to the main provider.
+        if !self.config.providers.abi.contains(section) {
+            return Err(CoreError::Denied {
+                why: format!("`{section}` is not a plugin provider section"),
+            });
+        }
+        // A decision call is cheap-tier work by nature, so it is gated,
+        // ledgered and counted toward the cap like a `cheap` model call.
+        let route = Route {
+            tier: Tier::Cheap,
+            provider: ProviderId::Plugin(section.to_string()),
+            model: ModelId(model.to_string()),
+            effort: request.effort,
+            thinking: request.thinking,
+            max_tokens: request.max_tokens,
+        };
+        self.plugin_call(Job::Plugin(id.to_string()), route, request)
+            .await
+    }
+}
+
+impl Session {
+    /// The budget gate, the provider call and the one `usage` row that
+    /// `cox_model_call` and a decide call-out share.
+    async fn plugin_call(
+        &self,
+        job: Job,
+        route: Route,
+        request: Request,
+    ) -> Result<Vec<ProviderEvent>, CoreError> {
         // The budget gate every provider call passes (D6h/invariant 8).
         // `already_warned = true` collapses `budget::decide`'s three
         // outcomes to `Stop`/`Proceed`: a plugin call has no session-level
@@ -211,6 +256,70 @@ mod tests {
             .await
             .expect_err("a zero cap refuses before the provider runs");
         assert!(matches!(error, CoreError::Budget { .. }), "{error:?}");
+        assert!(store.usage_rows().is_empty());
+    }
+
+    /// A session whose ABI section `own` is a scripted backend, apart
+    /// from the main provider, as session open builds it (T33.18).
+    fn session_with_section(cap: f64) -> (Session, Arc<MemoryStore>) {
+        let mut config = cox_protocol::Config::default();
+        config.budget.session_usd = cap;
+        config.providers.abi.insert("own".into());
+        let main = Arc::new(
+            Scripted::from_toml("[[turn]]\ntext = \"main\"\n", "").expect("main scenario"),
+        );
+        let store = Arc::new(MemoryStore::new());
+        let session = Session::new(
+            config,
+            main,
+            vec![],
+            store.clone(),
+            store.clone(),
+            PathBuf::from("/tmp"),
+        )
+        .expect("session");
+        let own = Scripted::from_toml("[[turn]]\ntext = \"0.9\"\n", "").expect("own scenario");
+        let map: std::collections::HashMap<String, Arc<dyn cox_protocol::traits::Provider>> =
+            [("own".to_string(), Arc::new(own) as _)].into();
+        session.set_plugin_providers(map);
+        (session, store)
+    }
+
+    #[tokio::test]
+    async fn decide_call_out_writes_one_usage_row() {
+        let (session, store) = session_with_section(5.0);
+        let events = ModelCaller::call_own(&session, "jev", "own", "jev-1", plugin_request())
+            .await
+            .expect("the call-out runs");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::TextDelta { text } if text == "0.9")),
+            "{events:?}"
+        );
+        let rows = store.usage_rows();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].job, Job::Plugin("jev".into()));
+        assert_eq!(rows[0].model, ModelId("jev-1".into()));
+    }
+
+    #[tokio::test]
+    async fn decide_call_out_over_budget_falls_back() {
+        let (session, store) = session_with_section(0.0);
+        let error = ModelCaller::call_own(&session, "jev", "own", "jev-1", plugin_request())
+            .await
+            .expect_err("a zero cap refuses before the section runs");
+        assert!(matches!(error, CoreError::Budget { .. }), "{error:?}");
+        assert!(store.usage_rows().is_empty());
+    }
+
+    #[tokio::test]
+    async fn decide_call_out_refuses_a_section_that_is_not_abi() {
+        let (session, store) = session_with_section(5.0);
+        let error = ModelCaller::call_own(&session, "jev", "anthropic", "m", plugin_request())
+            .await
+            .expect_err("only an ABI section has a plugin backend");
+        assert!(matches!(error, CoreError::Denied { .. }), "{error:?}");
         assert!(store.usage_rows().is_empty());
     }
 

@@ -137,6 +137,10 @@ fn merge_one(
     );
 }
 
+/// The export an ABI provider runs; `cox_http` keys the provider-host rule
+/// on it (T33.40.1).
+pub(crate) const EXPORT: &str = "cox_provider_stream";
+
 /// An ABI provider: one `[[provider]]` section with `api = "plugin"`.
 pub struct PluginProvider {
     section: String,
@@ -202,13 +206,13 @@ impl Provider for PluginProvider {
             let _guard = env.activate_provider(&section);
             match host.call::<_, Vec<ProviderEvent>>(
                 Lane::Control,
-                "cox_provider_stream",
+                EXPORT,
                 &call,
                 Duration::from_secs(60),
             ) {
                 Ok(Some(events)) => Ok(events),
                 Ok(None) => Err(ProviderError::Unsupported {
-                    feature: "cox_provider_stream".into(),
+                    feature: EXPORT.into(),
                 }),
                 Err(error) => Err(map_plugin(error)),
             }
