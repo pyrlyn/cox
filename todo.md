@@ -50,6 +50,8 @@
 - T56.8. Offline end-to-end over hand-written fixtures
 - T56.9. Docs: cloud agents for users and in EA
 - T56.10. Optional: live check against a real Cursor account (needs the creator's key)
+- T56.11. No usage row for a cloud run that never started
+- T56.12. A refused cloud run tells the user why
 - T57.1. Windows CI job: `cargo check` over a growing crate list
 - T57.4. `path::confine` on Windows paths
 - T57.5. One kill path for process trees: hooks and the session environment
