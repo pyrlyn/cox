@@ -10877,6 +10877,37 @@ $ mise exec -- cargo fmt --check
 clean
 ```
 
+#### T59.6 LSP `definition` and `references` tools on the running servers
+
+Model: sonnet · Status: done 2026-10-12 · Depends: T59.3 · Size: ~190 · Priority: P3 · Complexity: 3
+
+Execution plan: `lsp/nav.rs` holds the pure part (response parsing for `Location`, `Location[]` and `LocationLink[]`, UTF-16 column conversion, grep fallback patterns, line cap with archive) and the two tools `definition` and `references` over a shared `LspPool`, registered next to `diagnostics` in `cox-session`'s `with_lsp`. `server.rs` gains `Server::definition`/`references`, which sync the file the way `diagnostics` does (the shared sync step is extracted) and then send the request. Paths go through `confine`; locations the server names outside the roots print as bare `path:line:col` and are never read. Verify with fake-server tests for both requests, the fallback and the cap.
+
+Goal: `definition(path, line, col)` and `references(path, line, col)` answer from a language server when one runs for the file and fall back to an `outline`/`grep` answer with a `(no server)` note otherwise, so navigation needs no extra `grep` round trip.
+
+Files:
+- `crates/cox-tools/src/lsp/client.rs`
+- `crates/cox-tools/src/lsp/server.rs`
+- `crates/cox-tools/src/lsp/nav.rs` (new)
+
+Steps:
+1. Hand-rolled wire types for `textDocument/definition` and `textDocument/references` next to the existing ones (`client.rs:174`; P41 rejects `lsp-types`, `plan.md:1245-1253`).
+2. `Server` methods next to `start` (`server.rs:194`); results as `path:line` lines, capped and archived over the cap.
+3. Use `LspPool::running_for` from T59.3; the fallback is a plain-text answer, never a spawn from this tool unless `diagnostics` would spawn too.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: fake-server tests for both requests and the fallback.
+
+Out of scope: rename (T59.7), hover, workspace symbols.
+
+Check output: `mise exec -- cargo nextest run -p cox-tools -p cox-session` — 292 of 293 passed, including the new `lsp::nav` tests (definition and references against a fake server, UTF-16 columns, sort and dedup, an out-of-root path printed bare and sanitized, the 100-row cap archived, an empty answer, the grep fallback with no server and after a server error, input refusals) and the `definition`/`references` assertions in `cox-session` `tool_search_finds_diagnostics`; `mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print` timed out once under load, outside this task, and passed on its own rerun. `mise exec -- cargo nextest run -p cox --test lsp` (the real binary against a fake sandboxed server) — 2 passed. `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
 #### T5.9 Terminal pointer shape follows what the cell does (OSC 22)
 
 Depends: T37.50 · Size: ~150 · Files: `crates/cox-tui/src/term.rs` (`Caps`), `crates/cox-tui/src/state.rs` (`on_mouse`), `crates/cox-tui/src/app.rs` (`restore`)
