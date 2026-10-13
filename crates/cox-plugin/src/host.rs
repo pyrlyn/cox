@@ -343,16 +343,21 @@ pub(crate) mod tests {
     /// An `export` that answers the `len` bytes of JSON at offset 0; shared
     /// by the hook (`cox_hook`) and advisor (`cox_decide`) tests.
     pub(crate) fn answering(export: &str, json: &str) -> String {
-        let escaped = json.replace('"', "\\\"");
+        format!("(memory 1) {}", answering_at(export, json, 0))
+    }
+
+    /// Like [`answering`], with the JSON at byte `at`, so one module (which
+    /// declares its own `(memory 1)`) can hold several answering exports.
+    pub(crate) fn answering_at(export: &str, json: &str, at: usize) -> String {
+        let escaped = json.replace('\\', "\\\\").replace('"', "\\\"");
         format!(
-            r#"(memory 1)
-               (data (i32.const 0) "{escaped}")
+            r#"(data (i32.const {at}) "{escaped}")
                (func (export "{export}") (result i32) (local $off i64) (local $i i64)
                  (local.set $off (call $alloc (i64.const {len})))
                  (block $done (loop $copy
                    (br_if $done (i64.ge_u (local.get $i) (i64.const {len})))
                    (call $store (i64.add (local.get $off) (local.get $i))
-                     (i32.load8_u (i32.wrap_i64 (local.get $i))))
+                     (i32.load8_u offset={at} (i32.wrap_i64 (local.get $i))))
                    (local.set $i (i64.add (local.get $i) (i64.const 1)))
                    (br $copy)))
                  (call $output_set (local.get $off) (i64.const {len}))

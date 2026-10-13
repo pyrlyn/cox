@@ -68,6 +68,7 @@ impl Session {
                 "prompt": scrub(prompt).chars().take(PROMPT_CHARS).collect::<String>(),
             }),
             options: offer.iter().copied().map(tier_name).collect(),
+            items: vec![],
         };
         let budget = Duration::from_millis(decide.route_ms);
         // The core holds the budget itself, so an advisor that overruns its
