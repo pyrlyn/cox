@@ -32,7 +32,7 @@ import Testing
 }
 
 @Test func anAssistantPluginViewConverts() {
-  let span = CoxFFIBindings.SpanView(text: "hi", style: .ok, bold: false, italic: false)
+  let span = CoxFFIBindings.SpanView(text: "hi", style: .ok, bold: false, italic: false, link: nil)
   let live = CoxFFIBindings.BlockKind.assistant(
     text: "x", doc: .init(blocks: []), pluginView: .text(lines: [[span]]))
   #expect(
@@ -40,6 +40,31 @@ import Testing
       == .assistant(
         text: "x", doc: .init(blocks: []),
         pluginView: .text(lines: [[PluginRun("hi", token: .ok)]])))
+}
+
+/// T33.45.7 (PL§15.4): a linked run, an image and a plugin's notice cross field for field.
+@Test func theDesktopPluginValuesConvert() {
+  let link = CoxFFIBindings.SpanView(
+    text: "docs", style: .accent, bold: false, italic: false, link: "https://example.com")
+  let image = CoxFFIBindings.WidgetView.image(alt: "logo", png: Data([0x89, 0x50]))
+  #expect(
+    CoxClient.PluginView(
+      .stack(vertical: true, children: [.text(lines: [[link]]), image], sizes: []))
+      == .stack(
+        vertical: true,
+        children: [
+          .text(lines: [[PluginRun("docs", token: .accent, link: "https://example.com")]]),
+          .image(alt: "logo", png: [0x89, 0x50]),
+        ]))
+  let alert = CoxFFIBindings.PluginAlert(
+    session: "s1", plugin: "clock", warn: true, title: "Break", body: "Stand up",
+    actions: [.init(label: "Snooze", id: "plugin:clock:snooze")])
+  #expect(
+    CoxClient.PluginAlert(alert)
+      == .init(
+        session: "s1", plugin: "clock", warn: true, title: "Break", body: "Stand up",
+        actions: [.init(label: "Snooze", id: "plugin:clock:snooze")]))
+  #expect(CoxClient.LinkClick(.file(path: "/w/a.rs", line: 3)) == .file(path: "/w/a.rs", line: 3))
 }
 
 @Test func aDocTailKeepsSpanStyleColourAndLineStructure() {

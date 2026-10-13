@@ -14,8 +14,8 @@ use cox_app::TerminalHandle as Terminal;
 use cox_app::diffmodel::DiffModel;
 use cox_app::live::LiveSession;
 use cox_app::{
-    Block, Changes, Completion, Info, Intent, PaletteHit, PaletteItem, TaskTarget, TimelinePatch,
-    TurnCosts,
+    Block, Changes, Completion, Info, Intent, LinkClick, PaletteHit, PaletteItem, PluginAction,
+    PluginTab, TaskTarget, TimelinePatch, TurnCosts,
 };
 use cox_protocol::ids::{ArchiveId, SessionId, TaskId};
 use cox_protocol::types::TodoItem;
@@ -145,6 +145,34 @@ impl SessionHandle {
     /// The window's area in cells, for plugin panels and overlays.
     pub fn plugin_area(&self, width: u16, height: u16) {
         self.live.plugin_area(width, height);
+    }
+
+    /// The plugins' inspector tabs (PL§15.4), for the strip after Info.
+    pub fn plugin_tabs(&self) -> Vec<PluginTab> {
+        self.live.plugin_tabs()
+    }
+
+    /// The plugins' toolbar items (PL§15.4), after their status segments.
+    pub fn plugin_toolbar(&self) -> Vec<PluginAction> {
+        self.live.plugin_toolbar()
+    }
+
+    /// The inspector shows `plugin`'s tab, or a built-in one (`None`),
+    /// `width`×`height` cells large; only the selected tab renders.
+    pub fn select_plugin_tab(&self, plugin: Option<String>, width: u16, height: u16) {
+        self.live
+            .select_plugin_tab(plugin.as_deref(), width, height);
+    }
+
+    /// A toolbar item, palette action or notification button
+    /// (`plugin:<id>:<command>`); false for an id no plugin declared.
+    pub fn plugin_action(&self, id: String) -> bool {
+        self.live.plugin_action(&id)
+    }
+
+    /// A click on a link in a plugin's output (PL§15.4).
+    pub fn open_link(&self, link: String) -> LinkClick {
+        self.live.open_link(&link)
     }
 
     /// Esc on a plugin overlay.

@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use cox_app::{Browser, BrowserError, InboxItem, PageText};
+use cox_app::{Browser, BrowserError, InboxItem, PageText, PluginAlert};
 
 use crate::types::BrowserFailure;
 
@@ -28,6 +28,10 @@ pub trait AppHost: Send + Sync {
     /// T52.20: a web link a session on the ssh host `origin` asked to
     /// show; opened only after the person confirms it.
     fn confirm_open_url(&self, origin: String, url: String);
+    /// PL§15.4: a plugin's desktop notice, posted as a system notification
+    /// whose buttons call the session's `plugin_action`. False when the app
+    /// is in front on that session, so the transcript shows it instead.
+    fn plugin_notice(&self, alert: PluginAlert) -> bool;
     /// The Keychain secret stored for a provider section (`anthropic`,
     /// `openai`, a `[providers.<name>]`); its env var, when set, wins.
     fn secret(&self, section: String) -> Option<String>;
@@ -57,6 +61,9 @@ impl cox_app::app::Host for Bridge {
     }
     fn confirm_open_url(&self, origin: &str, url: &str) {
         self.0.confirm_open_url(origin.to_string(), url.to_string());
+    }
+    fn plugin_notice(&self, alert: PluginAlert) -> bool {
+        self.0.plugin_notice(alert)
     }
     fn secret(&self, section: &str) -> Option<String> {
         self.0.secret(section.to_string())
@@ -98,11 +105,13 @@ mod tests {
     use cox_app::app::Host as _;
     use std::sync::Mutex;
 
-    /// A host with or without a page; remembers what it was asked to load.
+    /// A host with or without a page; remembers what it was asked to load
+    /// and the plugin notices it posted.
     #[derive(Default)]
     struct PageHost {
         page: Option<PageText>,
         loaded: Mutex<Vec<String>>,
+        alerts: Mutex<Vec<PluginAlert>>,
     }
 
     #[async_trait::async_trait]
@@ -111,6 +120,10 @@ mod tests {
         fn badge(&self, _: u32) {}
         fn open_url(&self, _: String) {}
         fn confirm_open_url(&self, _: String, _: String) {}
+        fn plugin_notice(&self, alert: PluginAlert) -> bool {
+            self.alerts.lock().expect("alerts").push(alert);
+            true
+        }
         fn secret(&self, _: String) -> Option<String> {
             None
         }
@@ -156,5 +169,24 @@ mod tests {
             browser.snapshot().await,
             Err(BrowserError::Page("blank".into()))
         );
+    }
+
+    #[test]
+    fn the_bridge_hands_a_plugin_notice_to_the_host_and_returns_its_answer() {
+        let host = Arc::new(PageHost::default());
+        let alert = PluginAlert {
+            session: cox_protocol::ids::SessionId::new(),
+            plugin: "clock".into(),
+            warn: false,
+            title: "Break".into(),
+            body: "Stand up".into(),
+            actions: vec![cox_app::AlertAction {
+                label: "Snooze".into(),
+                id: "plugin:clock:snooze".into(),
+            }],
+        };
+        let bridge = Bridge(Arc::clone(&host) as Arc<dyn AppHost>);
+        assert!(bridge.plugin_notice(alert.clone()), "the host posted it");
+        assert_eq!(*host.alerts.lock().expect("alerts"), [alert]);
     }
 }

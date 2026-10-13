@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use cox_app::TimelinePatch;
 use cox_app::remote::{RemoteSession, RemoteWorkspace};
-use cox_app::{Block, Changes, Completion, Intent, Project, SearchHit, SessionEntry};
+use cox_app::{Block, Changes, Completion, Intent, LinkClick, Project, SearchHit, SessionEntry};
 use cox_protocol::ids::{ArchiveId, SessionId};
 use cox_protocol::types::TodoItem;
 
@@ -158,6 +158,18 @@ impl RemoteSessionHandle {
     /// A truncated output in full, as `cox expand` prints it.
     pub async fn output(self: Arc<Self>, archive: ArchiveId) -> Result<String, AppError> {
         Ok(on_runtime(async move { self.remote.output(archive).await }).await??)
+    }
+
+    /// A plugin button or action (`plugin:<id>:<command>`); the remote
+    /// session says whether its plugins declared it.
+    pub async fn plugin_action(self: Arc<Self>, id: String) -> Result<bool, AppError> {
+        Ok(on_runtime(async move { self.remote.plugin_action(&id).await }).await??)
+    }
+
+    /// A click on a link in the remote plugin's output: a web link is only
+    /// confirmed, a path comes back as written.
+    pub fn open_link(&self, link: String) -> LinkClick {
+        self.remote.open_link(&link)
     }
 
     /// Stops the stream; the remote session keeps running.

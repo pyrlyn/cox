@@ -8,6 +8,7 @@
 
 import CoxClient
 import CoxModel
+import CoxPlatform
 import CoxTranscript
 import CoxUI
 import SwiftUI
@@ -72,7 +73,62 @@ extension SessionWindow {
       (screen.inspectorTab, screen.isInspectorVisible) = (.context, true)
     case .open(.model): screen.popover = screen.popover == .model ? nil : .model
     case .rename(let title): send(.rename(title: title))
+    case .pluginAction(let id):
+      guard let store = showing?.store else { return }
+      Task { _ = await store.pluginAction(id) }
     }
+  }
+
+  /// The inspector shows `tab`: a plugin's tab renders for the inspector's width while it is the
+  /// one selected, and every other tab stops it (PL§15.4). The inspector scrolls, so the height
+  /// offered is the screen's, the most it could show.
+  func selectPluginTab(_ tab: InspectorTab) {
+    guard let store = showing?.store else { return }
+    guard case .plugin(let plugin) = tab else {
+      store.selectPluginTab(nil, width: 0, height: 0)
+      return
+    }
+    let size = CGSize(
+      width: Size.inspectorWidth - Space.xl * 2, height: NSScreen.main?.visibleFrame.height ?? 0)
+    let cells = PluginWidgets.cells(size, scale: base.textScale)
+    store.selectPluginTab(plugin, width: cells.width, height: cells.height)
+  }
+
+  /// PL§15.4's window side: the selected tab tells the core which plugin tab renders, a plugin's
+  /// `OpenInspector` shows its tab, a link click goes to `openPluginLink`, and focus tells the
+  /// host which session is in front.
+  func withPlugins(_ content: some View) -> some View {
+    content
+      .onChange(of: screen.inspectorTab) { _, tab in selectPluginTab(tab) }
+      .onChange(of: showing?.store.shownInspector) { _, plugin in
+        if let plugin { (screen.inspectorTab, screen.isInspectorVisible) = (.plugin(plugin), true) }
+      }
+      .environment(\.pluginLinkAction) { openPluginLink($0) }
+      .onChange(of: current, initial: true) { old, _ in markFront(replacing: old) }
+      .onChange(of: activeState) { markFront(replacing: nil) }
+      .onDisappear { current.map(FrontSession.shared.hide) }
+  }
+
+  /// Tells the host which session is in front, so a plugin's alert for it stays a notice rather
+  /// than a system notification (PL§15.4).
+  func markFront(replacing old: String?) {
+    if let old { FrontSession.shared.hide(old) }
+    guard let current else { return }
+    if activeState == .key {
+      FrontSession.shared.show(current)
+    } else {
+      FrontSession.shared.hide(current)
+    }
+  }
+
+  /// A plugin link's click (PL§15.4): cox-app opens a web link through the host, and hands back a
+  /// path it confined to a local session's workspace, which Finder reveals rather than opens, so
+  /// a click never runs a file. A remote session's path names that host's disk, not this one's.
+  func openPluginLink(_ link: String) {
+    guard let showing, case .file(let path, _) = showing.store.openLink(link),
+      model.remotes.workspace(for: showing.store.session.id) == nil
+    else { return }
+    NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: path)])
   }
 
   func handle(_ intent: Sidebar.Intent) {
@@ -93,6 +149,16 @@ extension SessionWindow {
         Task { await open(resume: session) }
       }
     }
+  }
+
+  /// A popped-out window has no sidebar to show.
+  func toggleSidebar() {
+    if popOut == nil { screen.isSidebarVisible.toggle() }
+  }
+
+  /// Opens `session` in a window of its own, or as a tab of this one.
+  func openPopOut(_ session: String, asTab: Bool) {
+    openWindow(value: PopOut(session: session, asTab: asTab))
   }
 
   /// ⌃`: shows or hides the terminal pane; showing it with no terminal open opens the session's

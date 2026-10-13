@@ -126,6 +126,14 @@ final class RemoteSession: SessionClient {
     throw RemoteUnsupported("A terminal")
   }
 
+  /// The remote session runs a plugin button's command; a lost link reads as not run.
+  func pluginAction(_ id: String) async -> Bool {
+    (try? await handle.pluginAction(id: id)) ?? false
+  }
+
+  /// A web link only asks to be confirmed; a path names the host's file, not one here.
+  func openLink(_ link: String) -> CoxClient.LinkClick { .init(handle.openLink(link: link)) }
+
   /// Stops the stream; the host keeps the session and any running turn.
   func close() {
     let handle = handle

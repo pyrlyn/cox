@@ -202,13 +202,14 @@ extension PluginWidget {
       self = .block(
         title: title.map(PluginSpan.init),
         child: child.first.map(PluginWidget.init) ?? .text([]))
+    case .image(let alt, let png): self = .image(alt: alt, png: Data(png))
     }
   }
 }
 
 extension PluginSpan {
   public init(_ run: PluginRun) {
-    self.init(run.text, Role(run.token), isBold: run.bold, isItalic: run.italic)
+    self.init(run.text, Role(run.token), isBold: run.bold, isItalic: run.italic, link: run.link)
   }
 }
 

@@ -3,7 +3,8 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 // A plugin slot's generated cox-ffi values ⇄ `CoxClient` values (PL§8, T52.17), field for
-// field like `Convert.swift`: the slot, its kind and the sanitized widget tree. Separate so the
+// field like `Convert.swift`: the slot, its kind and the sanitized widget tree, and the desktop
+// contributions (PL§15.4) — tabs, toolbar items, link clicks and notices. Separate so the
 // timeline's conversions stay one file; the terminal cell widths and stack sizes are dropped,
 // since the app lays the tree out natively.
 
@@ -33,7 +34,9 @@ extension CoxClient.PluginSlotKind {
 
 extension CoxClient.PluginRun {
   init(_ value: CoxFFIBindings.SpanView) {
-    self.init(value.text, token: .init(value.style), bold: value.bold, italic: value.italic)
+    self.init(
+      value.text, token: .init(value.style), bold: value.bold, italic: value.italic,
+      link: value.link)
   }
 }
 
@@ -49,9 +52,40 @@ extension CoxClient.PluginView {
     case .gauge(let ratio, let label): self = .gauge(ratio: ratio, label: .init(label))
     case .stack(let vertical, let children, _):
       self = .stack(vertical: vertical, children: children.map { CoxClient.PluginView($0) })
+    case .image(let alt, let png): self = .image(alt: alt, png: [UInt8](png))
     case .block(let title, let child):
       self = .block(
         title: title.map { CoxClient.PluginRun($0) }, child: child.map { CoxClient.PluginView($0) })
     }
+  }
+}
+
+extension CoxClient.PluginTab {
+  init(_ value: CoxFFIBindings.PluginTab) {
+    self.init(plugin: value.plugin, title: value.title, symbol: value.symbol)
+  }
+}
+
+extension CoxClient.PluginAction {
+  init(_ value: CoxFFIBindings.PluginAction) {
+    self.init(id: value.id, plugin: value.plugin, title: value.title, symbol: value.symbol)
+  }
+}
+
+extension CoxClient.LinkClick {
+  init(_ value: CoxFFIBindings.LinkClick) {
+    switch value {
+    case .opened: self = .opened
+    case .file(let path, let line): self = .file(path: path, line: line)
+    case .refused: self = .refused
+    }
+  }
+}
+
+extension CoxClient.PluginAlert {
+  init(_ value: CoxFFIBindings.PluginAlert) {
+    self.init(
+      session: value.session, plugin: value.plugin, warn: value.warn, title: value.title,
+      body: value.body, actions: value.actions.map { .init(label: $0.label, id: $0.id) })
   }
 }

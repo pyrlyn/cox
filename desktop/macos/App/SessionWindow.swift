@@ -70,8 +70,10 @@ struct SessionWindow: View {
   @State private var picking: AgentPicker?
   /// The composer's best-of-n candidates and the group the compare sheet shows (T52.12).
   @State private var bestOf = BestOfLauncher()
-  @Environment(\.coxAppearance) private var base
-  @Environment(\.openWindow) private var openWindow
+  @Environment(\.coxAppearance) var base
+  /// `.key` while this window has focus and cox is frontmost: its session is the one in front.
+  @Environment(\.controlActiveState) var activeState
+  @Environment(\.openWindow) var openWindow
   @Environment(\.openSettings) var openSettings
   /// Why the core refused a provider switch after the first turn (T60.3); offers a new session.
   @State var lockedMessage: String?
@@ -94,7 +96,7 @@ struct SessionWindow: View {
       } else if isFirstRun {
         FirstRun(launch: model.launch) { onboarded = true }
       } else {
-        main
+        withPlugins(main)
       }
     }
     .environment(\.coxAppearance, screen.appearance.applied(to: base))
@@ -158,6 +160,7 @@ struct SessionWindow: View {
     var state = screen
     state.toolbar = ShellState.toolbar(showing, sidebar: model.sidebar, popover: screen.popover)
     state.model = ShellState.models(showing?.menu)
+    (state.pluginTabs, state.inspectorTab) = ShellState.inspector(showing, tab: screen.inspectorTab)
     state.sidebar = ShellState.sidebar(
       model.sidebar, remotes: model.remotes, selection: current,
       providers: ProviderHealth(usable: usable, check: providerCheck))
@@ -171,16 +174,6 @@ struct SessionWindow: View {
   /// The pane shows while it is toggled on and the session has a terminal left open.
   var isTerminalShown: Bool {
     isTerminalVisible && showing?.store.terminals.isEmpty == false
-  }
-
-  /// A popped-out window has no sidebar to show.
-  func toggleSidebar() {
-    if popOut == nil { screen.isSidebarVisible.toggle() }
-  }
-
-  /// Opens `session` in a window of its own, or as a tab of this one.
-  func openPopOut(_ session: String, asTab: Bool) {
-    openWindow(value: PopOut(session: session, asTab: asTab))
   }
 
   private var isRefused: Binding<Bool> {

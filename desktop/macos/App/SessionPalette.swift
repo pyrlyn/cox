@@ -44,6 +44,8 @@ struct SessionPalette: Equatable {
   private static func row(_ hit: PaletteHit) -> CommandPalette.Row {
     let symbol: CommandPalette.Symbol =
       switch hit.item.kind {
+      // A plugin's action names its own symbol (PL§15.4); the app's own actions carry none.
+      case .action where hit.item.symbol != nil: .system(PluginSymbol.name(hit.item.symbol))
       case .action: .system(PaletteAction(rawValue: hit.item.id)?.symbol ?? "command")
       case .session: .system("bubble.left")
       case .command: .glyph("/")
@@ -144,7 +146,13 @@ extension SessionWindow {
     switch item.kind {
     case .session: handle(Sidebar.Intent.select(item.id))
     case .command, .file: showing?.composer.append(item.id)
-    case .action: if let action = PaletteAction(rawValue: item.id) { run(action) }
+    case .action:
+      if let action = PaletteAction(rawValue: item.id) {
+        run(action)
+      } else if let store = showing?.store {
+        // `plugin:<id>:<command>`: cox-app runs the command as if typed (PL§15.4).
+        Task { _ = await store.pluginAction(item.id) }
+      }
     }
   }
 

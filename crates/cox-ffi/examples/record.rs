@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use cox_app::{BlockKind, InboxItem, Intent, PageText, TimelinePatch};
+use cox_app::{BlockKind, InboxItem, Intent, PageText, PluginAlert, TimelinePatch};
 use cox_ffi::{App, AppError, AppHost, BrowserFailure, OpenRequest, SessionHandle};
 use cox_protocol::types::Decision;
 
@@ -48,6 +48,10 @@ impl AppHost for MemoryHost {
     fn badge(&self, _: u32) {}
     fn open_url(&self, _: String) {}
     fn confirm_open_url(&self, _: String, _: String) {}
+    /// The recorded sessions load no plugins.
+    fn plugin_notice(&self, _: PluginAlert) -> bool {
+        false
+    }
     fn secret(&self, section: String) -> Option<String> {
         let found = self.secrets.get(&section).cloned();
         self.asked

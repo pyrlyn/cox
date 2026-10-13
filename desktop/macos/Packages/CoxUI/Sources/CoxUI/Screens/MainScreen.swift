@@ -18,6 +18,8 @@ public struct MainScreenState: Equatable, Sendable {
   public var isSidebarVisible = true
   public var isInspectorVisible = true
   public var inspectorTab = InspectorTab.changes
+  /// The plugins' tabs after Info (PL§15.4).
+  public var pluginTabs: [PluginTabItem] = []
   /// Shown while the toolbar's `popover` is `.appearance`.
   public var appearance = AppearancePopover.State()
   /// Shown over the composer's model chip while the toolbar's `popover` is `.model`.
@@ -161,9 +163,10 @@ public struct MainScreen<Transcript: View, InspectorContent: View>: View {
   }
 
   private var inspectorPane: some View {
-    Inspector(selection: state.inspectorTab, content: inspector(state.inspectorTab)) {
-      send(.inspectorTab($0))
-    }
+    Inspector(
+      selection: state.inspectorTab, pluginTabs: state.pluginTabs,
+      content: inspector(state.inspectorTab)
+    ) { send(.inspectorTab($0)) }
   }
 }
 
