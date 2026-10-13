@@ -66,3 +66,6 @@ pub use host::{CONTROL_DEPTH, EVENT_DEPTH, Lane, PluginHost};
 pub use hostfn::{HostEnv, init_input};
 pub use live::{Live, LivePlugins, Notices, SessionTap};
 pub use tool::WasmTool;
+
+#[cfg(test)]
+mod surfaces_example;
