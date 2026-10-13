@@ -736,6 +736,25 @@ pub trait ModelCaller: Send + Sync {
         tier: crate::types::Tier,
         request: crate::types::Request,
     ) -> Result<Vec<crate::types::ProviderEvent>, crate::errors::CoreError>;
+
+    /// A decision plugin's call-out (T33.40.1, `DecideOut::Call`): runs
+    /// `request` on the ABI provider section `section` with `model`, as
+    /// job `Job::Plugin(id)`, through the same budget gate and ledger row
+    /// as [`Self::call`]. The caller has already checked that `section` is
+    /// plugin `id`'s own. Defaults to a refusal, so an implementation that
+    /// predates the call-out stays correct: the plugin's advice is silent.
+    async fn call_own(
+        &self,
+        id: &str,
+        section: &str,
+        model: &str,
+        request: crate::types::Request,
+    ) -> Result<Vec<crate::types::ProviderEvent>, crate::errors::CoreError> {
+        let _ = (id, model, request);
+        Err(crate::errors::CoreError::Denied {
+            why: format!("provider section `{section}` cannot be called here"),
+        })
+    }
 }
 
 /// A plugin's `cox_invoke_tool` (PL§4, T33.13): one tool call run the way a

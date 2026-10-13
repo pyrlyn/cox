@@ -338,14 +338,45 @@ pub struct ProviderCall {
     pub model: String,
 }
 
-/// `cox_model_call` input (PL§7d); the output is `Vec<ProviderEvent>`.
+/// `cox_model_call` input (PL§7d), and what `DecideOut::Call` asks the host
+/// to run (T33.40.1); the output is `Vec<ProviderEvent>`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelCall {
-    /// The tier to route at; the host clamps it to the grant, never `think`.
-    pub tier: ModelTier,
+    /// Where the call goes. Flattened so a tier call keeps the `{"tier": …}`
+    /// shape every older guest already sends.
+    #[serde(flatten)]
+    pub target: CallTarget,
     /// The request; the host sets its tier, model and job.
     #[schemars(extend("x-cox-protocol" = "Request"))]
     pub request: Value,
+}
+
+/// Where a [`ModelCall`] goes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum CallTarget {
+    /// The router's pick for a tier; the host clamps it to the grant, never
+    /// `think`. The only target `cox_model_call` takes.
+    Tier {
+        /// The tier to route at.
+        tier: ModelTier,
+    },
+    /// One of the plugin's own `[[provider]]` sections, run by the host
+    /// after `cox_decide` returns (`DecideOut::Call`), never from inside an
+    /// export: the plugin's one worker would be waiting on itself.
+    OwnProvider {
+        /// The section and the model to send.
+        own_provider: OwnProvider,
+    },
+}
+
+/// A plugin's own provider section and the model to ask it for.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OwnProvider {
+    /// The `[[provider]]` section name.
+    pub name: String,
+    /// The model id to send.
+    pub model: String,
 }
 
 /// `cox_http` input.
@@ -405,9 +436,70 @@ pub struct Question {
     /// `rank`); empty for a score or yes/no point.
     #[serde(default)]
     pub options: Vec<String>,
+    /// A batched question (J10): one request covers every item a point
+    /// needs, such as each call of one tool batch, instead of one request
+    /// per item. Empty for a single question; otherwise `state` holds what
+    /// the items share and the answer is [`Answer::Items`].
+    #[serde(default)]
+    pub items: Vec<QuestionItem>,
 }
 
-/// `cox_decide` output. The core applies the point's monotone rule and
+impl Question {
+    /// Whether `answer` has the shape this question asks for: exactly one
+    /// flat answer per item for a batched question, and no `Items` for a
+    /// single one. Checked by the host, so the core never has to guess
+    /// which item a short or nested answer meant.
+    pub fn fits(&self, answer: &Answer) -> bool {
+        match answer {
+            Answer::Items { answers } => {
+                !self.items.is_empty()
+                    && answers.len() == self.items.len()
+                    && !answers.iter().any(|a| matches!(a, Answer::Items { .. }))
+            }
+            _ => self.items.is_empty(),
+        }
+    }
+}
+
+/// One item of a batched [`Question`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct QuestionItem {
+    /// What this item is about, redacted.
+    pub state: Value,
+    /// This item's choices; empty for a score or yes/no point.
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
+/// `cox_decide` output. Untagged so a guest written before the call-out
+/// existed, which returns a bare `Option<Advice>`, still parses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum DecideOut {
+    /// Run this call on the plugin's own provider, then ask
+    /// `cox_decide_resume` with its events. The target must be
+    /// [`CallTarget::OwnProvider`].
+    Call {
+        /// The call to run.
+        call: ModelCall,
+    },
+    /// The answer, or silence.
+    Advice(Option<Advice>),
+}
+
+/// `cox_decide_resume` input (optional export, T33.40.1): the question
+/// again, with the events the host's run of `DecideOut::Call` produced.
+/// The output is `Option<Advice>`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DecideResume {
+    /// The question `cox_decide` was asked.
+    pub question: Question,
+    /// The provider's events, usage included.
+    #[schemars(extend("items" = { "x-cox-protocol": "ProviderEvent" }))]
+    pub events: Vec<Value>,
+}
+
+/// `cox_decide`'s answer. The core applies the point's monotone rule and
 /// uses its local default when confidence is below `min_confidence`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Advice {
@@ -440,13 +532,18 @@ pub enum Answer {
         /// P(yes) in `[0, 1]`.
         p_yes: f64,
     },
-    /// One score per item of a batched question (`salience`, T33.21.1):
-    /// `Question` has no `items` field yet (that is T33.40.1's batched-ABI
-    /// card), so the items travel in `Question.state["items"]` and the
-    /// answer carries one value per item, aligned by index.
+    /// One score per memory item for `salience` (T33.21.1), which predates
+    /// `Question.items`: its items travel in `Question.state["items"]` and
+    /// the answer carries one value per item, aligned by index.
     Scores {
         /// One score per item, same length and order as the items sent.
         values: Vec<f64>,
+    },
+    /// One answer per item of a batched question (`Question.items`), same
+    /// length and order; none of them is itself `Items`.
+    Items {
+        /// The answers.
+        answers: Vec<Answer>,
     },
 }
 
@@ -647,6 +744,89 @@ mod tests {
                 surface: Surface::Acp
             }
         );
+    }
+
+    #[test]
+    fn model_call_keeps_the_tier_wire_and_adds_own_provider() {
+        let tier = json!({ "tier": "cheap", "request": {} });
+        let call: ModelCall = serde_json::from_value(tier.clone()).expect("an older guest's call");
+        assert_eq!(
+            call.target,
+            CallTarget::Tier {
+                tier: ModelTier::Cheap
+            }
+        );
+        assert_eq!(serde_json::to_value(&call).expect("serializes"), tier);
+        let own: ModelCall = serde_json::from_value(json!({
+            "own_provider": { "name": "typesafe", "model": "jev-1" }, "request": {},
+        }))
+        .expect("own provider");
+        round_trip(&own);
+        assert_eq!(
+            own.target,
+            CallTarget::OwnProvider {
+                own_provider: OwnProvider {
+                    name: "typesafe".into(),
+                    model: "jev-1".into()
+                }
+            }
+        );
+        assert!(serde_json::from_value::<ModelCall>(json!({ "request": {} })).is_err());
+    }
+
+    #[test]
+    fn decide_out_reads_an_older_guests_bare_advice() {
+        let silent: DecideOut = serde_json::from_value(json!(null)).expect("null");
+        assert_eq!(silent, DecideOut::Advice(None));
+        let advice: DecideOut =
+            serde_json::from_value(json!({ "answer": { "kind": "noul", "p_yes": 0.5 } }))
+                .expect("advice");
+        assert!(matches!(advice, DecideOut::Advice(Some(_))), "{advice:?}");
+        let call: DecideOut = serde_json::from_value(json!({
+            "call": { "own_provider": { "name": "p", "model": "m" }, "request": {} },
+        }))
+        .expect("call");
+        assert!(matches!(call, DecideOut::Call { .. }), "{call:?}");
+        round_trip(&call);
+        round_trip(&DecideResume {
+            question: Question {
+                point: DecidePoint::Risk,
+                state: json!({}),
+                options: vec![],
+                items: vec![],
+            },
+            events: vec![json!({ "type": "text_delta", "text": "0.9" })],
+        });
+    }
+
+    #[test]
+    fn question_fits_one_flat_answer_per_item() {
+        let item = |s: &str| QuestionItem {
+            state: json!(s),
+            options: vec![],
+        };
+        let batch = Question {
+            point: DecidePoint::Risk,
+            state: json!({ "cwd": "/w" }),
+            options: vec![],
+            items: vec![item("a"), item("b")],
+        };
+        let score = |value| Answer::Score { value };
+        let items = |answers| Answer::Items { answers };
+        assert!(batch.fits(&items(vec![score(1.0), score(2.0)])));
+        assert!(!batch.fits(&items(vec![score(1.0)])));
+        assert!(!batch.fits(&score(1.0)));
+        assert!(!batch.fits(&items(vec![score(1.0), items(vec![score(2.0)])])));
+        let single = Question {
+            items: vec![],
+            ..batch
+        };
+        assert!(single.fits(&score(1.0)));
+        assert!(!single.fits(&items(vec![])));
+        // A question from a host older than `items` reads as a single one.
+        let old: Question =
+            serde_json::from_value(json!({ "point": "risk", "state": {} })).expect("question");
+        assert!(old.items.is_empty());
     }
 
     #[test]
