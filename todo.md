@@ -1,5 +1,6 @@
 # Todo
 
+- T32.17. `cox-config` loads through the shared `config-schema` crate
 - T33.14.2. Filesystem preopens
 - T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example

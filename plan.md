@@ -40,6 +40,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
+| T32.17 | in progress | P2 | 3 | 10% | Claude / opus-5.5 |
 | T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
@@ -846,6 +847,20 @@ Every card in this phase:
 
 No logic changes. At most three crates are touched. Moved lines do not count toward the 200-LOC limit; edited lines do.
 Common check: the three commands in AGENTS.md are green, `deps.rs` has the crate's rule, and the card's own line holds.
+
+#### T32.17 `cox-config` loads through the shared `config-schema` crate
+
+Model: Claude / opus-5.5 · Status: in progress · Depends: — · Size: ~200 (plus tests) · Files: `crates/cox-config/src/{load,cmd,lib}.rs`, `crates/cox-config/Cargo.toml`, `Cargo.toml`, `Cargo.lock`, `workspace-hack/Cargo.toml`, `toolchain.md`
+Goal: `config-schema` 0.1 (crates.io, `pyrlyn/crates-packages`) was extracted from this crate, rtok's `config/layers.rs` and ketch's `toml_file.rs`; `cox-config` consumes it instead of keeping its own copy (A155, the creator's approval for Mailune X1). Not a `git mv` card like the rest of P32: it deletes code the shared crate now owns. Behaviour stays the same: the layer order, `source_of`, `COX_*` handling, the A138 check in `cox config set` and the `ConfigError`/`CoreError::Config` variants; the existing `cox-config` and `crates/cox` config tests pass unchanged.
+
+Plan:
+1. `load.rs`: the layers go through `config_schema::Layers` (`toml_text` default, `file` user and project, `env` with an `EnvLayer` over `default.toml`'s key tree and the same ignore list, `overrides` for `COX_HOME` and the flags). Delete `Named`, `env_key`, `default_key_tree` and `to_core_error`; `find_git_root` keeps its canonical path over `config_schema::git_root`. `Layers` merges only, so the imported Claude layers keep figment's `adjoin` reading in a small JSON step (lists add, the lower layers win elsewhere), and `source_of` reports the lower layer for a key they only extended, as `adjoin` did. Array keys keep reading a `COX_*` value as TOML, not as a comma list.
+2. `cmd.rs`: `set` and `set_json_in` plan the edit with `config_schema::plan_edit_foreign`, check the result with `check_user_toml` (A138), then `Edit::apply`; delete the private `parse_value`, `toml_from_json` and the table walk.
+3. `lib.rs`: `ConfigError` keeps its variants; `InvalidToml` carries the parser's message as text, and `config_schema::Error` maps onto the existing variants.
+4. Manifests: `config-schema = "0.1"` in the workspace, `cox-config` drops its direct `figment` and `toml_edit`; `cargo hakari generate`; `toolchain.md`, §1.1 and the shared `rust.md` row.
+
+Check: `mise exec -- cargo nextest run -p cox-config -p cox -p cox-app`, then the three commands in AGENTS.md, `cargo hakari verify` and `cargo deny --locked check`; a real `cox config show --sources` and `cox config set` against a scratch `COX_HOME`.
+Out of scope: `docs/config.jsonschema` keeps `schemars::schema_for!` (`config_schema::schema_text` drops `null` from `Option` types, which would change the committed schema and the desktop Settings screen's input).
 
 ### P33 — WASM plugins (goal: one package adds a status segment, a hook, a deferred tool and a provider without a cox release; §1.15 invariants 1, 8, 10 and 15–17 green; ≤ 50 ms warm start per plugin)
 
@@ -3250,6 +3265,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
   - T66.1 depends on T66.1.1 and now touches only `compact.rs` and its test.
   - The `## Archived outputs` section is appended in `Session::compact` after `summarise`, not inside `WorkingState::render`. The old wording conflicted with "the summary ends with it", because the state block comes before the model text, and the `llm` strategy has no state block at all.
 - A154 §1.1 `cox-ext` row, §3 P7 (new T7.9, done the same day) — `cox-ext` reads SKILL.md, command and subagent frontmatter with serde-saphyr 1.3 instead of serde_yaml 0.9, by the creator (2026-10-12). Why: serde_yaml is deprecated and pulled unsafe-libyaml, unmaintained (RUSTSEC-2024-0449), which `deny.toml` ignored only until 2026-12-31; serde-saphyr is maintained and already listed in `rust.md`. Effect: the parser keeps the YAML 1.2 reading (`strict_booleans`, non-finite floats kept as text) and one-line errors; the one difference is that a quoted `'true'` now reads as a bool (test `frontmatter_quoted_true_is_a_bool`); the RUSTSEC-2024-0449 ignore is removed. No decision changes.
+- A155 §3 P32 (new T32.17), by the creator (2026-10-13, for Mailune X1): `cox-config` consumes the shared `config-schema` crate (layering with named layers and per-key provenance, the `COX_*` env layer, comment-preserving edits) that was extracted from it, rtok and ketch, and drops its own copy. Why: the workspace rule against duplicated code across projects. Effect: one card; `config-schema` replaces `cox-config`'s direct `figment` and `toml_edit` dependencies. No §0 decision changes.
 
 ## 7. Risk register
 
