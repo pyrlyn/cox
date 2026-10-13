@@ -10850,6 +10850,42 @@ Result: `crates/cox/tests/cloud_agents.rs` drives the real binary against a scra
 Deviations: the card says the approval is asked and answered with `--answer`; since T56.6 a background task has no prompt, so approval is the exact `CloudAgent(acme/widgets)` allow rule in the scratch config and the third test covers its absence. Gaps found, not fixed: when the engine refuses a cloud run, the refusal text (which names the rule) reaches the task's error but the stream's finish notice says only "the subagent produced no answer"; a refused task still gets an empty external usage row; a run reattached by a resumed session cannot be cancelled, and a stream ending without a terminal status may deliver twice on resume (both T56.7 known gaps). The fixture WAT module duplicates the one in `external_agents_cursor.rs` as `plugin/plugin.wasm` data, since the package must be a directory `plugin install` can read.
 Check output: `mise exec -- cargo nextest run -p cox cloud_agent_headless_run_end_to_end cloud_agent_requests_carry_no_git_identity` — 2 passed (with `cloud_agent_without_an_allow_rule_makes_no_request`, 3 of 3 in `--test cloud_agents`, 15 s); `cargo nextest run --no-fail-fast -p cox-cursor-cloud -p cox-config -p cox-session -p cox` — 326 of 327 passed, the one failure being the third new test's first draft, fixed and re-run green (3 of 3); `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean.
 
+#### T33.40.1 ABI: two-phase decide, own-provider call-out, batched questions — blocker
+
+Status: done 2026-10-12 · Model: Claude Code / opus-5.5
+
+Depends: T33.2, T33.14.1, T33.15, T33.18, T33.20 · Size: ~180 · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin/src/advisor.rs`, `crates/cox-plugin/src/net.rs`
+Goal: close the gap that PL§12 falsifier 3 predicts (J§4.1–4.3). Today a decision plugin can reach its own provider only through a deadlock (`cox_model_call` into its own `cox_provider_stream`) or a ledger bypass (`cox_http` from `cox_decide`). This card adds a path with neither.
+Plan:
+1. ABI changes:
+   - `DecideOut = Advice(Option<Advice>) | Call(ModelCall)`;
+   - the new optional export `cox_decide_resume(DecideResume { question, events }) -> Option<Advice>`;
+   - `ModelCall.target = Tier(t) | OwnProvider { name, model }`;
+   - `Question.items: Vec<QuestionItem>` (one answer per item).
+   
+   These are minor additions: `api` stays 1. Regenerate `docs/plugin-abi.schema.json`.
+2. `PluginAdvisor`: on `Call`, check that the target is a `[[provider]]` of the same plugin. Then run it through the budget gate → the provider registry (`PluginProvider`) → `Priced`, which writes one `usage` row with `job = plugin:<id>`. Then call `cox_decide_resume` with the events. The point's latency budget covers all three steps. Any failure along the way is `None`, and the local default applies.
+3. `net.rs`: `cox_http` to a provider section's host is allowed only inside `cox_provider_stream`. Everywhere else it returns `NotInThisContext`.
+4. PL§4: add the exports and state the context rule.
+Check:
+- `decide_call_out_writes_one_usage_row`: a WAT guest returns `Call`, and its own `cox_provider_stream` returns fixed events;
+- `decide_call_out_over_budget_falls_back`;
+- `decide_cannot_target_another_plugins_provider`;
+- `http_to_provider_host_outside_provider_stream_is_refused`;
+- `batched_question_answers_each_item`;
+- `abi_schema_matches_committed_file`;
+- invariant 8 `every_request_has_a_usage_row` still green.
+
+Execution plan (Claude Code / opus-5.5, ~300 LOC plus tests, one PR; the call-out needs a core seam, so the file list grows past the three named above):
+1. `cox-plugin-api/src/abi.rs`: `DecideOut` (untagged, so an older guest's bare `Option<Advice>` still parses), `DecideResume`, `CallTarget` flattened into `ModelCall` (the `{"tier": …}` wire stays byte-identical), `QuestionItem` + `Question.items`, `Answer::Items` and `Question::fits` (one answer per item). Regenerate `docs/plugin-abi.schema.json` and the `docs/plugins.md` field index.
+2. `cox-protocol/src/traits.rs`: `ModelCaller::call_own(id, section, model, request)`, default `Denied`; `cox-core/src/plugin_model.rs` implements it through the same budget gate → `plugin_backend` (the `Priced` `PluginProvider`) → one `usage` row as `call`, refusing a section that is not an ABI section.
+3. `cox-plugin/src/advisor.rs`: on `Call`, require `OwnProvider` naming a section bound in this plugin's own `HostEnv`, run it through `call_own`, then `cox_decide_resume`, all inside the point's budget; any failure is `None`. `live.rs` hands advisors the env and the late-bound caller.
+4. `cox-plugin/src/net.rs` + `hostfn.rs`: the provider-host branch keys on the calling export being `cox_provider_stream`, not only on the active section.
+5. `docs/design/plugins.md` §4: the context rule and the export shapes. Core `Question` literals gain `items: vec![]`; `router.rs` ignores `Answer::Items`.
+Verify: the Check tests, `cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-core -p cox-protocol`, clippy, fmt.
+
+Check output: `mise exec -- cargo nextest run --workspace --no-fail-fast` — 2274 passed, 8 skipped, including decide_call_out_writes_one_usage_row (cox-core and cox-plugin), decide_call_out_over_budget_falls_back (cox-core and cox-plugin), decide_cannot_target_another_plugins_provider, decide_call_out_refuses_a_section_that_is_not_abi, http_to_provider_host_outside_provider_stream_is_refused, batched_question_answers_each_item, decide_out_reads_an_older_guests_bare_advice, model_call_keeps_the_tier_wire_and_adds_own_provider, question_fits_one_flat_answer_per_item, abi_schema_matches_committed_file, protocol_jsonschema_matches_committed_file and every_request_has_a_usage_row; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean; `COX_HOME=<scratch> cargo run -- doctor` ran (plugin cache ok, provider key missing as expected).
+
 #### T59.6 LSP `definition` and `references` tools on the running servers
 
 Model: sonnet · Status: done 2026-10-12 · Depends: T59.3 · Size: ~190 · Priority: P3 · Complexity: 3
