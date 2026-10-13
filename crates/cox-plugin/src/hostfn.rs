@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use cox_plugin_api::{
-    AbiError, DesktopNotice, HttpReq, InitIn, MAX_NOTICE_ACTIONS, ModelCall, ModelTier,
+    AbiError, CallTarget, DesktopNotice, HttpReq, InitIn, MAX_NOTICE_ACTIONS, ModelCall, ModelTier,
     NoticeLevel, PluginManifest, SessionInfo, Surface, ToolCallIn,
 };
 use cox_protocol::config::PluginsConfig;
@@ -271,6 +271,13 @@ impl HostEnv {
         header: Option<(String, String)>,
     ) -> bool {
         self.net.bind_section(name, base_url, header)
+    }
+
+    /// Whether `name` is an ABI section bound to this plugin: one of its own
+    /// `[[provider]]` rows that won its name (`provider::backends`), so a
+    /// decide call-out can never reach another plugin's section (T33.40.1).
+    pub(crate) fn owns_provider(&self, name: &str) -> bool {
+        self.net.has_section(name)
     }
 
     /// Makes `name` the section `cox_http` may call, until the guard drops.
@@ -562,9 +569,17 @@ impl HostEnv {
             });
         };
         let call: ModelCall = parse(arg)?;
-        let requested = match call.tier {
-            ModelTier::Cheap => Tier::Cheap,
-            ModelTier::Code => Tier::Code,
+        let requested = match call.target {
+            CallTarget::Tier {
+                tier: ModelTier::Cheap,
+            } => Tier::Cheap,
+            CallTarget::Tier {
+                tier: ModelTier::Code,
+            } => Tier::Code,
+            // From inside an export the plugin's one worker is busy, so its
+            // own `cox_provider_stream` could never run: `DecideOut::Call`
+            // is the way there (T33.40.1).
+            CallTarget::OwnProvider { .. } => return Err(AbiError::NotInThisContext),
         };
         // `Tier`'s order is cost order, so the cheaper of the two is the clamp.
         let tier = requested.min(granted);
@@ -590,7 +605,8 @@ impl HostEnv {
     fn http(&self, arg: Value) -> Result<Value, AbiError> {
         self.outside_render()?;
         let request: HttpReq = parse(arg)?;
-        let url = self.net.target(&request.url)?;
+        let in_stream = lock(&self.export).as_str() == crate::provider::EXPORT;
+        let url = self.net.target(&request.url, in_stream)?;
         let runtime = self
             .runtime
             .as_ref()
@@ -1184,6 +1200,35 @@ pub(crate) mod tests {
         );
         assert_eq!(reply, json!({ "Err": { "kind": "not_in_this_context" } }));
         assert_eq!(hits(&rt, &server), 0);
+    }
+
+    /// T33.40.1: the provider host is open only to `cox_provider_stream`,
+    /// even while its section is active, so a decide or event export can
+    /// never reach a paid API past the budget gate and the ledger.
+    #[test]
+    fn http_to_provider_host_outside_provider_stream_is_refused() {
+        let rt = Runtime::new().expect("runtime");
+        let server = mock(&rt, "/v1", ResponseTemplate::new(200));
+        let mut env = HostEnv::new("t");
+        env.runtime = Some(rt.handle().clone());
+        let env = Arc::new(env);
+        let header = Some(("authorization".to_owned(), "Bearer k".to_owned()));
+        assert!(env.bind_provider("own", &server.uri(), header));
+        let _active = env.activate_provider("own");
+        for export in ["cox_on_event", "cox_command", "cox_hook", "cox_tool_call"] {
+            let reply = call(
+                &env,
+                "cox_http",
+                export,
+                get(format!("{}/v1", server.uri())),
+            );
+            assert_eq!(
+                reply,
+                json!({ "Err": { "kind": "not_in_this_context" } }),
+                "{export}"
+            );
+        }
+        assert_eq!(hits(&rt, &server), 0, "a refused request was sent");
     }
 
     #[test]
