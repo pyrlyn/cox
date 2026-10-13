@@ -33,7 +33,7 @@ pub mod voice;
 /// `docs/design/crates.md`: syntect, two-face, pulldown-cmark and
 /// terminal-colorsaurus); re-exported at their old paths so `crate::theme`,
 /// `cox_tui::diff` and the rest keep working.
-pub use cox_render::{color, diff, glyph, link, markdown, svg, theme};
+pub use cox_render::{color, diff, glyph, link, markdown, pointer, svg, theme};
 
 /// T32.1: `text::sanitize` moved to its own crate (guard (b), reuse (d) —
 /// `docs/design/crates.md`); re-exported here at the old path so

@@ -10837,3 +10837,47 @@ Plan: in `cloud_agents.rs`, at the end of a run (done, terminal status or cancel
 Result: `crates/cox-session/src/cloud_agents.rs`: when a run ends (a terminal status, `result`, or a cancel) `settle` reads `GET /v1/agents/{id}/usage` (the run's own entry, else the agent total; counts saturate to `u32`), then claims `cloud_run_mark_usage_recorded`, and only the winner gets the tokens; `task_turn` returns them, so the core's external-turn path writes the one row: provider external, cost $0, job `agent`, Cursor's input, output, cache read and cache write tokens, and the model from `ledger_model` (the preset's requested model, or `cursor:auto`). A row that is not terminal yet, or a failed usage read, leaves the claim for the next resume. Resume: `open` with `resume` spawns `cloud_agents::resume_runs` for the granted cloud drivers (the open never waits on the network); for each unsettled `cloud_runs` row of the session (driver chosen by backend, preferring the same model) it finalizes a run that `GET` reports terminal (the sanitized `result` is the task's result item, then the usage row), follows a run still going until it ends and then finalizes it (never cancelled from here, so closing cox again leaves it running), and writes the row for a terminal run whose usage read had failed. Errors become one sanitized warning notice per run.
 Deviations: the card names `cloud_agents.rs` and `lineage.rs`; `lineage::resume` only rebuilds history and has neither the session nor the drivers, so the resume hook is in `lib.rs`'s `open` instead and `lineage.rs` is unchanged. Core seams: `ExternalAgent::ledger_model` (default `name()`, `cox-protocol`), used by `Session::external_turn`, whose row write moved into `insert_external_usage`; public `Session::complete_resumed_task` (`TaskCompleted`, pointer line and notice, as a live task's end) and `Session::record_resumed_task_usage` (the same row at job `agent` and the session's tier) in `cox-core/src/tasks.rs`. `cox-store`: `cloud_runs_non_terminal` became `cloud_runs_unsettled` (not terminal, or terminal with no usage row yet), so a failed usage read is retried rather than lost. A resumed run's row is under the resumed (parent) session, since the child session that ran the task is gone. Not done: cancelling a reattached run (the task is not in the resumed process's task registry, so `task_stop` cannot reach it); a stream that ends without a terminal status delivers its answer but leaves the run for the next resume, which can deliver it a second time.
 Check output: `mise exec -- cargo nextest run -p cox-session cloud_agent_usage_row_is_billed_externally_with_cursor_tokens cloud_agent_usage_row_is_written_once resume_reattaches_to_a_running_cloud_run resume_finalizes_a_run_that_finished_while_closed` — 4 passed; `mise exec -- cargo nextest run -p cox-session -p cox-core -p cox-store -p cox-protocol -p cox-cursor-cloud` — 628 passed, 3 skipped; `-p cox --test deps` — 10 passed; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean; `cox doctor`, a scripted `cox run -p` and a `cox run --continue -p` against a scratch `COX_HOME` ran.
+
+#### T59.6 LSP `definition` and `references` tools on the running servers
+
+Model: sonnet · Status: done 2026-10-12 · Depends: T59.3 · Size: ~190 · Priority: P3 · Complexity: 3
+
+Execution plan: `lsp/nav.rs` holds the pure part (response parsing for `Location`, `Location[]` and `LocationLink[]`, UTF-16 column conversion, grep fallback patterns, line cap with archive) and the two tools `definition` and `references` over a shared `LspPool`, registered next to `diagnostics` in `cox-session`'s `with_lsp`. `server.rs` gains `Server::definition`/`references`, which sync the file the way `diagnostics` does (the shared sync step is extracted) and then send the request. Paths go through `confine`; locations the server names outside the roots print as bare `path:line:col` and are never read. Verify with fake-server tests for both requests, the fallback and the cap.
+
+Goal: `definition(path, line, col)` and `references(path, line, col)` answer from a language server when one runs for the file and fall back to an `outline`/`grep` answer with a `(no server)` note otherwise, so navigation needs no extra `grep` round trip.
+
+Files:
+- `crates/cox-tools/src/lsp/client.rs`
+- `crates/cox-tools/src/lsp/server.rs`
+- `crates/cox-tools/src/lsp/nav.rs` (new)
+
+Steps:
+1. Hand-rolled wire types for `textDocument/definition` and `textDocument/references` next to the existing ones (`client.rs:174`; P41 rejects `lsp-types`, `plan.md:1245-1253`).
+2. `Server` methods next to `start` (`server.rs:194`); results as `path:line` lines, capped and archived over the cap.
+3. Use `LspPool::running_for` from T59.3; the fallback is a plain-text answer, never a spawn from this tool unless `diagnostics` would spawn too.
+
+Check:
+```bash
+mise exec -- cargo nextest run --workspace
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when: fake-server tests for both requests and the fallback.
+
+Out of scope: rename (T59.7), hover, workspace symbols.
+
+Check output: `mise exec -- cargo nextest run -p cox-tools -p cox-session` — 292 of 293 passed, including the new `lsp::nav` tests (definition and references against a fake server, UTF-16 columns, sort and dedup, an out-of-root path printed bare and sanitized, the 100-row cap archived, an empty answer, the grep fallback with no server and after a server error, input refusals) and the `definition`/`references` assertions in `cox-session` `tool_search_finds_diagnostics`; `mcp_exec::tests::two_large_tool_results_leave_only_the_programs_print` timed out once under load, outside this task, and passed on its own rerun. `mise exec -- cargo nextest run -p cox --test lsp` (the real binary against a fake sandboxed server) — 2 passed. `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
+#### T5.9 Terminal pointer shape follows what the cell does (OSC 22)
+
+Depends: T37.50 · Size: ~150 · Files: `crates/cox-tui/src/term.rs` (`Caps`), `crates/cox-tui/src/state.rs` (`on_mouse`), `crates/cox-tui/src/app.rs` (`restore`)
+Goal: the TUI shows T37.50's shared pointer (A148) where the terminal can: with `tui.mouse` on, a mouse move builds the `Interaction` of what is under it (a row in `cell_rows` that a click acts on — a fold toggle, T22.9 — is clickable; transcript text is selectable), calls `cox_render::pointer::pointer` and writes `Pointer::css_name()` through OSC 22 (`ESC ] 22 ; <name> ST`). The TUI keeps no rule of its own. The shape is written only when it changes. `Caps::query` (T23.0) asks the terminal with OSC 22's `?` query and records support; a terminal that does not answer gets no OSC 22 bytes at all. `restore` puts the pointer back to `default` on exit and on suspend.
+Check: `on_mouse` unit tests: a move onto a fold row asks for `pointer`, onto plain text `text`, onto empty space `default`, a second move inside the same row writes nothing; a `Caps` without OSC 22 support writes no bytes; in kitty or Ghostty the pointer changes over a tool-call header and returns to the arrow after `cox` exits.
+Out of scope: terminals without OSC 22 (nothing changes there).
+
+Status: done 2026-10-12
+
+Implementation: `Caps.osc22` (`detect` sets it for kitty, Ghostty and foot outside tmux; `Caps::query` probes `OSC 22 ; ?pointer` behind a device-attributes backstop and returns `Queried`; `[tui.caps] osc22` overrides; `cox doctor` prints it). `term::pointer_bytes` writes the OSC 22 sequence from `Pointer::css_name()`. `view.rs` records `State.text_rows` beside `cell_rows`; `state::on_mouse` turns a `Moved` event into an `Interaction` for `cox_render::pointer::pointer` and emits `Cmd::Pointer` only when `caps.osc22`, `tui.mouse` is on and the shape changed. `app.rs` writes it and `restore` writes `default` on exit and in the panic hook. cox-tui has no suspend path, so there is nothing to hook for suspend.
+
+Check output: `mise exec -- cargo nextest run -p cox-tui -p cox-protocol -p cox-render` - 484 passed, including `mouse_move_asks_for_the_pointer_the_shared_rule_picks` (card row `pointer`, text row `text`, empty row `default`), `mouse_move_inside_the_same_shape_writes_nothing`, `mouse_move_writes_nothing_without_osc22_or_with_the_mouse_off`, `pty_restores_the_pointer_only_with_the_capability`; `cargo nextest run -p cox` - 194 passed; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: a live kitty or Ghostty window (none on this machine).
