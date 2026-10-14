@@ -1681,6 +1681,7 @@ name = "cox-target"
 version = "0.1.2"
 dependencies = [
  "insta",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "workspace-hack",

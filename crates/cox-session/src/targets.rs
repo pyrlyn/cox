@@ -36,6 +36,27 @@ pub fn configured(config: &Config) -> Vec<(String, String)> {
     named.chain(hosts).collect()
 }
 
+/// The launcher a listing runs: the configured path if it is an absolute
+/// file, else the fixed lookup. `None` for any miss, because a listing
+/// fails open (T68.4); a connection reports the same miss as an error.
+pub fn launcher(config: &Config, kind: Kind) -> Option<PathBuf> {
+    match launcher_override(config, kind) {
+        Some(path) => (path.is_absolute() && path.is_file()).then_some(path),
+        None => cox_target::launcher(kind).ok(),
+    }
+}
+
+fn launcher_override(config: &Config, kind: Kind) -> Option<PathBuf> {
+    let launchers = &config.launchers;
+    match kind {
+        Kind::Ssh => &launchers.ssh,
+        Kind::Docker => &launchers.docker,
+        Kind::Lima => &launchers.limactl,
+        Kind::Colima => &launchers.colima,
+    }
+    .clone()
+}
+
 fn resolve_with(
     config: &Config,
     text: &str,
@@ -68,16 +89,7 @@ fn resolve_with(
                 program: None,
             })
     };
-    let launchers = &config.launchers;
-    let by_kind = |kind: Kind| -> Option<PathBuf> {
-        let path = match kind {
-            Kind::Ssh => &launchers.ssh,
-            Kind::Docker => &launchers.docker,
-            Kind::Lima => &launchers.limactl,
-            Kind::Colima => &launchers.colima,
-        };
-        path.clone()
-    };
+    let by_kind = |kind: Kind| launcher_override(config, kind);
     cox_target::resolve(text, entry, by_kind, exists)
 }
 
