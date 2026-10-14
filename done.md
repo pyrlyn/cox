@@ -9202,6 +9202,39 @@ Result: `crates/cox/tests/support/fake_launcher.rs` (one fake launcher for all f
 
 Check (2026-10-14): `cargo nextest run -p cox --test targets --test remote --test deps` 17 passed, 3 skipped (ignored); clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean.
 
+#### T68.4 Desktop: connect to any target (Rust and FFI)
+
+Model: Claude / sonnet-5.5 · Depends: T68.2, T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
+
+Goal: `RemoteWorkspace::connect(target)` takes a `Target`; `App::targets()` lists the configured ones and the running ones it can see — `docker ps --format json`, `limactl list --json`, `colima list --json`, each run through the T68.1 launcher with a timeout, a missing launcher listing nothing (fail open). `cox-ffi` forwards both (one-expression bodies, D11). Done when `listing_skips_a_missing_launcher` and `connect_reaches_a_docker_target` (fake `docker` script) pass.
+
+Status: done 2026-10-14
+Result: `cox-target/src/discover.rs` (pure): `listing(kind, launcher)` builds the scrubbed-env command for `docker ps --format '{{json .}}'`, `limactl list --json` and `colima list --json`; `parse_listing` accepts NDJSON or an array, keeps running instances and drops names `check_name` refuses. `cox-session/src/targets.rs` `launcher(config, kind)`. `cox-app/src/targets.rs`: `TargetChoice`, `App::targets()` (configured first, then discovered, the three listings run concurrently with a 3 s timeout and `kill_on_drop`; a missing launcher, non-zero exit, timeout or unreadable output lists nothing for that kind) and `App::connect_target(text)` through `cox_session::targets::resolve`. `RemoteWorkspace::connect(Resolved, local)` spawns `cox [--cwd <dir>] app-server --stdio` through `cox_target::command(.., Tty::No)`; `connect_remote(host)` now goes through `connect_target("ssh:<host>")`; new `RemoteError::Config`. `cox-ffi`: `connect_target`, `targets` and the `TargetChoice` record as one-expression forwards; `connect_remote(host)` kept for Swift. Docker `context` is config-only, not discovered.
+
+Check (2026-10-14): `cargo nextest run -p cox-target -p cox-app -p cox-ffi -p cox -p cox-session` 601/601 (incl. `listing_skips_a_missing_launcher`, `connect_reaches_a_docker_target`, `forward_only`); clippy on the same packages `--all-targets -D warnings` clean; `cargo fmt --check` clean.
+
+#### T68.6 `--on <target>` for the TUI and `cox run`
+
+Model: Claude / sonnet-5.5 · Depends: T68.2 · Size: ~200 · Priority: P1 · Complexity: 3
+
+Goal: a global `--on <target>`. `cox --on lima:dev` runs the remote TUI through the launcher with a tty (`ssh -t`, `docker exec -it`, `limactl shell`, `colima ssh`); `cox run --on docker:ci -p …` runs without a tty, sends the prompt as one stream-json input line on stdin rather than on the command line, copies stdout through unchanged and exits with the remote exit code. Only an allowlisted set of flags is forwarded (`--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume`, `--continue`); `--cwd` comes from the target's `cwd`. Done when e2e `run_on_target_sends_prompt_over_stdin` and `run_on_target_returns_remote_exit_code` (fake launcher) pass.
+
+Status: done 2026-10-14
+Result: global `--on <target>` (`crates/cox/src/on_target.rs`). The TUI runs remotely with a tty and inherited stdio; `cox run --on` runs without a tty, writes the prompt as one JSON string line on the child's stdin, copies our stdin through after it and returns the remote exit code (a signal-killed launcher gives 1). Forwarded: `--cwd` from the target's config, `--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume`, `--continue`, each value checked by `cox_target::command`; any other flag, a TUI first-turn prompt or another subcommand is refused by name. New `cox run --prompt-stdin` (conflicts with `-p`): the first stdin line is a JSON string with the prompt, the rest stays the approvals channel. `cox-target` becomes a normal dependency of `cox`. `docs/config.md` "Running on a target". Not run against a real target or a real PTY.
+
+Check (2026-10-14): `cargo nextest run -p cox -p cox-target` 228 passed, 5 skipped (incl. e2e `run_on_target_sends_prompt_over_stdin`, `run_on_target_returns_remote_exit_code`, `run_on_target_refuses_a_flag_it_does_not_forward`; unit `tui_on_a_target_asks_for_a_tty`); clippy `-p cox -p cox-target --all-targets -D warnings` clean; `cargo fmt --check` clean.
+
+#### T68.7 `agent` presets on a target
+
+Model: Claude / sonnet-5.5 · Depends: T68.2 · Size: ~150 · Priority: P2 · Complexity: 3
+
+Goal: `[external_agents.<name>]` gains `target`. Such a preset runs `cox run --output-format stream-json` on the target through the existing `StreamJson` driver (`cox-session/src/external_agents.rs`) instead of a local program; the remote run's usage lines become local `usage` rows under the preset's model, so the ledger stays complete. A preset with a target is not wrapped in the local sandbox (the remote applies its own) and still asks permission per call like `CloudAgent`. Done when `agent_on_target_records_remote_usage` and `agent_on_target_is_not_locally_sandboxed_but_asks` pass.
+
+Status: done 2026-10-14
+Result: `ExternalAgentConfig.target` (user config only: `external_agents` is already in `GUARDED_KEYS`). `cox-session/src/target_agents.rs`: a preset with a target resolves through `targets::resolve` at session open and runs `cox [--cwd <cwd>] run --output-format stream-json --prompt-stdin` through `cox_target::command(.., Tty::No)`, not wrapped in the local sandbox; the prompt goes as one JSON string line on stdin. `external_agents.rs`: the stream-json loop is a shared `pump`, keeping `assistant` and `result` lines for the remote run and taking `usage` from `result` into one `usage` row under the preset name ($0, like other external agents). Permission: a call needs an `allow` rule for `TargetAgent(<kind:name>)` in user config; `bypass` and `auto` do not waive it (as `CloudAgent`); without it the call is refused naming the rule (approved by the creator 2026-10-14). A preset whose launcher is missing is left out with a warning. The preset's model/mode/sandbox are not forwarded to the remote run.
+
+Check (2026-10-14): `cargo nextest run -p cox-protocol -p cox-config -p cox-target -p cox-session --features cox-session/plugins` 256/256 (incl. `agent_on_target_records_remote_usage`, `agent_on_target_is_not_locally_sandboxed_but_asks`, `a_target_without_a_launcher_leaves_the_preset_out`); clippy on those packages clean; `cargo fmt --check` clean.
+
 #### T37.44.16 The shared file walker skips `.git/`
 
 Depends: — · Size: ~40 · Files: `crates/cox-search` (the walker), its tests
