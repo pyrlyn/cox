@@ -11634,3 +11634,20 @@ Deviations: four source files, not two: `server.rs` answers the new calls (its `
 
 Check output: `mise exec -- cargo nextest run -p cox-app` — 272 passed, with `wire_round_trips_every_message`, `app_server_schema_drift` (schema regenerated), `wire_has_no_secret_message`, `an_over_size_remote_canvas_is_capped_by_the_client` (14 frames and a bad id from the server: 12 kept, widths clamped, titles and plugin sanitized, another session's update not delivered) and `remote_canvas_replies_are_checked_again` (an `onclick` attribute dropped, an attachment sanitized, an over-size one refused); clippy `-D warnings` and `cargo fmt --check` clean.
 
+
+#### T33.47.6 FFI
+
+Depends: T33.47.5 · Files: `crates/cox-ffi/src/session.rs`, `crates/cox-ffi/src/remote.rs`, `crates/cox-ffi/src/types.rs` · Design: `docs/design/plugin-canvas.md` §8
+
+`CanvasView`, `show_canvas`, `canvas_select` on the local and the remote session.
+
+Check: the FFI mirror tests list the new shapes; a local and a remote selection round-trip in tests.
+
+Plan (Claude Code / claude-opus-5-5): (1) `types.rs`: `#[uniffi::remote(Record)]` for `PluginCanvas`, `Frame`, `CanvasUpdate` and `CanvasAttach`, so a field added upstream fails this build. (2) `session.rs` and `remote.rs`: one-expression forwards (`forward_only`) of `plugin_canvases`, `show_canvas`, `hide_canvas`, `next_canvas`, `select_canvas`. (3) A test through `SessionHandle`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.6 canvas calls over the FFI" on branch `t33.47-plugin-canvas`. The records keep their Rust names (`Frame`, not the design's `CanvasView`): the FFI declares cox-app's and the plugin API's own types rather than mirroring them. A local `show_canvas` is async because the draw it starts runs on the runtime; a local `hide_canvas` is not.
+
+Deviations: the test is in `crates/cox-ffi/tests/app.rs`, a fourth file. A remote round trip cannot be built from an integration test (`RemoteSessionHandle::new` is crate-private and a remote needs ssh), so the remote side is covered by `cox-app`'s `remote_canvas_replies_are_checked_again` and `an_over_size_remote_canvas_is_capped_by_the_client` (T33.47.5); the FFI side is checked by `forward_only`.
+
+Check output: `mise exec -- cargo nextest run -p cox-ffi` — 16 passed, with `canvas_calls_cross_the_ffi_and_fail_open` and `every_ffi_body_is_one_forward_expression`; clippy `-D warnings` and `cargo fmt --check` clean.
+

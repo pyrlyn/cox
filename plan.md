@@ -63,8 +63,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
-| T33.47 | in progress | P2 | 4 | 55% | Claude Code / claude-opus-5-5 |
-| T33.47.6 | todo | P2 | 2 | 0% | |
+| T33.47 | in progress | P2 | 4 | 65% | Claude Code / claude-opus-5-5 |
 | T33.47.7 | todo | P2 | 3 | 0% | |
 | T33.47.8 | todo | P2 | 4 | 0% | |
 | T33.47.9 | todo | P2 | 1 | 0% | |
@@ -1142,14 +1141,6 @@ Depends: T33.45.7 · Design: `docs/design/plugin-canvas.md`, A156
 A plugin that produces UI (Weft's `plugins/cox`, whose agent writes app screens) has no way to show them drawn: the desktop API is widgets only and PL§15.4 refused web views. The creator approved, through Weft's T106.6, a narrow kind of web view behind its own grant line, `desktop.canvas`: a pane beside the transcript holding *frames*, each a static HTML page a plugin draws, shown with page JavaScript off, every load blocked, every navigation but the first refused, and only a host-owned script in its own content world, which reports a click. The plugin turns the selection into text that the app adds to the composer as a `text/plain` attachment the person sends or removes. Redraws follow PL§8. The design, the caps, the isolation and its sources, and four open questions with recommendations are in the design document. The build is T33.47.1–T33.47.9; this card closes when they are done.
 
 Check: the nine cards' checks; `just test` green.
-
-#### T33.47.6 FFI
-
-Depends: T33.47.5 · Files: `crates/cox-ffi/src/session.rs`, `crates/cox-ffi/src/remote.rs`, `crates/cox-ffi/src/types.rs` · Design: `docs/design/plugin-canvas.md` §8
-
-`CanvasView`, `show_canvas`, `canvas_select` on the local and the remote session.
-
-Check: the FFI mirror tests list the new shapes; a local and a remote selection round-trip in tests.
 
 #### T33.47.7 CoxPlatform: `CanvasPage`
 
