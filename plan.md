@@ -142,9 +142,9 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T68.5 | todo | P2 | 3 | 0% |  |
-| T68.8 | todo | P2 | 3 | 0% |  |
-| T68.10 | todo | P2 | 1 | 0% |  |
+| T68.5 | in progress | P2 | 3 | 0% | Claude / sonnet-5.5 |
+| T68.8 | in progress | P2 | 3 | 0% | Claude / sonnet-5.5 |
+| T68.10 | in progress | P2 | 1 | 0% | Claude / haiku-5.5 |
 
 ## Reference
 
@@ -3047,19 +3047,19 @@ Rationale in §6 A158. Today only the desktop app reaches a remote session, only
 
 #### T68.5 Desktop: Connect to Target sheet (Swift)
 
-Model: - · Status: open · Depends: T68.4 · Size: ~200 · Priority: P2 · Complexity: 3
+Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.4 · Size: ~200 · Priority: P2 · Complexity: 3
 
 Goal: File > Connect to Host becomes Connect to Target: a kind picker (SSH, Docker, Lima, Colima), the listed targets of that kind, a free-text name, the `hello` result (OS, sandbox) shown before the first session opens. Remote hosts in `RemoteHosts.swift` become targets. DT§ and the shared design docs say how Windows and Linux apps repeat it. Done when the CoxUI snapshot of the sheet (recorded from CI) and a CoxModel test of the target list pass.
 
 #### T68.8 Windows targets
 
-Model: - · Status: open · Depends: T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
+Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
 
 Goal: `cox app-server --stdio` and `cox run` serve over Windows OpenSSH: binary stdio without CRLF translation, Windows paths accepted as a target `cwd`, `hello` reporting no sandbox so the session runs `on-request` (D7, T49.2 deferred). Run by the Windows host agent; the windows CI job runs the app-server tests once it is back on. Done when `app_server_round_trips_on_windows` passes there.
 
 #### T68.10 Docs: targets
 
-Model: - · Status: open · Depends: T68.5, T68.6, T68.7 · Size: ~150 (doc) · Priority: P2 · Complexity: 1
+Model: Claude / haiku-5.5 · Status: in progress · Depends: T68.5, T68.6, T68.7 · Size: ~150 (doc) · Priority: P2 · Complexity: 1
 
 Goal: `docs/targets.md` (each kind, how to put `cox` on it, what the trust rules above mean for a user, the sandbox inside a container), `docs/app-server.md` narrowed to the wire, `docs/config.md`, README links. Done when every target kind has a worked example and `docs/app-server.md` no longer explains ssh setup.
 
