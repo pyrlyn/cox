@@ -814,9 +814,66 @@ pub struct CanvasUpdate {
     pub stopped: bool,
 }
 
+impl PluginCanvas {
+    /// `decl` as the pane heads it, or why it is left out.
+    fn from_decl(plugin: &str, decl: CanvasDecl) -> Result<Self, CanvasError> {
+        decl.check()?;
+        Ok(Self {
+            plugin: sanitize(plugin),
+            title: sanitize(&decl.title),
+            symbol: symbol(&decl.symbol),
+            select_attr: decl.select_attr,
+        })
+    }
+
+    /// One a remote server sent, checked again (plugin-canvas §7): its
+    /// `select_attr` reaches the page's host script.
+    pub fn checked(self) -> Option<Self> {
+        let decl = CanvasDecl {
+            title: self.title,
+            symbol: self.symbol,
+            select_attr: self.select_attr,
+        };
+        Self::from_decl(&self.plugin, decl).ok()
+    }
+}
+
+impl CanvasUpdate {
+    /// The update as a client may show it. The wire is a boundary too
+    /// (plugin-canvas §7), so a remote server's frames are capped and
+    /// sanitized again, and `order` keeps only the ids the caps accept.
+    pub fn capped(self) -> Self {
+        let mut frames = CanvasOut {
+            frames: self.frames,
+        }
+        .capped()
+        .0
+        .frames;
+        for f in &mut frames {
+            f.title = sanitize(&f.title);
+        }
+        // The caps' own id rules (form, uniqueness, count), over ids alone.
+        let ids = self.order.into_iter().map(|id| Frame {
+            id,
+            title: String::new(),
+            width_pt: 0,
+            html: String::new(),
+        });
+        let ids = CanvasOut {
+            frames: ids.collect(),
+        };
+        Self {
+            plugin: sanitize(&self.plugin),
+            order: ids.capped().0.frames.into_iter().map(|f| f.id).collect(),
+            frames,
+            stopped: self.stopped,
+        }
+    }
+}
+
 /// Updates the pane has not taken yet; a full queue drops one, and the
 /// next draw then sends every frame.
-const CANVAS_QUEUE: usize = 8;
+pub(crate) const CANVAS_QUEUE: usize = 8;
 
 #[derive(Debug)]
 struct Canvas {
@@ -1184,22 +1241,19 @@ impl PluginUi {
 /// Records `plugin`'s canvas, or why it was left out: the host filtered it
 /// by surface and grant, and this checks the declaration itself.
 fn canvas(d: &mut Declared, plugin: &str, decl: CanvasDecl) {
-    if let Err(e) = decl.check() {
-        let why = sanitize(&e.to_string());
-        d.notices.push(format!(
-            "plugin {}: canvas left out: {why}",
-            sanitize(plugin)
-        ));
-        return;
-    }
+    let shown = match PluginCanvas::from_decl(plugin, decl) {
+        Ok(shown) => shown,
+        Err(e) => {
+            let why = sanitize(&e.to_string());
+            let plugin = sanitize(plugin);
+            d.notices
+                .push(format!("plugin {plugin}: canvas left out: {why}"));
+            return;
+        }
+    };
     d.canvases.push(Canvas {
         id: plugin.to_string(),
-        shown: PluginCanvas {
-            plugin: sanitize(plugin),
-            title: sanitize(&decl.title),
-            symbol: symbol(&decl.symbol),
-            select_attr: decl.select_attr,
-        },
+        shown,
         visible: false,
         size: CanvasIn {
             width_pt: 0,
@@ -1314,7 +1368,7 @@ impl PluginUi {
 
 /// An attachment as the composer's chip shows it: the host already capped
 /// it, and both strings are the plugin's, so neither may carry escapes.
-fn chip(attach: CanvasAttach) -> CanvasAttach {
+pub(crate) fn chip(attach: CanvasAttach) -> CanvasAttach {
     CanvasAttach {
         name: sanitize(&attach.name),
         text: sanitize(&attach.text),

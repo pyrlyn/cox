@@ -360,6 +360,138 @@
           ]
         },
         {
+          "description": "plugin-canvas §7: the canvases the session's plugins declared.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "canvases"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                }
+              },
+              "required": [
+                "session"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "The client's pane shows `plugin`'s canvas at this size, newly or\nresized; what it draws streams as `plugin_canvas` notifications.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "show_canvas"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                },
+                "plugin": {
+                  "type": "string"
+                },
+                "width_pt": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "height_pt": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "session",
+                "plugin",
+                "width_pt",
+                "height_pt"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "The client's pane hid `plugin`'s canvas.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "hide_canvas"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                },
+                "plugin": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "session",
+                "plugin"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "A click on a frame; answered with the composer's attachment, if any.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "canvas_select"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                },
+                "plugin": {
+                  "type": "string"
+                },
+                "frame": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "session",
+                "plugin",
+                "frame",
+                "value"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
           "description": "Stops the session's patch stream; the session keeps running.",
           "type": "object",
           "properties": {
@@ -681,6 +813,50 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "canvases"
+            },
+            "value": {
+              "type": "array",
+              "items": true
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "description": "A `show_canvas` or `hide_canvas` took effect.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "shown"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "canvas_attach"
+            },
+            "value": true
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "closed"
             }
           },
@@ -910,6 +1086,33 @@
               },
               "required": [
                 "alert"
+              ]
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "description": "plugin-canvas §6: what one draw of a shown canvas changed. The\nclient caps it again, since the wire is a boundary too (§7).",
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "const": "plugin_canvas"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                },
+                "update": true
+              },
+              "required": [
+                "session",
+                "update"
               ]
             }
           },
