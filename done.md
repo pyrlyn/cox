@@ -11763,6 +11763,22 @@ Deviations: none (3 files). `SessionWindow`'s side panes moved into an extension
 
 Check output: `scripts/desktop/app.sh` builds `Cox.app` (exit 0, no warnings in the touched files); `swiftlint lint --strict` and `swift format lint -s` clean on the three files. No App test target exists; the logic this wires is tested in T33.47.8.2, T33.47.8.4, T33.47.8.7 and T33.47.8.8.
 
+#### T33.47.8.9 CoxModel: the palette's pick
+
+Depends: T33.47.8.2 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/CanvasStore.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/CanvasStoreTests.swift` · Design: §3
+
+The palette's "Show <title>" names a canvas but not a size, which only the pane knows. `pick(_:)` switches a shown pane at the size it last sent, and a hidden pane opens on the picked canvas when it next shows.
+
+Check: a pick switches a shown pane at its last size; a pick while hidden is what the next show opens.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasStore.picked` and `pick(_:)`: a shown pane switches at its last size; a hidden one records the pick. (2) `show` prefers the pick to the first declared canvas and clears it. (3) Two tests in `CanvasStoreTests`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.9 canvas pick for the palette" on branch `t33.47-plugin-canvas`. Split out of T33.47.8.6 when its palette rows needed it.
+
+Deviations: none (2 files, about 40 lines).
+
+Check output: `swift test --filter CanvasStoreTests` — 10 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
+
 #### T33.47.8.4 CoxUI: `PluginCanvasPane`
 
 Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3

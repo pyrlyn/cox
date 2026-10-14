@@ -4,7 +4,8 @@
 
 // CanvasStore (T33.47.8.2, plugin-canvas §3, §5, §6): frames follow the plugin's order and an
 // unchanged one keeps its value, another plugin's draw is ignored, a stop keeps the last frames,
-// hiding forgets them, and a click's attachment is one chip per canvas.
+// hiding forgets them, and a click's attachment is one chip per canvas. The palette's pick switches
+// a shown pane at its size and names the canvas a hidden one opens on (T33.47.8.9).
 
 import CoxClient
 import Foundation
@@ -143,5 +144,22 @@ private struct Pane {
     session.plugins.canvases.close()
     await pump.value
     #expect(store.frames.map(\.id) == ["cart"])
+  }
+
+  @Test func aPickSwitchesAShownPaneAtItsLastSize() async throws {
+    let pane = try await Pane.shown()
+    await pane.store.resize(widthPt: 900, heightPt: 700)
+    await pane.store.pick("notes")
+    #expect(pane.store.shown == "notes" && pane.store.picked == nil)
+    #expect(pane.session.plugins.canvases.shown == ["weft", "weft", "notes"])
+  }
+
+  @Test func aPickWhileHiddenIsWhatThePaneOpensOn() async throws {
+    let pane = try await Pane.shown()
+    await pane.store.hide()
+    await pane.store.pick("notes")
+    #expect(pane.store.shown == nil && pane.store.picked == "notes")
+    await pane.store.show(widthPt: 800, heightPt: 600)
+    #expect(pane.store.shown == "notes" && pane.store.picked == nil)
   }
 }

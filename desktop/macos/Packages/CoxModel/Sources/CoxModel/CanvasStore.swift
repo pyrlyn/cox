@@ -22,6 +22,8 @@ public final class CanvasStore {
   public private(set) var frames: [CanvasFrame] = []
   /// The plugin missed three draws in a row; its last frames stay, and it is not drawn again.
   public private(set) var stopped = false
+  /// The canvas the palette picked while the pane was hidden, which it opens on.
+  public private(set) var picked: String?
   /// Why the last call failed; a remote session's can.
   public private(set) var failure: String?
   @ObservationIgnored private let client: any CanvasClient
@@ -46,10 +48,11 @@ public final class CanvasStore {
     do { canvases = try await client.pluginCanvases() } catch { report(error) }
   }
 
-  /// Shows `plugin`'s canvas, else the one shown, else the first declared, at this size. Another
-  /// plugin's canvas shown before is hidden first, so only one draws.
+  /// Shows `plugin`'s canvas, else the one shown, else the one picked, else the first declared,
+  /// at this size. Another plugin's canvas shown before is hidden first, so only one draws.
   public func show(_ plugin: String? = nil, widthPt: UInt32, heightPt: UInt32) async {
-    guard let plugin = plugin ?? shown ?? canvases.first?.plugin else { return }
+    guard let plugin = plugin ?? shown ?? picked ?? canvases.first?.plugin else { return }
+    picked = nil
     if let shown, shown != plugin { await hide() }
     if shown != plugin { (frames, stopped) = ([], false) }
     shown = plugin
@@ -59,6 +62,16 @@ public final class CanvasStore {
     } catch {
       report(error)
     }
+  }
+
+  /// The palette's "Show <title>": only the pane knows its size, so a shown pane switches at the
+  /// size it last sent, and a hidden one opens on `plugin` when it next shows.
+  public func pick(_ plugin: String) async {
+    guard shown != nil, size.count == 2 else {
+      picked = plugin
+      return
+    }
+    await show(plugin, widthPt: size[0], heightPt: size[1])
   }
 
   /// The pane's size changed; the core draws again when the change is large enough.
