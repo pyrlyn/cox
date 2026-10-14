@@ -26,7 +26,6 @@
 - T33.45.8. SDK and the surfaces example
 - T33.45.10. Docs: Russian and Ukrainian translations
 - T33.47. Plugin canvas: a desktop pane of plugin-drawn pages
-- T33.47.2. Manifest key, grant line and design text
 - T33.47.3. Host calls and SDK
 - T33.47.4. `cox-app`: canvas state
 - T33.47.5. Wire and remote sessions

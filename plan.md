@@ -63,8 +63,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
-| T33.47 | in progress | P2 | 4 | 20% | Claude Code / claude-opus-5-5 |
-| T33.47.2 | in progress | P2 | 1 | 0% | Claude Code / claude-opus-5-5 |
+| T33.47 | in progress | P2 | 4 | 25% | Claude Code / claude-opus-5-5 |
 | T33.47.3 | todo | P2 | 3 | 0% | |
 | T33.47.4 | todo | P2 | 3 | 0% | |
 | T33.47.5 | todo | P2 | 2 | 0% | |
@@ -1146,16 +1145,6 @@ Depends: T33.45.7 · Design: `docs/design/plugin-canvas.md`, A156
 A plugin that produces UI (Weft's `plugins/cox`, whose agent writes app screens) has no way to show them drawn: the desktop API is widgets only and PL§15.4 refused web views. The creator approved, through Weft's T106.6, a narrow kind of web view behind its own grant line, `desktop.canvas`: a pane beside the transcript holding *frames*, each a static HTML page a plugin draws, shown with page JavaScript off, every load blocked, every navigation but the first refused, and only a host-owned script in its own content world, which reports a click. The plugin turns the selection into text that the app adds to the composer as a `text/plain` attachment the person sends or removes. Redraws follow PL§8. The design, the caps, the isolation and its sources, and four open questions with recommendations are in the design document. The build is T33.47.1–T33.47.9; this card closes when they are done.
 
 Check: the nine cards' checks; `just test` green.
-
-#### T33.47.2 Manifest key, grant line and design text
-
-Depends: T33.47.1 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` (plus the regenerated `docs/plugin.schema.json` and field index) · Design: `docs/design/plugin-canvas.md` §1
-
-`DesktopCaps.canvas` (moved here from T33.47.1, so each task stays within three files); the `desktop.canvas` grant line; PL§4 (`cox_redraw` under the canvas), §14 decision 17, the §15.4 canvas row and rules in place of "HTML or web views — never", §15.5's `canvas` key.
-
-Plan (Claude Code / claude-opus-5-5): (1) `DesktopCaps.canvas` with `#[serde(default)]` and the test that it parses and is refused when `surfaces` excludes `desktop` (the existing surface-table check covers it); regenerate `docs/plugin.schema.json` and the field index. (2) `capability_list` adds `("desktop.canvas", caps.desktop.canvas)`; `grant_new_canvas_needs_approval` beside the existing desktop grant test. (3) PL§4 host-function table: `cox_redraw` under any `ui` or `desktop.canvas`; PL§14 decision 17; PL§15.4: the canvas row and its rules in place of "HTML or web views — never" (the pointer added with A156 goes); PL§15.5: `canvas = true` in the example and the grant line in the list.
-
-Check: `manifest_canvas_is_a_desktop_part`; `grant_new_canvas_needs_approval`; the schema drift test; `cargo nextest run -p cox-plugin-api -p cox-plugin`.
 
 #### T33.47.3 Host calls and SDK
 

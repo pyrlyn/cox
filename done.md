@@ -11572,3 +11572,17 @@ Check: caps unit tests (frame count, sizes, id, `select_attr`, selection value, 
 Status: done 2026-10-14 · Commit "feat: T33.47.1 canvas ABI types and caps" on branch `t33.47-plugin-canvas`: `DesktopOut.canvas`, `CanvasDecl`, `CanvasIn`, `CanvasOut`, `Frame`, `CanvasSelect`, `CanvasAttach`, `CanvasError`, the limits as constants, and `CanvasDecl::check`, `CanvasOut::capped`, `CanvasSelect::check`, `CanvasAttach::capped`, re-exported and in the ABI schema. The manifest key moved to T33.47.2 so this task stays within three files. The new `DesktopOut` field also needed `canvas: None` in the struct literals of the surfaces example and of two `cox-app` tests (one line each).
 
 Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-app` — 436 passed, with `canvas_decl_checks_title_symbol_and_attribute`, `canvas_out_keeps_valid_frames_within_the_limits`, `canvas_out_caps_the_frame_count_and_the_total_size`, `canvas_selection_needs_a_frame_id_and_a_plain_bounded_value`, `canvas_attachment_cuts_the_name_and_refuses_long_text`, `desktop_payloads_round_trip`, `abi_schema_matches_committed_file` and `plugin_api_reference_covers_both_schemas`; `cargo check --workspace --all-targets` and the `plugins/` workspace check clean; clippy `-D warnings` (host and `wasm32-unknown-unknown`) and `cargo fmt --check` clean.
+
+#### T33.47.2 Manifest key, grant line and design text
+
+Depends: T33.47.1 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` (plus the regenerated `docs/plugin.schema.json` and field index) · Design: `docs/design/plugin-canvas.md` §1
+
+`DesktopCaps.canvas` (moved here from T33.47.1, so each task stays within three files); the `desktop.canvas` grant line; PL§4 (`cox_redraw` under the canvas), §14 decision 17, the §15.4 canvas row and rules in place of "HTML or web views — never", §15.5's `canvas` key.
+
+Plan (Claude Code / claude-opus-5-5): (1) `DesktopCaps.canvas` with `#[serde(default)]` and the test that it parses and is refused when `surfaces` excludes `desktop` (the existing surface-table check covers it); regenerate `docs/plugin.schema.json` and the field index. (2) `capability_list` adds `("desktop.canvas", caps.desktop.canvas)`; `grant_new_canvas_needs_approval` beside the existing desktop grant test. (3) PL§4 host-function table: `cox_redraw` under any `ui` or `desktop.canvas`; PL§14 decision 17; PL§15.4: the canvas row and its rules in place of "HTML or web views — never" (the pointer added with A156 goes); PL§15.5: `canvas = true` in the example and the grant line in the list.
+
+Check: `manifest_canvas_is_a_desktop_part`; `grant_new_canvas_needs_approval`; the schema drift test; `cargo nextest run -p cox-plugin-api -p cox-plugin`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.2 canvas manifest key and grant line" on branch `t33.47-plugin-canvas`: `DesktopCaps.canvas`, the `desktop.canvas` grant line, PL§4 (`cox_redraw` under the canvas), PL§14 decision 17, the PL§15.4 canvas row and rule in place of "HTML or web views — never", PL§15.5's example and grant-line list; the regenerated manifest schema and field index.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin` — 172 passed, with `manifest_canvas_is_a_desktop_part`, `grant_new_canvas_needs_approval`, `plugin_schema_matches_committed_file` and `plugin_api_reference_covers_both_schemas`; clippy `-D warnings` and `cargo fmt --check` clean.
