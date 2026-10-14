@@ -42,7 +42,7 @@ use cox_app::{
 };
 use cox_app::{AlertAction, LinkClick, PluginAction, PluginAlert, PluginTab};
 use cox_app::{Fact, TurnFiles};
-use cox_app::{KeyError, PermissionRule, RuleKind, SessionGrant, SettingsGroup};
+use cox_app::{KeyError, PermissionRule, RuleKind, SessionGrant, SettingsGroup, TargetChoice};
 use cox_app::{KeyValueRow, PluginSlot, SpanView, WidgetView};
 use cox_app::{MenuModel, ModelSection, Readiness};
 use cox_app::{SettingControl, SettingInput, SettingOption};
@@ -123,6 +123,13 @@ uniffi::custom_type!(StyledSpan, Span, {
         link: s.link,
     }),
 });
+
+#[uniffi::remote(Record)]
+pub struct TargetChoice {
+    pub name: String,
+    pub target: String,
+    pub configured: bool,
+}
 
 #[uniffi::remote(Record)]
 pub struct ModelChoice {

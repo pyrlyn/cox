@@ -15,10 +15,12 @@ use std::fmt;
 use std::str::FromStr;
 
 pub mod command;
+pub mod discover;
 pub mod launcher;
 pub mod resolve;
 
 pub use command::{Tty, command, kept_env};
+pub use discover::{listing, parse_listing};
 pub use launcher::{candidates, find, launcher};
 pub use resolve::{Entry, Resolved, resolve};
 

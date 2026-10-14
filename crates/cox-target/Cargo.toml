@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# The container and VM tools list what runs as JSON (discover.rs).
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
