@@ -142,10 +142,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T68.4 | in progress | P2 | 3 | 100% | Claude / sonnet-5.5 |
 | T68.5 | todo | P2 | 3 | 0% |  |
-| T68.6 | in progress | P1 | 3 | 0% | Claude / sonnet-5.5 |
-| T68.7 | in progress | P2 | 3 | 100% | Claude / sonnet-5.5 |
 | T68.8 | todo | P2 | 3 | 0% |  |
 | T68.10 | todo | P2 | 1 | 0% |  |
 
@@ -3048,29 +3045,11 @@ Rationale in §6 A158. Today only the desktop app reaches a remote session, only
 
 **Not taken yet (in `ideas.md`):** a throwaway `docker run --rm` container from an image with the project mounted, and installing `cox` on a target.
 
-#### T68.4 Desktop: connect to any target (Rust and FFI)
-
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.2, T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
-
-Goal: `RemoteWorkspace::connect(target)` takes a `Target`; `App::targets()` lists the configured ones and the running ones it can see — `docker ps --format json`, `limactl list --json`, `colima list --json`, each run through the T68.1 launcher with a timeout, a missing launcher listing nothing (fail open). `cox-ffi` forwards both (one-expression bodies, D11). Done when `listing_skips_a_missing_launcher` and `connect_reaches_a_docker_target` (fake `docker` script) pass.
-
 #### T68.5 Desktop: Connect to Target sheet (Swift)
 
 Model: - · Status: open · Depends: T68.4 · Size: ~200 · Priority: P2 · Complexity: 3
 
 Goal: File > Connect to Host becomes Connect to Target: a kind picker (SSH, Docker, Lima, Colima), the listed targets of that kind, a free-text name, the `hello` result (OS, sandbox) shown before the first session opens. Remote hosts in `RemoteHosts.swift` become targets. DT§ and the shared design docs say how Windows and Linux apps repeat it. Done when the CoxUI snapshot of the sheet (recorded from CI) and a CoxModel test of the target list pass.
-
-#### T68.6 `--on <target>` for the TUI and `cox run`
-
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.2 · Size: ~200 · Priority: P1 · Complexity: 3
-
-Goal: a global `--on <target>`. `cox --on lima:dev` runs the remote TUI through the launcher with a tty (`ssh -t`, `docker exec -it`, `limactl shell`, `colima ssh`); `cox run --on docker:ci -p …` runs without a tty, sends the prompt as one stream-json input line on stdin rather than on the command line, copies stdout through unchanged and exits with the remote exit code. Only an allowlisted set of flags is forwarded (`--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume`, `--continue`); `--cwd` comes from the target's `cwd`. Done when e2e `run_on_target_sends_prompt_over_stdin` and `run_on_target_returns_remote_exit_code` (fake launcher) pass.
-
-#### T68.7 `agent` presets on a target
-
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.2 · Size: ~150 · Priority: P2 · Complexity: 3
-
-Goal: `[external_agents.<name>]` gains `target`. Such a preset runs `cox run --output-format stream-json` on the target through the existing `StreamJson` driver (`cox-session/src/external_agents.rs`) instead of a local program; the remote run's usage lines become local `usage` rows under the preset's model, so the ledger stays complete. A preset with a target is not wrapped in the local sandbox (the remote applies its own) and still asks permission per call like `CloudAgent`. Done when `agent_on_target_records_remote_usage` and `agent_on_target_is_not_locally_sandboxed_but_asks` pass.
 
 #### T68.8 Windows targets
 
