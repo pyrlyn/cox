@@ -11522,3 +11522,15 @@ Check: unit tests `manifest_skills_reject_a_dir_outside_the_package_or_not_named
 Status: done 2026-10-14 · Commit "feat: T33.46.1 manifest and grant: [[skills]]" on branch `t33.46-plugin-skills`: `SkillDecl` and `PluginManifest.skills`, the name and folder checks and `DuplicateSkill`, the `skill:<name> <dir>` grant line, PL§2/§3/§12/§14 decision 16, the regenerated schema and API field index, and a user-docs paragraph in `docs/plugins.md`.
 
 Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin` — 165 passed (with `manifest_skills_reject_a_dir_outside_the_package_or_not_named_for_the_skill`, `manifest_skills_only_package_needs_no_wasm`, `grant_new_skill_needs_approval`, and the schema and API-reference drift tests); clippy `-D warnings` and `cargo fmt --check` clean.
+
+#### T33.46.2 `cox-ext`: a plugin skill file, merge, and the skill's folder
+
+Depends: — · Files: `crates/cox-ext/src/skills.rs`, `crates/cox-ext/tests/skills.rs` · Design: A155
+
+`pub fn parse_file(path) -> Result<Skill, String>` (the parser `discover` uses, for files outside the skill dirs, like `agents::parse_file`) and `pub fn merge(local: &mut Discovered, plugin: Vec<Skill>, plugin_id)`: a name already loaded is kept and the plugin's skill is skipped with a notice. `SkillTool`'s output adds the line `Base directory: <folder>` after the heading, and `structured.dir`, so the model can read files the skill bundles (every skill, not only a plugin's: a local skill can bundle files too).
+
+Check: `skills_plugin_skill_loses_to_a_local_one_with_a_notice`, `skills_invoke_names_the_skill_folder`; the existing tests updated for the new line; `cargo nextest run -p cox-ext`.
+
+Status: done 2026-10-14 · Commit "feat: T33.46.2 cox-ext: plugin skill files, merge and the skill's folder" on branch `t33.46-plugin-skills`: `skills::parse_file`, `skills::merge` (a loaded name wins, the plugin's is a notice), and `Base directory: <folder>` plus `structured.dir` in the `skill` tool's output.
+
+Check output: `mise exec -- cargo nextest run -p cox-ext` — 64 passed (with `skills_plugin_skill_loses_to_a_local_one_with_a_notice`, `skills_parse_file_applies_the_name_rule`, `skills_invoke_names_the_skill_folder`); clippy `-D warnings` and `cargo fmt --check` clean.

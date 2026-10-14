@@ -63,9 +63,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
-| T33.46 | in progress | P2 | 3 | 35% | Claude Code / claude-opus-5-5 |
-| T33.46.2 | in progress | P2 | 2 | 0% | Claude Code / claude-opus-5-5 |
-| T33.46.3 | todo | P2 | 3 | 0% | |
+| T33.46 | in progress | P2 | 3 | 65% | Claude Code / claude-opus-5-5 |
+| T33.46.3 | in progress | P2 | 3 | 0% | Claude Code / claude-opus-5-5 |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
@@ -1140,14 +1139,6 @@ Depends: T45.4 · Design: `docs/design/plugins.md` §2, §3, §12, §14 decision
 A plugin package cannot carry Agent Skills: `plugin.toml` has `[[agents]]` and `[[mcp]]` but no skills, so a plugin that wants to teach the model how to use its tools (Weft's `plugins/cox`, which ships the Weft authoring guide as a skill to Claude Code and Cursor) has no way to. Add a data-only `[[skills]]` entry: `name` and `dir`, a package-relative folder holding a `SKILL.md` in the same format as `.cox/skills/<name>/SKILL.md`. Each entry is one grant line, `skill:<name> <dir>`. A granted plugin's skills join the session's skills after the local ones, so a user or project skill of the same name wins, with a notice. The `skill` tool names the skill's folder in its output, so a skill can point at files it bundles. The build is T33.46.1–T33.46.3; this card closes when they are done.
 
 Check: the three cards' checks; `just test` green.
-
-#### T33.46.2 `cox-ext`: a plugin skill file, merge, and the skill's folder
-
-Depends: — · Files: `crates/cox-ext/src/skills.rs`, `crates/cox-ext/tests/skills.rs` · Design: A155
-
-`pub fn parse_file(path) -> Result<Skill, String>` (the parser `discover` uses, for files outside the skill dirs, like `agents::parse_file`) and `pub fn merge(local: &mut Discovered, plugin: Vec<Skill>, plugin_id)`: a name already loaded is kept and the plugin's skill is skipped with a notice. `SkillTool`'s output adds the line `Base directory: <folder>` after the heading, and `structured.dir`, so the model can read files the skill bundles (every skill, not only a plugin's: a local skill can bundle files too).
-
-Check: `skills_plugin_skill_loses_to_a_local_one_with_a_notice`, `skills_invoke_names_the_skill_folder`; the existing tests updated for the new line; `cargo nextest run -p cox-ext`.
 
 #### T33.46.3 Session: a granted plugin's skills
 
