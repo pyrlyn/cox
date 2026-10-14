@@ -83,6 +83,10 @@ pub struct Config {
     pub desktop: DesktopConfig,
     /// `[external_agents.<name>]` (T52.2): user config only.
     pub external_agents: BTreeMap<String, ExternalAgentConfig>,
+    /// `[targets.<name>]` (T68.2): named run targets, user config only.
+    pub targets: BTreeMap<String, TargetConfig>,
+    /// `[launchers]` (T68.2): launcher program paths, user config only.
+    pub launchers: LaunchersConfig,
 }
 
 impl Config {
@@ -1255,6 +1259,44 @@ pub struct ExternalAgentConfig {
     pub writable: Vec<PathBuf>,
 }
 
+/// One `[targets.<name>]` entry (T68.2): a machine or container a whole
+/// session can run on. The name is the TOML key and what `--on` and the
+/// desktop app show. User config only: a project config can set none of it
+/// (the guards in `cox-config`'s `load.rs`), because a target decides which
+/// machine receives the session, its prompts and its files.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct TargetConfig {
+    /// Where it runs, as `kind:name`: `ssh:devbox`, `docker:web`,
+    /// `lima:default` or `colima:dev`.
+    pub target: String,
+    /// Directory on the target the session starts in; letters, digits and
+    /// `- _ . , / : = @ + \` only, because it goes on the remote command line.
+    pub cwd: Option<String>,
+    /// `docker --context` to reach the container through; `docker:` targets only.
+    pub context: Option<String>,
+    /// Absolute path of the launcher program for this target; beats
+    /// `[launchers]` and the built-in lookup.
+    pub program: Option<PathBuf>,
+}
+
+/// `[launchers]` (T68.2): absolute paths of the programs that reach a
+/// target, for a machine where they are not at the usual place. `PATH` is
+/// never searched. User config only: the path decides which program
+/// receives the session, so a repository must not set it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct LaunchersConfig {
+    /// `ssh`, for `ssh:` targets.
+    pub ssh: Option<PathBuf>,
+    /// `docker`, for `docker:` targets.
+    pub docker: Option<PathBuf>,
+    /// `limactl`, for `lima:` targets.
+    pub limactl: Option<PathBuf>,
+    /// `colima`, for `colima:` targets.
+    pub colima: Option<PathBuf>,
+}
+
 /// `[voice]` (P54, A123): push-to-talk dictation with local whisper, used
 /// only by a `cox` built with the `voice` feature. User config only: a
 /// project config cannot set any `voice.*` key (the guard in `cox-config`'s
@@ -1785,6 +1827,7 @@ fn generate_config_docs(toml: &str) -> String {
         }
     }
     out.push_str(EXTERNAL_AGENTS_DOCS);
+    out.push_str(TARGETS_DOCS);
     out.push_str(KEYBINDINGS_DOCS);
     out.push_str(ACCESSIBILITY_DOCS);
     out.push_str(STATUS_LINE_DOCS);
@@ -1828,6 +1871,45 @@ writable = [\"~/.gemini\"]
 ```
 
 Cursor (`agent acp`, `CURSOR_API_KEY`) comes from the granted Cursor plugin's `[[external_agents]]` entry (`plugins/cursor`), not from this table.
+
+";
+
+/// T68.2: `[targets.<name>]` and `[launchers]` have no default entry, so
+/// the scan of `default.toml` has nothing to list; the tables, their guard
+/// and one example per kind.
+#[cfg(test)]
+const TARGETS_DOCS: &str = "## `[targets.<name>]` and `[launchers]`
+
+Run targets (T68.2, P68): a machine or container a whole cox session can run on, reached with `--on <name>` and in the desktop app. None by default. **User config only**: a project `.cox/config.toml` cannot add, change or remove an entry or a launcher path, because a target decides which machine receives the session and a launcher path decides which program runs; the loader reverts both with a warning. `cox` must already be installed on the target.
+
+- `target` — where it runs, as `kind:name`: `ssh:<host or alias>`, `docker:<container>`, `lima:<instance>` or `colima:<profile>`
+- `cwd` — the directory on the target the session starts in. Letters, digits and `- _ . , / : = @ + \\` only, because it goes on the remote command line
+- `context` — `docker --context` to reach the container through; `docker:` targets only
+- `program` — absolute path of the launcher for this target; beats `[launchers]` and the built-in lookup
+- `[launchers]` `ssh`, `docker`, `limactl`, `colima` — absolute path of that program, for a machine where it is not at the usual place. `PATH` is never searched. A path that is relative or does not exist is refused
+
+A name in `[targets.*]` wins over a literal `kind:name`. Every `desktop.remote_hosts` alias also reads as an `ssh:<alias>` target.
+
+Examples (not defaults):
+
+```toml
+[targets.devbox]                    # ssh
+target = \"ssh:devbox\"
+cwd = \"/srv/app\"
+
+[targets.web]                       # a running container on a remote Docker engine
+target = \"docker:web\"
+context = \"staging\"
+
+[targets.vm]                        # a Lima instance
+target = \"lima:default\"
+
+[targets.dev]                       # a Colima profile
+target = \"colima:dev\"
+
+[launchers]
+docker = \"/opt/orbstack/bin/docker\"
+```
 
 ";
 
