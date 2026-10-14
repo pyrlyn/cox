@@ -5,7 +5,8 @@
 // CanvasPage's isolation (T33.47.7, docs/design/plugin-canvas.md §4), proved
 // on the shipped macOS rather than argued: a page script does not run, an
 // `https:` or `data:` image is not loaded, the page cannot navigate, and the
-// host script's post arrives with the clicked element's value. Nothing here
+// host script's post arrives with the clicked element's value. A shown frame
+// reports its content's height at 100% and zooms inside (T33.47.8.8). Nothing here
 // reaches the network: the rule list blocks it.
 
 import Foundation
@@ -84,6 +85,19 @@ private let fixture = """
     let canvas = try await loaded()
     try await canvas.load(html: "<title>second</title><p>2</p>")
     #expect(try await run(canvas, "return document.title") as? String == "second")
+  }
+
+  @Test func aShownFrameReportsItsHeightAt100PercentAndZoomsInside() async throws {
+    let canvas = try await CanvasPage.make(selectAttribute: "data-weft-path")
+    let tall = try await canvas.show(html: "<div style=\"height:500px\"></div>", zoom: 2)
+    // The div and the body's default margins, not the zoomed 1000.
+    #expect((500...540).contains(tall))
+    #expect(try await run(canvas, "return document.documentElement.style.zoom") as? String == "2")
+    // Shorter than the last one, in standards mode as the first was in quirks mode.
+    let short = try await canvas.show(html: "<!doctype html><p>x</p>", zoom: 1)
+    #expect(short > 0 && short < 100)
+    try await canvas.zoom(0.5)
+    #expect(try await run(canvas, "return document.documentElement.style.zoom") as? String == "0.5")
   }
 
   @Test func theAttributeReachesTheScriptAsJSON() {

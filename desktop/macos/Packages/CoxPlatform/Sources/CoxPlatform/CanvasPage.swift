@@ -20,6 +20,10 @@
 //   that outlines the element under the pointer and posts a click's
 //   selection value. The page shares the DOM but runs no script to forge it.
 //
+// The app sizes each frame's box from the content height `show` measures and
+// zooms inside the page, since scaling the web view from outside would put
+// clicks where the content is not drawn.
+//
 // Separate from `BrowserController`, whose page the agent drives on the open
 // web; this one never leaves its own `cox-canvas:` document.
 
@@ -98,6 +102,42 @@ public final class CanvasPage {
       for try await event in page.load(URLRequest(url: url)) where event == .finished { return }
     } catch {
       throw .page("the frame did not load: \(error.localizedDescription)")
+    }
+  }
+
+  /// Shows `html` at `zoom` and returns its content's height at 100%, in
+  /// points. Measured before the zoom applies, on the fresh document `load`
+  /// opened, and from the body's contents: the root's and the body's own boxes
+  /// fill the frame's current height in quirks mode, so they never shrink.
+  public func show(html: String, zoom: Double) async throws(CanvasFailure) -> Double {
+    try await load(html: html)
+    let height = try await run(Self.measure)
+    try await self.zoom(zoom)
+    return (height as? NSNumber)?.doubleValue ?? 0
+  }
+
+  static let measure = """
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    const margin = parseFloat(getComputedStyle(document.body).marginBottom) || 0;
+    return Math.ceil(range.getBoundingClientRect().bottom + window.scrollY + margin);
+    """
+
+  /// Scales the content inside the frame, as CSS `zoom` does.
+  public func zoom(_ zoom: Double) async throws(CanvasFailure) {
+    _ = try await run(
+      "document.documentElement.style.setProperty('zoom', String(zoom))", ["zoom": zoom])
+  }
+
+  /// Runs `body` in the host script's world: the page's own script is off,
+  /// and it shares only the DOM with this.
+  private func run(
+    _ body: String, _ arguments: [String: Any] = [:]
+  ) async throws(CanvasFailure) -> Any? {
+    do {
+      return try await page.callJavaScript(body, arguments: arguments, contentWorld: Self.world)
+    } catch {
+      throw .page("the frame's script failed: \(error.localizedDescription)")
     }
   }
 

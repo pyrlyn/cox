@@ -11731,6 +11731,22 @@ Deviations: none (3 files, about 75 lines).
 
 Check output: `theSessionsPullFoldsTheCanvasDraws` fails with the pump left out of the pull and passes with it; `twoWindowsShareOneCanvasAndASwitchMakesAFreshOne` passes; `swift test` in CoxModel — 181 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
 
+#### T33.47.8.8 CoxPlatform: a frame's content height and zoom
+
+Depends: T33.47.7 · Files: `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/CanvasPage.swift`, `desktop/macos/Packages/CoxPlatform/Tests/CoxPlatformTests/CanvasPageTests.swift` · Design: §3, §4
+
+The pane sizes each frame's box from its content height (§3) and zooms inside the page, since scaling a web view from outside misplaces its clicks; both need script in the `cox-canvas` world, which only `CanvasPage` holds. `show(html:zoom:)` loads, measures the content at 100% and applies the zoom; `zoom(_:)` applies a new one.
+
+Check: a frame reports its content height in quirks and standards mode, not the view's, and its root carries the zoom.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasPage.show(html:zoom:)`: `load`, then measure, then zoom, each script in the `cox-canvas` world. (2) Measure the body's contents with a `Range` plus the body's bottom margin, since in quirks mode the root's and the body's boxes fill the view. (3) `zoom(_:)` sets the root's CSS `zoom`. (4) A test in `CanvasPageTests`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.8 canvas frame height and zoom" on branch `t33.47-plugin-canvas`. Split out of T33.47.8.5 when its wiring needed both, to keep that card at three files.
+
+Deviations: none (2 files, about 55 lines).
+
+Check output: the first measure, the root's bounding box, gave 768 (the view's height) for a 500 px page without a doctype; the `Range` gives 500–540 there and under 100 for a one-line page with a doctype. `swift test` in CoxPlatform — 44 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
+
 #### T33.47.8.4 CoxUI: `PluginCanvasPane`
 
 Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3
