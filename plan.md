@@ -65,7 +65,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 75% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | todo | P2 | 4 | 0% | |
-| T33.47.8.3 | todo | P2 | 2 | 0% | |
 | T33.47.8.5 | todo | P2 | 3 | 0% | |
 | T33.47.8.6 | todo | P2 | 2 | 0% | |
 | T33.47.9 | todo | P2 | 1 | 0% | |
@@ -1153,14 +1152,6 @@ The pane beside the transcript with frames side by side and zoom, ⌘⇧D, the p
 Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a selection adds one chip and a second replaces it; the falsifier 3 measurement written into the card's Check output.
 
 Split by A157 into T33.47.8.1–T33.47.8.6, one layer each; this card closes when they are done.
-
-#### T33.47.8.3 CoxCore: the local and remote canvas calls
-
-Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxCore/Sources/CoxCore/PluginConvert.swift`, `desktop/macos/Packages/CoxCore/Sources/CoxCore/LiveCoreClient.swift`, `desktop/macos/Packages/CoxCore/Sources/CoxCore/RemoteClient.swift` · Design: §7, §8
-
-`LiveSession` and `RemoteSession` conform to `CanvasClient` through cox-ffi's calls; the FFI records convert to the client's.
-
-Check: a conversion test keeps every field; `swift test` for CoxCore against a freshly built `CoxFFI.xcframework`.
 
 #### T33.47.8.5 App: the pane beside the column
 

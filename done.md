@@ -11699,6 +11699,22 @@ Deviations: none.
 
 Check output: `swift test --filter "CanvasStoreTests|PluginCanvasTests|ComposerStore"` in `desktop/macos/Packages/CoxModel` — 32 passed, with `theFirstDeclaredCanvasShowsWithItsFrames`, `framesFollowTheOrderAndAnUnchangedOneKeepsItsValue`, `anotherPluginsDrawIsIgnoredAndAStopKeepsTheLastFrames`, `showingAnotherCanvasHidesTheFirstAndHidingForgetsTheFrames`, `onlyAChangedSizeIsSentAgain`, `aSelectionAddsOneChipAndASecondReplacesIt`, `aRemovedChipIsNotBroughtBack` and `theDrawsArriveThroughThePump`; swift-format and SwiftLint `--strict` clean.
 
+#### T33.47.8.3 CoxCore: the local and remote canvas calls
+
+Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxCore/Sources/CoxCore/PluginConvert.swift`, `desktop/macos/Packages/CoxCore/Sources/CoxCore/LiveCoreClient.swift`, `desktop/macos/Packages/CoxCore/Sources/CoxCore/RemoteClient.swift` · Design: §7, §8
+
+`LiveSession` and `RemoteSession` conform to `CanvasClient` through cox-ffi's calls; the FFI records convert to the client's.
+
+Check: a conversion test keeps every field; `swift test` for CoxCore against a freshly built `CoxFFI.xcframework`.
+
+Plan (Claude Code / claude-opus-5-5): (1) `PluginConvert.swift`: `PluginCanvas`, `CanvasUpdate` (its `Frame`s into `CanvasFrame`) and `CanvasAttach` from cox-ffi's records, field for field. (2) `LiveCoreClient.swift` and `RemoteClient.swift`: `CanvasClient` conformances forwarding to `SessionHandle` and `RemoteSessionHandle`. (3) A conversion test in `ConvertTests.swift`; rebuild `CoxFFI.xcframework` (`scripts/desktop/xcframework.sh`) and run CoxCore's `swift test`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.3 canvas calls in CoxCore" on branch `t33.47-plugin-canvas`. Each conformance sits in its session's own file because `handle` is private there. A local `hideCanvas` and `selectCanvas` cannot fail (the FFI answers without an error); the protocol's `throws` is for the remote ones.
+
+Deviations: the test is in `ConvertTests.swift`, a fourth file.
+
+Check output: `scripts/desktop/xcframework.sh` (dist profile, `CARGO_PROFILE_DIST_DEBUG=0`) built `CoxFFI.xcframework` and the bindings; `swift test` in `desktop/macos/Packages/CoxCore` — 29 passed, with `theCanvasValuesConvert`; swift-format and SwiftLint `--strict` clean on the four files.
+
 #### T33.47.8.4 CoxUI: `PluginCanvasPane`
 
 Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3
