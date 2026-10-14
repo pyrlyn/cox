@@ -11747,6 +11747,22 @@ Deviations: none (2 files, about 55 lines).
 
 Check output: the first measure, the root's bounding box, gave 768 (the view's height) for a 500 px page without a doctype; the `Range` gives 500–540 there and under 100 for a one-line page with a doctype. `swift test` in CoxPlatform — 44 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
 
+#### T33.47.8.10 CoxPlatform: a redraw keeps the scroll and the outline
+
+Depends: T33.47.8.8 · Files: `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/CanvasPage.swift`, `desktop/macos/Packages/CoxPlatform/Tests/CoxPlatformTests/CanvasPageTests.swift` · Design: §6
+
+§6 says a reloaded frame keeps its scroll offset and re-applies the outline when the selected value is still there; `CanvasPage.show` loaded a fresh document and lost both. It now reads them from the old document and restores them on the new one, comparing values rather than building a selector from one the page wrote.
+
+Check: a redraw keeps the scroll and the outline; a draw without the value outlines nothing.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasPage` keeps the selection attribute it was made with. (2) `show` reads the scroll offset and the outlined element's value from the old document, in the `cox-canvas` world, before loading. (3) After the load, the measure and the zoom, it outlines the first element whose attribute equals that value and scrolls back. (4) A test in `CanvasPageTests`.
+
+Status: done 2026-10-14 · Commit "fix: T33.47.8.10 a canvas redraw keeps scroll and outline" on branch `t33.47-plugin-canvas`. Found while writing T33.47.9: design §6 promised it and the app did not do it.
+
+Deviations: none (2 files, about 50 lines).
+
+Check output: `aRedrawKeepsTheScrollAndTheOutlineWhileTheValueIsThere` fails without the change (no outline, `scrollY` 0) and passes with it; `swift test` in CoxPlatform — 45 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
+
 #### T33.47.8.5 App: the pane beside the column
 
 Depends: T33.47.7, T33.47.8.2, T33.47.8.3, T33.47.8.4, T33.47.8.7, T33.47.8.8 · Files: `desktop/macos/App/SessionCanvas.swift` (new), `desktop/macos/App/SessionWindow.swift`, `desktop/macos/App/ShellState.swift` · Design: §3, §4, §5

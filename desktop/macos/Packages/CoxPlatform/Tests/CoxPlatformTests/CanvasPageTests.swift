@@ -6,7 +6,8 @@
 // on the shipped macOS rather than argued: a page script does not run, an
 // `https:` or `data:` image is not loaded, the page cannot navigate, and the
 // host script's post arrives with the clicked element's value. A shown frame
-// reports its content's height at 100% and zooms inside (T33.47.8.8). Nothing here
+// reports its content's height at 100% and zooms inside (T33.47.8.8), and a
+// redraw keeps the scroll and the selection's outline (T33.47.8.10). Nothing here
 // reaches the network: the rule list blocks it.
 
 import Foundation
@@ -98,6 +99,22 @@ private let fixture = """
     #expect(short > 0 && short < 100)
     try await canvas.zoom(0.5)
     #expect(try await run(canvas, "return document.documentElement.style.zoom") as? String == "0.5")
+  }
+
+  @Test func aRedrawKeepsTheScrollAndTheOutlineWhileTheValueIsThere() async throws {
+    let canvas = try await CanvasPage.make(selectAttribute: "data-weft-path")
+    let page = { (mark: String) in
+      #"<div style="height:3000px"><p data-weft-path="screen#home" id="home">\#(mark)</p></div>"#
+    }
+    _ = try await canvas.show(html: page("1"), zoom: 1)
+    _ = try await run(canvas, "document.getElementById('home').click(); scrollTo(0, 500); return 1")
+    _ = try await canvas.show(html: page("2"), zoom: 1)
+    let selected = "return document.querySelector('[data-cox-selected]')?.id ?? ''"
+    #expect(try await run(canvas, selected) as? String == "home")
+    #expect((try await run(canvas, "return scrollY") as? NSNumber)?.intValue == 500)
+    // The value is gone from the next draw, so nothing is outlined.
+    _ = try await canvas.show(html: #"<p data-weft-path="screen#cart">3</p>"#, zoom: 1)
+    #expect(try await run(canvas, selected) as? String == "")
   }
 
   @Test func theAttributeReachesTheScriptAsJSON() {

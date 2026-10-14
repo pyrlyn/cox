@@ -49,6 +49,8 @@ public final class CanvasPage {
   static let handlerName = "coxCanvas"
   private let gate: Gate
   private let handler: Handler
+  /// The plugin's selection attribute, already checked by the plugin API.
+  private let attribute: String
 
   /// The scheme the frame's own document is served on.
   nonisolated static let scheme = "cox-canvas"
@@ -85,14 +87,18 @@ public final class CanvasPage {
         source: hostScript(attribute: selectAttribute), injectionTime: .atDocumentEnd,
         forMainFrameOnly: true, in: world))
     let page = WebPage(configuration: configuration, navigationDecider: Decider(gate: gate))
-    return CanvasPage(page: page, selections: selections, gate: gate, handler: handler)
+    return CanvasPage(
+      page: page, selections: selections, gate: gate, handler: handler, attribute: selectAttribute)
   }
 
-  private init(page: WebPage, selections: AsyncStream<String>, gate: Gate, handler: Handler) {
+  private init(
+    page: WebPage, selections: AsyncStream<String>, gate: Gate, handler: Handler, attribute: String
+  ) {
     self.page = page
     self.selections = selections
     self.gate = gate
     self.handler = handler
+    self.attribute = attribute
   }
 
   /// Shows `html`, replacing what the frame showed; returns once loaded.
@@ -109,12 +115,36 @@ public final class CanvasPage {
   /// points. Measured before the zoom applies, on the fresh document `load`
   /// opened, and from the body's contents: the root's and the body's own boxes
   /// fill the frame's current height in quirks mode, so they never shrink.
+  /// A redraw keeps the scroll offset, and the outline while the selected
+  /// value is still on the page (plugin-canvas §6).
   public func show(html: String, zoom: Double) async throws(CanvasFailure) -> Double {
+    let kept = page.url == nil ? nil : try await run(Self.keep, ["attr": attribute])
     try await load(html: html)
     let height = try await run(Self.measure)
     try await self.zoom(zoom)
+    if var kept = kept as? [String: Any] {
+      kept["attr"] = attribute
+      _ = try await run(Self.restore, kept)
+    }
     return (height as? NSNumber)?.doubleValue ?? 0
   }
+
+  static let keep = """
+    const selected = document.querySelector("[data-cox-selected]");
+    return { x: window.scrollX, y: window.scrollY,
+      selected: selected ? selected.getAttribute(attr) ?? "" : "" };
+    """
+
+  /// Compares values rather than building a selector from one, which the
+  /// page's DOM wrote.
+  static let restore = """
+    if (selected) {
+      const el = Array.from(document.querySelectorAll("[" + attr + "]"))
+        .find(e => e.getAttribute(attr) === selected);
+      if (el) el.setAttribute("data-cox-selected", "");
+    }
+    window.scrollTo(x, y);
+    """
 
   static let measure = """
     const range = document.createRange();
