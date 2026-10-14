@@ -142,6 +142,16 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
+| T68.1 | in progress | P1 | 3 | 0% | Claude / sonnet-5.5 |
+| T68.2 | todo | P1 | 2 | 0% |  |
+| T68.3 | todo | P1 | 2 | 0% |  |
+| T68.4 | todo | P2 | 3 | 0% |  |
+| T68.5 | todo | P2 | 3 | 0% |  |
+| T68.6 | todo | P1 | 3 | 0% |  |
+| T68.7 | todo | P2 | 3 | 0% |  |
+| T68.8 | todo | P2 | 3 | 0% |  |
+| T68.9 | todo | P1 | 2 | 0% |  |
+| T68.10 | todo | P2 | 1 | 0% |  |
 
 ## Reference
 
@@ -3026,6 +3036,102 @@ Model: grok-4.7 · Status: open · Depends: — · Size: ~150 (doc) · Priority:
 
 Goal: `docs/design/github-action.md` and `docs/design/schedule.md`: how `cox run -p` runs in a GitHub workflow (inputs, key handling, sandbox, cost cap, what it may push) and on a schedule (where the schedule lives, locking, the ledger). No code until the creator approves; implementation cards come in a later amendment.
 
+### P68 — Run targets (goal: a whole cox session runs on another machine, in a Docker container, in a Lima instance or in the Colima VM, driven from the desktop app, the TUI, `cox run -p` or the `agent` tool, with the remote on Linux, macOS or Windows and the client on any of them)
+
+Rationale in §6 A158. Today only the desktop app reaches a remote session, only over ssh and only from macOS (`cox-app/src/remote.rs`, T52.19–T52.21). P68 generalises that link: a **target** is one string, `ssh:<host>`, `docker:<container>`, `lima:<instance>` or `colima:<profile>`, and every surface runs the remote `cox` through the target's launcher. The model, the tools, the sandbox and the keys stay on the target, as with `cox app-server` today.
+
+**Rules every P68 card keeps.**
+- A launcher (`ssh`, `docker`, `limactl`, `colima`) is found at an absolute path or the path the user config names, never through `PATH`.
+- Nothing the model or the person typed goes on the remote command line: ssh, `limactl shell` and `colima ssh` join their arguments into one shell string. Only fixed tokens and checked names (host, container, instance, profile, a cwd made of safe characters) go there; a prompt goes over stdin.
+- No key and no ssh agent crosses the link: `ForwardAgent=no`, `ClearAllForwardings=yes`, a scrubbed environment, and `docker exec` without `-e`.
+- A container is not a sandbox. The remote `cox` applies its own policy; with no sandbox backend there (a container without bwrap or Landlock, Windows) the session forces `on-request` (D7) and says so.
+- `cox` is on the target's `PATH` already; P68 installs nothing. A missing `cox` or a wire-version mismatch is one readable error with an install hint.
+- `targets.*` is user config only; a project config cannot name a target.
+
+**Order.** T68.1 blocks all. T68.2 and T68.3 follow it and are independent of each other. T68.4 → T68.5. T68.6 and T68.7 need T68.2. T68.8 needs T68.3. T68.9 can start after T68.1 and grows with each card. T68.10 last.
+
+**Not taken yet (in `ideas.md`):** a throwaway `docker run --rm` container from an image with the project mounted, and installing `cox` on a target.
+
+#### T68.1 `cox-target`: targets and their launch commands
+
+Model: Claude / sonnet-5.5 · Status: in progress · Depends: — · Size: ~250 · Priority: P1 · Complexity: 3
+
+Goal: a new pure crate `crates/cox-target` owns `Target` (`Ssh { host }`, `Docker { container, context }`, `Lima { instance }`, `Colima { profile }`), its `FromStr`/`Display` for `kind:name`, the name check (today's `remote::check_host`, generalised: no leading `-`, no whitespace or control characters), the launcher lookup and `command(target, launcher, remote_argv, tty) -> tokio::process::Command`. `cox-app/src/remote.rs` loses `check_host`, `ssh_command`, `SSH` and `KEPT_ENV` and calls the crate, so the ssh path has one owner.
+
+Plan:
+1. `crates/cox-target/src/lib.rs`: `Target`, `Kind`, `TargetError` (thiserror), parse and display; `check_name`; `check_token` for each remote argv token (refuses whitespace, control characters and shell metacharacters, because three launchers join argv into a shell string).
+2. `launcher.rs`: per-kind absolute candidates for macOS, Linux and Windows (`/usr/bin/ssh`, `%SystemRoot%\System32\OpenSSH\ssh.exe`; Homebrew, `/usr/local/bin`, `/usr/bin` and Docker Desktop paths for `docker`, `limactl`, `colima`), first existing wins; the existence check is injected so tests touch no real path.
+3. `command.rs`: argv per kind — `ssh -T|-t -o BatchMode=yes -o ForwardAgent=no -o ClearAllForwardings=yes -- <host> …`, `docker [--context <ctx>] exec -i [-t] <container> …`, `limactl shell <instance> …`, `colima ssh -p <profile> -- …`; flag names checked against each tool's own docs and cited in the commit; environment cleared to a per-OS kept list (`HOME USER LOGNAME PATH SSH_AUTH_SOCK`, plus `DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG` for docker, `LIMA_HOME` for lima; `USERPROFILE SystemRoot` on Windows); stdin and stdout piped, stderr null as today (T68.3 changes it); `kill_on_drop`.
+4. `remote.rs` switches to the crate; `RemoteWorkspace::connect_with(path)` stays for tests.
+5. `Cargo.toml` workspace member, `deps.rs` rule if one lists crate edges, `toolchain.md` untouched (no new dependency).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-target -p cox-app
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `target_round_trips_through_its_string`, `name_that_reads_as_an_option_is_refused`, `token_with_shell_metacharacters_is_refused`, `each_kind_builds_its_launch_argv` (insta, one per kind and tty), `launcher_lookup_never_uses_path` and the existing `crates/cox/tests/remote.rs` pass.
+
+#### T68.2 `[targets.<name>]` in config
+
+Model: - · Status: open · Depends: T68.1 · Size: ~120 · Priority: P1 · Complexity: 2
+
+Goal: `[targets.<name>]` with `target` (`kind:name`), `cwd`, `context` (docker) and `program` (an absolute launcher path that overrides the lookup), plus `[launchers]` per kind. A surface accepts a target by its config name or as a literal `kind:name`. `desktop.remote_hosts` stays and reads as `ssh:<alias>` targets. The project-config guard reverts every `targets.*` and `launchers.*` key. Files: `cox-protocol/src/config.rs`, `cox-config/src/load.rs`, `default.toml`, `docs/config.md`, regenerated `docs/config.jsonschema`.
+
+Done when `project_config_cannot_name_a_target`, `remote_hosts_read_as_ssh_targets` and the schema drift test pass.
+
+#### T68.3 `hello` handshake and readable failures
+
+Model: - · Status: open · Depends: T68.1 · Size: ~180 · Priority: P1 · Complexity: 2
+
+Goal: the first exchange on the app-server wire is `hello`: wire version, cox version, OS, arch and the sandbox backend (or none). The client refuses another wire major version with one sentence naming both versions. The launcher's stderr is read, bounded (8 KiB) and passed through `cox_sanitize::sanitize`, so `cox: command not found`, exit 127, an unknown container or a stopped instance becomes `RemoteError::NotInstalled` / `RemoteError::Unreachable` with the target and a hint, instead of a silent drop. Files: `cox-app/src/wire.rs`, `server.rs`, `remote.rs`, `docs/app-server.schema.json`.
+
+Done when `old_wire_version_is_refused_by_name`, `missing_remote_cox_says_how_to_install` and `remote_stderr_is_sanitized_and_bounded` pass.
+
+#### T68.4 Desktop: connect to any target (Rust and FFI)
+
+Model: - · Status: open · Depends: T68.2, T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
+
+Goal: `RemoteWorkspace::connect(target)` takes a `Target`; `App::targets()` lists the configured ones and the running ones it can see — `docker ps --format json`, `limactl list --json`, `colima list --json`, each run through the T68.1 launcher with a timeout, a missing launcher listing nothing (fail open). `cox-ffi` forwards both (one-expression bodies, D11). Done when `listing_skips_a_missing_launcher` and `connect_reaches_a_docker_target` (fake `docker` script) pass.
+
+#### T68.5 Desktop: Connect to Target sheet (Swift)
+
+Model: - · Status: open · Depends: T68.4 · Size: ~200 · Priority: P2 · Complexity: 3
+
+Goal: File > Connect to Host becomes Connect to Target: a kind picker (SSH, Docker, Lima, Colima), the listed targets of that kind, a free-text name, the `hello` result (OS, sandbox) shown before the first session opens. Remote hosts in `RemoteHosts.swift` become targets. DT§ and the shared design docs say how Windows and Linux apps repeat it. Done when the CoxUI snapshot of the sheet (recorded from CI) and a CoxModel test of the target list pass.
+
+#### T68.6 `--on <target>` for the TUI and `cox run`
+
+Model: - · Status: open · Depends: T68.2 · Size: ~200 · Priority: P1 · Complexity: 3
+
+Goal: a global `--on <target>`. `cox --on lima:dev` runs the remote TUI through the launcher with a tty (`ssh -t`, `docker exec -it`, `limactl shell`, `colima ssh`); `cox run --on docker:ci -p …` runs without a tty, sends the prompt as one stream-json input line on stdin rather than on the command line, copies stdout through unchanged and exits with the remote exit code. Only an allowlisted set of flags is forwarded (`--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume`, `--continue`); `--cwd` comes from the target's `cwd`. Done when e2e `run_on_target_sends_prompt_over_stdin` and `run_on_target_returns_remote_exit_code` (fake launcher) pass.
+
+#### T68.7 `agent` presets on a target
+
+Model: - · Status: open · Depends: T68.2 · Size: ~150 · Priority: P2 · Complexity: 3
+
+Goal: `[external_agents.<name>]` gains `target`. Such a preset runs `cox run --output-format stream-json` on the target through the existing `StreamJson` driver (`cox-session/src/external_agents.rs`) instead of a local program; the remote run's usage lines become local `usage` rows under the preset's model, so the ledger stays complete. A preset with a target is not wrapped in the local sandbox (the remote applies its own) and still asks permission per call like `CloudAgent`. Done when `agent_on_target_records_remote_usage` and `agent_on_target_is_not_locally_sandboxed_but_asks` pass.
+
+#### T68.8 Windows targets
+
+Model: - · Status: open · Depends: T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
+
+Goal: `cox app-server --stdio` and `cox run` serve over Windows OpenSSH: binary stdio without CRLF translation, Windows paths accepted as a target `cwd`, `hello` reporting no sandbox so the session runs `on-request` (D7, T49.2 deferred). Run by the Windows host agent; the windows CI job runs the app-server tests once it is back on. Done when `app_server_round_trips_on_windows` passes there.
+
+#### T68.9 End-to-end tests with fake launchers
+
+Model: - · Status: open · Depends: T68.1 · Size: ~60 + tests · Priority: P1 · Complexity: 2
+
+Goal: test-support scripts named `ssh`, `docker`, `limactl` and `colima` that check their argv and exec the local `cox app-server --stdio` against a scratch `COX_HOME`, used by every P68 card; one `#[ignore]` test per real backend (`colima`, `lima`, `docker` under Colima) for a manual run. Done when `crates/cox/tests/targets.rs` runs a turn through each fake launcher with the scripted provider.
+
+#### T68.10 Docs: targets
+
+Model: - · Status: open · Depends: T68.5, T68.6, T68.7 · Size: ~150 (doc) · Priority: P2 · Complexity: 1
+
+Goal: `docs/targets.md` (each kind, how to put `cox` on it, what the trust rules above mean for a user, the sandbox inside a container), `docs/app-server.md` narrowed to the wire, `docs/config.md`, README links. Done when every target kind has a worked example and `docs/app-server.md` no longer explains ssh setup.
+
 ---
 
 ## 4. Definition of done for v0.1
@@ -3254,6 +3360,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A155 §3 P33 (new T33.46, T33.46.1–T33.46.3), docs/design/plugins.md §2, §3, §12, §14 — by the creator (2026-10-14), through Weft's T106.5 ("extend cox where it lacks what the Weft plugin needs"): a plugin package may ship Agent Skills with a data-only `[[skills]]` entry (`name`, `dir`), one grant line each (`skill:<name> <dir>`), loaded only for a granted plugin and read only through the package (no `..`, no symlinks). A local skill of the same name wins, with a notice. Why: a plugin that brings tools has no way to bring the instructions for them; Weft's cox plugin ships its authoring guide as a skill to Claude Code and Cursor. Effect: PL§12's "plugins adding text to the system prompt (skills do that)" now reads that a plugin adds prompt text only as a granted skill's index line in `system[2]`, which is built once per session, so the cache-stable prefix holds; new PL§14 decision 16. The `skill` tool's output names the skill's folder (all skills), so a skill can refer to files it bundles. No new dependency.
 - A156 §3 P33 (new T33.47, T33.47.1–T33.47.9), new `docs/design/plugin-canvas.md`; on build docs/design/plugins.md §4, §14, §15.4, §15.5 and docs/design/desktop.md §5.1, §5.5, §10 — by the creator (2026-10-14), through Weft's T106.6 ("a Design tab like Claude Design; if cox does not have it, add it", with the guards: plugin and model content untrusted, sandboxed, no network, no scripts from that content, a new grant line): a desktop-only plugin *canvas*, a pane of static HTML frames a plugin draws, behind `desktop.canvas`. Each frame is a WebKit page with content JavaScript off, every load blocked by a content rule list, every navigation but the first refused, a non-persistent store and no page-world bridge; only a host script in its own content world runs, to report a click. The plugin turns a selection into text the app adds to the composer as a `text/plain` attachment the person sends or removes. Effect: PL§15.4's "plugin-supplied SwiftUI, HTML or web views — never" becomes "SwiftUI or scripted web views — never; static HTML only through the canvas"; SwiftUI and MCP Apps stay closed (A123). Open questions 1–4 of the design go to the creator with recommendations; the build follows the recommendations until answered. Numbered on a branch stacked on A155's; renumber on merge if main has moved. No new dependency.
 - A157 §3 P33 (T33.47.8, new T33.47.10) — split the pane, shortcut and chip card into T33.47.8.1–T33.47.8.10, one layer each (CoxClient seam, CoxModel store, CoxCore calls, CoxUI pane, App wiring, shortcut and DT§ text, one canvas store per session in `AppStore`, a canvas page's content height and zoom in CoxPlatform, the store's pick for the palette, and a redraw that keeps §6's scroll and outline), because the card spans six Swift packages and the app, well over 200 lines and three files. `CanvasClient` is a protocol of its own rather than five more `SessionClient` requirements, so a client without canvases needs no stubs. T33.47.10 fixes a T33.47.4 bug found while wiring the pane: a local `next_canvas` never returned after `close()`, so the FFI pull held the session for ever. Effect: T33.47.8 stays open until the ten cards and its Check pass; no API or design decision changes.
+- A158 §3 (new P68: T68.1–T68.10), by the creator (2026-10-14) — run targets: a whole cox session runs over ssh on Linux, macOS or Windows, in a Docker container, in a Lima instance or in the Colima VM, from the desktop app, the TUI and `cox run` (`--on <target>`) and the `agent` tool. Why: the only remote path is the desktop app's `ssh <host> cox app-server --stdio` with a hard-coded `/usr/bin/ssh` (T52.19–T52.21); containers and VMs are the usual isolation for agents (research.md 9.1.x). Effect: a new pure crate `cox-target` owns target names, launcher lookup (absolute paths only) and launch argv, and `cox-app/src/remote.rs` delegates to it; the app-server wire gains a `hello` handshake; `targets.*` is user config only. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link and nothing typed by the model or the person goes on the remote command line. `cox` must already be on the target; installing it and throwaway `docker run` containers are ideas, not cards. No new dependency; D7 holds on targets without a sandbox backend. No §0 decision changes.
 
 ## 7. Risk register
 

@@ -128,3 +128,13 @@
 - T67.11. `cox run -p --json-schema`
 - T67.12. Output styles
 - T67.13. Design: a GitHub Action and scheduled runs
+- T68.1. `cox-target`: targets and their launch commands
+- T68.2. `[targets.<name>]` in config
+- T68.3. `hello` handshake and readable failures
+- T68.4. Desktop: connect to any target (Rust and FFI)
+- T68.5. Desktop: Connect to Target sheet (Swift)
+- T68.6. `--on <target>` for the TUI and `cox run`
+- T68.7. `agent` presets on a target
+- T68.8. Windows targets
+- T68.9. End-to-end tests with fake launchers
+- T68.10. Docs: targets
