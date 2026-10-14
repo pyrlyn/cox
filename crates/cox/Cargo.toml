@@ -145,6 +145,10 @@ wiremock = { workspace = true }
 # `tests/plugins.rs` and `examples/plugin_bench.rs` (PL§13); a workspace
 # crate with no dependencies of its own.
 cox-plugin-fixtures = { path = "../cox-plugin-fixtures" }
+# T68.9: `tests/targets.rs` builds each launch command with the same
+# `cox_target::command` the app uses and finds the real launchers; the
+# crate is only reachable through `cox-app` otherwise, and that is optional.
+cox-target = { path = "../cox-target", version = "0.1.2" }
 
 [[example]]
 name = "plugin_bench"
