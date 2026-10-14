@@ -90,6 +90,9 @@ cox-config = { path = "../cox-config", version = "0.1.2" }
 # this crate keeps the flags, the TUI loop and the printing. Its `plugins`
 # feature follows this crate's.
 cox-session = { path = "../cox-session", version = "0.1.2", default-features = false }
+# T68.6: `--on <target>` builds the launch command with the same
+# `cox_target::command` the desktop app uses; `tests/targets.rs` shares it.
+cox-target = { path = "../cox-target", version = "0.1.2" }
 # T52.19: the app-server surface; optional behind `app-server`.
 cox-app = { path = "../cox-app", version = "0.1.2", optional = true }
 # anyhow at the cox-crate boundary (AGENTS.md: "anyhow only in crates/cox"),
@@ -145,10 +148,6 @@ wiremock = { workspace = true }
 # `tests/plugins.rs` and `examples/plugin_bench.rs` (PL§13); a workspace
 # crate with no dependencies of its own.
 cox-plugin-fixtures = { path = "../cox-plugin-fixtures" }
-# T68.9: `tests/targets.rs` builds each launch command with the same
-# `cox_target::command` the app uses and finds the real launchers; the
-# crate is only reachable through `cox-app` otherwise, and that is optional.
-cox-target = { path = "../cox-target", version = "0.1.2" }
 
 [[example]]
 name = "plugin_bench"

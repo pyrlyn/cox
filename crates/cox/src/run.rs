@@ -160,10 +160,26 @@ impl Outcome {
     }
 }
 
+/// The first line of `input`, a JSON string. Read from the locked, buffered
+/// stdin, so the approvals thread that locks it next continues after this
+/// line, not from a lost buffer.
+fn read_prompt_line(input: &mut impl BufRead) -> anyhow::Result<String> {
+    let mut line = String::new();
+    input.read_line(&mut line)?;
+    serde_json::from_str(line.trim_end()).map_err(|e| {
+        anyhow::anyhow!("--prompt-stdin: the first stdin line must be a JSON string ({e})")
+    })
+}
+
 /// Runs one prompt to completion and returns the process exit code.
 /// Without `-p` this is the resume/continue listing from T2.4.
 pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
-    let Some(prompt) = args.prompt.clone() else {
+    let prompt = if args.prompt_stdin {
+        Some(read_prompt_line(&mut std::io::stdin().lock())?)
+    } else {
+        args.prompt.clone()
+    };
+    let Some(prompt) = prompt else {
         resume::run(cli, args)?;
         return Ok(EXIT_OK);
     };
@@ -624,5 +640,22 @@ mod tests {
         assert_eq!(total.tokens, [2, 3, 4, 5]);
         assert_eq!(total.cost_usd, 0.75);
         assert_eq!(total.turns, 2);
+    }
+
+    #[test]
+    fn prompt_line_is_a_json_string_and_leaves_the_rest_of_stdin() {
+        let mut input = std::io::Cursor::new(b"\"fix \\\"it\\\"\\nnow\"\nallow c1\n".to_vec());
+        assert_eq!(read_prompt_line(&mut input).unwrap(), "fix \"it\"\nnow");
+        let mut rest = String::new();
+        input.read_line(&mut rest).unwrap();
+        assert_eq!(rest, "allow c1\n");
+    }
+
+    #[test]
+    fn prompt_line_that_is_not_a_json_string_is_refused() {
+        for bad in ["plain text\n", "{\"prompt\":\"x\"}\n", "42\n", ""] {
+            let mut input = std::io::Cursor::new(bad.as_bytes().to_vec());
+            assert!(read_prompt_line(&mut input).is_err(), "{bad:?}");
+        }
     }
 }

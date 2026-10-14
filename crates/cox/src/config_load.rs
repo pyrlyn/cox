@@ -251,7 +251,8 @@ mod tests {
     #[test]
     fn config_every_flag_has_a_config_key() {
         let map = flag_key_map();
-        let excluded = ["help", "version", "json", "verbose"];
+        // why: `--on` and `--prompt-stdin` pick where and how a run starts; neither is a setting.
+        let excluded = ["help", "version", "json", "verbose", "on", "prompt-stdin"];
         let mut missing = Vec::new();
 
         let cmd = Cli::command();
