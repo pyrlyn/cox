@@ -274,6 +274,14 @@ fn no_crate_below_cox_depends_on_core() {
         deps["cox-sanitize"]
     );
 
+    // cox-target (T68.1) is the launch-argv trust guard shared by the desktop
+    // link, `--on` and agent presets: pure, no workspace-crate dependencies.
+    assert!(
+        deps["cox-target"].is_empty(),
+        "cox-target must not depend on any other workspace crate, found {:?}",
+        deps["cox-target"]
+    );
+
     // cox-sandbox (T32.3) is a trust guard that depends only on
     // cox-protocol among workspace crates (SandboxPolicy, SandboxMode,
     // LinuxBackend, ToolError).

@@ -33,3 +33,8 @@ Not approved yet. Move nothing from here into `plan.md` or `roadmap.md` without 
 ## Subagents
 
 - Advisory file-claim warning for parallel writer subagents (from T59.9, not approved): tell the second child to write a path another child of the same parent turn already wrote, without blocking it. Only worth a card once a real run shows two children writing one file; see `research.md` §11.
+
+## Run targets
+
+- Throwaway target: `docker run --rm -i` from an image with the project mounted, removed when the session ends (left out of P68, A158).
+- Install `cox` on a target that lacks it: probe its OS and arch (`uname -sm`) and copy a matching release binary (`scp`, `docker cp`, `limactl copy`); needs release builds per target (left out of P68, A158).
