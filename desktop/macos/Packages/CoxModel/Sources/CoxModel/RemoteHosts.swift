@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// The app's remote workspaces (DT§4.4, T52.21): each host File › Connect to Host… or
-// `desktop.remote_hosts` named, whether its connection holds, and its sessions as a sidebar
-// group of their own. Beside `AppStore`, not in it: the registry holds open sessions whatever
+// The app's remote workspaces (DT§4.4, T52.21, T68.5): each target File › Connect to Target… or
+// `desktop.remote_hosts` named (an ssh host alias is the target `ssh:<alias>`), whether its
+// connection holds, and its sessions as a sidebar group of their own. Beside `AppStore`, not in it: the registry holds open sessions whatever
 // core they came from, this store holds the connections a remote one opens through. The saved
 // list is user config; a project config cannot set it (the project-config guard).
 
@@ -17,9 +17,11 @@ import Observation
 public final class RemoteHosts {
   /// One host as the sidebar shows it.
   public struct Host: Identifiable, Equatable, Sendable {
-    /// The `ssh` host alias.
+    /// The `ssh` host alias, or the `kind:name` of another target.
     public let id: String
     public var isConnected: Bool
+    /// What the target's last `hello` answered.
+    public var info: HostInfo?
     /// Every session of every project the host listed, newest project first.
     public var sessions: [(project: Project, entry: SessionEntry)] = []
     /// Why the last connect or read failed; the next success clears it.
@@ -50,6 +52,17 @@ public final class RemoteHosts {
   static let projectLimit: UInt32 = 20
   static let sessionLimit: UInt32 = 20
 
+  /// What the Connect to Target sheet lists: the core's targets with the saved ssh hosts.
+  public func targets() async -> [TargetOption] {
+    TargetList.options(await connector?.targets() ?? [], hosts: saved)
+  }
+
+  /// What `target`'s last `hello` answered, once it connected.
+  public func hello(for target: String) -> HostHello? {
+    let id = TargetList.hostID(target)
+    return hosts.first { $0.id == id }?.info.map(HostHello.init)
+  }
+
   /// `desktop.remote_hosts` as the settings view read it.
   public var saved: [String] {
     settings?.view.flatMap { SectionRows($0.settings, "desktop").decode("remote_hosts") } ?? []
@@ -73,22 +86,25 @@ public final class RemoteHosts {
   public func connectSaved() async {
     if settings?.view == nil { await settings?.load() }
     for host in saved where !hosts.contains(where: { $0.id == host }) {
-      _ = await connect(host, save: false)
+      _ = await connect(TargetList.sshText(host), save: false)
     }
   }
 
-  /// Connects to `host` and lists its sessions; a new alias joins `desktop.remote_hosts` in the
-  /// user config. Returns why it failed, for the sheet.
-  public func connect(_ host: String, save: Bool = true) async -> String? {
-    let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
+  /// Connects to `target` and lists its sessions; a new ssh alias joins `desktop.remote_hosts` in
+  /// the user config (the other kinds are named in `[targets.*]` or found running). Returns why
+  /// it failed, for the sheet.
+  public func connect(_ target: String, save: Bool = true) async -> String? {
+    let target = target.trimmingCharacters(in: .whitespacesAndNewlines)
+    let host = TargetList.hostID(target)
     guard let connector, !host.isEmpty else { return nil }
     isConnecting = true
     defer { isConnecting = false }
     do {
-      let workspace = try await connector.connect(host: host)
+      let workspace = try await connector.connect(target: target)
       workspaces[host] = workspace
+      update(host) { $0.info = workspace.info }
       await read(host, workspace)
-      if save, !saved.contains(host) {
+      if save, target.hasPrefix("ssh:"), !saved.contains(host) {
         await settings?.set("desktop.remote_hosts", to: .list(saved + [host]))
       }
       return nil
@@ -102,7 +118,7 @@ public final class RemoteHosts {
   /// The group's Reconnect: the same workspace dials again, or a new one when none connected.
   public func reconnect(_ host: String) async {
     guard let workspace = workspaces[host] else {
-      _ = await connect(host, save: false)
+      _ = await connect(TargetList.text(hostID: host), save: false)
       return
     }
     do {
@@ -164,7 +180,9 @@ public final class RemoteHosts {
           sessions.append((project, entry))
         }
       }
-      update(host) { ($0.isConnected, $0.sessions, $0.failure) = (true, sessions, nil) }
+      update(host) {
+        ($0.isConnected, $0.sessions, $0.failure, $0.info) = (true, sessions, nil, workspace.info)
+      }
     } catch {
       let failure = String(describing: error)
       update(host) { ($0.isConnected, $0.failure) = (workspace.isConnected, failure) }

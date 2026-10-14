@@ -31,6 +31,7 @@ use cox_app::patch::{Block, BlockId, BlockKind, Status, TimelinePatch, ToolState
 use cox_app::plugin_ui::{CanvasUpdate, PluginCanvas};
 use cox_app::pointer::{Edge, Interaction, Pointer};
 use cox_app::review::LineComment;
+use cox_app::wire::HostInfo;
 use cox_app::workspace::{SidebarKind, SidebarRow, SidebarSection, SidebarStatus, SubtitlePart};
 use cox_app::{
     Activity, BrowserError, BudgetRow, ChangedFile, Changes, Checkpoint, Completion, ConfigSource,
@@ -129,6 +130,15 @@ pub struct TargetChoice {
     pub name: String,
     pub target: String,
     pub configured: bool,
+}
+
+#[uniffi::remote(Record)]
+pub struct HostInfo {
+    pub wire: u32,
+    pub cox: String,
+    pub os: String,
+    pub arch: String,
+    pub sandbox: Option<String>,
 }
 
 #[uniffi::remote(Record)]
