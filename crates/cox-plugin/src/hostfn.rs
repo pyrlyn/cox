@@ -19,8 +19,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use cox_plugin_api::{
-    AbiError, CallTarget, DesktopNotice, HttpReq, InitIn, MAX_NOTICE_ACTIONS, ModelCall,
-    ModelTier, NoticeLevel, PluginManifest, SessionInfo, Surface, ToolCallIn,
+    AbiError, CallTarget, DesktopNotice, HttpReq, InitIn, MAX_NOTICE_ACTIONS, ModelCall, ModelTier,
+    NoticeLevel, PluginManifest, SessionInfo, Surface, ToolCallIn,
 };
 use cox_protocol::config::PluginsConfig;
 use cox_protocol::errors::CoreError;
