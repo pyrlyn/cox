@@ -64,14 +64,15 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 10% | Claude Code / claude-opus-5-5 |
-| T33.47.1 | todo | P2 | 3 | 0% | |
-| T33.47.2 | todo | P2 | 3 | 0% | |
+| T33.47.1 | in progress | P2 | 3 | 0% | Claude Code / claude-opus-5-5 |
+| T33.47.2 | todo | P2 | 1 | 0% | |
 | T33.47.3 | todo | P2 | 3 | 0% | |
-| T33.47.4 | todo | P2 | 2 | 0% | |
+| T33.47.4 | todo | P2 | 3 | 0% | |
 | T33.47.5 | todo | P2 | 2 | 0% | |
-| T33.47.6 | todo | P2 | 3 | 0% | |
-| T33.47.7 | todo | P2 | 4 | 0% | |
-| T33.47.8 | todo | P2 | 1 | 0% | |
+| T33.47.6 | todo | P2 | 2 | 0% | |
+| T33.47.7 | todo | P2 | 3 | 0% | |
+| T33.47.8 | todo | P2 | 4 | 0% | |
+| T33.47.9 | todo | P2 | 1 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
@@ -1143,51 +1144,61 @@ Check: both cover all three parts and every heading of the English page; `just t
 
 Depends: T33.45.7 · Design: `docs/design/plugin-canvas.md`, A156
 
-A plugin that produces UI (Weft's `plugins/cox`, whose agent writes app screens) has no way to show them drawn: the desktop API is widgets only and PL§15.4 refused web views. The creator approved, through Weft's T106.6, a narrow kind of web view behind its own grant line, `desktop.canvas`: a pane beside the transcript holding *frames*, each a static HTML page a plugin draws, shown with page JavaScript off, every load blocked, every navigation but the first refused, and only a host-owned script in its own content world, which reports a click. The plugin turns the selection into text that the app adds to the composer as a `text/plain` attachment the person sends or removes. Redraws follow PL§8. The design, the caps, the isolation and its sources, and four open questions with recommendations are in the design document. The build is T33.47.1–T33.47.8; this card closes when they are done.
+A plugin that produces UI (Weft's `plugins/cox`, whose agent writes app screens) has no way to show them drawn: the desktop API is widgets only and PL§15.4 refused web views. The creator approved, through Weft's T106.6, a narrow kind of web view behind its own grant line, `desktop.canvas`: a pane beside the transcript holding *frames*, each a static HTML page a plugin draws, shown with page JavaScript off, every load blocked, every navigation but the first refused, and only a host-owned script in its own content world, which reports a click. The plugin turns the selection into text that the app adds to the composer as a `text/plain` attachment the person sends or removes. Redraws follow PL§8. The design, the caps, the isolation and its sources, and four open questions with recommendations are in the design document. The build is T33.47.1–T33.47.9; this card closes when they are done.
 
-Check: the eight cards' checks; `just test` green.
+Check: the nine cards' checks; `just test` green.
 
-#### T33.47.1 API: manifest, grant line, ABI types and caps
+#### T33.47.1 API: manifest key, ABI types and caps
 
-Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin/src/grant.rs` (plus PL§4, §14 decision 17, §15.4, §15.5 and the regenerated schemas) · Design: `docs/design/plugin-canvas.md` §1, §2
+Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin-api/src/lib.rs` (plus the regenerated `docs/plugin.schema.json`, `docs/plugin-abi.schema.json` and the `docs/plugins.md` field index) · Design: `docs/design/plugin-canvas.md` §1, §2
 
-`DesktopCaps.canvas`; `CanvasDecl`, `CanvasIn`, `CanvasOut`, `Frame`, `CanvasSelect`, `CanvasAttach`, `CommandOut::OpenCanvas`; one caps function the host and the app-server client both call; the `desktop.canvas` grant line.
+`DesktopCaps.canvas`; `DesktopOut.canvas: Option<CanvasDecl>`; `CanvasIn`, `CanvasOut`, `Frame`, `CanvasSelect`, `CanvasAttach`; one caps check the host and the app-server client both call.
 
-Check: caps unit tests (frame count, sizes, id, `select_attr`, selection value); `grant_new_canvas_needs_approval`; the schema and API-reference drift tests; `cargo nextest run -p cox-plugin-api -p cox-plugin`.
+Plan (Claude Code / claude-opus-5-5): (1) `manifest.rs`: `DesktopCaps.canvas` (`#[serde(default)]`); the existing surface-table check already refuses it when `surfaces` excludes `desktop`. (2) `abi.rs`: `DesktopOut.canvas`, the five payloads, the limits as constants, and the checks: `CanvasDecl::check` (title 1–64 chars, `is_symbol_name`, `is_select_attr` `^data-[a-z0-9-]{1,48}$`), `CanvasOut::capped` (keeps the first 12 frames with a valid unique id `^[a-z0-9_.-]{1,64}$`, at most 1 MiB each and 4 MiB in all, titles cut to 80 chars, widths clamped to 200–2560, and returns one `CanvasError` per drop), `CanvasSelect::check` (a frame id, a value of 1–256 chars without control characters), `CanvasAttach::capped` (name cut to 80 chars, text over 8 KiB refused). The checks are forms and sizes only: sanitizing needs `cox-sanitize`, which this crate may not depend on, so it stays in `cox-app` as for widgets. (3) `lib.rs`: re-exports and the new types in the ABI schema's `defs!`; regenerate both schemas and `scripts/plugin_api_reference.py --write`.
 
-#### T33.47.2 Host calls and SDK
+Check: caps unit tests (frame count, sizes, id, `select_attr`, selection value, attachment); the schema and API-reference drift tests; `cargo nextest run -p cox-plugin-api`.
 
-Depends: T33.47.1 · Files: `crates/cox-plugin/src/live.rs`, `crates/cox-plugin/src/hostfn.rs`, `plugins/sdk/src/lib.rs` · Design: `docs/design/plugin-canvas.md` §2, §6
+#### T33.47.2 Grant line and design text
+
+Depends: T33.47.1 · Files: `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` · Design: `docs/design/plugin-canvas.md` §1
+
+The `desktop.canvas` grant line; PL§4 (`cox_redraw` under the canvas), §14 decision 17, the §15.4 canvas row and rules in place of "HTML or web views — never", §15.5's `canvas` key.
+
+Check: `grant_new_canvas_needs_approval`; `cargo nextest run -p cox-plugin`.
+
+#### T33.47.3 Host calls and SDK
+
+Depends: T33.47.2 · Files: `crates/cox-plugin/src/live.rs`, `crates/cox-plugin/src/hostfn.rs`, `plugins/sdk/src/lib.rs` · Design: `docs/design/plugin-canvas.md` §2, §6
 
 `cox_canvas` and `cox_canvas_select` on the control queue with their deadlines and render-context host functions; the `InitOut.desktop.canvas` filter; `cox_redraw` under `desktop.canvas`; the SDK's `canvas` and `canvas_select` arms.
 
 Check: a fixture plugin's frames come back capped; a slow `cox_canvas` misses three times and stops for the session; `cox_redraw` is allowed under `desktop.canvas` alone.
 
-#### T33.47.3 `cox-app`: canvas state
+#### T33.47.4 `cox-app`: canvas state
 
-Depends: T33.47.2 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugin-canvas.md` §3, §5, §6
+Depends: T33.47.3 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugin-canvas.md` §3, §5, §6
 
-Canvas state per session: visible or not, the last frames, redraw while visible, unchanged frames not re-sent, `OpenCanvas`, and the selection call returning a sanitized, capped attachment.
+Canvas state per session: visible or not, the last frames, redraw while visible, unchanged frames not re-sent, and the selection call returning a sanitized, capped attachment.
 
 Check: no render while hidden; an unchanged frame is not re-sent; a selection on an unknown frame or with a bad value is dropped before the plugin; the attachment is sanitized and capped.
 
-#### T33.47.4 Wire and remote sessions
+#### T33.47.5 Wire and remote sessions
 
-Depends: T33.47.3 · Files: `crates/cox-app/src/wire.rs`, `crates/cox-app/src/remote.rs` (plus `docs/app-server.schema.json`) · Design: `docs/design/plugin-canvas.md` §7
+Depends: T33.47.4 · Files: `crates/cox-app/src/wire.rs`, `crates/cox-app/src/remote.rs` (plus `docs/app-server.schema.json`) · Design: `docs/design/plugin-canvas.md` §7
 
 `ServerEvent::PluginCanvas`, `Call::CanvasSelect`, `Reply::CanvasAttach`; the client applies the caps again.
 
 Check: `wire_round_trips_every_message`; `app_server_schema_drift`; an over-size `PluginCanvas` from the server is capped by the client.
 
-#### T33.47.5 FFI
+#### T33.47.6 FFI
 
-Depends: T33.47.4 · Files: `crates/cox-ffi/src/session.rs`, `crates/cox-ffi/src/remote.rs`, `crates/cox-ffi/src/types.rs` · Design: `docs/design/plugin-canvas.md` §8
+Depends: T33.47.5 · Files: `crates/cox-ffi/src/session.rs`, `crates/cox-ffi/src/remote.rs`, `crates/cox-ffi/src/types.rs` · Design: `docs/design/plugin-canvas.md` §8
 
 `CanvasView`, `show_canvas`, `canvas_select` on the local and the remote session.
 
 Check: the FFI mirror tests list the new shapes; a local and a remote selection round-trip in tests.
 
-#### T33.47.6 CoxPlatform: `CanvasPage`
+#### T33.47.7 CoxPlatform: `CanvasPage`
 
 Depends: — · Files: `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/CanvasPage.swift`, `desktop/macos/Packages/CoxPlatform/Tests/CoxPlatformTests/CanvasPageTests.swift` · Design: `docs/design/plugin-canvas.md` §4
 
@@ -1195,17 +1206,17 @@ The isolated page: content JavaScript off, the block-everything rule list, the n
 
 Check: a page `<script>` does not run; neither an `https:` nor a `data:` image loads; a link click does not navigate; the host script's post arrives with the attribute value; `swift test` for CoxPlatform.
 
-#### T33.47.7 The pane, the shortcut and the composer chip
+#### T33.47.8 The pane, the shortcut and the composer chip
 
-Depends: T33.47.5, T33.47.6 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift`, `desktop/macos/App/SessionCanvas.swift`, `desktop/macos/App/SessionWindow.swift` (plus DT§5.1, §5.5 and §10) · Design: `docs/design/plugin-canvas.md` §3, §5
+Depends: T33.47.6, T33.47.7 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift`, `desktop/macos/App/SessionCanvas.swift`, `desktop/macos/App/SessionWindow.swift` (plus DT§5.1, §5.5 and §10) · Design: `docs/design/plugin-canvas.md` §3, §5
 
 The pane beside the transcript with frames side by side and zoom, ⌘⇧D, the palette action, and one replaceable composer chip per canvas.
 
 Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a selection adds one chip and a second replaces it; the falsifier 3 measurement written into the card's Check output.
 
-#### T33.47.8 User docs
+#### T33.47.9 User docs
 
-Depends: T33.47.7 · Files: `docs/plugins.md` (and the `ru`/`uk` pages when T33.45.10 has made them) · Design: `docs/design/plugin-canvas.md`
+Depends: T33.47.8 · Files: `docs/plugins.md` (and the `ru`/`uk` pages when T33.45.10 has made them) · Design: `docs/design/plugin-canvas.md`
 
 The canvas in the user docs: the manifest key, the grant line, what the page can and cannot do.
 
@@ -3332,7 +3343,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
   - The `## Archived outputs` section is appended in `Session::compact` after `summarise`, not inside `WorkingState::render`. The old wording conflicted with "the summary ends with it", because the state block comes before the model text, and the `llm` strategy has no state block at all.
 - A154 §1.1 `cox-ext` row, §3 P7 (new T7.9, done the same day) — `cox-ext` reads SKILL.md, command and subagent frontmatter with serde-saphyr 1.3 instead of serde_yaml 0.9, by the creator (2026-10-12). Why: serde_yaml is deprecated and pulled unsafe-libyaml, unmaintained (RUSTSEC-2024-0449), which `deny.toml` ignored only until 2026-12-31; serde-saphyr is maintained and already listed in `rust.md`. Effect: the parser keeps the YAML 1.2 reading (`strict_booleans`, non-finite floats kept as text) and one-line errors; the one difference is that a quoted `'true'` now reads as a bool (test `frontmatter_quoted_true_is_a_bool`); the RUSTSEC-2024-0449 ignore is removed. No decision changes.
 - A155 §3 P33 (new T33.46, T33.46.1–T33.46.3), docs/design/plugins.md §2, §3, §12, §14 — by the creator (2026-10-14), through Weft's T106.5 ("extend cox where it lacks what the Weft plugin needs"): a plugin package may ship Agent Skills with a data-only `[[skills]]` entry (`name`, `dir`), one grant line each (`skill:<name> <dir>`), loaded only for a granted plugin and read only through the package (no `..`, no symlinks). A local skill of the same name wins, with a notice. Why: a plugin that brings tools has no way to bring the instructions for them; Weft's cox plugin ships its authoring guide as a skill to Claude Code and Cursor. Effect: PL§12's "plugins adding text to the system prompt (skills do that)" now reads that a plugin adds prompt text only as a granted skill's index line in `system[2]`, which is built once per session, so the cache-stable prefix holds; new PL§14 decision 16. The `skill` tool's output names the skill's folder (all skills), so a skill can refer to files it bundles. No new dependency.
-- A156 §3 P33 (new T33.47, T33.47.1–T33.47.8), new `docs/design/plugin-canvas.md`; on build docs/design/plugins.md §4, §14, §15.4, §15.5 and docs/design/desktop.md §5.1, §5.5, §10 — by the creator (2026-10-14), through Weft's T106.6 ("a Design tab like Claude Design; if cox does not have it, add it", with the guards: plugin and model content untrusted, sandboxed, no network, no scripts from that content, a new grant line): a desktop-only plugin *canvas*, a pane of static HTML frames a plugin draws, behind `desktop.canvas`. Each frame is a WebKit page with content JavaScript off, every load blocked by a content rule list, every navigation but the first refused, a non-persistent store and no page-world bridge; only a host script in its own content world runs, to report a click. The plugin turns a selection into text the app adds to the composer as a `text/plain` attachment the person sends or removes. Effect: PL§15.4's "plugin-supplied SwiftUI, HTML or web views — never" becomes "SwiftUI or scripted web views — never; static HTML only through the canvas"; SwiftUI and MCP Apps stay closed (A123). Open questions 1–4 of the design go to the creator with recommendations; the build follows the recommendations until answered. Numbered on a branch stacked on A155's; renumber on merge if main has moved. No new dependency.
+- A156 §3 P33 (new T33.47, T33.47.1–T33.47.9), new `docs/design/plugin-canvas.md`; on build docs/design/plugins.md §4, §14, §15.4, §15.5 and docs/design/desktop.md §5.1, §5.5, §10 — by the creator (2026-10-14), through Weft's T106.6 ("a Design tab like Claude Design; if cox does not have it, add it", with the guards: plugin and model content untrusted, sandboxed, no network, no scripts from that content, a new grant line): a desktop-only plugin *canvas*, a pane of static HTML frames a plugin draws, behind `desktop.canvas`. Each frame is a WebKit page with content JavaScript off, every load blocked by a content rule list, every navigation but the first refused, a non-persistent store and no page-world bridge; only a host script in its own content world runs, to report a click. The plugin turns a selection into text the app adds to the composer as a `text/plain` attachment the person sends or removes. Effect: PL§15.4's "plugin-supplied SwiftUI, HTML or web views — never" becomes "SwiftUI or scripted web views — never; static HTML only through the canvas"; SwiftUI and MCP Apps stay closed (A123). Open questions 1–4 of the design go to the creator with recommendations; the build follows the recommendations until answered. Numbered on a branch stacked on A155's; renumber on merge if main has moved. No new dependency.
 
 ## 7. Risk register
 
