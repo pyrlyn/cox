@@ -11586,3 +11586,17 @@ Check: `manifest_canvas_is_a_desktop_part`; `grant_new_canvas_needs_approval`; t
 Status: done 2026-10-14 · Commit "feat: T33.47.2 canvas manifest key and grant line" on branch `t33.47-plugin-canvas`: `DesktopCaps.canvas`, the `desktop.canvas` grant line, PL§4 (`cox_redraw` under the canvas), PL§14 decision 17, the PL§15.4 canvas row and rule in place of "HTML or web views — never", PL§15.5's example and grant-line list; the regenerated manifest schema and field index.
 
 Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin` — 172 passed, with `manifest_canvas_is_a_desktop_part`, `grant_new_canvas_needs_approval`, `plugin_schema_matches_committed_file` and `plugin_api_reference_covers_both_schemas`; clippy `-D warnings` and `cargo fmt --check` clean.
+
+#### T33.47.3 Host side and SDK
+
+Depends: T33.47.2 · Files: `crates/cox-plugin/src/live.rs`, `crates/cox-plugin/src/hostfn.rs`, `plugins/sdk/src/lib.rs` · Design: `docs/design/plugin-canvas.md` §2
+
+The `InitOut.desktop.canvas` filter (dropped with the other desktop parts off the desktop, and without `desktop.canvas`); `cox_canvas` and `cox_canvas_select` run in render context (read-only host functions); the SDK's `canvas` and `canvas_select` arms.
+
+Plan (Claude Code / claude-opus-5-5): (1) `live.rs`: off the desktop `out.desktop.canvas.take()` joins the dropped list; on the desktop it is cleared without the `desktop.canvas` line; extend `init_drops_by_surface`-style tests. (2) `hostfn.rs`: `outside_render` also refuses inside `cox_canvas` and `cox_canvas_select`. (3) SDK: `register!` arms `canvas` (`CanvasIn` → `CanvasOut`) and `canvas_select` (`CanvasSelect` → `Option<CanvasAttach>`), re-exports, and the doc table.
+
+Check: a canvas declaration is dropped on the terminal and without its grant and kept with it; `cox_kv_put` and `cox_notify` from `cox_canvas` answer `NotInThisContext`; the SDK's export table lists both; `cargo nextest run -p cox-plugin` and the `plugins/` workspace tests.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.3 canvas host side and SDK arms" on branch `t33.47-plugin-canvas`: `InitOut.desktop.canvas` dropped with a notice off the desktop and silently without `desktop.canvas`; `cox_canvas` and `cox_canvas_select` are render context in `outside_render`; the SDK's `canvas` and `canvas_select` arms and their row in the export table.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin` — 119 passed, with `canvas_is_kept_only_on_the_desktop_with_its_grant` and `canvas_exports_are_render_context`; in `plugins/`, `cargo test -p cox-plugin-sdk` — 10 passed (the `register!` test exports both); clippy `-D warnings` (host, and the SDK for `wasm32-unknown-unknown`) and `cargo fmt --check` clean in both workspaces.
