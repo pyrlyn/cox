@@ -54,6 +54,9 @@ pub struct Plugins {
     /// Each granted plugin's `[[agents]]` definitions by plugin id (T45.4),
     /// for `cox_ext::agents::merge`; never an ungranted plugin's.
     pub agent_defs: Vec<(String, Vec<cox_protocol::agent::AgentDef>)>,
+    /// Each granted plugin's `[[skills]]` by plugin id (T33.46), for
+    /// `cox_ext::skills::merge`; never an ungranted plugin's.
+    pub skill_defs: Vec<(String, Vec<cox_ext::skills::Skill>)>,
     /// Each loaded plugin's `[[models]]` rows by plugin id (T33.44).
     pub models: Vec<(String, Vec<cox_protocol::plugin::ModelDecl>)>,
     /// The loaded instances, compiled under their grants; `start_plugins`
@@ -212,6 +215,10 @@ pub fn load_plugins_for_surface(
                 if loaded.is_ok() && !manifest.agents.is_empty() {
                     let defs = plugin_agent_defs(id, &p.dir, manifest, notices);
                     out.agent_defs.push((id.clone(), defs));
+                }
+                if loaded.is_ok() && !manifest.skills.is_empty() {
+                    let skills = plugin_skills(id, &p.dir, manifest, notices);
+                    out.skill_defs.push((id.clone(), skills));
                 }
                 match (loaded, writable) {
                     (Err(e), _) => notices.push(format!("plugin {id} failed to load: {e}")),
@@ -486,6 +493,44 @@ fn plugin_agent_defs(
     defs
 }
 
+/// T33.46: one granted plugin's `[[skills]]`, each `<dir>/SKILL.md` parsed
+/// by the same code as `.cox/skills`. A file that is missing, reached
+/// through a symlink (the digest hashes regular files only), unparsable, or
+/// whose frontmatter `name` is not the one the grant approved is a warning
+/// and absent (D14).
+#[cfg(feature = "plugins")]
+fn plugin_skills(
+    id: &str,
+    dir: &Path,
+    manifest: &cox_plugin_api::PluginManifest,
+    notices: &mut Vec<String>,
+) -> Vec<cox_ext::skills::Skill> {
+    let mut skills = Vec::new();
+    for decl in &manifest.skills {
+        // `package_program` walks the path inside `dir`, refusing `..` and
+        // any symlink on the way, as for an `[[agents]]` file.
+        let skill =
+            cox_plugin::external_agent::package_program(dir, &format!("./{}/SKILL.md", decl.dir))
+                .map_err(|e| e.to_string())
+                .and_then(|path| cox_ext::skills::parse_file(&path))
+                .and_then(|skill| {
+                    if skill.name == decl.name {
+                        Ok(skill)
+                    } else {
+                        Err(format!(
+                            "its frontmatter names {:?}, the grant approved {:?}",
+                            skill.name, decl.name
+                        ))
+                    }
+                });
+        match skill {
+            Ok(skill) => skills.push(skill),
+            Err(why) => notices.push(format!("plugin {id}: skill {} skipped: {why}", decl.name)),
+        }
+    }
+    skills
+}
+
 /// Builds and writes one `PluginGrant` row (PL§3): the single place the row
 /// is assembled, so `cox plugin enable`/`install` and the TUI's grant
 /// dialog share it instead of each holding its own `grant_put` literal
@@ -566,6 +611,53 @@ mod tests {
             "mcp": [mcp],
         }))
         .expect("manifest")
+    }
+
+    /// T33.46: only a regular `SKILL.md` inside the package, named as the
+    /// grant approved, loads; the rest are notices.
+    #[cfg(all(feature = "plugins", unix))]
+    #[test]
+    fn plugin_skills_skip_a_symlink_and_a_misnamed_skill() {
+        let pkg = tempfile::tempdir().expect("pkg");
+        let outside = tempfile::tempdir().expect("outside");
+        let write = |path: &Path, name: &str| {
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            std::fs::write(
+                path,
+                format!("---\nname: {name}\ndescription: d\n---\nbody\n"),
+            )
+            .expect("write");
+        };
+        write(&pkg.path().join("skills/notes/SKILL.md"), "notes");
+        write(&pkg.path().join("skills/other/SKILL.md"), "renamed");
+        write(&outside.path().join("linked/SKILL.md"), "linked");
+        std::fs::create_dir_all(pkg.path().join("skills/linked")).expect("mkdir");
+        std::os::unix::fs::symlink(
+            outside.path().join("linked/SKILL.md"),
+            pkg.path().join("skills/linked/SKILL.md"),
+        )
+        .expect("symlink");
+        let decls: Vec<_> = ["notes", "other", "linked"]
+            .iter()
+            .map(|n| serde_json::json!({ "name": n, "dir": format!("skills/{n}") }))
+            .collect();
+        let manifest: cox_plugin_api::PluginManifest = serde_json::from_value(serde_json::json!({
+            "api": 1, "id": "kit", "version": "0.1.0", "name": "kit", "skills": decls,
+        }))
+        .expect("manifest");
+        let mut notices = Vec::new();
+        let skills = plugin_skills("kit", pkg.path(), &manifest, &mut notices);
+        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["notes"]);
+        assert_eq!(notices.len(), 2, "{notices:?}");
+        assert!(
+            notices[0].starts_with("plugin kit: skill other skipped:"),
+            "{notices:?}"
+        );
+        assert!(
+            notices[1].starts_with("plugin kit: skill linked skipped:"),
+            "{notices:?}"
+        );
     }
 
     #[cfg(feature = "plugins")]

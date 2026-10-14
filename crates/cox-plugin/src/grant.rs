@@ -147,6 +147,7 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
         ("desktop.toolbar", caps.desktop.toolbar),
         ("desktop.palette", caps.desktop.palette),
         ("desktop.notify", caps.desktop.notify),
+        ("desktop.canvas", caps.desktop.canvas),
     ];
     out.extend(
         flags
@@ -197,6 +198,9 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
     for a in &manifest.agents {
         out.insert(format!("subagent:{} {}", a.name, a.file));
     }
+    for s in &manifest.skills {
+        out.insert(format!("skill:{} {}", s.name, s.dir));
+    }
     out.into_iter().collect()
 }
 
@@ -244,6 +248,7 @@ mod tests {
             external_agents: Vec::new(),
             cloud_agents: Vec::new(),
             agents: Vec::new(),
+            skills: Vec::new(),
         }
     }
 
@@ -391,6 +396,28 @@ mod tests {
         );
     }
 
+    /// T33.46: a newly declared `[[skills]]` folder is an added approval
+    /// line, so an update cannot slip a skill in under an old grant.
+    #[test]
+    fn grant_new_skill_needs_approval() {
+        let mut m = manifest(Capabilities {
+            kv: true,
+            ..Capabilities::default()
+        });
+        let stored = grant("d1", &["kv"]);
+        m.skills.push(cox_plugin_api::SkillDecl {
+            name: "release-notes".into(),
+            dir: "skills/release-notes".into(),
+        });
+        assert_eq!(
+            check(&m, "d1", Some(&stored)),
+            Verdict::NeedsApproval {
+                added: vec!["skill:release-notes skills/release-notes".into()],
+                removed: Vec::new(),
+            }
+        );
+    }
+
     fn linked_grant(caps: &[&str]) -> PluginGrant {
         PluginGrant {
             source: json!({"kind": "link", "path": "/home/user/dev/git-glance"}),
@@ -492,6 +519,23 @@ mod tests {
             Verdict::NeedsApproval {
                 added: vec!["desktop.inspector".into(), "desktop.notify".into()],
                 removed: vec!["terminal.keys".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn grant_new_canvas_needs_approval() {
+        let mut caps = Capabilities::default();
+        caps.desktop.inspector = true;
+        let stored = grant("d1", &["desktop.inspector"]);
+        caps.desktop.canvas = true;
+        // The canvas shows the plugin's own HTML, so even a granted
+        // desktop plugin asks again for it.
+        assert_eq!(
+            check(&manifest(caps), "d1", Some(&stored)),
+            Verdict::NeedsApproval {
+                added: vec!["desktop.canvas".into()],
+                removed: vec![],
             }
         );
     }

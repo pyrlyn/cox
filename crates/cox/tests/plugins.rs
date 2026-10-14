@@ -239,6 +239,51 @@ fn granted_plugin_agent_is_dispatchable() {
     assert!(tools.contains("grep") && !tools.contains("glob"), "{tools}");
 }
 
+/// T33.46: a skills-only package (no wasm); the scripted turn loads its
+/// skill through the `skill` tool, then ends.
+fn skill_package(root: &Path) -> (String, String) {
+    let pkg = root.join("notes-kit");
+    std::fs::create_dir_all(pkg.join("skills/release-notes")).unwrap();
+    std::fs::write(
+        pkg.join("plugin.toml"),
+        "api = 1\nid = \"notes-kit\"\nversion = \"0.1.0\"\nname = \"Notes kit\"\n\n\
+         [[skills]]\nname = \"release-notes\"\ndir = \"skills/release-notes\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("skills/release-notes/SKILL.md"),
+        "---\nname: release-notes\ndescription: Write release notes\n---\nPLUGIN-SKILL-BODY\n",
+    )
+    .unwrap();
+    let scenario = root.join("plugin_skill.toml");
+    std::fs::write(
+        &scenario,
+        "[[turn]]\ntool_calls = [{ name = \"skill\", input = { name = \"release-notes\" } }]\n\n\
+         [[turn]]\ntext = \"done\"\n",
+    )
+    .unwrap();
+    let path = |p: &Path| p.to_str().unwrap().to_string();
+    (path(&pkg), path(&scenario))
+}
+
+#[test]
+fn granted_plugin_skill_is_loaded_by_the_skill_tool() {
+    let (home, cwd, root) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    let (home, cwd) = (home.path(), cwd.path());
+    let (pkg, scenario) = skill_package(root.path());
+    stdout(cox(home, cwd).args(["plugin", "install", &pkg, "--yes"]));
+
+    let (_, result, _) = agent_run(home, cwd, &scenario);
+    let text = result.to_string();
+    assert!(text.contains("PLUGIN-SKILL-BODY"), "{text}");
+    assert!(text.contains("Base directory: "), "{text}");
+    assert!(text.contains("skills/release-notes"), "{text}");
+}
+
 #[test]
 fn ungranted_plugin_agent_is_not_loaded() {
     let (home, cwd, root) = (

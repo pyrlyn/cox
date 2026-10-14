@@ -51,6 +51,7 @@ pub fn declarations() -> InitOut {
             }),
             toolbar: vec![action.clone()],
             palette: vec![action],
+            canvas: None,
         },
         ..InitOut::default()
     }

@@ -4,7 +4,8 @@
 
 // A plugin slot's generated cox-ffi values ⇄ `CoxClient` values (PL§8, T52.17), field for
 // field like `Convert.swift`: the slot, its kind and the sanitized widget tree, and the desktop
-// contributions (PL§15.4) — tabs, toolbar items, link clicks and notices. Separate so the
+// contributions (PL§15.4) — tabs, toolbar items, link clicks and notices — and the canvases
+// (plugin-canvas §8, T33.47.8.3), whose frames' HTML passes through untouched. Separate so the
 // timeline's conversions stay one file; the terminal cell widths and stack sizes are dropped,
 // since the app lays the tree out natively.
 
@@ -87,5 +88,29 @@ extension CoxClient.PluginAlert {
     self.init(
       session: value.session, plugin: value.plugin, warn: value.warn, title: value.title,
       body: value.body, actions: value.actions.map { .init(label: $0.label, id: $0.id) })
+  }
+}
+
+extension CoxClient.PluginCanvas {
+  init(_ value: CoxFFIBindings.PluginCanvas) {
+    self.init(
+      plugin: value.plugin, title: value.title, symbol: value.symbol, selectAttr: value.selectAttr)
+  }
+}
+
+extension CoxClient.CanvasUpdate {
+  init(_ value: CoxFFIBindings.CanvasUpdate) {
+    self.init(
+      plugin: value.plugin, order: value.order,
+      frames: value.frames.map {
+        CanvasFrame(id: $0.id, title: $0.title, widthPt: $0.widthPt, html: $0.html)
+      },
+      stopped: value.stopped)
+  }
+}
+
+extension CoxClient.CanvasAttach {
+  init(_ value: CoxFFIBindings.CanvasAttach) {
+    self.init(name: value.name, text: value.text)
   }
 }

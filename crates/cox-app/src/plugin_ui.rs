@@ -17,18 +17,20 @@
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cox_protocol::ids::{ItemId, SessionId};
 use cox_protocol::plugin::ui::Span;
 use cox_protocol::plugin::{
-    ActionDecl, CommandDecl, DesktopNotice, DesktopOut, MAX_IMAGE_BYTES, MAX_NOTICE_ACTIONS,
+    ActionDecl, CanvasAttach, CanvasDecl, CanvasError, CanvasIn, CanvasOut, CanvasSelect,
+    CommandDecl, DesktopNotice, DesktopOut, Frame, MAX_IMAGE_BYTES, MAX_NOTICE_ACTIONS,
     MAX_TOOLBAR_ACTIONS, NoticeLevel, RenderIn, Slot, StyleToken, Widget, is_link, is_symbol_name,
 };
 use cox_protocol::types::{Event, ItemKind, ToolCall};
 use cox_sanitize::sanitize;
-use cox_session::plugin_ui::{ItemSource, LivePlugins, PluginAnswer, PluginRequest};
+use cox_session::plugin_ui::{ItemSource, LivePlugins, PluginAnswer, PluginHost, PluginRequest};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
@@ -788,6 +790,167 @@ fn actions(
     kept
 }
 
+/// A plugin's canvas (plugin-canvas §3), sanitized: what heads the pane,
+/// names it in the picker, and which attribute a click reads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginCanvas {
+    pub plugin: String,
+    pub title: String,
+    pub symbol: String,
+    pub select_attr: String,
+}
+
+/// What one draw changes (§6): `order` is every frame now on the canvas,
+/// `frames` only those whose page is new or changed, so an unchanged frame
+/// keeps its web view and scroll offset. Each frame is capped, its title
+/// sanitized; its `html` stays untrusted, for the isolated `CanvasPage`
+/// (§4) only. `stopped` once [`MAX_MISSES`] draws in a row missed; the
+/// canvas is not drawn again this session.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CanvasUpdate {
+    pub plugin: String,
+    pub order: Vec<String>,
+    pub frames: Vec<Frame>,
+    pub stopped: bool,
+}
+
+impl PluginCanvas {
+    /// `decl` as the pane heads it, or why it is left out.
+    fn from_decl(plugin: &str, decl: CanvasDecl) -> Result<Self, CanvasError> {
+        decl.check()?;
+        Ok(Self {
+            plugin: sanitize(plugin),
+            title: sanitize(&decl.title),
+            symbol: symbol(&decl.symbol),
+            select_attr: decl.select_attr,
+        })
+    }
+
+    /// One a remote server sent, checked again (plugin-canvas §7): its
+    /// `select_attr` reaches the page's host script.
+    pub fn checked(self) -> Option<Self> {
+        let decl = CanvasDecl {
+            title: self.title,
+            symbol: self.symbol,
+            select_attr: self.select_attr,
+        };
+        Self::from_decl(&self.plugin, decl).ok()
+    }
+}
+
+impl CanvasUpdate {
+    /// The update as a client may show it. The wire is a boundary too
+    /// (plugin-canvas §7), so a remote server's frames are capped and
+    /// sanitized again, and `order` keeps only the ids the caps accept.
+    pub fn capped(self) -> Self {
+        let mut frames = CanvasOut {
+            frames: self.frames,
+        }
+        .capped()
+        .0
+        .frames;
+        for f in &mut frames {
+            f.title = sanitize(&f.title);
+        }
+        // The caps' own id rules (form, uniqueness, count), over ids alone.
+        let ids = self.order.into_iter().map(|id| Frame {
+            id,
+            title: String::new(),
+            width_pt: 0,
+            html: String::new(),
+        });
+        let ids = CanvasOut {
+            frames: ids.collect(),
+        };
+        Self {
+            plugin: sanitize(&self.plugin),
+            order: ids.capped().0.frames.into_iter().map(|f| f.id).collect(),
+            frames,
+            stopped: self.stopped,
+        }
+    }
+}
+
+/// Updates the pane has not taken yet; a full queue drops one, and the
+/// next draw then sends every frame.
+pub(crate) const CANVAS_QUEUE: usize = 8;
+
+#[derive(Debug)]
+struct Canvas {
+    id: String,
+    shown: PluginCanvas,
+    visible: bool,
+    size: CanvasIn,
+    /// What the plugin drew last while shown: the frames a click may name.
+    frames: Vec<Frame>,
+    misses: u8,
+}
+
+impl Canvas {
+    fn live(&self) -> bool {
+        self.visible && self.misses < MAX_MISSES
+    }
+
+    /// One draw (`None` is a miss): the update to send, if anything changed,
+    /// and a notice per dropped frame or for the stop.
+    fn fold(
+        &mut self,
+        out: Option<(CanvasOut, Vec<CanvasError>)>,
+    ) -> (Option<CanvasUpdate>, Vec<String>) {
+        let plugin = self.shown.plugin.clone();
+        let Some((out, dropped)) = out else {
+            self.misses += 1;
+            if self.live() {
+                return (None, Vec::new());
+            }
+            let notice = format!("plugin {plugin}: canvas missed {MAX_MISSES} draws; stopped");
+            let update = CanvasUpdate {
+                plugin,
+                stopped: true,
+                ..CanvasUpdate::default()
+            };
+            return (Some(update), vec![notice]);
+        };
+        self.misses = 0;
+        let notices = dropped
+            .iter()
+            .map(|e| format!("plugin {plugin}: {}", sanitize(&e.to_string())))
+            .collect();
+        let mut next = out.frames;
+        for f in &mut next {
+            f.title = sanitize(&f.title);
+        }
+        let order: Vec<String> = next.iter().map(|f| f.id.clone()).collect();
+        let frames: Vec<Frame> = next
+            .iter()
+            .filter(|f| !self.frames.contains(f))
+            .cloned()
+            .collect();
+        let same = frames.is_empty() && self.frames.iter().map(|f| &f.id).eq(&order);
+        self.frames = next;
+        let update = CanvasUpdate {
+            plugin,
+            order,
+            frames,
+            stopped: false,
+        };
+        ((!same).then_some(update), notices)
+    }
+}
+
+/// The canvas plugins' hosts, which the canvas calls need outside the serve
+/// thread (§8); a newtype because a `PluginHost` has no `Debug`.
+#[derive(Default)]
+struct Hosts(Vec<(String, Arc<PluginHost>)>);
+
+impl fmt::Debug for Hosts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list()
+            .entries(self.0.iter().map(|(id, _)| id))
+            .finish()
+    }
+}
+
 #[derive(Debug, Default)]
 struct Declared {
     slots: PluginSlots,
@@ -799,6 +962,17 @@ struct Declared {
     palette: Vec<Action>,
     /// Why a declared action was left out, until the session tells it.
     notices: Vec<String>,
+    canvases: Vec<Canvas>,
+    hosts: Hosts,
+}
+
+impl Declared {
+    /// `plugin`'s canvas while it is shown and still drawing.
+    fn live_canvas(&mut self, plugin: &str) -> Option<&mut Canvas> {
+        self.canvases
+            .iter_mut()
+            .find(|c| c.id == plugin && c.live())
+    }
 }
 
 /// One session's plugin UI: its slots, its plugins' grants and the queue
@@ -807,13 +981,22 @@ struct Declared {
 pub struct PluginUi {
     state: Mutex<Declared>,
     requests: mpsc::Sender<Ask>,
+    canvas_tx: mpsc::Sender<CanvasUpdate>,
+    canvas_rx: tokio::sync::Mutex<mpsc::Receiver<CanvasUpdate>>,
+    /// Set by [`Self::close_canvas`]. The sender above lives as long as the
+    /// session, so the channel alone never ends a waiting pull.
+    canvas_closed: tokio::sync::watch::Sender<bool>,
 }
 
 impl PluginUi {
     pub fn new(requests: mpsc::Sender<Ask>) -> Self {
+        let (canvas_tx, canvas_rx) = mpsc::channel(CANVAS_QUEUE);
         Self {
             state: Mutex::new(Declared::default()),
             requests,
+            canvas_tx,
+            canvas_rx: tokio::sync::Mutex::new(canvas_rx),
+            canvas_closed: tokio::sync::watch::Sender::new(false),
         }
     }
 
@@ -902,6 +1085,9 @@ impl PluginUi {
                     symbol: symbol(&tab.symbol),
                 });
                 slots.push(Slot::DesktopInspector);
+            }
+            if let Some(decl) = desktop.canvas {
+                canvas(&mut d, plugin, decl);
             }
             d.commands
                 .extend(commands.into_iter().map(|c| (plugin.to_string(), c)));
@@ -1056,6 +1242,154 @@ impl PluginUi {
     }
 }
 
+/// Records `plugin`'s canvas, or why it was left out: the host filtered it
+/// by surface and grant, and this checks the declaration itself.
+fn canvas(d: &mut Declared, plugin: &str, decl: CanvasDecl) {
+    let shown = match PluginCanvas::from_decl(plugin, decl) {
+        Ok(shown) => shown,
+        Err(e) => {
+            let why = sanitize(&e.to_string());
+            let plugin = sanitize(plugin);
+            d.notices
+                .push(format!("plugin {plugin}: canvas left out: {why}"));
+            return;
+        }
+    };
+    d.canvases.push(Canvas {
+        id: plugin.to_string(),
+        shown,
+        visible: false,
+        size: CanvasIn {
+            width_pt: 0,
+            height_pt: 0,
+        },
+        frames: Vec::new(),
+        misses: 0,
+    });
+}
+
+impl PluginUi {
+    /// The declared canvases, in the order their plugins started.
+    pub fn canvases(&self) -> Vec<PluginCanvas> {
+        self.lock()
+            .canvases
+            .iter()
+            .map(|c| c.shown.clone())
+            .collect()
+    }
+
+    /// Keeps the hosts of the plugins that declared a canvas.
+    pub fn canvas_hosts(&self, hosts: Vec<(String, Arc<PluginHost>)>) {
+        let mut d = self.lock();
+        let kept = hosts
+            .into_iter()
+            .filter(|(id, _)| d.canvases.iter().any(|c| &c.id == id))
+            .collect();
+        d.hosts = Hosts(kept);
+    }
+
+    /// The pane shows `plugin`'s canvas at this size, newly or resized.
+    /// True when it should draw now: false for an undeclared or stopped
+    /// canvas. The pane starts its frames afresh, so the next draw sends
+    /// them all.
+    pub fn show_canvas(&self, plugin: &str, width_pt: u32, height_pt: u32) -> bool {
+        let mut d = self.lock();
+        let Some(c) = d.canvases.iter_mut().find(|c| c.id == plugin) else {
+            return false;
+        };
+        c.visible = true;
+        c.size = CanvasIn {
+            width_pt,
+            height_pt,
+        };
+        c.frames.clear();
+        c.live()
+    }
+
+    /// The pane hid `plugin`'s canvas: nothing draws until it is shown.
+    pub fn hide_canvas(&self, plugin: &str) {
+        if let Some(c) = self.lock().canvases.iter_mut().find(|c| c.id == plugin) {
+            c.visible = false;
+        }
+    }
+
+    /// Whether a redraw of `plugin` should draw its canvas.
+    pub fn canvas_live(&self, plugin: &str) -> bool {
+        self.lock().live_canvas(plugin).is_some()
+    }
+
+    /// Draws `plugin`'s canvas and queues what changed for
+    /// [`Self::next_canvas`]; gives the notices to tell. Blocks up to the
+    /// draw's deadline, so it runs off the UI thread, and without the lock,
+    /// so slots and commands go on meanwhile.
+    pub fn draw_canvas(&self, plugin: &str) -> Vec<String> {
+        let (input, host) = {
+            let mut d = self.lock();
+            let Some(c) = d.live_canvas(plugin) else {
+                return Vec::new();
+            };
+            let input = c.size.clone();
+            let host = d.hosts.0.iter().find(|(id, _)| id == plugin);
+            (input, host.map(|(_, h)| Arc::clone(h)))
+        };
+        let out = cox_session::plugin_ui::canvas(host.as_deref(), &input);
+        let mut d = self.lock();
+        // Hidden while it drew: the next show draws again.
+        let Some(c) = d.live_canvas(plugin) else {
+            return Vec::new();
+        };
+        let (update, notices) = c.fold(out);
+        if let Some(update) = update
+            && self.canvas_tx.try_send(update).is_err()
+        {
+            c.frames.clear();
+        }
+        notices
+    }
+
+    /// The next update for the pane; `None` once the session is closed.
+    pub async fn next_canvas(&self) -> Option<CanvasUpdate> {
+        let mut closed = self.canvas_closed.subscribe();
+        let mut rx = self.canvas_rx.lock().await;
+        tokio::select! {
+            update = rx.recv() => update,
+            _ = closed.wait_for(|closed| *closed) => None,
+        }
+    }
+
+    /// Ends the pane's pull, waiting or later, as closing the session ends
+    /// the patch pull (DT§4.5).
+    pub fn close_canvas(&self) {
+        self.canvas_closed.send_replace(true);
+    }
+
+    /// A click on `frame` of `plugin`'s canvas: the plugin's attachment,
+    /// sanitized and capped. A frame the plugin did not draw last is dropped
+    /// before the plugin sees the click. Blocks like [`Self::draw_canvas`].
+    pub fn select_canvas(&self, plugin: &str, frame: &str, value: &str) -> Option<CanvasAttach> {
+        let host = {
+            let mut d = self.lock();
+            let drawn = d.live_canvas(plugin)?.frames.iter().any(|f| f.id == frame);
+            let host = d.hosts.0.iter().find(|(id, _)| id == plugin);
+            drawn.then(|| host.map(|(_, h)| Arc::clone(h)))?
+        };
+        let select = CanvasSelect {
+            frame: frame.to_string(),
+            value: value.to_string(),
+        };
+        cox_session::plugin_ui::canvas_select(host.as_deref(), &select).map(chip)
+    }
+}
+
+/// An attachment as the composer's chip shows it: the host already capped
+/// it, and both strings are the plugin's, so neither may carry escapes.
+pub(crate) fn chip(attach: CanvasAttach) -> CanvasAttach {
+    CanvasAttach {
+        name: sanitize(&attach.name),
+        text: sanitize(&attach.text),
+    }
+}
+
 /// The `ServeUi` a session calls once its plugins started: the serve thread
 /// over their hosts, their grants declared, and the `Redraw` their tap
 /// calls, which joins every other answer on `answers`.
@@ -1089,6 +1423,7 @@ pub fn serve_ui(
                 p.granted_renderers(),
             );
         }
+        ui.canvas_hosts(live.hosts());
         // After the grants are declared: a notice from `cox_init` is held
         // until now, and its buttons are checked against them.
         // A full queue drops a notice: the plugin's rate limit already makes
@@ -1556,6 +1891,7 @@ mod tests {
             }),
             toolbar: vec![act("go", "Go\u{202e}", "play.fill")],
             palette: vec![act("go", "Go now", "Not A Symbol")],
+            canvas: None,
         };
         ui.declare("acme", &[], vec![command("go")], desktop, vec![]);
         assert!(ui.take_notices().is_empty());
@@ -1607,6 +1943,7 @@ mod tests {
                 act("c", "C", "eye"),
             ],
             palette: vec![act("missing", "Ghost", "eye")],
+            canvas: None,
         };
         let commands = vec![command("a"), command("b"), command("c")];
         ui.declare("acme", &[], commands, desktop, vec![]);
@@ -1802,5 +2139,135 @@ mod tests {
         assert!(!ui.action("plugin:acme:ghost"));
         assert!(!ui.action("plugin:other:snooze"));
         assert!(rx.try_recv().is_err());
+    }
+
+    /// A plugin whose canvas exports never return, under a `call_ms` of
+    /// `call_ms`, so a canvas call ends at the shorter of it and its own
+    /// deadline.
+    fn spinning_canvas(call_ms: u32) -> PluginHost {
+        let wat = r#"(module (memory 1)
+          (func (export "cox_init") (result i32) (i32.const 0))
+          (func (export "cox_canvas") (result i32) (loop $spin (br $spin)) (i32.const 0))
+          (func (export "cox_canvas_select") (result i32) (loop $spin (br $spin)) (i32.const 0)))"#;
+        let limits = Limits {
+            call_ms: Some(call_ms),
+            ..Limits::default()
+        };
+        PluginHost::load("acme", wat.as_bytes(), &limits).expect("module loads")
+    }
+
+    fn canvas_ui(host: Option<PluginHost>) -> PluginUi {
+        let ui = PluginUi::new(mpsc::channel(8).0);
+        let desktop = DesktopOut {
+            canvas: Some(CanvasDecl {
+                title: "Screens".into(),
+                symbol: "rectangle.on.rectangle".into(),
+                select_attr: "data-weft-path".into(),
+            }),
+            ..DesktopOut::default()
+        };
+        ui.declare("acme", &[], Vec::new(), desktop, Vec::new());
+        let hosts = host.map(|h| ("acme".to_string(), Arc::new(h)));
+        ui.canvas_hosts(hosts.into_iter().collect());
+        ui
+    }
+
+    fn page(id: &str, title: &str, html: &str) -> Frame {
+        Frame {
+            id: id.into(),
+            title: title.into(),
+            width_pt: 390,
+            html: html.into(),
+        }
+    }
+
+    fn update(ui: &PluginUi) -> Option<CanvasUpdate> {
+        ui.canvas_rx.try_lock().expect("unshared").try_recv().ok()
+    }
+
+    /// plugin-canvas §2, §6: frames come back capped and sanitized, and a
+    /// draw sends only the frames whose page changed.
+    #[test]
+    fn a_canvas_sends_only_changed_frames() {
+        let ui = canvas_ui(None);
+        assert!(ui.show_canvas("acme", 800, 600));
+        let draw = |frames: Vec<Frame>| {
+            let mut d = ui.lock();
+            let c = d.live_canvas("acme").expect("shown");
+            c.fold(Some(CanvasOut { frames }.capped()))
+        };
+        let (first, notices) = draw(vec![
+            page("home", "Home\u{1b}[2J", "<p>1</p>"),
+            page("Bad!", "x", ""),
+            page("list", "List", "<p>2</p>"),
+        ]);
+        let first = first.expect("an update");
+        assert_eq!(first.order, ["home", "list"]);
+        assert_eq!(first.frames[0].title, "Home");
+        assert_eq!(notices.len(), 1, "the bad id is told: {notices:?}");
+        let same = vec![
+            page("home", "Home", "<p>1</p>"),
+            page("list", "List", "<p>2</p>"),
+        ];
+        assert_eq!(draw(same.clone()).0, None, "nothing changed");
+        let mut changed = same;
+        changed[1].html = "<p>3</p>".into();
+        let next = draw(changed).0.expect("an update");
+        assert_eq!(next.order, ["home", "list"]);
+        assert_eq!(next.frames.len(), 1);
+        assert_eq!(next.frames[0].id, "list");
+    }
+
+    /// §6, PL§8: a hidden canvas never draws, and three slow draws in a row
+    /// stop it for the session.
+    #[test]
+    fn a_slow_canvas_stops_after_three_misses() {
+        let ui = canvas_ui(Some(spinning_canvas(50)));
+        assert_eq!(ui.canvases()[0].select_attr, "data-weft-path");
+        assert!(!ui.canvas_live("acme"), "hidden until the pane shows it");
+        assert!(ui.draw_canvas("acme").is_empty());
+        assert_eq!(update(&ui), None);
+        assert!(ui.show_canvas("acme", 800, 600));
+        for miss in 1..=MAX_MISSES {
+            let notices = ui.draw_canvas("acme");
+            assert_eq!(notices.len(), usize::from(miss == MAX_MISSES));
+        }
+        let stopped = update(&ui).expect("the stop is sent");
+        assert!(stopped.stopped);
+        assert!(!ui.canvas_live("acme"));
+        assert!(!ui.show_canvas("acme", 800, 600), "never drawn again");
+        ui.hide_canvas("acme");
+    }
+
+    /// §5: a click on a frame the plugin did not draw, or with a value the
+    /// caps refuse, never reaches the plugin; a drawn frame does.
+    #[test]
+    fn a_click_reaches_the_plugin_only_on_a_drawn_frame() {
+        let ui = canvas_ui(Some(spinning_canvas(30_000)));
+        assert!(ui.show_canvas("acme", 800, 600));
+        let frames = vec![page("home", "Home", "<p>1</p>")];
+        let mut d = ui.lock();
+        let c = d.live_canvas("acme").expect("shown");
+        let _ = c.fold(Some(CanvasOut { frames }.capped()));
+        drop(d);
+        let quick = |frame: &str, value: &str| {
+            let started = std::time::Instant::now();
+            assert_eq!(ui.select_canvas("acme", frame, value), None);
+            started.elapsed() < std::time::Duration::from_millis(300)
+        };
+        assert!(quick("other", "hero"), "an unknown frame is dropped");
+        assert!(quick("home", "a\u{7}b"), "a bad value is dropped");
+        assert!(!quick("home", "hero"), "a drawn frame waits on the plugin");
+    }
+
+    /// §5: the chip's name and text carry no escapes.
+    #[test]
+    fn a_canvas_attachment_is_sanitized() {
+        let shown = chip(CanvasAttach {
+            name: "Hero\u{1b}]8;;x\u{7}".into(),
+            text: "screen home\nnode hero\u{202e}".into(),
+        });
+        assert_eq!(shown.name, "Hero");
+        assert_eq!(shown.text, "screen home\nnode hero");
     }
 }
