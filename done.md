@@ -11779,6 +11779,22 @@ Deviations: none (2 files, about 40 lines).
 
 Check output: `swift test --filter CanvasStoreTests` — 10 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
 
+#### T33.47.8.6 ⌘⇧D, the palette action and the DT§ text
+
+Depends: T33.47.8.5, T33.47.8.9 · Files: `desktop/macos/App/ShellCommands.swift`, `desktop/macos/App/SessionPalette.swift`, `docs/design/desktop.md` · Design: §3, A156
+
+View › Show Canvas on ⌘⇧D, the palette's "Show <title>" per declared canvas, and DT§5.1, §5.5 and §10's text for the pane, the shortcut and the isolation.
+
+Check: the app builds; ⌘⇧D and the palette row toggle the pane by hand; the falsifier 3 measurement (Instruments, by hand) is written into T33.47.8's Check output or left open with why.
+
+Plan (Claude Code / claude-opus-5-5): (1) `ShellActions.isCanvasVisible` and `toggleCanvas`, `nil` while the session declares no canvas; View › Show/Hide Canvas on `ShellShortcut.canvas` (⌘⇧D). (2) The window loads the session's canvases once its plugins are loaded. (3) The palette's `canvas:<plugin>` row per declared canvas, "Show <title>" or "Hide <title>", which picks first (T33.47.8.9) and then shows the pane. (4) DT§5.1's pane, DT§5.5's row, key and zoom keys, and DT§10's isolation.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.6 canvas shortcut, palette rows and DT text" on branch `t33.47-plugin-canvas`.
+
+Deviations: 4 files rather than 3: the three App files the shortcut and the palette need, and `docs/design/desktop.md`, text only. `SessionWindow`'s one-pane-beside-the-column rule moved into a `ViewModifier` in the same file to keep the struct under SwiftLint's 250-line body. The hand check (⌘⇧D and the palette row toggle the pane; two frames show; a click adds a chip and a second replaces it) and the falsifier 3 measurement (Instruments) need a person at the app: an agent here has no way to drive a native window, and no fixture plugin declares a canvas. Both are left open in T33.47.8's Check.
+
+Check output: `scripts/desktop/app.sh` builds `Cox.app` (exit 0, no warnings in the touched files); `swiftlint lint --strict` on `App` and `swift format lint -s` on the three Swift files clean.
+
 #### T33.47.8.4 CoxUI: `PluginCanvasPane`
 
 Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3

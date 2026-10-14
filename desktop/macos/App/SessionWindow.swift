@@ -129,9 +129,11 @@ struct SessionWindow: View {
         ShellActions(
           isSidebarVisible: screen.isSidebarVisible, isInspectorVisible: screen.isInspectorVisible,
           isTerminalVisible: isTerminalShown, isBrowserVisible: isBrowserVisible,
+          isCanvasVisible: isCanvasVisible,
           toggleSidebar: { toggleSidebar() },
           toggleInspector: { screen.isInspectorVisible.toggle() },
           toggleTerminal: { toggleTerminal() }, toggleBrowser: { isBrowserVisible.toggle() },
+          toggleCanvas: canvasToggle,
           popOut: current.map { session -> (Bool) -> Void in { openPopOut(session, asTab: $0) } },
           connectHost: model.remotes.canConnect ? { connecting = ConnectHostSheet.State() } : nil,
           newSession: { Task { await newSession() } }, review: showing.map { _ in toggleReview },
@@ -153,18 +155,10 @@ struct SessionWindow: View {
       }
       .joinsTabs(of: popOut?.tabOf)
       .closeGuard { opened.values.contains { $0.store.hasBusyTerminal } }
-      // The browser takes the inspector's place beside the column, as mockup 25 draws it, and the
-      // canvas takes either's: with two, the panes outgrow the window and push the toolbar's
-      // trailing buttons off its edge.
-      .onChange(of: isBrowserVisible) { _, shown in
-        if shown { (screen.isInspectorVisible, isCanvasVisible) = (false, false) }
-      }
-      .onChange(of: isCanvasVisible) { _, shown in
-        if shown { (screen.isInspectorVisible, isBrowserVisible) = (false, false) }
-      }
-      .onChange(of: screen.isInspectorVisible) { _, shown in
-        if shown { (isBrowserVisible, isCanvasVisible) = (false, false) }
-      }
+      .modifier(
+        OnePaneBeside(
+          inspector: $screen.isInspectorVisible, browser: $isBrowserVisible,
+          canvas: $isCanvasVisible))
   }
 
   private var shown: MainScreenState {
@@ -332,6 +326,8 @@ struct SessionWindow: View {
       }
       // After it shows: Info asks git about the cwd, which can take a while.
       if let info = try? await client.info() { opened[client.id]?.info = info }
+      // The plugins are loaded now, so ⌘⇧D and the palette know their canvases.
+      await opened[client.id]?.canvas?.load()
     } catch {
       // Without a first session the column says why; later, an alert does.
       if current == nil {
@@ -355,6 +351,22 @@ extension SessionWindow {
       SessionCanvas(canvas: canvas) { refused = $0 }
         .frame(maxWidth: SessionCanvas.paneWidth)
     }
+  }
+}
+
+/// The browser takes the inspector's place beside the column, as mockup 25 draws it, and the
+/// canvas takes either's: with two, the panes outgrow the window and push the toolbar's trailing
+/// buttons off its edge.
+private struct OnePaneBeside: ViewModifier {
+  @Binding var inspector: Bool
+  @Binding var browser: Bool
+  @Binding var canvas: Bool
+
+  func body(content: Content) -> some View {
+    content
+      .onChange(of: browser) { _, shown in if shown { (inspector, canvas) = (false, false) } }
+      .onChange(of: canvas) { _, shown in if shown { (inspector, browser) = (false, false) } }
+      .onChange(of: inspector) { _, shown in if shown { (browser, canvas) = (false, false) } }
   }
 }
 

@@ -65,7 +65,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 75% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | todo | P2 | 4 | 0% | |
-| T33.47.8.6 | todo | P2 | 2 | 0% | |
 | T33.47.9 | todo | P2 | 1 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
@@ -1151,14 +1150,6 @@ The pane beside the transcript with frames side by side and zoom, ⌘⇧D, the p
 Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a selection adds one chip and a second replaces it; the falsifier 3 measurement written into the card's Check output.
 
 Split by A157 into T33.47.8.1–T33.47.8.9, one layer each; this card closes when they are done.
-
-#### T33.47.8.6 ⌘⇧D, the palette action and the DT§ text
-
-Depends: T33.47.8.5, T33.47.8.9 · Files: `desktop/macos/App/ShellCommands.swift`, `desktop/macos/App/SessionPalette.swift`, `docs/design/desktop.md` · Design: §3, A156
-
-View › Show Canvas on ⌘⇧D, the palette's "Show <title>" per declared canvas, and DT§5.1, §5.5 and §10's text for the pane, the shortcut and the isolation.
-
-Check: the app builds; ⌘⇧D and the palette row toggle the pane by hand; the falsifier 3 measurement (Instruments, by hand) is written into T33.47.8's Check output or left open with why.
 
 #### T33.47.9 User docs
 

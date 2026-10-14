@@ -5,7 +5,8 @@
 // ⌘K's command palette in a session window (DT§5.5, mockup 12, T37.44.13): the window's actions
 // and the listed sessions go to the session, which ranks them with its `/` commands and `@` files
 // through `cox_app::palette::rank`; a picked row runs its action, shows its session or lands in
-// the composer. Separate from `SessionWindow.swift` to keep that file within SwiftLint's length
+// the composer. A plugin's declared canvas adds a "Show <title>" row (plugin-canvas §3). Separate
+// from `SessionWindow.swift` to keep that file within SwiftLint's length
 // limits; nothing here ranks or filters.
 
 import CoxClient
@@ -138,6 +139,8 @@ extension SessionWindow {
       Action.terminal.item(isTerminalShown ? "Hide Terminal" : "Show Terminal", .terminal),
       Action.browser.item(isBrowserVisible ? "Hide Browser" : "Show Browser", .browser),
     ]
+    // Only the person opens the pane: a plugin can declare a canvas but not show it.
+    items += (showing?.canvas?.canvases ?? []).map(canvasItem)
     if model.remotes.canConnect { items.append(Action.connectHost.item("Connect to Host…")) }
     return items
   }
@@ -149,10 +152,43 @@ extension SessionWindow {
     case .action:
       if let action = PaletteAction(rawValue: item.id) {
         run(action)
+      } else if item.id.hasPrefix(Self.canvasPrefix) {
+        toggleCanvas(String(item.id.dropFirst(Self.canvasPrefix.count)))
       } else if let store = showing?.store {
         // `plugin:<id>:<command>`: cox-app runs the command as if typed (PL§15.4).
         Task { _ = await store.pluginAction(item.id) }
       }
+    }
+  }
+
+  /// A canvas row's id: `canvas:<plugin>`. cox-app names plugin actions `plugin:…`, so the two
+  /// never meet.
+  static let canvasPrefix = "canvas:"
+
+  /// ⌘⇧D's action; `nil` while the shown session's plugins declare no canvas.
+  var canvasToggle: (() -> Void)? {
+    guard showing?.canvas?.canvases.isEmpty == false else { return nil }
+    return { isCanvasVisible.toggle() }
+  }
+
+  private func canvasItem(_ canvas: PluginCanvas) -> PaletteItem {
+    let isShown = isCanvasVisible && showing?.canvas?.shown == canvas.plugin
+    return PaletteItem(
+      kind: .action, id: Self.canvasPrefix + canvas.plugin,
+      title: "\(isShown ? "Hide" : "Show") \(canvas.title)", detail: "", symbol: canvas.symbol)
+  }
+
+  /// Hides the pane when it shows `plugin`'s canvas, else shows that canvas there. The pick goes
+  /// first, so a pane that opens now opens on it.
+  private func toggleCanvas(_ plugin: String) {
+    guard let canvas = showing?.canvas else { return }
+    if isCanvasVisible, canvas.shown == plugin {
+      isCanvasVisible = false
+      return
+    }
+    Task {
+      await canvas.pick(plugin)
+      isCanvasVisible = true
     }
   }
 
