@@ -464,7 +464,10 @@ impl HostEnv {
     /// `cox_render` has a strict time cap, so it may only read (PL§4).
     fn outside_render(&self) -> Result<(), AbiError> {
         match lock(&self.export).as_str() {
-            "cox_render" | "cox_render_item" => Err(AbiError::NotInThisContext),
+            // The canvas exports draw and read, like a render (canvas design §2).
+            "cox_render" | "cox_render_item" | "cox_canvas" | "cox_canvas_select" => {
+                Err(AbiError::NotInThisContext)
+            }
             _ => Ok(()),
         }
     }
@@ -850,7 +853,9 @@ pub(crate) mod tests {
               (export "cox_key" (func $relay))
               (export "cox_on_event" (func $relay))
               (export "cox_tool_call" (func $relay))
-              (export "cox_render" (func $relay)))"#
+              (export "cox_render" (func $relay))
+              (export "cox_canvas" (func $relay))
+              (export "cox_canvas_select" (func $relay)))"#
         )
         .into_bytes()
     }
@@ -1050,6 +1055,30 @@ pub(crate) mod tests {
             call(&granted, "cox_kv_get", "cox_command", json!("turns")),
             json!({ "Ok": null })
         );
+    }
+
+    /// The canvas exports run in render context (canvas design §2): they may
+    /// read the context but not write, notify or reach kv.
+    #[test]
+    fn canvas_exports_are_render_context() {
+        let store = Arc::new(MemKv::default());
+        let env = Arc::new(
+            HostEnv::new("t").with_grant(vec!["kv".into(), "context".into()], store.clone()),
+        );
+        let refused = json!({ "Err": { "kind": "not_in_this_context" } });
+        for export in ["cox_canvas", "cox_canvas_select"] {
+            let put = json!({ "key": "k", "value": 1 });
+            assert_eq!(call(&env, "cox_kv_put", export, put), refused, "{export}");
+            let notice = json!({ "level": "info", "text": "hi" });
+            assert_eq!(
+                call(&env, "cox_notify", export, notice),
+                refused,
+                "{export}"
+            );
+            let reply = call(&env, "cox_context", export, Value::Null);
+            assert!(reply["Ok"]["items"].is_array(), "{export}: {reply}");
+        }
+        assert!(lock(&store.0).is_empty());
     }
 
     #[test]
