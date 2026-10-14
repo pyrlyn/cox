@@ -76,6 +76,33 @@ module, and a drift test keeps it current.
     plugin's widget is checked again on the app and goes through the same
     confirmation as `open_url`.
 
+## Handshake
+
+The first request on a link is `hello`. It takes no parameters and answers the
+host's protocol version (`wire`), cox version, OS, architecture and sandbox
+backend, or no backend when the host has none. The app refuses a host that
+speaks another protocol version and says which side to update, for example:
+
+> devbox speaks app-server protocol 2 but this app speaks 1; update this app
+> so the two match
+
+A cox that is too old to know `hello` gives a plain error instead:
+
+> the cox on devbox is too old for this app (protocol 1); update cox on that
+> machine (see docs/app-server.md)
+
+The app also reads the launcher's stderr, keeping the last 8 KiB and stripping
+escape sequences and bidi controls from it, so a link that closes before
+`hello` says why. When the shell reports exit status 127 or `cox: command not
+found`, the message is:
+
+> cox is not on the PATH of devbox; install cox there so that a
+> non-interactive login can run `cox` (see docs/app-server.md)
+
+Any other early close shows the last lines the launcher wrote, for example
+`could not reach devbox: ssh: Could not resolve hostname devbox`. A drop after
+a successful `hello` is the usual **Disconnected** state.
+
 A stalled client never delays a turn. The server keeps at most 64 lines queued
 for the writer. Past that, each session's patches fold into the latest state
 per block until the client reads again.

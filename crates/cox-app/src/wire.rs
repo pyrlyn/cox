@@ -53,6 +53,9 @@ pub struct Request {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Call {
+    /// The first call on a link (T68.3): what the other end is, so a client
+    /// can refuse a wire it does not speak before it relies on one.
+    Hello,
     Projects {
         limit: i64,
     },
@@ -153,6 +156,7 @@ pub enum Outcome {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Reply {
+    Hello(HostInfo),
     Projects(#[schemars(with = "Vec<Value>")] Vec<Project>),
     Sessions(#[schemars(with = "Vec<Value>")] Vec<SessionEntry>),
     Search(#[schemars(with = "Vec<Value>")] Vec<SearchHit>),
@@ -178,6 +182,24 @@ pub enum Reply {
     Shown,
     CanvasAttach(#[schemars(with = "Option<Value>")] Option<CanvasAttach>),
     Closed,
+}
+
+/// What `hello` answers: the host a server runs on, as the client shows it
+/// and checks it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HostInfo {
+    /// The server's `wire::VERSION`.
+    pub wire: u32,
+    /// The server's cox version.
+    pub cox: String,
+    /// `std::env::consts::OS`: `macos`, `linux`, `windows`.
+    pub os: String,
+    /// `std::env::consts::ARCH`: `aarch64`, `x86_64`.
+    pub arch: String,
+    /// The backend that confines shell commands there (`seatbelt`, `bwrap`,
+    /// `landlock`), or `None` when the host has none (D7 then forces
+    /// `on-request` approval).
+    pub sandbox: Option<String>,
 }
 
 /// Pushed by the server, never answered.
@@ -304,6 +326,7 @@ mod tests {
     fn every_message() -> Vec<Line> {
         let id = session();
         vec![
+            request(Call::Hello),
             request(Call::Projects { limit: 20 }),
             request(Call::Sessions {
                 project: PathBuf::from("/work/cox"),
@@ -356,6 +379,20 @@ mod tests {
                 value: "screen#home/hero".into(),
             }),
             request(Call::Close { session: id }),
+            reply(Reply::Hello(HostInfo {
+                wire: VERSION,
+                cox: "0.1.2".into(),
+                os: "linux".into(),
+                arch: "aarch64".into(),
+                sandbox: Some("bwrap".into()),
+            })),
+            reply(Reply::Hello(HostInfo {
+                wire: VERSION,
+                cox: "0.1.2".into(),
+                os: "windows".into(),
+                arch: "x86_64".into(),
+                sandbox: None,
+            })),
             reply(Reply::Projects(Vec::new())),
             reply(Reply::Sessions(Vec::new())),
             reply(Reply::Search(Vec::new())),
