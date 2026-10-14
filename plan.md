@@ -63,9 +63,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
-| T33.47 | in progress | P2 | 4 | 10% | Claude Code / claude-opus-5-5 |
-| T33.47.1 | in progress | P2 | 3 | 0% | Claude Code / claude-opus-5-5 |
-| T33.47.2 | todo | P2 | 1 | 0% | |
+| T33.47 | in progress | P2 | 4 | 20% | Claude Code / claude-opus-5-5 |
+| T33.47.2 | in progress | P2 | 1 | 0% | Claude Code / claude-opus-5-5 |
 | T33.47.3 | todo | P2 | 3 | 0% | |
 | T33.47.4 | todo | P2 | 3 | 0% | |
 | T33.47.5 | todo | P2 | 2 | 0% | |
@@ -1148,23 +1147,15 @@ A plugin that produces UI (Weft's `plugins/cox`, whose agent writes app screens)
 
 Check: the nine cards' checks; `just test` green.
 
-#### T33.47.1 API: manifest key, ABI types and caps
+#### T33.47.2 Manifest key, grant line and design text
 
-Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin-api/src/lib.rs` (plus the regenerated `docs/plugin.schema.json`, `docs/plugin-abi.schema.json` and the `docs/plugins.md` field index) · Design: `docs/design/plugin-canvas.md` §1, §2
+Depends: T33.47.1 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` (plus the regenerated `docs/plugin.schema.json` and field index) · Design: `docs/design/plugin-canvas.md` §1
 
-`DesktopCaps.canvas`; `DesktopOut.canvas: Option<CanvasDecl>`; `CanvasIn`, `CanvasOut`, `Frame`, `CanvasSelect`, `CanvasAttach`; one caps check the host and the app-server client both call.
+`DesktopCaps.canvas` (moved here from T33.47.1, so each task stays within three files); the `desktop.canvas` grant line; PL§4 (`cox_redraw` under the canvas), §14 decision 17, the §15.4 canvas row and rules in place of "HTML or web views — never", §15.5's `canvas` key.
 
-Plan (Claude Code / claude-opus-5-5): (1) `manifest.rs`: `DesktopCaps.canvas` (`#[serde(default)]`); the existing surface-table check already refuses it when `surfaces` excludes `desktop`. (2) `abi.rs`: `DesktopOut.canvas`, the five payloads, the limits as constants, and the checks: `CanvasDecl::check` (title 1–64 chars, `is_symbol_name`, `is_select_attr` `^data-[a-z0-9-]{1,48}$`), `CanvasOut::capped` (keeps the first 12 frames with a valid unique id `^[a-z0-9_.-]{1,64}$`, at most 1 MiB each and 4 MiB in all, titles cut to 80 chars, widths clamped to 200–2560, and returns one `CanvasError` per drop), `CanvasSelect::check` (a frame id, a value of 1–256 chars without control characters), `CanvasAttach::capped` (name cut to 80 chars, text over 8 KiB refused). The checks are forms and sizes only: sanitizing needs `cox-sanitize`, which this crate may not depend on, so it stays in `cox-app` as for widgets. (3) `lib.rs`: re-exports and the new types in the ABI schema's `defs!`; regenerate both schemas and `scripts/plugin_api_reference.py --write`.
+Plan (Claude Code / claude-opus-5-5): (1) `DesktopCaps.canvas` with `#[serde(default)]` and the test that it parses and is refused when `surfaces` excludes `desktop` (the existing surface-table check covers it); regenerate `docs/plugin.schema.json` and the field index. (2) `capability_list` adds `("desktop.canvas", caps.desktop.canvas)`; `grant_new_canvas_needs_approval` beside the existing desktop grant test. (3) PL§4 host-function table: `cox_redraw` under any `ui` or `desktop.canvas`; PL§14 decision 17; PL§15.4: the canvas row and its rules in place of "HTML or web views — never" (the pointer added with A156 goes); PL§15.5: `canvas = true` in the example and the grant line in the list.
 
-Check: caps unit tests (frame count, sizes, id, `select_attr`, selection value, attachment); the schema and API-reference drift tests; `cargo nextest run -p cox-plugin-api`.
-
-#### T33.47.2 Grant line and design text
-
-Depends: T33.47.1 · Files: `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` · Design: `docs/design/plugin-canvas.md` §1
-
-The `desktop.canvas` grant line; PL§4 (`cox_redraw` under the canvas), §14 decision 17, the §15.4 canvas row and rules in place of "HTML or web views — never", §15.5's `canvas` key.
-
-Check: `grant_new_canvas_needs_approval`; `cargo nextest run -p cox-plugin`.
+Check: `manifest_canvas_is_a_desktop_part`; `grant_new_canvas_needs_approval`; the schema drift test; `cargo nextest run -p cox-plugin-api -p cox-plugin`.
 
 #### T33.47.3 Host calls and SDK
 

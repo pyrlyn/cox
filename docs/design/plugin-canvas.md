@@ -122,8 +122,8 @@ A156 §3 P33: new T33.47 and T33.47.1–T33.47.9. PL§15.4 changes "plugin-suppl
 
 | Task | Files | Check |
 | --- | --- | --- |
-| T33.47.1 API: manifest key, ABI types and caps | `cox-plugin-api` `manifest.rs`, `abi.rs`, `lib.rs` (schemas, API field index) | caps unit tests (count, size, id, attr, value); the schema and API-reference drift tests |
-| T33.47.2 Grant line and design text | `cox-plugin` `grant.rs`; `docs/design/plugins.md` | `grant_new_canvas_needs_approval`; PL§4, §14 decision 17, §15.4 and §15.5 describe the canvas |
+| T33.47.1 API: ABI types and caps | `cox-plugin-api` `abi.rs`, `lib.rs` (schema, API field index) | caps unit tests (count, size, id, attr, value); the schema and API-reference drift tests |
+| T33.47.2 Manifest key, grant line and design text | `cox-plugin-api` `manifest.rs`; `cox-plugin` `grant.rs`; `docs/design/plugins.md` | `manifest_canvas_is_a_desktop_part`; `grant_new_canvas_needs_approval`; PL§4, §14 decision 17, §15.4 and §15.5 describe the canvas |
 | T33.47.3 Host calls and SDK | `cox-plugin` `live.rs`, `hostfn.rs`; `plugins/sdk/src/lib.rs` | a fixture plugin's frames come back capped; a slow `cox_canvas` misses three times and stops; `cox_redraw` allowed under `desktop.canvas` |
 | T33.47.4 cox-app canvas state | `cox-app` `plugin_ui.rs`, `live.rs` | redraw only while visible; unchanged frames not re-sent; a select on an unknown frame is dropped; the attachment is sanitized and capped |
 | T33.47.5 Wire and remote | `cox-app` `wire.rs`, `remote.rs` (schema) | `wire_round_trips_every_message`; the client re-applies caps to an over-size `PluginCanvas` |

@@ -11558,3 +11558,17 @@ Check: the three cards' checks; `just test` green.
 Status: done 2026-10-14 · Branch `t33.46-plugin-skills` (T33.46.1–T33.46.3): a plugin package ships Agent Skills with `[[skills]]`, one `skill:<name> <dir>` grant line each, loaded for a granted plugin after the local skills.
 
 Check output: the three cards' checks. Per the creator's brief for this branch, only the touched crates were tested, not `just test`.
+
+#### T33.47.1 API: ABI types and caps
+
+Depends: — · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin-api/src/lib.rs`, `plugins/examples/surfaces/src/lib.rs` (plus the regenerated `docs/plugin-abi.schema.json` and the `docs/plugins.md` field index) · Design: `docs/design/plugin-canvas.md` §1, §2
+
+`DesktopCaps.canvas`; `DesktopOut.canvas: Option<CanvasDecl>`; `CanvasIn`, `CanvasOut`, `Frame`, `CanvasSelect`, `CanvasAttach`; one caps check the host and the app-server client both call.
+
+Plan (Claude Code / claude-opus-5-5): (1) `manifest.rs`: `DesktopCaps.canvas` (`#[serde(default)]`); the existing surface-table check already refuses it when `surfaces` excludes `desktop`. (2) `abi.rs`: `DesktopOut.canvas`, the five payloads, the limits as constants, and the checks: `CanvasDecl::check` (title 1–64 chars, `is_symbol_name`, `is_select_attr` `^data-[a-z0-9-]{1,48}$`), `CanvasOut::capped` (keeps the first 12 frames with a valid unique id `^[a-z0-9_.-]{1,64}$`, at most 1 MiB each and 4 MiB in all, titles cut to 80 chars, widths clamped to 200–2560, and returns one `CanvasError` per drop), `CanvasSelect::check` (a frame id, a value of 1–256 chars without control characters), `CanvasAttach::capped` (name cut to 80 chars, text over 8 KiB refused). The checks are forms and sizes only: sanitizing needs `cox-sanitize`, which this crate may not depend on, so it stays in `cox-app` as for widgets. (3) `lib.rs`: re-exports and the new types in the ABI schema's `defs!`; regenerate both schemas and `scripts/plugin_api_reference.py --write`.
+
+Check: caps unit tests (frame count, sizes, id, `select_attr`, selection value, attachment); the schema and API-reference drift tests; `cargo nextest run -p cox-plugin-api`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.1 canvas ABI types and caps" on branch `t33.47-plugin-canvas`: `DesktopOut.canvas`, `CanvasDecl`, `CanvasIn`, `CanvasOut`, `Frame`, `CanvasSelect`, `CanvasAttach`, `CanvasError`, the limits as constants, and `CanvasDecl::check`, `CanvasOut::capped`, `CanvasSelect::check`, `CanvasAttach::capped`, re-exported and in the ABI schema. The manifest key moved to T33.47.2 so this task stays within three files. The new `DesktopOut` field also needed `canvas: None` in the struct literals of the surfaces example and of two `cox-app` tests (one line each).
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-app` — 436 passed, with `canvas_decl_checks_title_symbol_and_attribute`, `canvas_out_keeps_valid_frames_within_the_limits`, `canvas_out_caps_the_frame_count_and_the_total_size`, `canvas_selection_needs_a_frame_id_and_a_plain_bounded_value`, `canvas_attachment_cuts_the_name_and_refuses_long_text`, `desktop_payloads_round_trip`, `abi_schema_matches_committed_file` and `plugin_api_reference_covers_both_schemas`; `cargo check --workspace --all-targets` and the `plugins/` workspace check clean; clippy `-D warnings` (host and `wasm32-unknown-unknown`) and `cargo fmt --check` clean.
