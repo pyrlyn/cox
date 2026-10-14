@@ -11534,3 +11534,27 @@ Check: `skills_plugin_skill_loses_to_a_local_one_with_a_notice`, `skills_invoke_
 Status: done 2026-10-14 · Commit "feat: T33.46.2 cox-ext: plugin skill files, merge and the skill's folder" on branch `t33.46-plugin-skills`: `skills::parse_file`, `skills::merge` (a loaded name wins, the plugin's is a notice), and `Base directory: <folder>` plus `structured.dir` in the `skill` tool's output.
 
 Check output: `mise exec -- cargo nextest run -p cox-ext` — 64 passed (with `skills_plugin_skill_loses_to_a_local_one_with_a_notice`, `skills_parse_file_applies_the_name_rule`, `skills_invoke_names_the_skill_folder`); clippy `-D warnings` and `cargo fmt --check` clean.
+
+#### T33.46.3 Session: a granted plugin's skills
+
+Depends: T33.46.1, T33.46.2 · Files: `crates/cox-session/src/plugins.rs`, `crates/cox-session/src/lib.rs`, `crates/cox/tests/plugins.rs` · Design: A155
+
+`Plugins.skill_defs`, filled for a granted plugin like `agent_defs`: each `<dir>/SKILL.md` is reached through `package_program` (no `..`, no symlink on the way, a regular file), parsed with `cox_ext::skills::parse_file`, and kept only when its frontmatter `name` is the approved one; anything else is a notice (D14). `lib.rs` merges them after `discover`, before `prefix_texts` and `SkillTool::new`, so the index and the tool see them. `cox ext list` is unchanged (it lists files, not plugins).
+
+Check: an e2e test in `crates/cox/tests/plugins.rs` installs a wasm-less skills package with `--yes` and finds the skill in the `skill` tool's output under a scripted session; a symlinked `SKILL.md` is skipped with a notice; `cargo nextest run -p cox-session -p cox` and the `--no-default-features` build of `cox-session`.
+
+Status: done 2026-10-14 · Commit "feat: T33.46.3 session: a granted plugin's skills" on branch `t33.46-plugin-skills`: `Plugins.skill_defs` and `plugin_skills` (each `SKILL.md` through `package_program`, parsed with `skills::parse_file`, kept only under its approved name, otherwise a notice), merged in `lib.rs` after `discover` and before `prefix_texts` and `SkillTool::new`.
+
+Check output: `mise exec -- cargo nextest run -p cox-session -p cox-ext -p cox-plugin -p cox-plugin-api -p cox` — 299 of 302 passed, with `granted_plugin_skill_is_loaded_by_the_skill_tool` and `plugin_skills_skip_a_symlink_and_a_misnamed_skill`; the 3 failures were `cox-plugin` http host-function tests that time out under the parallel load and pass alone (`http_to_allowed_host_round_trips`: 1 passed), untouched by this branch. clippy `-D warnings` (also `cox-session --no-default-features`) and `cargo fmt --check` clean.
+
+#### T33.46 Plugins ship skills
+
+Depends: T45.4 · Design: `docs/design/plugins.md` §2, §3, §12, §14 decision 16, A155
+
+A plugin package cannot carry Agent Skills: `plugin.toml` has `[[agents]]` and `[[mcp]]` but no skills, so a plugin that wants to teach the model how to use its tools (Weft's `plugins/cox`, which ships the Weft authoring guide as a skill to Claude Code and Cursor) has no way to. Add a data-only `[[skills]]` entry: `name` and `dir`, a package-relative folder holding a `SKILL.md` in the same format as `.cox/skills/<name>/SKILL.md`. Each entry is one grant line, `skill:<name> <dir>`. A granted plugin's skills join the session's skills after the local ones, so a user or project skill of the same name wins, with a notice. The `skill` tool names the skill's folder in its output, so a skill can point at files it bundles. The build is T33.46.1–T33.46.3; this card closes when they are done.
+
+Check: the three cards' checks; `just test` green.
+
+Status: done 2026-10-14 · Branch `t33.46-plugin-skills` (T33.46.1–T33.46.3): a plugin package ships Agent Skills with `[[skills]]`, one `skill:<name> <dir>` grant line each, loaded for a granted plugin after the local skills.
+
+Check output: the three cards' checks. Per the creator's brief for this branch, only the touched crates were tested, not `just test`.
