@@ -143,7 +143,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
 | T68.5 | in progress | P2 | 3 | 100% | Claude / sonnet-5.5 |
-| T68.8 | in progress | P2 | 3 | 0% | Claude / sonnet-5.5 |
+| T68.8 | in progress | P2 | 3 | 70% | Claude / sonnet-5.5 |
 | T68.10 | in progress | P2 | 1 | 0% | Claude / haiku-5.5 |
 
 ## Reference
@@ -3056,6 +3056,10 @@ Goal: File > Connect to Host becomes Connect to Target: a kind picker (SSH, Dock
 Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
 
 Goal: `cox app-server --stdio` and `cox run` serve over Windows OpenSSH: binary stdio without CRLF translation, Windows paths accepted as a target `cwd`, `hello` reporting no sandbox so the session runs `on-request` (D7, T49.2 deferred). Run by the Windows host agent; the windows CI job runs the app-server tests once it is back on. Done when `app_server_round_trips_on_windows` passes there.
+
+Done on macOS (A130): `serve_stdio` skips the login-shell capture on Windows (OpenSSH starts the command with the whole environment); a CRLF client is read and a CR is never written, pinned by `app_server_reads_crlf_lines_and_writes_bare_newlines` and, over the real binary's pipes, `crates/cox/tests/app_server_stdio.rs`; `hello` already reports `sandbox: None` on Windows (`cox_sandbox::sandbox::backend`), so T57.3's `effective_approval` keeps `on-request`; a Windows `cwd` (`C:\srv\app`) passes `check_token` (`windows_cwd_is_a_safe_token`, `a_windows_cwd_reaches_the_remote_command_line_whole`); cmd.exe's and PowerShell's "not recognized" wording and cmd's status 9009 read as `NotInstalled`.
+
+Remaining for the Windows host agent: `cox-session`, `cox-app` and `cox` are not in `windows_crates` and do not build there yet (`nix` in both crates' manifests, `std::os::unix` in `cox-session/src/{env,plugins,mcp,external_agents,target_agents}.rs` and `cox-app/src/{remote,targets,terminal}.rs`, `process_group` in `cox-session/src/env.rs`). Port those (gate `nix` to `cfg(unix)`, add the crates to `windows_crates`), then run `mise exec -- cargo nextest run -p cox-app -p cox-target` and `mise exec -- cargo nextest run -p cox --test app_server_stdio` (must pass `app_server_round_trips_on_windows` and `app_server_stdio_round_trips_with_lf_and_crlf_clients`; the test sets `SHELL=/bin/sh`, harmless on Windows), then try a real `ssh <win-host> cox app-server --stdio` from a Mac `RemoteWorkspace` and `cox run --on ssh:<win-host> -p hi` with `[targets.win] cwd = "C:\\srv\\app"`. Check that OpenSSH's default shell (cmd.exe) passes `--cwd C:\srv\app` through unchanged and that stdin EOF ends the server. Then set readiness to 100% and move the card to `done.md`.
 
 #### T68.10 Docs: targets
 

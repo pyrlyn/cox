@@ -172,6 +172,13 @@ mod tests {
     }
 
     #[test]
+    fn a_windows_cwd_reaches_the_remote_command_line_whole() {
+        let cli = Cli::parse_from(["cox", "--on", "ssh:winbox"]);
+        let plan = plan(&cli, Some("C:\\srv\\app")).unwrap();
+        assert_eq!(plan.remote, ["cox", "--cwd", "C:\\srv\\app"]);
+    }
+
+    #[test]
     fn tui_on_a_target_asks_for_a_tty() {
         let plan = plan_of(&["cox", "--on", "lima:dev", "--model", "m1"]).unwrap();
         assert_eq!(plan.tty, Tty::Yes);
