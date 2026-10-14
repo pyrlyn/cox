@@ -149,7 +149,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.6 | todo | P1 | 3 | 0% |  |
 | T68.7 | todo | P2 | 3 | 0% |  |
 | T68.8 | todo | P2 | 3 | 0% |  |
-| T68.9 | in progress | P1 | 2 | 100% | Claude / sonnet-5.5 |
 | T68.10 | todo | P2 | 1 | 0% |  |
 
 ## Reference
@@ -3096,12 +3095,6 @@ Goal: `[external_agents.<name>]` gains `target`. Such a preset runs `cox run --o
 Model: - · Status: open · Depends: T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
 
 Goal: `cox app-server --stdio` and `cox run` serve over Windows OpenSSH: binary stdio without CRLF translation, Windows paths accepted as a target `cwd`, `hello` reporting no sandbox so the session runs `on-request` (D7, T49.2 deferred). Run by the Windows host agent; the windows CI job runs the app-server tests once it is back on. Done when `app_server_round_trips_on_windows` passes there.
-
-#### T68.9 End-to-end tests with fake launchers
-
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.1 · Size: ~60 + tests · Priority: P1 · Complexity: 2
-
-Goal: test-support scripts named `ssh`, `docker`, `limactl` and `colima` that check their argv and exec the local `cox app-server --stdio` against a scratch `COX_HOME`, used by every P68 card; one `#[ignore]` test per real backend (`colima`, `lima`, `docker` under Colima) for a manual run. Done when `crates/cox/tests/targets.rs` runs a turn through each fake launcher with the scripted provider.
 
 #### T68.10 Docs: targets
 

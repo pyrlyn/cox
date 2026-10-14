@@ -135,5 +135,4 @@
 - T68.6. `--on <target>` for the TUI and `cox run`
 - T68.7. `agent` presets on a target
 - T68.8. Windows targets
-- T68.9. End-to-end tests with fake launchers
 - T68.10. Docs: targets
