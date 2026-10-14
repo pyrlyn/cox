@@ -11666,3 +11666,20 @@ Status: done 2026-10-14 · Commit "feat: T33.47.7 canvas page isolation" on bran
 Deviations: `docs/design/plugin-canvas.md` is a third file, outside the card's two, to correct §4.
 
 Check output: `swift test` in `desktop/macos/Packages/CoxPlatform` — 43 tests in 2 suites passed, with `aPageScriptDoesNotRun`, `neitherAWebNorADataImageLoads`, `thePageCannotNavigate`, `aClickPostsTheNearestValueAndDoesNotFollowALink`, `aNewLoadReplacesTheFrame` and `theAttributeReachesTheScriptAsJSON`; `xcrun swift-format lint --strict` and `swiftlint lint --strict` clean on both files.
+
+#### T33.47.8.1 CoxClient: the canvas seam and its fixture
+
+Depends: T33.47.6 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxClient/PluginCanvas.swift` (new), `desktop/macos/Packages/CoxModel/Sources/CoxClient/FixturePlugins.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/PluginCanvasTests.swift` (new) · Design: `docs/design/plugin-canvas.md` §3, §5, §8
+
+The client types `PluginCanvas`, `CanvasFrame`, `CanvasUpdate`, `CanvasAttach` and a `CanvasClient` protocol (`pluginCanvases`, `showCanvas`, `hideCanvas`, `nextCanvas`, `selectCanvas`) that a session with canvases also conforms to, so a client without them needs no stubs and `SessionClient` does not grow. The fixture session conforms: a test declares canvases, queues updates and reads back what was shown, hidden and clicked.
+
+Plan (Claude Code / claude-opus-5-5): (1) `PluginCanvas.swift`: the four records mirroring cox-ffi's, and the protocol, its remote-friendly `async throws` calls. (2) `FixturePlugins.swift`: canvases, a queue of updates handed out by `nextCanvas`, the shows, hides and selections recorded, one answer per selection; `FixtureSession: CanvasClient`. (3) `PluginCanvasTests.swift`; `swift test --filter PluginCanvas` in CoxModel, swift-format and SwiftLint.
+
+Check: the fixture lists its canvases, a show is recorded and the queued update comes back, a selection is recorded and answered, `nextCanvas` returns `nil` once the fixture is closed.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.1 canvas client seam" on branch `t33.47-plugin-canvas`. The fixture's canvas state hangs off `FixturePlugins` (`plugins.canvases`), so `FixtureSession`'s stored properties and `CoreClient.swift` do not change. A show sends the update the fixture declared for that plugin, as the core draws on show.
+
+Deviations: none.
+
+Check output: `swift test --filter PluginCanvasTests` in `desktop/macos/Packages/CoxModel` — 5 passed (`aFixtureListsItsCanvases`, `aShowIsRecordedAndSendsTheDrawnUpdate`, `aQueuedRedrawReachesAWaitingPull`, `aClickIsRecordedAndAnswered`, `thePullEndsOnceClosed`); `xcrun swift-format lint --strict` and `swiftlint lint --strict` clean on the three files.
+

@@ -65,6 +65,11 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 75% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | todo | P2 | 4 | 0% | |
+| T33.47.8.2 | todo | P2 | 3 | 0% | |
+| T33.47.8.3 | todo | P2 | 2 | 0% | |
+| T33.47.8.4 | todo | P2 | 3 | 0% | |
+| T33.47.8.5 | todo | P2 | 3 | 0% | |
+| T33.47.8.6 | todo | P2 | 2 | 0% | |
 | T33.47.9 | todo | P2 | 1 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
@@ -1148,6 +1153,48 @@ Depends: T33.47.6, T33.47.7 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxU
 The pane beside the transcript with frames side by side and zoom, ⌘⇧D, the palette action, and one replaceable composer chip per canvas.
 
 Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a selection adds one chip and a second replaces it; the falsifier 3 measurement written into the card's Check output.
+
+Split by A157 into T33.47.8.1–T33.47.8.6, one layer each; this card closes when they are done.
+
+#### T33.47.8.2 CoxModel: `CanvasStore` and the replaceable chip
+
+Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/CanvasStore.swift` (new), `desktop/macos/Packages/CoxModel/Sources/CoxModel/ComposerStore.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/CanvasStoreTests.swift` (new) · Design: §3, §5, §6
+
+The pane's state: the declared canvases, the one shown, its frames in the plugin's order (an unchanged frame keeps its value so its web view stays), `stopped`, and the size sent with each show. A selection's `CanvasAttach` goes to the composer as a `text/plain` attachment; a second one from the same canvas replaces it, and one the person removed is not brought back.
+
+Check: frames follow `order`, changed frames replace, missing ones go, another plugin's update is ignored; hide forgets the frames; a selection adds one chip and a second replaces it; `None` adds nothing.
+
+#### T33.47.8.3 CoxCore: the local and remote canvas calls
+
+Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxCore/Sources/CoxCore/PluginConvert.swift`, `desktop/macos/Packages/CoxCore/Sources/CoxCore/LiveCoreClient.swift`, `desktop/macos/Packages/CoxCore/Sources/CoxCore/RemoteClient.swift` · Design: §7, §8
+
+`LiveSession` and `RemoteSession` conform to `CanvasClient` through cox-ffi's calls; the FFI records convert to the client's.
+
+Check: a conversion test keeps every field; `swift test` for CoxCore against a freshly built `CoxFFI.xcframework`.
+
+#### T33.47.8.4 CoxUI: `PluginCanvasPane`
+
+Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3
+
+The pane's look: the plugin's symbol and title, a picker when more than one plugin declares a canvas, frames side by side at their widths with their titles, zoom (⌘+ and ⌘− while focused, pinch) clamped, and a "stopped" line. The frame's page is a view the app passes in, so CoxUI stays free of WebKit. `ShellShortcut.canvas` is ⌘⇧D.
+
+Check: snapshots of the pane with two frames and with the picker × light/dark; the zoom clamp; the shortcut's key and tooltip.
+
+#### T33.47.8.5 App: the pane beside the column
+
+Depends: T33.47.7, T33.47.8.2, T33.47.8.3, T33.47.8.4 · Files: `desktop/macos/App/SessionCanvas.swift` (new), `desktop/macos/App/SessionWindow.swift`, `desktop/macos/App/ShellState.swift` · Design: §3, §4, §5
+
+One `CanvasPage` per frame shown with SwiftUI's `WebView`, loaded again only when its HTML changed; each page's selections go to the store with the frame id the app owns; the pane takes the inspector's place beside the column as the browser does; resizing sends the new size.
+
+Check: the app builds; by hand, with a fixture plugin: two frames show, a click adds a chip, a second click replaces it. No App test target exists, so the logic this wires is tested in T33.47.8.2 and T33.47.8.4.
+
+#### T33.47.8.6 ⌘⇧D, the palette action and the DT§ text
+
+Depends: T33.47.8.5 · Files: `desktop/macos/App/ShellCommands.swift`, `desktop/macos/App/SessionPalette.swift`, `docs/design/desktop.md` · Design: §3, A156
+
+View › Show Canvas on ⌘⇧D, the palette's "Show <title>" per declared canvas, and DT§5.1, §5.5 and §10's text for the pane, the shortcut and the isolation.
+
+Check: the app builds; ⌘⇧D and the palette row toggle the pane by hand; the falsifier 3 measurement (Instruments, by hand) is written into T33.47.8's Check output or left open with why.
 
 #### T33.47.9 User docs
 
@@ -3279,6 +3326,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A154 §1.1 `cox-ext` row, §3 P7 (new T7.9, done the same day) — `cox-ext` reads SKILL.md, command and subagent frontmatter with serde-saphyr 1.3 instead of serde_yaml 0.9, by the creator (2026-10-12). Why: serde_yaml is deprecated and pulled unsafe-libyaml, unmaintained (RUSTSEC-2024-0449), which `deny.toml` ignored only until 2026-12-31; serde-saphyr is maintained and already listed in `rust.md`. Effect: the parser keeps the YAML 1.2 reading (`strict_booleans`, non-finite floats kept as text) and one-line errors; the one difference is that a quoted `'true'` now reads as a bool (test `frontmatter_quoted_true_is_a_bool`); the RUSTSEC-2024-0449 ignore is removed. No decision changes.
 - A155 §3 P33 (new T33.46, T33.46.1–T33.46.3), docs/design/plugins.md §2, §3, §12, §14 — by the creator (2026-10-14), through Weft's T106.5 ("extend cox where it lacks what the Weft plugin needs"): a plugin package may ship Agent Skills with a data-only `[[skills]]` entry (`name`, `dir`), one grant line each (`skill:<name> <dir>`), loaded only for a granted plugin and read only through the package (no `..`, no symlinks). A local skill of the same name wins, with a notice. Why: a plugin that brings tools has no way to bring the instructions for them; Weft's cox plugin ships its authoring guide as a skill to Claude Code and Cursor. Effect: PL§12's "plugins adding text to the system prompt (skills do that)" now reads that a plugin adds prompt text only as a granted skill's index line in `system[2]`, which is built once per session, so the cache-stable prefix holds; new PL§14 decision 16. The `skill` tool's output names the skill's folder (all skills), so a skill can refer to files it bundles. No new dependency.
 - A156 §3 P33 (new T33.47, T33.47.1–T33.47.9), new `docs/design/plugin-canvas.md`; on build docs/design/plugins.md §4, §14, §15.4, §15.5 and docs/design/desktop.md §5.1, §5.5, §10 — by the creator (2026-10-14), through Weft's T106.6 ("a Design tab like Claude Design; if cox does not have it, add it", with the guards: plugin and model content untrusted, sandboxed, no network, no scripts from that content, a new grant line): a desktop-only plugin *canvas*, a pane of static HTML frames a plugin draws, behind `desktop.canvas`. Each frame is a WebKit page with content JavaScript off, every load blocked by a content rule list, every navigation but the first refused, a non-persistent store and no page-world bridge; only a host script in its own content world runs, to report a click. The plugin turns a selection into text the app adds to the composer as a `text/plain` attachment the person sends or removes. Effect: PL§15.4's "plugin-supplied SwiftUI, HTML or web views — never" becomes "SwiftUI or scripted web views — never; static HTML only through the canvas"; SwiftUI and MCP Apps stay closed (A123). Open questions 1–4 of the design go to the creator with recommendations; the build follows the recommendations until answered. Numbered on a branch stacked on A155's; renumber on merge if main has moved. No new dependency.
+- A157 §3 P33 (T33.47.8) — split the pane, shortcut and chip card into T33.47.8.1–T33.47.8.6, one layer each (CoxClient seam, CoxModel store, CoxCore calls, CoxUI pane, App wiring, shortcut and DT§ text), because the card spans six Swift packages and the app, well over 200 lines and three files. `CanvasClient` is a protocol of its own rather than five more `SessionClient` requirements, so a client without canvases needs no stubs. Effect: T33.47.8 stays open until the six cards and its Check pass; no API or design decision changes.
 
 ## 7. Risk register
 
