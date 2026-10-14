@@ -17,14 +17,14 @@ use cox_core::{History, Session};
 use cox_protocol::Checkpointer as _;
 use cox_protocol::SandboxPolicy;
 use cox_protocol::ids::{ArchiveId, SessionId, TaskId};
-use cox_protocol::plugin::{CommandOut, DesktopNotice, NoticeLevel};
+use cox_protocol::plugin::{CanvasAttach, CommandOut, DesktopNotice, NoticeLevel};
 use cox_protocol::traits::Store as _;
 use cox_protocol::types::{Event, Level, ModelId, Submission, Tier, TodoItem};
 use cox_render::diffmodel::DiffModel;
 use cox_sanitize::sanitize;
 use cox_session::SessionSpec;
 use cox_session::acp_session::AcpSession;
-use cox_session::plugin_ui::PluginAnswer;
+use cox_session::plugin_ui::{PluginAnswer, tool_plugin};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -34,7 +34,8 @@ use crate::costs::{self, TurnCosts};
 use crate::info::{self, Info};
 use crate::mcp_status::McpRun;
 use crate::plugin_ui::{
-    self, Answered, ItemWatch, LinkClick, PluginAction, PluginSlot, PluginTab, PluginUi,
+    self, Answered, CanvasUpdate, ItemWatch, LinkClick, PluginAction, PluginCanvas, PluginSlot,
+    PluginTab, PluginUi,
 };
 use crate::review;
 use crate::status::StatusFold;
@@ -141,7 +142,7 @@ impl LiveSession {
             plugin_ui: Some(plugin_ui::serve_ui(
                 Arc::clone(&plugins),
                 requests,
-                answered,
+                answered.clone(),
                 posted,
             )),
             client: None,
@@ -163,7 +164,8 @@ impl LiveSession {
         // Review's hunk revert (T51.19): cox-render's diff, which the core cannot reach.
         session.set_hunk_reverter(crate::review::RenderHunks::shared());
         let events = session.events().ok_or(AppError::EventsTaken)?;
-        let events = tee(Arc::clone(&app), session.id(), events, Arc::clone(&plugins));
+        let watch = (Arc::clone(&plugins), answered);
+        let events = tee(Arc::clone(&app), session.id(), events, watch);
         // Declared while the session was built, before it had a stream.
         for text in plugins.take_notices() {
             let _ = session.notice(Level::Warn, text).await;
@@ -225,7 +227,10 @@ impl LiveSession {
             Arc::clone(&app),
             id,
             opened.events,
-            Arc::new(PluginUi::new(mpsc::channel(1).0)),
+            (
+                Arc::new(PluginUi::new(mpsc::channel(1).0)),
+                mpsc::channel(1).0,
+            ),
         );
         let (asks, _) = mpsc::channel(1);
         let owner = Arc::clone(&app);
@@ -654,6 +659,59 @@ impl LiveSession {
         self.patch_slots(slots);
     }
 
+    /// The canvases plugins declared (plugin-canvas §3), for the pane.
+    pub fn plugin_canvases(&self) -> Vec<PluginCanvas> {
+        self.plugins.canvases()
+    }
+
+    /// The pane shows `plugin`'s canvas at this size, newly or resized;
+    /// what it draws arrives through [`Self::next_canvas`].
+    pub fn show_canvas(self: &Arc<Self>, plugin: &str, width_pt: u32, height_pt: u32) {
+        if self.plugins.show_canvas(plugin, width_pt, height_pt) {
+            self.draw_canvas(plugin);
+        }
+    }
+
+    /// The pane hid `plugin`'s canvas.
+    pub fn hide_canvas(&self, plugin: &str) {
+        self.plugins.hide_canvas(plugin);
+    }
+
+    /// The next canvas update; `None` once the session is gone.
+    pub async fn next_canvas(&self) -> Option<CanvasUpdate> {
+        self.plugins.next_canvas().await
+    }
+
+    /// A click on a frame (§5): the attachment for the composer, if any.
+    pub async fn select_canvas(
+        &self,
+        plugin: &str,
+        frame: &str,
+        value: &str,
+    ) -> Option<CanvasAttach> {
+        let ui = Arc::clone(&self.plugins);
+        let (plugin, frame, value) = (plugin.to_string(), frame.to_string(), value.to_string());
+        let select = move || ui.select_canvas(&plugin, &frame, &value);
+        tokio::task::spawn_blocking(select).await.ok().flatten()
+    }
+
+    /// Draws on a blocking thread, since the call waits up to its deadline,
+    /// and tells why frames were dropped in the transcript.
+    fn draw_canvas(self: &Arc<Self>, plugin: &str) {
+        let live = Arc::clone(self);
+        let plugin = plugin.to_string();
+        tokio::spawn(async move {
+            let ui = Arc::clone(&live.plugins);
+            let draw = tokio::task::spawn_blocking(move || ui.draw_canvas(&plugin));
+            let notices = draw.await.unwrap_or_default();
+            if let Ok(session) = live.core("Notice") {
+                for text in notices {
+                    let _ = session.notice(Level::Warn, text).await;
+                }
+            }
+        });
+    }
+
     fn patch_slots(&self, slots: Vec<PluginSlot>) {
         for slot in slots {
             let slot = Box::new(slot);
@@ -663,7 +721,7 @@ impl LiveSession {
 
     /// One answer from the serve thread: a slot's render or miss, a redraw,
     /// or a command's closed effect (PL§4).
-    async fn on_plugin(&self, Answered { block, answer }: Answered) {
+    async fn on_plugin(self: &Arc<Self>, Answered { block, answer }: Answered) {
         match answer {
             PluginAnswer::Command { plugin, out } => self.plugin_effect(&plugin, out).await,
             // A miss lands `None`, which leaves the generic card.
@@ -674,6 +732,12 @@ impl LiveSession {
                 }
             }
             other => {
+                // A redraw asks the canvas too, while it is shown (§6).
+                if let PluginAnswer::Redraw { plugin } = &other
+                    && self.plugins.canvas_live(plugin)
+                {
+                    self.draw_canvas(plugin);
+                }
                 let slots = self.plugins.step(|s| s.fold(other));
                 self.patch_slots(slots);
             }
@@ -862,7 +926,7 @@ fn tee(
     app: Arc<App>,
     id: SessionId,
     mut from: mpsc::Receiver<Event>,
-    plugins: Arc<PluginUi>,
+    (plugins, redraws): (Arc<PluginUi>, mpsc::Sender<Answered>),
 ) -> mpsc::Receiver<Event> {
     let (tx, rx) = mpsc::channel(EVENTS);
     tokio::spawn(async move {
@@ -875,6 +939,18 @@ fn tee(
             // After the send, so the block is in the timeline by the time a
             // plugin's answer names it.
             if let Some((block, target, source)) = finished {
+                // §6: a plugin whose tools change what it draws needs no
+                // event grant; a full queue drops the redraw.
+                let own = target.strip_prefix("tool:").and_then(tool_plugin);
+                if let Some(plugin) = own.filter(|p| plugins.canvas_live(p)) {
+                    let answer = PluginAnswer::Redraw {
+                        plugin: plugin.to_string(),
+                    };
+                    let _ = redraws.try_send(Answered {
+                        block: None,
+                        answer,
+                    });
+                }
                 plugins.render_item(block, &target, source);
             }
         }
