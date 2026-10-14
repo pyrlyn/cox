@@ -695,13 +695,20 @@ fn classify_failure(host: &str, status: Option<i32>, text: &str) -> RemoteError 
     let clean = cox_sanitize::sanitize(text);
     let lower = clean.to_lowercase();
     let names_cox = lower.contains("cox");
-    let not_found = ["command not found", "executable file not found"]
-        .iter()
-        .any(|phrase| lower.contains(phrase))
+    // The third phrase is how Windows OpenSSH's default shells word it:
+    // cmd.exe ("'cox' is not recognized as an internal or external
+    // command") and PowerShell ("the term 'cox' is not recognized as ...").
+    let not_found = [
+        "command not found",
+        "executable file not found",
+        "is not recognized as",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase))
         || lower.contains("no such file or directory");
     // 127 is the shell's "not found" status, which ssh and `docker exec`
-    // pass through.
-    if status == Some(127) || (names_cox && not_found) {
+    // pass through; 9009 is cmd.exe's.
+    if matches!(status, Some(127 | 9009)) || (names_cox && not_found) {
         return RemoteError::NotInstalled {
             target: host.to_owned(),
         };
@@ -1440,6 +1447,19 @@ mod tests {
             )
         };
         assert!(not_installed(Some(127), ""));
+        assert!(not_installed(Some(9009), ""));
+        assert!(not_installed(
+            Some(1),
+            "'cox' is not recognized as an internal or external command,\r\noperable program or batch file."
+        ));
+        assert!(not_installed(
+            Some(1),
+            "cox : The term 'cox' is not recognized as the name of a cmdlet"
+        ));
+        assert!(!not_installed(
+            Some(1),
+            "'git' is not recognized as an internal or external command"
+        ));
         assert!(not_installed(None, "bash: cox: command not found"));
         assert!(not_installed(
             Some(126),

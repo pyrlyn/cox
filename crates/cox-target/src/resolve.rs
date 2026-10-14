@@ -151,6 +151,29 @@ mod tests {
     }
 
     #[test]
+    fn windows_cwd_is_a_safe_token() {
+        // T68.8: a Windows OpenSSH host gets `--cwd C:\srv\app` from cmd.exe
+        // or PowerShell, neither of which treats `\` or `:` as special there.
+        for cwd in ["C:\\srv\\app", "D:/work/app", "\\\\host\\share\\app"] {
+            let entry = |_: &str| {
+                Some(Entry {
+                    cwd: Some(cwd),
+                    ..WEB
+                })
+            };
+            let got = resolve("web", entry, no_override, |_| true).expect("a Windows cwd");
+            assert_eq!(got.cwd.as_deref(), Some(cwd));
+        }
+        let spaced = |_: &str| {
+            Some(Entry {
+                cwd: Some("C:\\Program Files\\app"),
+                ..WEB
+            })
+        };
+        assert!(resolve("web", spaced, no_override, |_| true).is_err());
+    }
+
+    #[test]
     fn cwd_must_be_safe_on_a_remote_command_line() {
         let entry = |cwd| move |_: &str| Some(Entry { cwd, ..WEB });
         let ok = resolve("web", entry(Some("/srv/app")), no_override, |_| true).expect("safe cwd");
