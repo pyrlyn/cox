@@ -64,8 +64,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 25% | Claude Code / claude-opus-5-5 |
-| T33.47.3 | todo | P2 | 3 | 0% | |
-| T33.47.4 | todo | P2 | 3 | 0% | |
+| T33.47.3 | in progress | P2 | 2 | 0% | Claude Code / claude-opus-5-5 |
+| T33.47.4 | todo | P2 | 4 | 0% | |
 | T33.47.5 | todo | P2 | 2 | 0% | |
 | T33.47.6 | todo | P2 | 2 | 0% | |
 | T33.47.7 | todo | P2 | 3 | 0% | |
@@ -1146,21 +1146,23 @@ A plugin that produces UI (Weft's `plugins/cox`, whose agent writes app screens)
 
 Check: the nine cards' checks; `just test` green.
 
-#### T33.47.3 Host calls and SDK
+#### T33.47.3 Host side and SDK
 
-Depends: T33.47.2 · Files: `crates/cox-plugin/src/live.rs`, `crates/cox-plugin/src/hostfn.rs`, `plugins/sdk/src/lib.rs` · Design: `docs/design/plugin-canvas.md` §2, §6
+Depends: T33.47.2 · Files: `crates/cox-plugin/src/live.rs`, `crates/cox-plugin/src/hostfn.rs`, `plugins/sdk/src/lib.rs` · Design: `docs/design/plugin-canvas.md` §2
 
-`cox_canvas` and `cox_canvas_select` on the control queue with their deadlines and render-context host functions; the `InitOut.desktop.canvas` filter; `cox_redraw` under `desktop.canvas`; the SDK's `canvas` and `canvas_select` arms.
+The `InitOut.desktop.canvas` filter (dropped with the other desktop parts off the desktop, and without `desktop.canvas`); `cox_canvas` and `cox_canvas_select` run in render context (read-only host functions); the SDK's `canvas` and `canvas_select` arms.
 
-Check: a fixture plugin's frames come back capped; a slow `cox_canvas` misses three times and stops for the session; `cox_redraw` is allowed under `desktop.canvas` alone.
+Plan (Claude Code / claude-opus-5-5): (1) `live.rs`: off the desktop `out.desktop.canvas.take()` joins the dropped list; on the desktop it is cleared without the `desktop.canvas` line; extend `init_drops_by_surface`-style tests. (2) `hostfn.rs`: `outside_render` also refuses inside `cox_canvas` and `cox_canvas_select`. (3) SDK: `register!` arms `canvas` (`CanvasIn` → `CanvasOut`) and `canvas_select` (`CanvasSelect` → `Option<CanvasAttach>`), re-exports, and the doc table.
 
-#### T33.47.4 `cox-app`: canvas state
+Check: a canvas declaration is dropped on the terminal and without its grant and kept with it; `cox_kv_put` and `cox_notify` from `cox_canvas` answer `NotInThisContext`; the SDK's export table lists both; `cargo nextest run -p cox-plugin` and the `plugins/` workspace tests.
 
-Depends: T33.47.3 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugin-canvas.md` §3, §5, §6
+#### T33.47.4 Canvas calls and `cox-app` state
 
-Canvas state per session: visible or not, the last frames, redraw while visible, unchanged frames not re-sent, and the selection call returning a sanitized, capped attachment.
+Depends: T33.47.3 · Files: `crates/cox-session/src/plugin_ui.rs`, `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugin-canvas.md` §3, §5, §6
 
-Check: no render while hidden; an unchanged frame is not re-sent; a selection on an unknown frame or with a bad value is dropped before the plugin; the attachment is sanitized and capped.
+`cox-session`: `canvas` and `canvas_select`, the two calls with their deadlines (`min(call_ms, 2 s)` and `min(call_ms, 500 ms)`) and the caps, as plain functions beside `answer`, so the TUI's request enum does not change. `cox-app`: canvas state per session: visible or not, the last frames, three misses stop it, redraw while visible on `Effects.redraw` and after the plugin's own tool calls, unchanged frames not re-sent, and the selection call returning a sanitized, capped attachment.
+
+Check: a fixture plugin's frames come back capped; a slow `cox_canvas` misses three times and stops for the session; no render while hidden; an unchanged frame is not re-sent; a selection on an unknown frame or with a bad value is dropped before the plugin; the attachment is sanitized and capped.
 
 #### T33.47.5 Wire and remote sessions
 

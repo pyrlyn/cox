@@ -27,7 +27,7 @@ canvas = true
 ```
 
 - `DesktopCaps.canvas: bool` (`crates/cox-plugin-api/src/manifest.rs`), grant line `desktop.canvas` (`crates/cox-plugin/src/grant.rs`), shown "desktop only" in the grant prompt like the other `desktop.*` lines (PL§15.5).
-- `desktop.canvas` also allows `cox_redraw()` (PL§4 lists it under "any `ui`"), since a canvas redraws on the same signal.
+- `desktop.canvas` counts as a `ui` grant for `cox_redraw()` in PL§4, since a canvas redraws on the same signal. That host function is designed but not built yet (`crates/cox-plugin/src/hostfn.rs` answers `failed`), so this design does not depend on it (§6).
 - A manifest whose `surfaces` excludes `desktop` and asks for `canvas` is an error (PL§15.5).
 
 ## 2. ABI
@@ -80,7 +80,7 @@ Why not a `UserPromptSubmit` hook rewriting the prompt: the person would not see
 
 ## 6. Live updates
 
-The PL§8 redraw model: `cox_canvas` runs when the pane becomes visible, when the plugin calls `cox_redraw()` (from a tool call, an event or a command), and when the pane's size changes by more than a frame's clamp. The app compares each frame's HTML with the last one and reloads only the frames that changed. A reloaded frame keeps its scroll offset and re-applies the outline when the selected value is still there. While the pane is hidden nothing renders.
+The PL§8 redraw model: `cox_canvas` runs when the pane becomes visible, when the plugin asks through `Effects.redraw` (from `cox_on_event`), after each call of one of the plugin's own tools finishes (the app sees the `ToolCallDone` of a `wasm__<id>__…` tool, so a plugin whose tools change what it draws needs no event grant), and when the pane's size changes by more than a frame's clamp. The app compares each frame's HTML with the last one and reloads only the frames that changed. A reloaded frame keeps its scroll offset and re-applies the outline when the selected value is still there. While the pane is hidden nothing renders.
 
 ## 7. Surfaces and remote sessions
 
@@ -92,7 +92,8 @@ The PL§8 redraw model: `cox_canvas` runs when the pane becomes visible, when th
 | Crate or package | Gains |
 | --- | --- |
 | `cox-plugin-api` | `DesktopCaps.canvas`, `CanvasDecl`, `CanvasIn`, `CanvasOut`, `Frame`, `CanvasSelect`, `CanvasAttach`, the caps check; regenerated `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` |
-| `cox-plugin` | the `desktop.canvas` line; the two calls with their deadlines; the `InitOut.desktop` filter; `cox_redraw` under the canvas grant |
+| `cox-plugin` | the `desktop.canvas` line; the `InitOut.desktop` filter; the two exports in render context |
+| `cox-session` | `canvas` and `canvas_select`: the two calls with their deadlines and caps, as plain functions beside `plugin_ui::answer`, so the TUI's request enum does not change |
 | `plugins/sdk` | `register!` arms `canvas` and `canvas_select` |
 | `cox-app` | canvas state in `plugin_ui` (visible, last frames, redraw, select), `LiveSession` methods, the wire payloads and `RemoteSession` |
 | `cox-ffi` | `CanvasView`, `show_canvas`, `canvas_select` on the local and remote sessions |
@@ -124,8 +125,8 @@ A156 §3 P33: new T33.47 and T33.47.1–T33.47.9. PL§15.4 changes "plugin-suppl
 | --- | --- | --- |
 | T33.47.1 API: ABI types and caps | `cox-plugin-api` `abi.rs`, `lib.rs` (schema, API field index) | caps unit tests (count, size, id, attr, value); the schema and API-reference drift tests |
 | T33.47.2 Manifest key, grant line and design text | `cox-plugin-api` `manifest.rs`; `cox-plugin` `grant.rs`; `docs/design/plugins.md` | `manifest_canvas_is_a_desktop_part`; `grant_new_canvas_needs_approval`; PL§4, §14 decision 17, §15.4 and §15.5 describe the canvas |
-| T33.47.3 Host calls and SDK | `cox-plugin` `live.rs`, `hostfn.rs`; `plugins/sdk/src/lib.rs` | a fixture plugin's frames come back capped; a slow `cox_canvas` misses three times and stops; `cox_redraw` allowed under `desktop.canvas` |
-| T33.47.4 cox-app canvas state | `cox-app` `plugin_ui.rs`, `live.rs` | redraw only while visible; unchanged frames not re-sent; a select on an unknown frame is dropped; the attachment is sanitized and capped |
+| T33.47.3 Host side and SDK | `cox-plugin` `live.rs`, `hostfn.rs`; `plugins/sdk/src/lib.rs` | `InitOut.desktop.canvas` dropped off the desktop and without its grant; the canvas exports are render context; the SDK exports both |
+| T33.47.4 Canvas calls and cox-app state | `cox-session` `plugin_ui.rs`; `cox-app` `plugin_ui.rs`, `live.rs` | frames come back capped; a slow `cox_canvas` misses three times and stops; redraw only while visible and after the plugin's own tool calls; unchanged frames not re-sent; a select on an unknown frame is dropped; the attachment is sanitized and capped |
 | T33.47.5 Wire and remote | `cox-app` `wire.rs`, `remote.rs` (schema) | `wire_round_trips_every_message`; the client re-applies caps to an over-size `PluginCanvas` |
 | T33.47.6 FFI | `cox-ffi` `session.rs`, `remote.rs`, `types.rs` | the FFI mirrors list the new shapes; a local and a remote select round-trip |
 | T33.47.7 `CanvasPage` | CoxPlatform `CanvasPage.swift`, `CanvasPageTests.swift` | no page script, no `https:` or `data:` load, no navigation, the host script's post arrives (§4) |
