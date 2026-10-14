@@ -142,7 +142,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T68.3 | in progress | P1 | 2 | 100% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
 | T68.5 | todo | P2 | 3 | 0% |  |
 | T68.6 | todo | P1 | 3 | 0% |  |
@@ -3049,14 +3048,6 @@ Rationale in §6 A158. Today only the desktop app reaches a remote session, only
 **Order.** T68.1 blocks all. T68.2 and T68.3 follow it and are independent of each other. T68.4 → T68.5. T68.6 and T68.7 need T68.2. T68.8 needs T68.3. T68.9 can start after T68.1 and grows with each card. T68.10 last.
 
 **Not taken yet (in `ideas.md`):** a throwaway `docker run --rm` container from an image with the project mounted, and installing `cox` on a target.
-
-#### T68.3 `hello` handshake and readable failures
-
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.1 · Size: ~180 · Priority: P1 · Complexity: 2
-
-Goal: the first exchange on the app-server wire is `hello`: wire version, cox version, OS, arch and the sandbox backend (or none). The client refuses another wire major version with one sentence naming both versions. The launcher's stderr is read, bounded (8 KiB) and passed through `cox_sanitize::sanitize`, so `cox: command not found`, exit 127, an unknown container or a stopped instance becomes `RemoteError::NotInstalled` / `RemoteError::Unreachable` with the target and a hint, instead of a silent drop. Files: `cox-app/src/wire.rs`, `server.rs`, `remote.rs`, `docs/app-server.schema.json`.
-
-Done when `old_wire_version_is_refused_by_name`, `missing_remote_cox_says_how_to_install` and `remote_stderr_is_sanitized_and_bounded` pass.
 
 #### T68.4 Desktop: connect to any target (Rust and FFI)
 
