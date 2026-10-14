@@ -315,8 +315,11 @@ An ACP agent a new session can be driven by instead of cox's own loop (T52.2, DT
 - `args` — arguments to `command`
 - `key_env` — the agent's own API-key variable. Only this one variable is passed through, by name, next to the child allowlist (`PATH`, `HOME`, `LANG`, `LC_*`, `TERM`, `TMPDIR`, `USER`, `SHELL`); cox's own provider keys stay behind. A key that does not resolve (env var, then keychain) leaves the agent out with one warning
 - `writable` — extra directories under your home the agent may write, for its own state (for example `~/.claude`). Each must resolve inside your home, never to your home itself; one that does not refuses the entry with a warning. A project config cannot set it
+- `target` — run the preset on a target (a `[targets.<name>]` name or a literal `kind:name`) instead of a local program (T68.7). The remote `cox run --output-format stream-json` does the work; `command`, `args`, `key_env` and `writable` then do nothing
 
 An external agent always runs under the sandbox wrap. Its file limits are the session's `[sandbox]` ones plus `writable`, but it always has network access, whatever `sandbox.network` says: it has to reach its vendor's API. The agent's model, cost and context are its own: cox writes no usage row for it and shows its cost as "—".
+
+A preset with a `target` is not wrapped in the local sandbox: the remote `cox` applies its own, keeps its own keys, and nothing but the launcher's scrubbed environment leaves this machine. The prompt goes over stdin, never onto the remote command line. Every call needs an allow rule `TargetAgent(<kind:name>)` in your own config's `permissions.allow` (`bypass` and `auto` do not waive it, like `CloudAgent`); without one the call is refused with the rule to add. The remote run's token counts become a `$0` usage row named after the preset.
 
 Examples (install the program first; these are not defaults):
 
