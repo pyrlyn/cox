@@ -25,6 +25,15 @@
 - T33.45.7. FFI and Swift: the desktop contributions
 - T33.45.8. SDK and the surfaces example
 - T33.45.10. Docs: Russian and Ukrainian translations
+- T33.47. Plugin canvas: a desktop pane of plugin-drawn pages
+- T33.47.1. API: manifest, grant line, ABI types and caps
+- T33.47.2. Host calls and SDK
+- T33.47.3. `cox-app`: canvas state
+- T33.47.4. Wire and remote sessions
+- T33.47.5. FFI
+- T33.47.6. CoxPlatform: `CanvasPage`
+- T33.47.7. The pane, the shortcut and the composer chip
+- T33.47.8. User docs
 - T35.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T37.32. Signing, notarization, Sparkle, bundled CLI, Homebrew cask
 - T37.32.2. Developer ID signing, notarization, Sparkle, bundled CLI, Homebrew cask
