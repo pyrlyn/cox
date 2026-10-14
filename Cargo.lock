@@ -1629,6 +1629,7 @@ dependencies = [
  "cox-provider",
  "cox-sanitize",
  "cox-store",
+ "cox-target",
  "cox-tools",
  "futures",
  "nix 0.31.3",

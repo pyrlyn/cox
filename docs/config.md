@@ -341,6 +341,39 @@ writable = ["~/.gemini"]
 
 Cursor (`agent acp`, `CURSOR_API_KEY`) comes from the granted Cursor plugin's `[[external_agents]]` entry (`plugins/cursor`), not from this table.
 
+## `[targets.<name>]` and `[launchers]`
+
+Run targets (T68.2, P68): a machine or container a whole cox session can run on, reached with `--on <name>` and in the desktop app. None by default. **User config only**: a project `.cox/config.toml` cannot add, change or remove an entry or a launcher path, because a target decides which machine receives the session and a launcher path decides which program runs; the loader reverts both with a warning. `cox` must already be installed on the target.
+
+- `target` — where it runs, as `kind:name`: `ssh:<host or alias>`, `docker:<container>`, `lima:<instance>` or `colima:<profile>`
+- `cwd` — the directory on the target the session starts in. Letters, digits and `- _ . , / : = @ + \` only, because it goes on the remote command line
+- `context` — `docker --context` to reach the container through; `docker:` targets only
+- `program` — absolute path of the launcher for this target; beats `[launchers]` and the built-in lookup
+- `[launchers]` `ssh`, `docker`, `limactl`, `colima` — absolute path of that program, for a machine where it is not at the usual place. `PATH` is never searched. A path that is relative or does not exist is refused
+
+A name in `[targets.*]` wins over a literal `kind:name`. Every `desktop.remote_hosts` alias also reads as an `ssh:<alias>` target.
+
+Examples (not defaults):
+
+```toml
+[targets.devbox]                    # ssh
+target = "ssh:devbox"
+cwd = "/srv/app"
+
+[targets.web]                       # a running container on a remote Docker engine
+target = "docker:web"
+context = "staging"
+
+[targets.vm]                        # a Lima instance
+target = "lima:default"
+
+[targets.dev]                       # a Colima profile
+target = "colima:dev"
+
+[launchers]
+docker = "/opt/orbstack/bin/docker"
+```
+
 ## `~/.cox/keybindings.toml`
 
 Rebinds the TUI's keys (T25.5). Each line is an action id and a key, or a list of keys; dotted ids may be written as TOML tables. The keys you give replace the action's defaults, in every context the action has (`idle`, `running`), and take the key from whatever action held it by default. A missing file means the defaults in `docs/getting-started.md`.

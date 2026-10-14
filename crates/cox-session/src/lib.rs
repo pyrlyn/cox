@@ -41,6 +41,7 @@ pub mod plugin_ui;
 pub mod plugins;
 pub mod provider;
 pub mod sandbox;
+pub mod targets;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
 pub mod tools;
