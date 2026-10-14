@@ -29,6 +29,7 @@
 - T33.47.8. The pane, the shortcut and the composer chip
 - T33.47.8.5. App: the pane beside the column
 - T33.47.8.6. ⌘⇧D, the palette action and the DT§ text
+- T33.47.8.7. CoxModel: one canvas store per session
 - T33.47.9. User docs
 - T35.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T37.32. Signing, notarization, Sparkle, bundled CLI, Homebrew cask

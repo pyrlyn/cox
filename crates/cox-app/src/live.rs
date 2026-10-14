@@ -856,6 +856,7 @@ impl LiveSession {
     /// Stops the pull; the session keeps running (DT§4.5).
     pub fn close(&self) {
         self.controller.close();
+        self.plugins.close_canvas();
     }
 
     /// Quitting: ends every turn and kills what it detached (T38.2).

@@ -239,3 +239,16 @@ async fn canvas_calls_cross_the_ffi_and_fail_open() {
     assert_eq!(click.await, None);
     session.hide_canvas("weft".into());
 }
+
+/// T33.47.10: closing the session ends a canvas pull that is waiting, as
+/// it ends the patch pull; otherwise the pull holds the session for ever.
+#[tokio::test]
+async fn closing_the_session_ends_the_canvas_pull() {
+    let dir = scratch(Some(&scenario("read-and-reply")));
+    let session = open(dir.path(), Arc::default()).await.expect("open");
+    let pull = tokio::spawn(Arc::clone(&session).next_canvas());
+    tokio::task::yield_now().await;
+    session.close();
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(5), pull).await;
+    assert_eq!(ended.expect("the pull ends").expect("joined"), None);
+}

@@ -11731,3 +11731,19 @@ Deviations: none.
 
 Check output: `swift test --filter "PluginCanvas|CanvasShortcut"` in `desktop/macos/Packages/CoxUI` — 4 tests passed (`canvasPane` × 4 variants against the recorded images, `theZoomStepsOnAQuarterGrid`, `theZoomIsClamped`, `theCanvasTogglesOnCommandShiftD`); the images were recorded on the first run, looked at, and asserted on the second; swift-format and SwiftLint `--strict` clean.
 
+#### T33.47.10 A closed session ends the canvas pull
+
+Depends: T33.47.4 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/live.rs`, `crates/cox-ffi/tests/app.rs` · Design: §6, DT§4.5
+
+`PluginUi::next_canvas` waited on a channel whose sender lives as long as the session, and the FFI's `next_canvas` holds the session while it waits, so a closed window's pull and its session never went away. `LiveSession::close` now ends the pull as it ends the patch pull. A remote session's already ended on `ServerEvent::Ended`.
+
+Check: `closing_the_session_ends_the_canvas_pull` fails before the fix and passes after it.
+
+Plan (Claude Code / claude-opus-5-5): (1) The failing test first, through the FFI: a waiting `next_canvas`, then `close()`, then the pull must end within five seconds. (2) `PluginUi`: a `watch` flag that `close_canvas` sets, raced against the channel in `next_canvas`. (3) `LiveSession::close` calls it.
+
+Status: done 2026-10-14 · Commit "fix: T33.47.10 a closed session ends the canvas pull" on branch `t33.47-plugin-canvas`. Found while wiring the pane's pump (T33.47.8.7): every closed window would have leaked its session.
+
+Deviations: none.
+
+Check output: `cargo nextest run -p cox-ffi --test app closing_the_session_ends_the_canvas_pull` failed before the fix (the pull did not end in 5 s); after it, `cargo nextest run -p cox-ffi -p cox-app` — 289 passed; clippy `-D warnings` and `cargo fmt --check` clean.
+

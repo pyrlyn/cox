@@ -983,6 +983,9 @@ pub struct PluginUi {
     requests: mpsc::Sender<Ask>,
     canvas_tx: mpsc::Sender<CanvasUpdate>,
     canvas_rx: tokio::sync::Mutex<mpsc::Receiver<CanvasUpdate>>,
+    /// Set by [`Self::close_canvas`]. The sender above lives as long as the
+    /// session, so the channel alone never ends a waiting pull.
+    canvas_closed: tokio::sync::watch::Sender<bool>,
 }
 
 impl PluginUi {
@@ -993,6 +996,7 @@ impl PluginUi {
             requests,
             canvas_tx,
             canvas_rx: tokio::sync::Mutex::new(canvas_rx),
+            canvas_closed: tokio::sync::watch::Sender::new(false),
         }
     }
 
@@ -1343,9 +1347,20 @@ impl PluginUi {
         notices
     }
 
-    /// The next update for the pane; `None` once the session is gone.
+    /// The next update for the pane; `None` once the session is closed.
     pub async fn next_canvas(&self) -> Option<CanvasUpdate> {
-        self.canvas_rx.lock().await.recv().await
+        let mut closed = self.canvas_closed.subscribe();
+        let mut rx = self.canvas_rx.lock().await;
+        tokio::select! {
+            update = rx.recv() => update,
+            _ = closed.wait_for(|closed| *closed) => None,
+        }
+    }
+
+    /// Ends the pane's pull, waiting or later, as closing the session ends
+    /// the patch pull (DT§4.5).
+    pub fn close_canvas(&self) {
+        self.canvas_closed.send_replace(true);
     }
 
     /// A click on `frame` of `plugin`'s canvas: the plugin's attachment,
