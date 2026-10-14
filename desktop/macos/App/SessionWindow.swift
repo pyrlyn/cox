@@ -12,7 +12,8 @@
 // as `/model` does, the inspector's tabs read the open session,
 // Review replaces the transcript column, the shell's panes fold, ⌃` shows the session's terminal
 // pane under the column (T51.6; the window asks before closing over a running command), ⌘⇧B
-// shows the browser pane beside it (T51.10), plugin panels sit above the composer and a plugin
+// shows the browser pane beside it (T51.10) and a plugin's canvas takes its place (T33.47.8.5),
+// plugin panels sit above the composer and a plugin
 // overlay shows as a sheet (T52.17), File › Connect to Host… lists a remote host's sessions in
 // the sidebar and opens one through that host (T52.21), New session asks which agent drives it
 // and an external agent's transcript opens with its ACP banner (T52.8), the composer offers
@@ -62,6 +63,8 @@ struct SessionWindow: View {
   @State private var terminalHeight = SessionTerminal.defaultHeight
   /// The browser pane shows beside the column; UI-only, like the terminal's.
   @State var isBrowserVisible = false
+  /// The plugin canvas pane shows there instead; UI-only too.
+  @State var isCanvasVisible = false
   /// ⌘K's palette, while it shows (T37.44.13).
   @State var palette: SessionPalette?
   /// The Connect to Host sheet, while it shows (T52.21).
@@ -150,10 +153,18 @@ struct SessionWindow: View {
       }
       .joinsTabs(of: popOut?.tabOf)
       .closeGuard { opened.values.contains { $0.store.hasBusyTerminal } }
-      // The browser takes the inspector's place beside the column, as mockup 25 draws it: with
-      // both, the panes outgrow the window and push the toolbar's trailing buttons off its edge.
-      .onChange(of: isBrowserVisible) { if isBrowserVisible { screen.isInspectorVisible = false } }
-      .onChange(of: screen.isInspectorVisible) { _, shown in if shown { isBrowserVisible = false } }
+      // The browser takes the inspector's place beside the column, as mockup 25 draws it, and the
+      // canvas takes either's: with two, the panes outgrow the window and push the toolbar's
+      // trailing buttons off its edge.
+      .onChange(of: isBrowserVisible) { _, shown in
+        if shown { (screen.isInspectorVisible, isCanvasVisible) = (false, false) }
+      }
+      .onChange(of: isCanvasVisible) { _, shown in
+        if shown { (screen.isInspectorVisible, isBrowserVisible) = (false, false) }
+      }
+      .onChange(of: screen.isInspectorVisible) { _, shown in
+        if shown { (isBrowserVisible, isCanvasVisible) = (false, false) }
+      }
   }
 
   private var shown: MainScreenState {
@@ -229,12 +240,7 @@ struct SessionWindow: View {
           let cells = PluginWidgets.cells(size, scale: base.textScale)
           showing.store.pluginArea(width: cells.width, height: cells.height)
         }
-        if isBrowserVisible {
-          // Up to the mockup's width, narrower when the window is: at a fixed width a small
-          // window's column cannot hold it beside the transcript.
-          SessionBrowser(controller: model.launch.browser) { refused = $0 }
-            .frame(maxWidth: SessionBrowser.paneWidth)
-        }
+        paneBeside(showing)
       }
       // A new view per session, so the transcript's text is rebuilt from the one it shows; and
       // per provider switch, which swaps the stores under one session id (T60.7).
@@ -333,6 +339,21 @@ struct SessionWindow: View {
       } else {
         refused = String(describing: error)
       }
+    }
+  }
+}
+
+extension SessionWindow {
+  /// The browser or the plugin canvas beside the column, whichever shows.
+  @ViewBuilder func paneBeside(_ showing: OpenedSession) -> some View {
+    if isBrowserVisible {
+      // Up to the mockup's width, narrower when the window is: at a fixed width a small
+      // window's column cannot hold it beside the transcript.
+      SessionBrowser(controller: model.launch.browser) { refused = $0 }
+        .frame(maxWidth: SessionBrowser.paneWidth)
+    } else if isCanvasVisible, let canvas = showing.canvas {
+      SessionCanvas(canvas: canvas) { refused = $0 }
+        .frame(maxWidth: SessionCanvas.paneWidth)
     }
   }
 }

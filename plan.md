@@ -65,7 +65,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 75% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | todo | P2 | 4 | 0% | |
-| T33.47.8.5 | todo | P2 | 3 | 0% | |
 | T33.47.8.6 | todo | P2 | 2 | 0% | |
 | T33.47.9 | todo | P2 | 1 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
@@ -1152,14 +1151,6 @@ The pane beside the transcript with frames side by side and zoom, ⌘⇧D, the p
 Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a selection adds one chip and a second replaces it; the falsifier 3 measurement written into the card's Check output.
 
 Split by A157 into T33.47.8.1–T33.47.8.8, one layer each; this card closes when they are done.
-
-#### T33.47.8.5 App: the pane beside the column
-
-Depends: T33.47.7, T33.47.8.2, T33.47.8.3, T33.47.8.4, T33.47.8.7, T33.47.8.8 · Files: `desktop/macos/App/SessionCanvas.swift` (new), `desktop/macos/App/SessionWindow.swift`, `desktop/macos/App/ShellState.swift` · Design: §3, §4, §5
-
-One `CanvasPage` per frame shown with SwiftUI's `WebView`, loaded again only when its HTML changed; each page's selections go to the store with the frame id the app owns; the pane takes the inspector's place beside the column as the browser does; resizing sends the new size.
-
-Check: the app builds; by hand, with a fixture plugin: two frames show, a click adds a chip, a second click replaces it. No App test target exists, so the logic this wires is tested in T33.47.8.2 and T33.47.8.4.
 
 #### T33.47.8.6 ⌘⇧D, the palette action and the DT§ text
 

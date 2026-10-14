@@ -11747,6 +11747,22 @@ Deviations: none (2 files, about 55 lines).
 
 Check output: the first measure, the root's bounding box, gave 768 (the view's height) for a 500 px page without a doctype; the `Range` gives 500–540 there and under 100 for a one-line page with a doctype. `swift test` in CoxPlatform — 44 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
 
+#### T33.47.8.5 App: the pane beside the column
+
+Depends: T33.47.7, T33.47.8.2, T33.47.8.3, T33.47.8.4, T33.47.8.7, T33.47.8.8 · Files: `desktop/macos/App/SessionCanvas.swift` (new), `desktop/macos/App/SessionWindow.swift`, `desktop/macos/App/ShellState.swift` · Design: §3, §4, §5
+
+One `CanvasPage` per frame shown with SwiftUI's `WebView`, loaded again only when its HTML changed; each page's selections go to the store with the frame id the app owns; the pane takes the inspector's place beside the column as the browser does; resizing sends the new size.
+
+Check: the app builds; by hand, with a fixture plugin: two frames show, a click adds a chip, a second click replaces it. No App test target exists, so the logic this wires is tested in T33.47.8.2 and T33.47.8.4.
+
+Plan (Claude Code / claude-opus-5-5): (1) `OpenedSession.canvas` from `AppStore.Shared` (T33.47.8.7). (2) `SessionCanvas`: `PluginCanvasPane` with one `WebView` per frame over a `CanvasPage` that `CanvasPages` keeps by frame id, loads again only when the frame's HTML changed, and drops with its selection listener when the frame goes; the pane's size shows the canvas and then resizes it; the zoom applies inside each page (T33.47.8.8); a click's value goes to `CanvasStore.select` with the frame id the view owns; a store failure is the window's alert. (3) `SessionWindow`: `isCanvasVisible`, the pane beside the column in the browser's place, one of inspector, browser and canvas at a time.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.5 plugin canvas pane in the window" on branch `t33.47-plugin-canvas`. The pane is reachable once T33.47.8.6 adds ⌘⇧D and the palette row, so the hand check moves to that card's Check.
+
+Deviations: none (3 files). `SessionWindow`'s side panes moved into an extension in the same file to keep the struct under SwiftLint's 250-line body.
+
+Check output: `scripts/desktop/app.sh` builds `Cox.app` (exit 0, no warnings in the touched files); `swiftlint lint --strict` and `swift format lint -s` clean on the three files. No App test target exists; the logic this wires is tested in T33.47.8.2, T33.47.8.4, T33.47.8.7 and T33.47.8.8.
+
 #### T33.47.8.4 CoxUI: `PluginCanvasPane`
 
 Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3

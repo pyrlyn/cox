@@ -21,6 +21,8 @@ import Foundation
 struct OpenedSession {
   let store: SessionStore
   let composer: ComposerStore
+  /// Its plugins' canvases, shared like the others; `nil` for a session that has none.
+  let canvas: CanvasStore?
   /// What it reported after it showed; nil until then.
   var info: Info?
   /// The models its cwd's config offers, for best-of's options; empty until read.
@@ -61,7 +63,7 @@ struct OpenedSession {
   }
 
   init(_ shared: AppStore.Shared) {
-    (store, composer) = (shared.store, shared.composer)
+    (store, composer, canvas) = (shared.store, shared.composer, shared.canvas)
   }
 
   /// This window stops showing the session: its terminal views detach, and the registry closes
