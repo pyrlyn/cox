@@ -374,6 +374,19 @@ target = "colima:dev"
 docker = "/opt/orbstack/bin/docker"
 ```
 
+### Running on a target
+
+`cox --on <target>` opens the TUI on the target through its launcher, with a terminal (`ssh -t`, `docker exec -it`, `limactl shell`, `colima ssh`). `cox run --on <target> -p "…"` runs without one: the prompt goes to the remote `cox run --prompt-stdin` as the first stdin line, a JSON string, never on the command line; the rest of your stdin stays the approvals channel, the remote stdout and stderr are copied through, and the exit code is the remote's. `<target>` is a name from `[targets.*]` or a literal `kind:name`. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link.
+
+Only `--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume` and `--continue` are forwarded, each value limited to letters, digits and `- _ . , / : = @ + \`; the directory is the target's `cwd`. Any other flag, a first-turn prompt for the TUI and every subcommand other than `run` are refused with a message naming them, so nothing is dropped silently.
+
+```bash
+cox --on lima:dev
+cox run --on docker:ci -p "fix the failing test" --output-format stream-json
+```
+
+`cox run --prompt-stdin` also works on its own: `printf '"summarise the diff"\n' | cox run --prompt-stdin`. It excludes `-p`.
+
 ## `~/.cox/keybindings.toml`
 
 Rebinds the TUI's keys (T25.5). Each line is an action id and a key, or a list of keys; dotted ids may be written as TOML tables. The keys you give replace the action's defaults, in every context the action has (`idle`, `running`), and take the key from whatever action held it by default. A missing file means the defaults in `docs/getting-started.md`.
