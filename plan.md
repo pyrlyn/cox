@@ -143,7 +143,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
-| T68.3 | in progress | P1 | 2 | 100% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
 | T68.5 | todo | P2 | 3 | 0% |  |
 | T68.6 | todo | P1 | 3 | 0% |  |
@@ -3058,14 +3057,6 @@ Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.1 · Size: ~12
 Goal: `[targets.<name>]` with `target` (`kind:name`), `cwd`, `context` (docker) and `program` (an absolute launcher path that overrides the lookup), plus `[launchers]` per kind. A surface accepts a target by its config name or as a literal `kind:name`. `desktop.remote_hosts` stays and reads as `ssh:<alias>` targets. The project-config guard reverts every `targets.*` and `launchers.*` key. Files: `cox-protocol/src/config.rs`, `cox-config/src/load.rs`, `default.toml`, `docs/config.md`, regenerated `docs/config.jsonschema`.
 
 Done when `project_config_cannot_name_a_target`, `remote_hosts_read_as_ssh_targets` and the schema drift test pass.
-
-#### T68.3 `hello` handshake and readable failures
-
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.1 · Size: ~180 · Priority: P1 · Complexity: 2
-
-Goal: the first exchange on the app-server wire is `hello`: wire version, cox version, OS, arch and the sandbox backend (or none). The client refuses another wire major version with one sentence naming both versions. The launcher's stderr is read, bounded (8 KiB) and passed through `cox_sanitize::sanitize`, so `cox: command not found`, exit 127, an unknown container or a stopped instance becomes `RemoteError::NotInstalled` / `RemoteError::Unreachable` with the target and a hint, instead of a silent drop. Files: `cox-app/src/wire.rs`, `server.rs`, `remote.rs`, `docs/app-server.schema.json`.
-
-Done when `old_wire_version_is_refused_by_name`, `missing_remote_cox_says_how_to_install` and `remote_stderr_is_sanitized_and_bounded` pass.
 
 #### T68.4 Desktop: connect to any target (Rust and FFI)
 

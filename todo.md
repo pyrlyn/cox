@@ -129,7 +129,6 @@
 - T67.12. Output styles
 - T67.13. Design: a GitHub Action and scheduled runs
 - T68.2. `[targets.<name>]` in config
-- T68.3. `hello` handshake and readable failures
 - T68.4. Desktop: connect to any target (Rust and FFI)
 - T68.5. Desktop: Connect to Target sheet (Swift)
 - T68.6. `--on <target>` for the TUI and `cox run`

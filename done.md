@@ -9165,6 +9165,19 @@ Result: implemented as the card describes. New crate `crates/cox-target` (`lib.r
 
 Check (2026-10-14): `cargo nextest run -p cox-target -p cox-app` 273/273; `cargo nextest run -p cox --test remote --test deps` 11/11; clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean; `cargo hakari verify` clean.
 
+#### T68.3 `hello` handshake and readable failures
+
+Model: Claude / sonnet-5.5 · Depends: T68.1 · Size: ~180 · Priority: P1 · Complexity: 2
+
+Goal: the first exchange on the app-server wire is `hello`: wire version, cox version, OS, arch and the sandbox backend (or none). The client refuses another wire major version with one sentence naming both versions. The launcher's stderr is read, bounded (8 KiB) and passed through `cox_sanitize::sanitize`, so `cox: command not found`, exit 127, an unknown container or a stopped instance becomes `RemoteError::NotInstalled` / `RemoteError::Unreachable` with the target and a hint, instead of a silent drop. Files: `cox-app/src/wire.rs`, `server.rs`, `remote.rs`, `docs/app-server.schema.json`.
+
+Done when `old_wire_version_is_refused_by_name`, `missing_remote_cox_says_how_to_install` and `remote_stderr_is_sanitized_and_bounded` pass.
+
+Status: done 2026-10-14
+Result: `Call::Hello` / `Reply::Hello(HostInfo { wire, cox, os, arch, sandbox })`; the server answers from `cox_tools::sandbox::backend(LinuxBackend::Auto)` as `doctor` does. `connect_with` and `reconnect` say hello first, with a 30 s deadline (`HELLO_TIMEOUT`). New `RemoteError` variants `WireVersion`, `RemoteTooOld`, `NotInstalled`, `Unreachable`; `Disconnected` stays for drops after hello. The launcher's stderr is piped, its last 8 KiB kept and passed through `cox_sanitize::sanitize` before it reaches an error. An `id: 0` answer (a line the server could not read, e.g. an older cox without `hello`) pairs only with the pending hello. `RemoteWorkspace::info()` returns the `HostInfo` by clone (it is replaced on reconnect). `docs/app-server.md` Handshake section; schema regenerated. Review round: id-0 pairing narrowed to the hello, and the hello deadline added.
+
+Check (2026-10-14): `cargo nextest run -p cox-app` 273/273; `-p cox --test remote` 1/1; `-p cox-ffi` 15/15 (before the review round, which changed no FFI-visible type); clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean.
+
 #### T37.44.16 The shared file walker skips `.git/`
 
 Depends: — · Size: ~40 · Files: `crates/cox-search` (the walker), its tests
