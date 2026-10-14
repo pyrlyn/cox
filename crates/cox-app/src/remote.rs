@@ -32,7 +32,7 @@ use std::time::Duration;
 use cox_protocol::ids::{ArchiveId, SessionId};
 use cox_protocol::plugin::CanvasAttach;
 use cox_protocol::types::TodoItem;
-use cox_target::{Kind, Target, Tty};
+use cox_target::{Resolved, Target, Tty};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -48,7 +48,7 @@ use crate::{Block, Changes, Completion, Intent, Project, SearchHit, SessionEntry
 pub enum RemoteError {
     #[error(transparent)]
     Target(#[from] cox_target::TargetError),
-    #[error("could not start ssh: {0}")]
+    #[error("could not start the launcher: {0}")]
     Spawn(#[from] std::io::Error),
     #[error("the connection to {0} dropped; reconnect to go on")]
     Disconnected(String),
@@ -78,6 +78,8 @@ pub enum RemoteError {
     /// The remote cox's own error, as it worded it.
     #[error("{0}")]
     Remote(String),
+    #[error("could not read the config: {0}")]
+    Config(String),
     #[error("the remote cox answered another call")]
     Unexpected,
     #[error(transparent)]
@@ -446,10 +448,10 @@ fn web_link(text: &str) -> Option<String> {
     web.then(|| url.into())
 }
 
-/// One host's workspace over ssh.
+/// One target's workspace: a host over ssh, a container or a VM.
 pub struct RemoteWorkspace {
     host: String,
-    ssh: PathBuf,
+    resolved: Resolved,
     local: Arc<dyn Host>,
     link: Mutex<Arc<Link>>,
     /// What the last `hello` answered.
@@ -457,22 +459,21 @@ pub struct RemoteWorkspace {
 }
 
 impl RemoteWorkspace {
-    /// Connects to `host` with the system ssh.
-    pub async fn connect(host: &str, local: Arc<dyn Host>) -> Result<Arc<Self>, RemoteError> {
-        let ssh = cox_target::launcher(Kind::Ssh)?;
-        Self::connect_with(&ssh, host, local).await
-    }
-
-    /// Connects through `ssh`: the system one, or a test's fake.
-    pub async fn connect_with(
-        ssh: &Path,
-        host: &str,
+    /// Connects to a resolved target (T68.4): `cox app-server --stdio` run
+    /// through its launcher, in its starting directory if it has one.
+    pub async fn connect(
+        resolved: Resolved,
         local: Arc<dyn Host>,
     ) -> Result<Arc<Self>, RemoteError> {
-        let (link, info) = establish(ssh, host, Arc::clone(&local)).await?;
+        // An ssh host reads as its bare name, as before targets existed.
+        let host = match &resolved.target {
+            Target::Ssh { host } => host.clone(),
+            other => other.to_string(),
+        };
+        let (link, info) = establish(&resolved, &host, Arc::clone(&local)).await?;
         Ok(Arc::new(Self {
-            host: host.to_owned(),
-            ssh: ssh.to_owned(),
+            host,
+            resolved,
             local,
             link: Mutex::new(link),
             info: Mutex::new(info),
@@ -483,6 +484,23 @@ impl RemoteWorkspace {
     /// and sandbox backend. A copy, because `reconnect` replaces it.
     pub fn info(&self) -> HostInfo {
         lock(&self.info).clone()
+    }
+
+    /// Connects to ssh `host` through `ssh`: the system one, or a test's fake.
+    pub async fn connect_with(
+        ssh: &Path,
+        host: &str,
+        local: Arc<dyn Host>,
+    ) -> Result<Arc<Self>, RemoteError> {
+        let target = Target::Ssh {
+            host: host.to_owned(),
+        };
+        let resolved = Resolved {
+            target,
+            launcher: ssh.to_owned(),
+            cwd: None,
+        };
+        Self::connect(resolved, local).await
     }
 
     pub fn host(&self) -> &str {
@@ -496,7 +514,7 @@ impl RemoteWorkspace {
     /// The disconnected state's action: a fresh ssh connection. Sessions
     /// are opened again (with `resume`) by the caller.
     pub async fn reconnect(&self) -> Result<(), RemoteError> {
-        let (link, info) = establish(&self.ssh, &self.host, Arc::clone(&self.local)).await?;
+        let (link, info) = establish(&self.resolved, &self.host, Arc::clone(&self.local)).await?;
         *lock(&self.link) = link;
         *lock(&self.info) = info;
         Ok(())
@@ -551,18 +569,21 @@ impl RemoteWorkspace {
     }
 }
 
-fn spawn(ssh: &Path, host: &str, local: Arc<dyn Host>) -> Result<Arc<Link>, RemoteError> {
-    let target = Target::Ssh {
-        host: host.to_owned(),
-    };
-    let command = cox_target::command(&target, ssh, &["cox", "app-server", "--stdio"], Tty::No)?;
+fn spawn(resolved: &Resolved, host: &str, local: Arc<dyn Host>) -> Result<Arc<Link>, RemoteError> {
+    // why: the directory comes from config and was checked as a token when
+    // the target resolved; `command` checks every token again.
+    let cwd = resolved.cwd.as_deref().map(|dir| ["--cwd", dir]);
+    let mut argv = vec!["cox"];
+    argv.extend(cwd.iter().flatten());
+    argv.extend(["app-server", "--stdio"]);
+    let command = cox_target::command(&resolved.target, &resolved.launcher, &argv, Tty::No)?;
     let mut child = tokio::process::Command::from(command)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
-    let missing = || std::io::Error::other("ssh started without its pipes");
+    let missing = || std::io::Error::other("the launcher started without its pipes");
     let stdin = child.stdin.take().ok_or_else(missing)?;
     let stdout = child.stdout.take().ok_or_else(missing)?;
     let stderr = child.stderr.take().ok_or_else(missing)?;
@@ -576,11 +597,11 @@ fn spawn(ssh: &Path, host: &str, local: Arc<dyn Host>) -> Result<Arc<Link>, Remo
 /// A started link and the answer to its `hello`. A link that cannot say
 /// hello is dropped, which kills its process.
 async fn establish(
-    ssh: &Path,
+    resolved: &Resolved,
     host: &str,
     local: Arc<dyn Host>,
 ) -> Result<(Arc<Link>, HostInfo), RemoteError> {
-    let link = spawn(ssh, host, local)?;
+    let link = spawn(resolved, host, local)?;
     let info = hello(&link).await?;
     Ok((link, info))
 }
@@ -931,7 +952,7 @@ impl App {
     /// A remote host's workspace over ssh (T52.20); its inbox items and
     /// links reach this app's host.
     pub async fn connect_remote(&self, host: &str) -> Result<Arc<RemoteWorkspace>, RemoteError> {
-        RemoteWorkspace::connect(host, Arc::clone(&self.host)).await
+        self.connect_target(&format!("ssh:{host}")).await
     }
 }
 
@@ -1347,11 +1368,47 @@ mod tests {
     /// A launcher that ignores its arguments and runs `body`.
     #[cfg(unix)]
     fn launcher(dir: &Path, body: &str) -> PathBuf {
+        named_launcher(dir, "ssh", body)
+    }
+
+    #[cfg(unix)]
+    fn named_launcher(dir: &Path, name: &str, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt as _;
-        let path = dir.join("ssh");
+        let path = dir.join(name);
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write the launcher");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
         path
+    }
+
+    /// T68.4: a configured docker target runs `docker exec -i web cox …`
+    /// through the configured launcher, and the host's hello is the answer.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn connect_reaches_a_docker_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let args = dir.path().join("args");
+        let docker = named_launcher(
+            dir.path(),
+            "docker",
+            &format!(
+                "echo \"$@\" > {args:?}\nread request\nprintf '%s\\n' '{}'\ncat >/dev/null",
+                hello_line(wire::VERSION, wire::VERSION)
+            ),
+        );
+        let config = format!(
+            "[launchers]\ndocker = {docker:?}\n\n[targets.web]\ntarget = \"docker:web\"\ncwd = \"/srv/app\"\n"
+        );
+        std::fs::write(dir.path().join("config.toml"), config).expect("write the config");
+        let app = App::new(Some(dir.path().to_owned()), Arc::new(Links::default())).expect("app");
+        let workspace = app.connect_target("web").await.expect("connects");
+        assert_eq!(workspace.host(), "docker:web");
+        assert_eq!(workspace.info(), hello_info(wire::VERSION));
+        assert_eq!(
+            std::fs::read_to_string(&args)
+                .expect("recorded args")
+                .trim(),
+            "exec -i web cox --cwd /srv/app app-server --stdio"
+        );
     }
 
     #[cfg(unix)]

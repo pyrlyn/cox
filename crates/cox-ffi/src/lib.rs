@@ -29,7 +29,7 @@ use cox_app::terminal::TerminalError;
 use cox_app::workspace::SidebarSection;
 use cox_app::{
     Activity, AgentChoice, DaySummary, Holder, InboxItem, ModelChoice, PaletteHit, PaletteItem,
-    Project, SearchHit, SessionEntry,
+    Project, SearchHit, SessionEntry, TargetChoice,
 };
 use cox_app::{RuleKind, SessionGrant, SettingsView};
 use cox_protocol::ids::SessionId;
@@ -466,6 +466,22 @@ impl App {
         Ok(RemoteHandle::new(
             on_runtime(async move { self.owner.connect_remote(&host).await }).await??,
         ))
+    }
+
+    /// A workspace on a configured name or a `kind:name` target (T68.4).
+    pub async fn connect_target(
+        self: Arc<Self>,
+        text: String,
+    ) -> Result<Arc<RemoteHandle>, AppError> {
+        Ok(RemoteHandle::new(
+            on_runtime(async move { self.owner.connect_target(&text).await }).await??,
+        ))
+    }
+
+    /// The configured targets and the containers and VMs running now
+    /// (T68.4); it runs the launchers, so it runs off the caller's thread.
+    pub async fn targets(self: Arc<Self>) -> Result<Vec<TargetChoice>, AppError> {
+        on_runtime(async move { self.owner.targets().await }).await
     }
 
     /// Best of n (T52.9): one worktree and one session per candidate, each
