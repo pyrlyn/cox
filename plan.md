@@ -63,8 +63,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
-| T33.47 | in progress | P2 | 4 | 35% | Claude Code / claude-opus-5-5 |
-| T33.47.4 | todo | P2 | 4 | 0% | |
+| T33.47 | in progress | P2 | 4 | 45% | Claude Code / claude-opus-5-5 |
 | T33.47.5 | todo | P2 | 2 | 0% | |
 | T33.47.6 | todo | P2 | 2 | 0% | |
 | T33.47.7 | todo | P2 | 3 | 0% | |
@@ -1144,14 +1143,6 @@ Depends: T33.45.7 · Design: `docs/design/plugin-canvas.md`, A156
 A plugin that produces UI (Weft's `plugins/cox`, whose agent writes app screens) has no way to show them drawn: the desktop API is widgets only and PL§15.4 refused web views. The creator approved, through Weft's T106.6, a narrow kind of web view behind its own grant line, `desktop.canvas`: a pane beside the transcript holding *frames*, each a static HTML page a plugin draws, shown with page JavaScript off, every load blocked, every navigation but the first refused, and only a host-owned script in its own content world, which reports a click. The plugin turns the selection into text that the app adds to the composer as a `text/plain` attachment the person sends or removes. Redraws follow PL§8. The design, the caps, the isolation and its sources, and four open questions with recommendations are in the design document. The build is T33.47.1–T33.47.9; this card closes when they are done.
 
 Check: the nine cards' checks; `just test` green.
-
-#### T33.47.4 Canvas calls and `cox-app` state
-
-Depends: T33.47.3 · Files: `crates/cox-session/src/plugin_ui.rs`, `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugin-canvas.md` §3, §5, §6
-
-`cox-session`: `canvas` and `canvas_select`, the two calls with their deadlines (`min(call_ms, 2 s)` and `min(call_ms, 500 ms)`) and the caps, as plain functions beside `answer`, so the TUI's request enum does not change. `cox-app`: canvas state per session: visible or not, the last frames, three misses stop it, redraw while visible on `Effects.redraw` and after the plugin's own tool calls, unchanged frames not re-sent, and the selection call returning a sanitized, capped attachment.
-
-Check: a fixture plugin's frames come back capped; a slow `cox_canvas` misses three times and stops for the session; no render while hidden; an unchanged frame is not re-sent; a selection on an unknown frame or with a bad value is dropped before the plugin; the attachment is sanitized and capped.
 
 #### T33.47.5 Wire and remote sessions
 

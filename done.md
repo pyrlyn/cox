@@ -11600,3 +11600,20 @@ Check: a canvas declaration is dropped on the terminal and without its grant and
 Status: done 2026-10-14 · Commit "feat: T33.47.3 canvas host side and SDK arms" on branch `t33.47-plugin-canvas`: `InitOut.desktop.canvas` dropped with a notice off the desktop and silently without `desktop.canvas`; `cox_canvas` and `cox_canvas_select` are render context in `outside_render`; the SDK's `canvas` and `canvas_select` arms and their row in the export table.
 
 Check output: `mise exec -- cargo nextest run -p cox-plugin` — 119 passed, with `canvas_is_kept_only_on_the_desktop_with_its_grant` and `canvas_exports_are_render_context`; in `plugins/`, `cargo test -p cox-plugin-sdk` — 10 passed (the `register!` test exports both); clippy `-D warnings` (host, and the SDK for `wasm32-unknown-unknown`) and `cargo fmt --check` clean in both workspaces.
+
+#### T33.47.4 Canvas calls and `cox-app` state
+
+Depends: T33.47.3 · Files: `crates/cox-session/src/plugin_ui.rs`, `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugin-canvas.md` §3, §5, §6
+
+`cox-session`: `canvas` and `canvas_select`, the two calls with their deadlines (`min(call_ms, 2 s)` and `min(call_ms, 500 ms)`) and the caps, as plain functions beside `answer`, so the TUI's request enum does not change. `cox-app`: canvas state per session: visible or not, the last frames, three misses stop it, redraw while visible on `Effects.redraw` and after the plugin's own tool calls, unchanged frames not re-sent, and the selection call returning a sanitized, capped attachment.
+
+Check: a fixture plugin's frames come back capped; a slow `cox_canvas` misses three times and stops for the session; no render while hidden; an unchanged frame is not re-sent; a selection on an unknown frame or with a bad value is dropped before the plugin; the attachment is sanitized and capped.
+
+Plan (Claude Code / claude-opus-5-5): (1) `cox-session`: `canvas` and `canvas_select` call `PluginHost::call` with 2 s and 500 ms, which the host already cuts to `call_ms`, then `CanvasOut::capped`, `CanvasSelect::check` and `CanvasAttach::capped`; `tool_plugin` names a `wasm__<id>__` tool's plugin. (2) `cox-app` `plugin_ui.rs`: a `Canvas` per declaration (checked again), shown or hidden, its size, the last frames and the misses; `draw_canvas` and `select_canvas` call without the lock; updates queue for `next_canvas`. (3) `live.rs`: `show_canvas`, `hide_canvas`, `next_canvas`, `select_canvas`, a draw on a blocking thread, a redraw on `PluginAnswer::Redraw` and on the plugin's own `ToolCallDone`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.4 canvas calls and app canvas state" on branch `t33.47-plugin-canvas`. `CanvasUpdate` carries every frame id in order and only the frames whose page changed; the API's `Frame` is reused rather than a parallel app type. Showing the pane clears the last frames, so the first draw after it sends them all, and a full update queue clears them too. A frame's dropped reason and the stop are told as `Warn` notices.
+
+Deviations: about 310 lines of code (plus about 190 of tests) against 200, in the three files the card names; the bulk is the state and the `LiveSession` wrappers, which do not split without leaving the state untested. "A fixture plugin's frames come back capped" is covered by the caps' own tests (T33.47.1) and the fold test feeding `CanvasOut::capped`; a wasm fixture that returns frames would need the extism output kernel in a hand-written module, which the spinning `wat` hosts here avoid.
+
+Check output: `mise exec -- cargo nextest run -p cox-app -p cox-session` — 345 passed, with `a_canvas_sends_only_changed_frames`, `a_slow_canvas_stops_after_three_misses` (a spinning `cox_canvas` under `call_ms` 50), `a_click_reaches_the_plugin_only_on_a_drawn_frame` (a spinning `cox_canvas_select`: an unknown frame and a bad value return at once, a drawn frame waits its 500 ms), `a_canvas_attachment_is_sanitized`, `canvas_calls_fail_open_and_refuse_a_bad_click` and `a_plugin_tool_names_its_plugin`; clippy `-D warnings` and `cargo fmt --check` clean.
+
