@@ -11511,3 +11511,14 @@ Status: done 2026-10-13 · `cox-plugin-api`: `ui::is_link` is the one rule for a
 
 Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-session -p cox-app -p cox-ffi` — 491 passed, including `desktop_notice_reaches_the_sink_cleaned_capped_and_trimmed`, `a_plugin_notice_reaches_the_host_and_its_button_runs_the_command`, `a_notice_button_runs_a_granted_command_and_an_ungranted_one_is_dropped`, `a_remote_plugin_notice_reaches_the_local_host_and_a_link_click_asks_first`, `wire_round_trips_every_message` and `app_server_schema_drift`; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean; `COX_HOME=<scratch> cargo run -- doctor` and `plugin list` run.
 
+#### T33.46.1 Manifest and grant: `[[skills]]`
+
+Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` (plus the regenerated `docs/plugin.schema.json` and `docs/plugins.md` field index) · Design: A155
+
+Plan (Claude Code / claude-opus-5-5): (1) `SkillDecl { name, dir }` and `PluginManifest.skills` (`#[serde(default)]`), beside `AgentDecl`. `validate`: `name` is 1–64 lowercase letters, digits and `-` (the Agent Skills rule `cox-ext` applies at load); `dir` is an `is_package_path` whose last component is `name`, because `cox-ext` requires a skill's name to equal its folder, so a declaration that could never load is refused before approval; names are unique. New errors `SkillName`, `SkillDir`, `DuplicateSkill`; `MissingWasm`'s text names `[[skills]]` too. A skills-only package needs no wasm, like `[[agents]]`. (2) `capability_list` adds `skill:<name> <dir>`. (3) PL§2 example and rules, the PL§3 line list, PL§12 and PL§14 decision 16; regenerate the schema (delete it and rerun `plugin_schema_matches_committed_file`) and `scripts/plugin_api_reference.py --write`.
+
+Check: unit tests `manifest_skills_reject_a_dir_outside_the_package_or_not_named_for_the_skill`, `manifest_skills_only_package_needs_no_wasm`, `grant_new_skill_needs_approval`; the schema and API-reference drift tests pass; `cargo nextest run -p cox-plugin-api -p cox-plugin`.
+
+Status: done 2026-10-14 · Commit "feat: T33.46.1 manifest and grant: [[skills]]" on branch `t33.46-plugin-skills`: `SkillDecl` and `PluginManifest.skills`, the name and folder checks and `DuplicateSkill`, the `skill:<name> <dir>` grant line, PL§2/§3/§12/§14 decision 16, the regenerated schema and API field index, and a user-docs paragraph in `docs/plugins.md`.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin` — 165 passed (with `manifest_skills_reject_a_dir_outside_the_package_or_not_named_for_the_skill`, `manifest_skills_only_package_needs_no_wasm`, `grant_new_skill_needs_approval`, and the schema and API-reference drift tests); clippy `-D warnings` and `cargo fmt --check` clean.

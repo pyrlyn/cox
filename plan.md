@@ -63,9 +63,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
-| T33.46 | in progress | P2 | 3 | 0% | Claude Code / claude-opus-5-5 |
-| T33.46.1 | in progress | P2 | 2 | 0% | Claude Code / claude-opus-5-5 |
-| T33.46.2 | todo | P2 | 2 | 0% | |
+| T33.46 | in progress | P2 | 3 | 35% | Claude Code / claude-opus-5-5 |
+| T33.46.2 | in progress | P2 | 2 | 0% | Claude Code / claude-opus-5-5 |
 | T33.46.3 | todo | P2 | 3 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
@@ -1141,14 +1140,6 @@ Depends: T45.4 · Design: `docs/design/plugins.md` §2, §3, §12, §14 decision
 A plugin package cannot carry Agent Skills: `plugin.toml` has `[[agents]]` and `[[mcp]]` but no skills, so a plugin that wants to teach the model how to use its tools (Weft's `plugins/cox`, which ships the Weft authoring guide as a skill to Claude Code and Cursor) has no way to. Add a data-only `[[skills]]` entry: `name` and `dir`, a package-relative folder holding a `SKILL.md` in the same format as `.cox/skills/<name>/SKILL.md`. Each entry is one grant line, `skill:<name> <dir>`. A granted plugin's skills join the session's skills after the local ones, so a user or project skill of the same name wins, with a notice. The `skill` tool names the skill's folder in its output, so a skill can point at files it bundles. The build is T33.46.1–T33.46.3; this card closes when they are done.
 
 Check: the three cards' checks; `just test` green.
-
-#### T33.46.1 Manifest and grant: `[[skills]]`
-
-Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` (plus the regenerated `docs/plugin.schema.json` and `docs/plugins.md` field index) · Design: A155
-
-Plan (Claude Code / claude-opus-5-5): (1) `SkillDecl { name, dir }` and `PluginManifest.skills` (`#[serde(default)]`), beside `AgentDecl`. `validate`: `name` is 1–64 lowercase letters, digits and `-` (the Agent Skills rule `cox-ext` applies at load); `dir` is an `is_package_path` whose last component is `name`, because `cox-ext` requires a skill's name to equal its folder, so a declaration that could never load is refused before approval; names are unique. New errors `SkillName`, `SkillDir`, `DuplicateSkill`; `MissingWasm`'s text names `[[skills]]` too. A skills-only package needs no wasm, like `[[agents]]`. (2) `capability_list` adds `skill:<name> <dir>`. (3) PL§2 example and rules, the PL§3 line list, PL§12 and PL§14 decision 16; regenerate the schema (delete it and rerun `plugin_schema_matches_committed_file`) and `scripts/plugin_api_reference.py --write`.
-
-Check: unit tests `manifest_skills_reject_a_dir_outside_the_package_or_not_named_for_the_skill`, `manifest_skills_only_package_needs_no_wasm`, `grant_new_skill_needs_approval`; the schema and API-reference drift tests pass; `cargo nextest run -p cox-plugin-api -p cox-plugin`.
 
 #### T33.46.2 `cox-ext`: a plugin skill file, merge, and the skill's folder
 
