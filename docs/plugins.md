@@ -163,6 +163,7 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 - ABI `InitOut`: `tools`, `commands`, `status`, `panels`, `renderers`, `subscribe`
 - ABI `CommandDecl`: `name`, `description`
 - ABI `Slot`: `status.left`, `status.right`, `panel`, `overlay`
+- ABI `CanvasDecl`: `title`, `symbol`, `select_attr`
 - ABI `EventBatch`: `first_seq`, `dropped`, `events`
 - ABI `Effects`: `redraw`, `notices`
 - ABI `PluginNotice`: `level`, `text`
@@ -190,6 +191,11 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 - ABI `Widget`: `text`, `list`, `list.items`, `list.selected`, `table`, `table.header`, `table.rows`, `table.widths`, `key_value`, `gauge`, `gauge.ratio`, `gauge.label`, `stack`, `stack.vertical`, `stack.children`, `stack.sizes`, `block`, `block.title`, `block.child`
 - ABI `Span`: `text`, `style`, `bold`, `italic`, `link`
 - ABI `StyleToken`: `text`, `dim`, `accent`, `user`, `agent`, `tool`, `ok`, `warn`, `error`, `diff_add`, `diff_del`, `diff_hunk`, `border`, `selection`
+- ABI `CanvasIn`: `width_pt`, `height_pt`
+- ABI `CanvasOut`: `frames`
+- ABI `Frame`: `id`, `title`, `width_pt`, `html`
+- ABI `CanvasSelect`: `frame`, `value`
+- ABI `CanvasAttach`: `name`, `text`
 
 ### Terminal-only
 
@@ -205,7 +211,7 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 - manifest `DesktopCaps`: `inspector`, `toolbar`, `palette`, `notify`
 - ABI `InitOut`: `desktop`
 - ABI `Slot`: `desktop.inspector`
-- ABI `DesktopOut`: `inspector`, `toolbar`, `palette`
+- ABI `DesktopOut`: `inspector`, `toolbar`, `palette`, `canvas`
 - ABI `TabDecl`: `title`, `symbol`
 - ABI `ActionDecl`: `command`, `title`, `symbol`
 - ABI `CommandOut`: `open_inspector`, `open_inspector.kind`

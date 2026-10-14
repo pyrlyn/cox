@@ -1556,6 +1556,7 @@ mod tests {
             }),
             toolbar: vec![act("go", "Go\u{202e}", "play.fill")],
             palette: vec![act("go", "Go now", "Not A Symbol")],
+            canvas: None,
         };
         ui.declare("acme", &[], vec![command("go")], desktop, vec![]);
         assert!(ui.take_notices().is_empty());
@@ -1607,6 +1608,7 @@ mod tests {
                 act("c", "C", "eye"),
             ],
             palette: vec![act("missing", "Ghost", "eye")],
+            canvas: None,
         };
         let commands = vec![command("a"), command("b"), command("c")];
         ui.declare("acme", &[], commands, desktop, vec![]);
