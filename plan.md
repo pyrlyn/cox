@@ -65,7 +65,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 75% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | todo | P2 | 4 | 0% | |
-| T33.47.9 | todo | P2 | 1 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
@@ -1150,35 +1149,6 @@ The pane beside the transcript with frames side by side and zoom, ⌘⇧D, the p
 Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a selection adds one chip and a second replaces it; the falsifier 3 measurement written into the card's Check output.
 
 Split by A157 into T33.47.8.1–T33.47.8.9, one layer each; this card closes when they are done.
-
-#### T33.47.9 User docs
-
-Depends: T33.47.8 · Files: `docs/plugins.md` (and the `ru`/`uk` pages when T33.45.10 has made them) · Design: `docs/design/plugin-canvas.md`
-
-The canvas in the user docs: the manifest key, the grant line, what the page can and cannot do.
-
-Check: the API-reference drift test; `just test` green.
-
-**Order.** T33.1 → T33.2 → T33.3 → T33.4 → T33.5 → T33.6 is the critical path. After it these can run in parallel:
-
-- T33.7–T33.8;
-- T33.9 → (T33.10, T33.11, T33.12, T33.14.1, T33.15); T33.43 → T33.14.2;
-- T33.16 → T33.17 → T33.18;
-- T33.19 (after T32.3) → T33.42;
-- T33.20 → T33.21.
-
-TUI: T33.22 → T33.23 → (T33.24, T33.25, T33.26). SDK and languages: T33.27 → T33.28 → T33.29 → T33.30, then T33.31 → T33.32 → T33.33; T33.34; T33.35 → T33.36; T33.37 → T33.38. Then T33.39; T33.40.1–T33.40.17 (own order below); T33.41 and T33.42 whenever they are wanted. The top table gets rows T33.1–T33.39, T33.41–T33.42 and T33.40.1–T33.40.17; P2 by default, P1 for the blockers T33.1–T33.6 and T33.40.1, P3 for the optional cards (T33.41, T33.40.17), the paid eval E2 (T33.40.10) and the Kotlin/Dart feasibility spikes (T33.35, T33.37).
-
-**T33.40 order.**
-
-- Main line: T33.40.1 and T33.40.2 (in parallel) → T33.40.3 → T33.40.4 → T33.40.5.
-- Risk: T33.40.6 → T33.40.7.
-- Route: T33.40.8, which can start after T33.20 → T33.40.9 → T33.40.10.
-- Docs: T33.40.11 after T33.40.6 and T33.40.9. Its results section is filled by T33.40.7 and T33.40.10.
-- Removal (C1): T33.40.12 → T33.40.13 → T33.40.14 → T33.40.15 → T33.40.16, starting once T33.40.5 and T33.40.6 are done. It does not wait for the evals.
-- T33.40.17 runs whenever the creator has a key.
-
-The paid runs are T33.40.7 (≤ $0.10, approved) and T33.40.10 (≤ $3, needs the creator's go-ahead each time).
 
 ### P34 — Subagents (goal: a subagent can be a custom named definition, capped in number, able to ask the user, and able to exchange follow-up messages with its parent and its siblings — all through the parent's own `Submission`/`Event` stream)
 

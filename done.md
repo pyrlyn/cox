@@ -11795,6 +11795,43 @@ Deviations: 4 files rather than 3: the three App files the shortcut and the pale
 
 Check output: `scripts/desktop/app.sh` builds `Cox.app` (exit 0, no warnings in the touched files); `swiftlint lint --strict` on `App` and `swift format lint -s` on the three Swift files clean.
 
+#### T33.47.9 User docs
+
+Depends: T33.47.8 · Files: `docs/plugins.md` (and the `ru`/`uk` pages when T33.45.10 has made them) · Design: `docs/design/plugin-canvas.md`
+
+The canvas in the user docs: the manifest key, the grant line, what the page can and cannot do.
+
+Check: the API-reference drift test; `just test` green.
+
+**Order.** T33.1 → T33.2 → T33.3 → T33.4 → T33.5 → T33.6 is the critical path. After it these can run in parallel:
+
+- T33.7–T33.8;
+- T33.9 → (T33.10, T33.11, T33.12, T33.14.1, T33.15); T33.43 → T33.14.2;
+- T33.16 → T33.17 → T33.18;
+- T33.19 (after T32.3) → T33.42;
+- T33.20 → T33.21.
+
+TUI: T33.22 → T33.23 → (T33.24, T33.25, T33.26). SDK and languages: T33.27 → T33.28 → T33.29 → T33.30, then T33.31 → T33.32 → T33.33; T33.34; T33.35 → T33.36; T33.37 → T33.38. Then T33.39; T33.40.1–T33.40.17 (own order below); T33.41 and T33.42 whenever they are wanted. The top table gets rows T33.1–T33.39, T33.41–T33.42 and T33.40.1–T33.40.17; P2 by default, P1 for the blockers T33.1–T33.6 and T33.40.1, P3 for the optional cards (T33.41, T33.40.17), the paid eval E2 (T33.40.10) and the Kotlin/Dart feasibility spikes (T33.35, T33.37).
+
+**T33.40 order.**
+
+- Main line: T33.40.1 and T33.40.2 (in parallel) → T33.40.3 → T33.40.4 → T33.40.5.
+- Risk: T33.40.6 → T33.40.7.
+- Route: T33.40.8, which can start after T33.20 → T33.40.9 → T33.40.10.
+- Docs: T33.40.11 after T33.40.6 and T33.40.9. Its results section is filled by T33.40.7 and T33.40.10.
+- Removal (C1): T33.40.12 → T33.40.13 → T33.40.14 → T33.40.15 → T33.40.16, starting once T33.40.5 and T33.40.6 are done. It does not wait for the evals.
+- T33.40.17 runs whenever the creator has a key.
+
+The paid runs are T33.40.7 (≤ $0.10, approved) and T33.40.10 (≤ $3, needs the creator's go-ahead each time).
+
+Plan (Claude Code / claude-opus-5-5): (1) `docs/plugins.md`: the `canvas` and `canvas_select` rows in the export table, `canvas` in the desktop keys, and a Canvas section with the declaration, the grant line, who opens the pane, the caps, what a page can and cannot do, and how a click becomes a chip. (2) No `ru`/`uk` pages exist yet (T33.45.10 has not made them). (3) The drift test and the docs check.
+
+Status: done 2026-10-14 · Commit "docs: T33.47.9 plugin canvas in the plugin guide" on branch `t33.47-plugin-canvas`.
+
+Deviations: none (1 file).
+
+Check output: `python3 scripts/plugin_api_reference.py` exit 0; `cargo nextest run -p cox-plugin-api` — 55 passed, `plugin_api_reference_covers_both_schemas` among them; `cargo test --locked -p cox --test docs` — 5 passed. `just test` was not run whole: the cox rule for this work is to test the touched crates, and this card touches none.
+
 #### T33.47.8.4 CoxUI: `PluginCanvasPane`
 
 Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3
