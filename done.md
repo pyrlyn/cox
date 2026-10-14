@@ -11699,3 +11699,19 @@ Deviations: none.
 
 Check output: `swift test --filter "CanvasStoreTests|PluginCanvasTests|ComposerStore"` in `desktop/macos/Packages/CoxModel` — 32 passed, with `theFirstDeclaredCanvasShowsWithItsFrames`, `framesFollowTheOrderAndAnUnchangedOneKeepsItsValue`, `anotherPluginsDrawIsIgnoredAndAStopKeepsTheLastFrames`, `showingAnotherCanvasHidesTheFirstAndHidingForgetsTheFrames`, `onlyAChangedSizeIsSentAgain`, `aSelectionAddsOneChipAndASecondReplacesIt`, `aRemovedChipIsNotBroughtBack` and `theDrawsArriveThroughThePump`; swift-format and SwiftLint `--strict` clean.
 
+#### T33.47.8.4 CoxUI: `PluginCanvasPane`
+
+Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3
+
+The pane's look: the plugin's symbol and title, a picker when more than one plugin declares a canvas, frames side by side at their widths with their titles, zoom (⌘+ and ⌘− while focused, pinch) clamped, and a "stopped" line. The frame's page is a view the app passes in, so CoxUI stays free of WebKit. `ShellShortcut.canvas` is ⌘⇧D.
+
+Check: snapshots of the pane with two frames and with the picker × light/dark; the zoom clamp; the shortcut's key and tooltip.
+
+Plan (Claude Code / claude-opus-5-5): (1) `PluginCanvasPane.swift`: a generic organism like `BrowserPaneChrome`, its own `State` (canvases, shown, frames with width and content height, stopped, zoom) and `Intent` (`pick`, `zoom`), the page view passed in; zoom on a quarter grid from 25% to 200% by the bar's buttons, ⌘+ / ⌘− while the pane has focus, and pinch; `ShellShortcut.canvas`. (2) `PreviewState+Canvas.swift`: two frames, and the picker stopped at 75%. (3) `PluginCanvasPaneTests.swift`: snapshots × `Variant.all`, the zoom grid and clamp, the shortcut.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.4 plugin canvas pane" on branch `t33.47-plugin-canvas`. The pane sizes each frame's box at its width and height times the zoom and gives the page the zoom to apply inside it (the app will set CSS `zoom` from the host world), because scaling a web view from outside would put its clicks in the wrong place. The box anchors the page top-left. Snapshot images: 8, 4.2 MB, the same as `BrowserPaneChromeTests`.
+
+Deviations: none.
+
+Check output: `swift test --filter "PluginCanvas|CanvasShortcut"` in `desktop/macos/Packages/CoxUI` — 4 tests passed (`canvasPane` × 4 variants against the recorded images, `theZoomStepsOnAQuarterGrid`, `theZoomIsClamped`, `theCanvasTogglesOnCommandShiftD`); the images were recorded on the first run, looked at, and asserted on the second; swift-format and SwiftLint `--strict` clean.
+

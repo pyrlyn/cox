@@ -66,7 +66,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.47 | in progress | P2 | 4 | 75% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | todo | P2 | 4 | 0% | |
 | T33.47.8.3 | todo | P2 | 2 | 0% | |
-| T33.47.8.4 | todo | P2 | 3 | 0% | |
 | T33.47.8.5 | todo | P2 | 3 | 0% | |
 | T33.47.8.6 | todo | P2 | 2 | 0% | |
 | T33.47.9 | todo | P2 | 1 | 0% | |
@@ -1162,14 +1161,6 @@ Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxCore/Sources/CoxCore/Pl
 `LiveSession` and `RemoteSession` conform to `CanvasClient` through cox-ffi's calls; the FFI records convert to the client's.
 
 Check: a conversion test keeps every field; `swift test` for CoxCore against a freshly built `CoxFFI.xcframework`.
-
-#### T33.47.8.4 CoxUI: `PluginCanvasPane`
-
-Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3
-
-The pane's look: the plugin's symbol and title, a picker when more than one plugin declares a canvas, frames side by side at their widths with their titles, zoom (⌘+ and ⌘− while focused, pinch) clamped, and a "stopped" line. The frame's page is a view the app passes in, so CoxUI stays free of WebKit. `ShellShortcut.canvas` is ⌘⇧D.
-
-Check: snapshots of the pane with two frames and with the picker × light/dark; the zoom clamp; the shortcut's key and tooltip.
 
 #### T33.47.8.5 App: the pane beside the column
 

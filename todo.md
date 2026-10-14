@@ -28,7 +28,6 @@
 - T33.47. Plugin canvas: a desktop pane of plugin-drawn pages
 - T33.47.8. The pane, the shortcut and the composer chip
 - T33.47.8.3. CoxCore: the local and remote canvas calls
-- T33.47.8.4. CoxUI: `PluginCanvasPane`
 - T33.47.8.5. App: the pane beside the column
 - T33.47.8.6. ⌘⇧D, the palette action and the DT§ text
 - T33.47.9. User docs
