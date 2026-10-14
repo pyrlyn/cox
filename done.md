@@ -9138,6 +9138,33 @@ Check (2026-09-29, verification round 2): `cargo nextest run --workspace` 1886/1
 
 Not done: the app build and CoxPlatform tests are blocked until the Metal Toolchain is installed (SwiftTerm's shaders); this card does not depend on them.
 
+#### T68.1 `cox-target`: targets and their launch commands
+
+Model: Claude / sonnet-5.5 · Depends: — · Size: ~250 · Priority: P1 · Complexity: 3
+
+Goal: a new pure crate `crates/cox-target` owns `Target` (`Ssh { host }`, `Docker { container, context }`, `Lima { instance }`, `Colima { profile }`), its `FromStr`/`Display` for `kind:name`, the name check (today's `remote::check_host`, generalised: no leading `-`, no whitespace or control characters), the launcher lookup and `command(target, launcher, remote_argv, tty) -> tokio::process::Command`. `cox-app/src/remote.rs` loses `check_host`, `ssh_command`, `SSH` and `KEPT_ENV` and calls the crate, so the ssh path has one owner.
+
+Plan:
+1. `crates/cox-target/src/lib.rs`: `Target`, `Kind`, `TargetError` (thiserror), parse and display; `check_name`; `check_token` for each remote argv token (refuses whitespace, control characters and shell metacharacters, because three launchers join argv into a shell string).
+2. `launcher.rs`: per-kind absolute candidates for macOS, Linux and Windows (`/usr/bin/ssh`, `%SystemRoot%\System32\OpenSSH\ssh.exe`; Homebrew, `/usr/local/bin`, `/usr/bin` and Docker Desktop paths for `docker`, `limactl`, `colima`), first existing wins; the existence check is injected so tests touch no real path.
+3. `command.rs`: argv per kind — `ssh -T|-t -o BatchMode=yes -o ForwardAgent=no -o ClearAllForwardings=yes -- <host> …`, `docker [--context <ctx>] exec -i [-t] <container> …`, `limactl shell <instance> …`, `colima ssh -p <profile> -- …`; flag names checked against each tool's own docs and cited in the commit; environment cleared to a per-OS kept list (`HOME USER LOGNAME PATH SSH_AUTH_SOCK`, plus `DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG` for docker, `LIMA_HOME` for lima; `USERPROFILE SystemRoot` on Windows); stdin and stdout piped, stderr null as today (T68.3 changes it); `kill_on_drop`.
+4. `remote.rs` switches to the crate; `RemoteWorkspace::connect_with(path)` stays for tests.
+5. `Cargo.toml` workspace member, `deps.rs` rule if one lists crate edges, `toolchain.md` untouched (no new dependency).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-target -p cox-app
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `target_round_trips_through_its_string`, `name_that_reads_as_an_option_is_refused`, `token_with_shell_metacharacters_is_refused`, `each_kind_builds_its_launch_argv` (insta, one per kind and tty), `launcher_lookup_never_uses_path` and the existing `crates/cox/tests/remote.rs` pass.
+
+Status: done 2026-10-14
+Result: implemented as the card describes. New crate `crates/cox-target` (`lib.rs` 280, `launcher.rs` 102, `command.rs` 207 lines, tests included); `cox-app/src/remote.rs` delegates to it, `RemoteError::BadHost` became `RemoteError::Target`. The ssh argv for `Tty::No` is byte-identical to the old one. Extra test `name_that_reads_as_an_option_never_reaches_a_command` (a hand-built `Target`, docker context included). The Windows branches compile only under `cfg(windows)` and were not built here.
+
+Check (2026-10-14): `cargo nextest run -p cox-target -p cox-app` 273/273; `cargo nextest run -p cox --test remote --test deps` 11/11; clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean; `cargo hakari verify` clean.
+
 #### T37.44.16 The shared file walker skips `.git/`
 
 Depends: — · Size: ~40 · Files: `crates/cox-search` (the walker), its tests

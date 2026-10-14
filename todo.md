@@ -128,7 +128,6 @@
 - T67.11. `cox run -p --json-schema`
 - T67.12. Output styles
 - T67.13. Design: a GitHub Action and scheduled runs
-- T68.1. `cox-target`: targets and their launch commands
 - T68.2. `[targets.<name>]` in config
 - T68.3. `hello` handshake and readable failures
 - T68.4. Desktop: connect to any target (Rust and FFI)

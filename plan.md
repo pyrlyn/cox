@@ -142,7 +142,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T68.1 | in progress | P1 | 3 | 100% | Claude / sonnet-5.5 |
 | T68.2 | todo | P1 | 2 | 0% |  |
 | T68.3 | todo | P1 | 2 | 0% |  |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -3051,28 +3050,6 @@ Rationale in §6 A158. Today only the desktop app reaches a remote session, only
 **Order.** T68.1 blocks all. T68.2 and T68.3 follow it and are independent of each other. T68.4 → T68.5. T68.6 and T68.7 need T68.2. T68.8 needs T68.3. T68.9 can start after T68.1 and grows with each card. T68.10 last.
 
 **Not taken yet (in `ideas.md`):** a throwaway `docker run --rm` container from an image with the project mounted, and installing `cox` on a target.
-
-#### T68.1 `cox-target`: targets and their launch commands
-
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: — · Size: ~250 · Priority: P1 · Complexity: 3
-
-Goal: a new pure crate `crates/cox-target` owns `Target` (`Ssh { host }`, `Docker { container, context }`, `Lima { instance }`, `Colima { profile }`), its `FromStr`/`Display` for `kind:name`, the name check (today's `remote::check_host`, generalised: no leading `-`, no whitespace or control characters), the launcher lookup and `command(target, launcher, remote_argv, tty) -> tokio::process::Command`. `cox-app/src/remote.rs` loses `check_host`, `ssh_command`, `SSH` and `KEPT_ENV` and calls the crate, so the ssh path has one owner.
-
-Plan:
-1. `crates/cox-target/src/lib.rs`: `Target`, `Kind`, `TargetError` (thiserror), parse and display; `check_name`; `check_token` for each remote argv token (refuses whitespace, control characters and shell metacharacters, because three launchers join argv into a shell string).
-2. `launcher.rs`: per-kind absolute candidates for macOS, Linux and Windows (`/usr/bin/ssh`, `%SystemRoot%\System32\OpenSSH\ssh.exe`; Homebrew, `/usr/local/bin`, `/usr/bin` and Docker Desktop paths for `docker`, `limactl`, `colima`), first existing wins; the existence check is injected so tests touch no real path.
-3. `command.rs`: argv per kind — `ssh -T|-t -o BatchMode=yes -o ForwardAgent=no -o ClearAllForwardings=yes -- <host> …`, `docker [--context <ctx>] exec -i [-t] <container> …`, `limactl shell <instance> …`, `colima ssh -p <profile> -- …`; flag names checked against each tool's own docs and cited in the commit; environment cleared to a per-OS kept list (`HOME USER LOGNAME PATH SSH_AUTH_SOCK`, plus `DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG` for docker, `LIMA_HOME` for lima; `USERPROFILE SystemRoot` on Windows); stdin and stdout piped, stderr null as today (T68.3 changes it); `kill_on_drop`.
-4. `remote.rs` switches to the crate; `RemoteWorkspace::connect_with(path)` stays for tests.
-5. `Cargo.toml` workspace member, `deps.rs` rule if one lists crate edges, `toolchain.md` untouched (no new dependency).
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-target -p cox-app
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `target_round_trips_through_its_string`, `name_that_reads_as_an_option_is_refused`, `token_with_shell_metacharacters_is_refused`, `each_kind_builds_its_launch_argv` (insta, one per kind and tty), `launcher_lookup_never_uses_path` and the existing `crates/cox/tests/remote.rs` pass.
 
 #### T68.2 `[targets.<name>]` in config
 
