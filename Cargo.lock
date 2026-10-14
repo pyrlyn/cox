@@ -1160,6 +1160,7 @@ dependencies = [
  "cox-sanitize",
  "cox-session",
  "cox-store",
+ "cox-target",
  "cox-telemetry",
  "cox-tools",
  "cox-tui",
