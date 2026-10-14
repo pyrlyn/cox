@@ -1225,6 +1225,7 @@ dependencies = [
  "cox-search",
  "cox-session",
  "cox-store",
+ "cox-target",
  "cox-tools",
  "insta",
  "nix 0.31.3",
@@ -1670,6 +1671,16 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "workspace-hack",
+]
+
+[[package]]
+name = "cox-target"
+version = "0.1.2"
+dependencies = [
+ "insta",
+ "tempfile",
+ "thiserror 2.0.21",
  "workspace-hack",
 ]
 

@@ -25,6 +25,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use cox_protocol::ids::{ArchiveId, SessionId};
 use cox_protocol::plugin::CanvasAttach;
 use cox_protocol::types::TodoItem;
+use cox_target::{Kind, Target, Tty};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Notify, mpsc, oneshot};
 
@@ -34,19 +35,11 @@ use crate::plugin_ui::{self, CanvasUpdate, LinkClick, LinkTarget, PluginCanvas, 
 use crate::wire::{self, Call, Line, Outcome, Reply, Request, ServerEvent, WireError};
 use crate::{Block, Changes, Completion, Intent, Project, SearchHit, SessionEntry, TimelinePatch};
 
-/// The system ssh; a fixed path, never one found through `PATH`.
-pub const SSH: &str = "/usr/bin/ssh";
-
-/// What ssh may still see of this process's environment: enough to find
-/// the person's ssh config (`HOME`), name them and reach their local agent
-/// for authentication. `ForwardAgent=no` keeps that agent off the remote.
-const KEPT_ENV: [&str; 5] = ["HOME", "USER", "LOGNAME", "PATH", "SSH_AUTH_SOCK"];
-
 /// What a remote call can fail with.
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteError {
-    #[error("{0:?} is not an ssh host name")]
-    BadHost(String),
+    #[error(transparent)]
+    Target(#[from] cox_target::TargetError),
     #[error("could not start ssh: {0}")]
     Spawn(#[from] std::io::Error),
     #[error("the connection to {0} dropped; reconnect to go on")]
@@ -58,39 +51,6 @@ pub enum RemoteError {
     Unexpected,
     #[error(transparent)]
     Wire(#[from] WireError),
-}
-
-/// Refuses a host ssh could take for an option (`-oProxyCommand=…`) or
-/// split into several words.
-pub fn check_host(host: &str) -> Result<(), RemoteError> {
-    let bad = host.is_empty()
-        || host.starts_with('-')
-        || host.chars().any(|c| c.is_whitespace() || c.is_control());
-    if bad {
-        return Err(RemoteError::BadHost(host.to_owned()));
-    }
-    Ok(())
-}
-
-/// The ssh invocation for `host`, not yet started.
-pub fn ssh_command(ssh: &Path, host: &str) -> Result<tokio::process::Command, RemoteError> {
-    check_host(host)?;
-    let mut command = tokio::process::Command::new(ssh);
-    command
-        .args(["-T", "-o", "BatchMode=yes", "-o", "ForwardAgent=no"])
-        .args(["-o", "ClearAllForwardings=yes", "--", host])
-        .args(["cox", "app-server", "--stdio"])
-        .env_clear()
-        .envs(
-            KEPT_ENV
-                .iter()
-                .filter_map(|k| Some((*k, std::env::var_os(*k)?))),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    Ok(command)
 }
 
 /// A session's patches, created by whichever comes first: the reader
@@ -344,7 +304,8 @@ pub struct RemoteWorkspace {
 impl RemoteWorkspace {
     /// Connects to `host` with the system ssh.
     pub async fn connect(host: &str, local: Arc<dyn Host>) -> Result<Arc<Self>, RemoteError> {
-        Self::connect_with(Path::new(SSH), host, local).await
+        let ssh = cox_target::launcher(Kind::Ssh)?;
+        Self::connect_with(&ssh, host, local).await
     }
 
     /// Connects through `ssh`: the system one, or a test's fake.
@@ -428,7 +389,16 @@ impl RemoteWorkspace {
 }
 
 fn spawn(ssh: &Path, host: &str, local: Arc<dyn Host>) -> Result<Arc<Link>, RemoteError> {
-    let mut child = ssh_command(ssh, host)?.spawn()?;
+    let target = Target::Ssh {
+        host: host.to_owned(),
+    };
+    let command = cox_target::command(&target, ssh, &["cox", "app-server", "--stdio"], Tty::No)?;
+    let mut child = tokio::process::Command::from(command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
     let missing = || std::io::Error::other("ssh started without its pipes");
     let stdin = child.stdin.take().ok_or_else(missing)?;
     let stdout = child.stdout.take().ok_or_else(missing)?;
@@ -676,27 +646,6 @@ impl App {
 mod tests {
     use super::*;
 
-    #[test]
-    fn remote_host_with_leading_dash_is_refused() {
-        for host in [
-            "-oProxyCommand=touch /tmp/x",
-            "-p22",
-            "",
-            "dev box",
-            "dev\nbox",
-            "a\u{7}",
-        ] {
-            assert!(
-                matches!(check_host(host), Err(RemoteError::BadHost(_))),
-                "{host:?} was accepted"
-            );
-            assert!(ssh_command(Path::new(SSH), host).is_err());
-        }
-        for host in ["devbox", "me@devbox.local", "devbox:2222", "[::1]"] {
-            assert!(check_host(host).is_ok(), "{host:?} was refused");
-        }
-    }
-
     /// Remembers every link it was asked to open, and how.
     #[derive(Default)]
     struct Links {
@@ -874,46 +823,6 @@ mod tests {
         assert_eq!(second.next().await, None);
         assert_eq!(first.next().await, Some(vec![append("a", "1")]));
     }
-
-    #[test]
-    // why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
-    #[allow(unsafe_code)]
-    fn remote_spawn_forwards_no_agent_and_no_env() {
-        // SAFETY: nextest runs each test in its own process.
-        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "sk-must-not-leave") };
-        let command = ssh_command(Path::new(SSH), "devbox").expect("a valid host");
-        let std = command.as_std();
-        assert_eq!(std.get_program(), SSH);
-        let args: Vec<_> = std
-            .get_args()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            args,
-            [
-                "-T",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ForwardAgent=no",
-                "-o",
-                "ClearAllForwardings=yes",
-                "--",
-                "devbox",
-                "cox",
-                "app-server",
-                "--stdio",
-            ]
-        );
-        // `env_clear` leaves only what is set explicitly, and that is the
-        // allow-list.
-        for (key, _) in std.get_envs() {
-            let key = key.to_string_lossy();
-            assert!(KEPT_ENV.contains(&&*key), "{key} reaches ssh");
-        }
-        assert!(std.get_envs().all(|(k, _)| k != "ANTHROPIC_API_KEY"));
-    }
-
     fn frame(id: &str, title: &str) -> cox_protocol::plugin::Frame {
         cox_protocol::plugin::Frame {
             id: id.into(),

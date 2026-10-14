@@ -1,0 +1,14 @@
+---
+source: crates/cox-target/src/command.rs
+expression: out
+---
+ssh:devbox No: /launch/ssh -T -o BatchMode=yes -o ForwardAgent=no -o ClearAllForwardings=yes -- devbox cox app-server --stdio
+ssh:devbox Yes: /launch/ssh -t -o BatchMode=yes -o ForwardAgent=no -o ClearAllForwardings=yes -- devbox cox app-server --stdio
+docker:web No: /launch/docker exec -i web cox app-server --stdio
+docker:web Yes: /launch/docker exec -i -t web cox app-server --stdio
+lima:default No: /launch/limactl shell --tty=false default cox app-server --stdio
+lima:default Yes: /launch/limactl shell default cox app-server --stdio
+colima:dev No: /launch/colima ssh --profile dev -- cox app-server --stdio
+colima:dev Yes: /launch/colima ssh --profile dev -- cox app-server --stdio
+docker:web No: /launch/docker --context remote exec -i web cox app-server --stdio
+docker:web Yes: /launch/docker --context remote exec -i -t web cox app-server --stdio
