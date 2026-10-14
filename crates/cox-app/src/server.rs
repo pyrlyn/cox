@@ -27,7 +27,9 @@ use crate::InboxItem;
 use crate::app::{App, AppError, Host};
 use crate::live::LiveSession;
 use crate::plugin_ui::PluginAlert;
-use crate::wire::{self, Call, Line, Notification, Outcome, Reply, Response, ServerEvent};
+use crate::wire::{
+    self, Call, HostInfo, Line, Notification, Outcome, Reply, Response, ServerEvent,
+};
 
 /// Lines waiting for the writer. A stalled client fills it; then each
 /// session's pump waits and its controller coalesces instead.
@@ -93,6 +95,21 @@ impl Host for ServerHost {
     /// Never: a key does not cross the wire in either direction.
     fn secret(&self, _section: &str) -> Option<String> {
         None
+    }
+}
+
+/// What `hello` answers. No session state is read, so a client learns what
+/// it connected to before anything is opened.
+pub fn host_info() -> HostInfo {
+    HostInfo {
+        wire: wire::VERSION,
+        cox: env!("CARGO_PKG_VERSION").to_owned(),
+        os: std::env::consts::OS.to_owned(),
+        arch: std::env::consts::ARCH.to_owned(),
+        // `Auto`, as `doctor` reports it: the per-project `linux_backend`
+        // setting is not known before a session opens.
+        sandbox: cox_tools::sandbox::backend(cox_protocol::LinuxBackend::Auto)
+            .map(|backend| backend.name().to_owned()),
     }
 }
 
@@ -179,6 +196,7 @@ impl Server {
 
     async fn answer(&mut self, call: Call) -> Result<Reply, AppError> {
         Ok(match call {
+            Call::Hello => Reply::Hello(host_info()),
             Call::Projects { limit } => Reply::Projects(self.app.workspace().projects(limit)?),
             Call::Sessions { project, limit } => {
                 Reply::Sessions(self.app.workspace().sessions(&project, limit)?)
@@ -337,6 +355,43 @@ async fn write<W: AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn app_server_answers_hello() {
+        use tokio::io::AsyncBufReadExt as _;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (host, events) = ServerHost::channel();
+        let app = App::new(Some(dir.path().join(".cox")), host).expect("app");
+        let (mut to_server, server_in) = tokio::io::duplex(4096);
+        let (server_out, from_server) = tokio::io::duplex(4096);
+        let client = async {
+            let request = Line::Request(wire::Request {
+                v: wire::VERSION,
+                id: 1,
+                call: Call::Hello,
+            });
+            let text = wire::encode(&request).expect("encodes");
+            to_server.write_all(text.as_bytes()).await.expect("write");
+            let mut lines = BufReader::new(from_server).lines();
+            let text = lines.next_line().await.expect("read").expect("a line");
+            drop(to_server);
+            wire::decode(&text).expect("decodes")
+        };
+        let (line, served) = tokio::join!(client, serve(app, events, server_in, server_out));
+        served.expect("served");
+        let Line::Response(Response {
+            id: 1,
+            outcome: Outcome::Ok(Reply::Hello(info)),
+            ..
+        }) = line
+        else {
+            panic!("not a hello reply: {line:?}");
+        };
+        assert_eq!(info, host_info());
+        assert_eq!(info.wire, wire::VERSION);
+        assert_eq!(info.cox, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.os, std::env::consts::OS);
+    }
 
     #[test]
     fn server_host_sends_a_plugin_notice_to_the_client() {

@@ -15,24 +15,32 @@
 //! ssh configuration and agent — the app never asks for a password. A link
 //! the remote asks to show is a web link or nothing, and it opens only after
 //! the person confirms it (`Host::confirm_open_url`).
+//!
+//! The first exchange is `hello` (T68.3). The launcher's stderr is the only
+//! place ssh, a shell or a container runtime say why a link never came up,
+//! so it is read, kept to its last 8 KiB and passed through
+//! `cox_sanitize::sanitize` before any of it reaches an error: it is text
+//! the other machine wrote and is shown to the person as is.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use cox_protocol::ids::{ArchiveId, SessionId};
 use cox_protocol::plugin::CanvasAttach;
 use cox_protocol::types::TodoItem;
 use cox_target::{Kind, Target, Tty};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Notify, mpsc, oneshot};
+use tokio::task::JoinHandle;
 
 use crate::app::{App, Host};
 use crate::coalesce;
 use crate::plugin_ui::{self, CanvasUpdate, LinkClick, LinkTarget, PluginCanvas, link_target};
-use crate::wire::{self, Call, Line, Outcome, Reply, Request, ServerEvent, WireError};
+use crate::wire::{self, Call, HostInfo, Line, Outcome, Reply, Request, ServerEvent, WireError};
 use crate::{Block, Changes, Completion, Intent, Project, SearchHit, SessionEntry, TimelinePatch};
 
 /// What a remote call can fail with.
@@ -44,6 +52,29 @@ pub enum RemoteError {
     Spawn(#[from] std::io::Error),
     #[error("the connection to {0} dropped; reconnect to go on")]
     Disconnected(String),
+    /// The launcher ran but `cox` was not found on the target.
+    #[error(
+        "cox is not on the PATH of {target}; install cox there so that a non-interactive login can run `cox` (see docs/app-server.md)"
+    )]
+    NotInstalled { target: String },
+    /// The link closed before `hello` finished, for a reason the launcher
+    /// gave on stderr (sanitized, last lines only).
+    #[error("could not reach {target}: {detail}")]
+    Unreachable { target: String, detail: String },
+    #[error(
+        "{target} speaks app-server protocol {theirs} but this app speaks {ours}; update {} so the two match",
+        update_side(.ours, .theirs)
+    )]
+    WireVersion {
+        target: String,
+        ours: u32,
+        theirs: u32,
+    },
+    /// An older cox answered `hello` with an error: it has no such call.
+    #[error(
+        "the cox on {target} is too old for this app (protocol {ours}); update cox on that machine (see docs/app-server.md)"
+    )]
+    RemoteTooOld { target: String, ours: u32 },
     /// The remote cox's own error, as it worded it.
     #[error("{0}")]
     Remote(String),
@@ -81,9 +112,29 @@ struct Link {
     /// stream is.
     canvases: Mutex<HashMap<SessionId, mpsc::Sender<CanvasUpdate>>>,
     connected: AtomicBool,
+    /// The protocol version of a line this end refused, 0 if none: the
+    /// reason a link that never answered `hello` is a wire mismatch.
+    refused_version: AtomicU32,
+    /// The id of the `hello` still waiting for its answer, 0 when none: the
+    /// one call an unpairable (id 0) error line may be an answer to.
+    hello_id: AtomicU64,
     /// Killed when the link goes (`kill_on_drop`).
-    _child: Mutex<Option<tokio::process::Child>>,
+    child: Mutex<Option<tokio::process::Child>>,
+    /// The launcher's stderr; `None` for a link that is not a process.
+    stderr: Mutex<Option<Stderr>>,
 }
+
+/// A launcher's stderr as it is read: the last `STDERR_KEEP` bytes.
+struct Stderr {
+    tail: Arc<Mutex<Vec<u8>>>,
+    task: JoinHandle<()>,
+}
+
+/// How much of the launcher's stderr is kept; older bytes are dropped.
+const STDERR_KEEP: usize = 8 * 1024;
+
+/// The longest detail an error carries, after the last few lines are cut.
+const DETAIL_CHARS: usize = 600;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -108,7 +159,10 @@ impl Link {
             streams: Mutex::new(HashMap::new()),
             canvases: Mutex::new(HashMap::new()),
             connected: AtomicBool::new(true),
-            _child: Mutex::new(child),
+            refused_version: AtomicU32::new(0),
+            hello_id: AtomicU64::new(0),
+            child: Mutex::new(child),
+            stderr: Mutex::new(None),
         });
         tokio::spawn(read(Arc::clone(&link), reader, local));
         link
@@ -116,6 +170,18 @@ impl Link {
 
     async fn call(&self, call: Call) -> Result<Reply, RemoteError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let is_hello = matches!(call, Call::Hello);
+        if is_hello {
+            self.hello_id.store(id, Ordering::Release);
+        }
+        let result = self.exchange(id, call).await;
+        if is_hello {
+            self.hello_id.store(0, Ordering::Release);
+        }
+        result
+    }
+
+    async fn exchange(&self, id: u64, call: Call) -> Result<Reply, RemoteError> {
         let (tx, rx) = oneshot::channel();
         lock(&self.pending).insert(id, tx);
         if !self.connected.load(Ordering::Acquire) {
@@ -147,6 +213,65 @@ impl Link {
 
     fn dropped(&self) -> RemoteError {
         RemoteError::Disconnected(self.host.clone())
+    }
+
+    /// Why a link that closed before `hello` finished is gone: a line of
+    /// another protocol version, else what the launcher exited with and
+    /// said on stderr.
+    async fn launch_failure(&self) -> RemoteError {
+        let theirs = self.refused_version.load(Ordering::Acquire);
+        if theirs != 0 {
+            return wire_mismatch(&self.host, theirs);
+        }
+        let (status, text) = self.reap(false).await;
+        classify_failure(&self.host, status, &text)
+    }
+
+    /// `hello` got no answer in time: the process is killed, so a stuck
+    /// remote does not outlive the attempt.
+    async fn hello_timed_out(&self) -> RemoteError {
+        let (_, text) = self.reap(true).await;
+        let mut detail = format!("no answer within {} s", HELLO_TIMEOUT.as_secs());
+        let tail = tail_detail(&text);
+        if !tail.is_empty() {
+            detail = format!("{detail}; {tail}");
+        }
+        RemoteError::Unreachable {
+            target: self.host.clone(),
+            detail,
+        }
+    }
+
+    /// The process's exit status and the stderr it wrote, once it is gone.
+    async fn reap(&self, kill: bool) -> (Option<i32>, String) {
+        let child = lock(&self.child).take();
+        let status = match child {
+            Some(mut child) => {
+                if kill {
+                    let _ = child.start_kill();
+                }
+                match tokio::time::timeout(REAP, child.wait()).await {
+                    Ok(Ok(status)) => status.code(),
+                    _ => {
+                        // Still up with its stdout closed: nothing more will come.
+                        let _ = child.start_kill();
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        let stderr = lock(&self.stderr).take();
+        let text = match stderr {
+            Some(Stderr { tail, task }) => {
+                // The pipe ends with the process; the bound only guards a
+                // grandchild that kept it open.
+                let _ = tokio::time::timeout(REAP, task).await;
+                String::from_utf8_lossy(&lock(&tail)).into_owned()
+            }
+            None => String::new(),
+        };
+        (status, text)
     }
 
     /// `session`'s stream, once.
@@ -245,18 +370,46 @@ impl Stream {
     }
 }
 
+/// How long `hello` may wait for its answer. A launcher can connect while the
+/// remote never answers (a shell rc that waits for input, a stopped
+/// container's proxy), and the app must not hang on it.
+const HELLO_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a closed link waits for its process and its stderr.
+const REAP: Duration = Duration::from_secs(2);
+
 /// Routes each line the remote writes; ends the link at EOF or an error.
 async fn read(link: Arc<Link>, reader: impl AsyncRead + Unpin, local: Arc<dyn Host>) {
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(text)) = lines.next_line().await {
-        // A line that does not parse is skipped, not fatal: the stream
-        // stays in step because every line is whole.
-        let Ok(line) = wire::decode(&text) else {
-            continue;
+        let line = match wire::decode(&text) {
+            Ok(line) => line,
+            // The other end speaks another protocol: nothing it says can be
+            // trusted to mean what ours does, and the pending `hello` must
+            // learn why instead of waiting.
+            Err(WireError::Version { got }) => {
+                link.refused_version.store(got, Ordering::Release);
+                break;
+            }
+            // A line that does not parse is skipped, not fatal: the stream
+            // stays in step because every line is whole.
+            Err(_) => continue,
         };
         match line {
             Line::Response(response) => {
-                if let Some(tx) = lock(&link.pending).remove(&response.id) {
+                // Id 0 is the server's answer to a line it could not read, so
+                // it cannot be paired. Only a `hello` still waiting may take
+                // it (an older cox does not know that call); after that a
+                // remote could complete an unrelated call with it.
+                let waiting = if response.id == 0 {
+                    match link.hello_id.load(Ordering::Acquire) {
+                        0 => None,
+                        id => lock(&link.pending).remove(&id),
+                    }
+                } else {
+                    lock(&link.pending).remove(&response.id)
+                };
+                if let Some(tx) = waiting {
                     let _ = tx.send(response.outcome);
                 }
             }
@@ -299,6 +452,8 @@ pub struct RemoteWorkspace {
     ssh: PathBuf,
     local: Arc<dyn Host>,
     link: Mutex<Arc<Link>>,
+    /// What the last `hello` answered.
+    info: Mutex<HostInfo>,
 }
 
 impl RemoteWorkspace {
@@ -314,13 +469,20 @@ impl RemoteWorkspace {
         host: &str,
         local: Arc<dyn Host>,
     ) -> Result<Arc<Self>, RemoteError> {
-        let link = spawn(ssh, host, Arc::clone(&local))?;
+        let (link, info) = establish(ssh, host, Arc::clone(&local)).await?;
         Ok(Arc::new(Self {
             host: host.to_owned(),
             ssh: ssh.to_owned(),
             local,
             link: Mutex::new(link),
+            info: Mutex::new(info),
         }))
+    }
+
+    /// What the host answered to `hello`: its cox version, OS, architecture
+    /// and sandbox backend. A copy, because `reconnect` replaces it.
+    pub fn info(&self) -> HostInfo {
+        lock(&self.info).clone()
     }
 
     pub fn host(&self) -> &str {
@@ -334,8 +496,9 @@ impl RemoteWorkspace {
     /// The disconnected state's action: a fresh ssh connection. Sessions
     /// are opened again (with `resume`) by the caller.
     pub async fn reconnect(&self) -> Result<(), RemoteError> {
-        let link = spawn(&self.ssh, &self.host, Arc::clone(&self.local))?;
+        let (link, info) = establish(&self.ssh, &self.host, Arc::clone(&self.local)).await?;
         *lock(&self.link) = link;
+        *lock(&self.info) = info;
         Ok(())
     }
 
@@ -396,13 +559,143 @@ fn spawn(ssh: &Path, host: &str, local: Arc<dyn Host>) -> Result<Arc<Link>, Remo
     let mut child = tokio::process::Command::from(command)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
     let missing = || std::io::Error::other("ssh started without its pipes");
     let stdin = child.stdin.take().ok_or_else(missing)?;
     let stdout = child.stdout.take().ok_or_else(missing)?;
-    Ok(Link::start(host, stdout, stdin, Some(child), local))
+    let stderr = child.stderr.take().ok_or_else(missing)?;
+    let link = Link::start(host, stdout, stdin, Some(child), local);
+    let tail = Arc::new(Mutex::new(Vec::new()));
+    let task = tokio::spawn(collect(stderr, Arc::clone(&tail)));
+    *lock(&link.stderr) = Some(Stderr { tail, task });
+    Ok(link)
+}
+
+/// A started link and the answer to its `hello`. A link that cannot say
+/// hello is dropped, which kills its process.
+async fn establish(
+    ssh: &Path,
+    host: &str,
+    local: Arc<dyn Host>,
+) -> Result<(Arc<Link>, HostInfo), RemoteError> {
+    let link = spawn(ssh, host, local)?;
+    let info = hello(&link).await?;
+    Ok((link, info))
+}
+
+/// The first exchange on a link, refused unless the host speaks our wire.
+async fn hello(link: &Link) -> Result<HostInfo, RemoteError> {
+    let host = &link.host;
+    let answer = match tokio::time::timeout(HELLO_TIMEOUT, link.call(Call::Hello)).await {
+        Ok(answer) => answer,
+        Err(_) => return Err(link.hello_timed_out().await),
+    };
+    let info = match answer {
+        Ok(Reply::Hello(info)) => info,
+        Ok(_) => return Err(RemoteError::Unexpected),
+        // The server answered, but with an error: it does not know `hello`.
+        Err(RemoteError::Remote(_)) => {
+            return Err(RemoteError::RemoteTooOld {
+                target: host.clone(),
+                ours: wire::VERSION,
+            });
+        }
+        Err(RemoteError::Disconnected(_)) => return Err(link.launch_failure().await),
+        Err(e) => return Err(e),
+    };
+    if info.wire != wire::VERSION {
+        return Err(wire_mismatch(host, info.wire));
+    }
+    Ok(info)
+}
+
+/// Which end is behind: the one with the lower protocol version.
+fn update_side(ours: &u32, theirs: &u32) -> &'static str {
+    if theirs > ours {
+        "this app"
+    } else {
+        "cox on that machine"
+    }
+}
+
+fn wire_mismatch(host: &str, theirs: u32) -> RemoteError {
+    RemoteError::WireVersion {
+        target: host.to_owned(),
+        ours: wire::VERSION,
+        theirs,
+    }
+}
+
+/// Reads `stderr` to its end, keeping the last `STDERR_KEEP` bytes. It keeps
+/// reading past that so the process never blocks on a full pipe.
+async fn collect(mut stderr: impl AsyncRead + Unpin, tail: Arc<Mutex<Vec<u8>>>) {
+    let mut chunk = [0u8; 4096];
+    while let Ok(n) = stderr.read(&mut chunk).await {
+        if n == 0 {
+            break;
+        }
+        keep_last(&mut lock(&tail), &chunk[..n], STDERR_KEEP);
+    }
+}
+
+fn keep_last(kept: &mut Vec<u8>, chunk: &[u8], cap: usize) {
+    kept.extend_from_slice(chunk);
+    if kept.len() > cap {
+        kept.drain(..kept.len() - cap);
+    }
+}
+
+/// The last few non-empty lines of `text`, sanitized and cut to
+/// `DETAIL_CHARS`; empty when there are none.
+fn tail_detail(text: &str) -> String {
+    let clean = cox_sanitize::sanitize(text);
+    let lines: Vec<&str> = clean
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let detail = lines[lines.len().saturating_sub(4)..].join("; ");
+    match detail
+        .char_indices()
+        .rev()
+        .nth(DETAIL_CHARS.saturating_sub(1))
+    {
+        Some((start, _)) => format!("…{}", &detail[start..]),
+        None => detail,
+    }
+}
+
+/// The error for a link that closed before `hello` was answered. `text` is
+/// the launcher's stderr, untrusted: it is sanitized and cut to its last
+/// lines here, and nothing else puts it in an error.
+fn classify_failure(host: &str, status: Option<i32>, text: &str) -> RemoteError {
+    let clean = cox_sanitize::sanitize(text);
+    let lower = clean.to_lowercase();
+    let names_cox = lower.contains("cox");
+    let not_found = ["command not found", "executable file not found"]
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+        || lower.contains("no such file or directory");
+    // 127 is the shell's "not found" status, which ssh and `docker exec`
+    // pass through.
+    if status == Some(127) || (names_cox && not_found) {
+        return RemoteError::NotInstalled {
+            target: host.to_owned(),
+        };
+    }
+    let mut detail = tail_detail(&clean);
+    if detail.is_empty() {
+        detail = match status {
+            Some(code) => format!("the connection closed (exit status {code})"),
+            None => "the connection closed".to_owned(),
+        };
+    }
+    RemoteError::Unreachable {
+        target: host.to_owned(),
+        detail,
+    }
 }
 
 /// A session on the remote machine: the calls a `LiveSession` answers,
@@ -944,5 +1237,247 @@ mod tests {
             None,
             "an over-size attachment is dropped"
         );
+    }
+
+    fn hello_info(wire: u32) -> HostInfo {
+        HostInfo {
+            wire,
+            cox: "9.9.9".into(),
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            sandbox: None,
+        }
+    }
+
+    /// A fake remote that reads the client's one request and writes
+    /// `answer` back; returns the link to its client end.
+    async fn link_to_server_that_says(answer: String) -> Arc<Link> {
+        let (client, server) = tokio::io::duplex(4096);
+        let (reader, writer) = tokio::io::split(client);
+        let local = Arc::new(Links::default()) as Arc<dyn Host>;
+        let link = Link::start("devbox", reader, writer, None, local);
+        tokio::spawn(async move {
+            let (read, mut write) = tokio::io::split(server);
+            let mut lines = BufReader::new(read).lines();
+            let _ = lines.next_line().await;
+            let _ = write.write_all(answer.as_bytes()).await;
+            // The server stays up: only its answer can end the call.
+            std::future::pending::<()>().await;
+        });
+        link
+    }
+
+    fn hello_line(v: u32, wire: u32) -> String {
+        let line = Line::Response(wire::Response {
+            v,
+            id: 1,
+            outcome: Outcome::Ok(Reply::Hello(hello_info(wire))),
+        });
+        // `encode` always stamps ours; the other version is the point here.
+        wire::encode(&line)
+            .expect("encodes")
+            .replace("\"v\":1", &format!("\"v\":{v}"))
+    }
+
+    #[tokio::test]
+    async fn old_wire_version_is_refused_by_name() {
+        let link = link_to_server_that_says(hello_line(wire::VERSION, 2)).await;
+        let err = hello(&link).await.expect_err("refused");
+        assert!(
+            matches!(
+                err,
+                RemoteError::WireVersion {
+                    ours: 1,
+                    theirs: 2,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            "devbox speaks app-server protocol 2 but this app speaks 1; update this app so the two match"
+        );
+
+        // The other direction names the other side.
+        let link = link_to_server_that_says(hello_line(wire::VERSION, 0)).await;
+        let err = hello(&link).await.expect_err("refused");
+        assert!(
+            err.to_string()
+                .ends_with("update cox on that machine so the two match")
+        );
+
+        // A server whose every line carries another envelope version never
+        // gets as far as `hello`'s answer; the line itself is the evidence.
+        let link = link_to_server_that_says(hello_line(2, 2)).await;
+        let err = hello(&link).await.expect_err("refused");
+        assert!(
+            matches!(
+                err,
+                RemoteError::WireVersion {
+                    ours: 1,
+                    theirs: 2,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+
+        // An older cox without `hello` answers an unpairable error line.
+        let refusal = Line::Response(wire::Response {
+            v: wire::VERSION,
+            id: 0,
+            outcome: Outcome::Err("not a protocol line: unknown variant `hello`".into()),
+        });
+        let link = link_to_server_that_says(wire::encode(&refusal).expect("encodes")).await;
+        let err = hello(&link).await.expect_err("refused");
+        assert!(matches!(err, RemoteError::RemoteTooOld { .. }), "{err:?}");
+        assert!(err.to_string().contains("update cox on that machine"));
+    }
+
+    #[tokio::test]
+    async fn a_matching_hello_keeps_the_hosts_answer() {
+        let link = link_to_server_that_says(hello_line(wire::VERSION, wire::VERSION)).await;
+        assert_eq!(
+            hello(&link).await.expect("hello"),
+            hello_info(wire::VERSION)
+        );
+    }
+
+    /// A launcher that ignores its arguments and runs `body`.
+    #[cfg(unix)]
+    fn launcher(dir: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = dir.join("ssh");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write the launcher");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        path
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn missing_remote_cox_says_how_to_install() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ssh = launcher(
+            dir.path(),
+            "echo 'sh: cox: command not found' >&2\nexit 127",
+        );
+        let local = Arc::new(Links::default()) as Arc<dyn Host>;
+        let err = RemoteWorkspace::connect_with(&ssh, "devbox", local)
+            .await
+            .err()
+            .expect("no cox there");
+        assert!(matches!(err, RemoteError::NotInstalled { .. }), "{err:?}");
+        let text = err.to_string();
+        assert!(text.contains("devbox"), "{text}");
+        assert!(text.contains("not on the PATH"), "{text}");
+        assert!(text.contains("docs/app-server.md"), "{text}");
+    }
+
+    #[test]
+    fn launcher_failures_name_cox_only_when_it_is_the_cause() {
+        let not_installed = |status, text| {
+            matches!(
+                classify_failure("devbox", status, text),
+                RemoteError::NotInstalled { .. }
+            )
+        };
+        assert!(not_installed(Some(127), ""));
+        assert!(not_installed(None, "bash: cox: command not found"));
+        assert!(not_installed(
+            Some(126),
+            "exec: \"cox\": executable file not found in $PATH"
+        ));
+        assert!(not_installed(
+            Some(1),
+            "/usr/bin/env: 'cox': No such file or directory"
+        ));
+        assert!(!not_installed(
+            Some(255),
+            "ssh: Could not resolve hostname devbox: Name or service not known"
+        ));
+        assert!(!not_installed(Some(1), "bash: git: command not found"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn remote_stderr_is_sanitized_and_bounded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ssh = launcher(
+            dir.path(),
+            "head -c 20000 /dev/zero | tr '\\0' 'x' >&2\n\
+             printf '\\n\\033]0;pwned\\007\\342\\200\\256reversed \\033[2Jlast words\\n' >&2\n\
+             exit 1",
+        );
+        let local = Arc::new(Links::default()) as Arc<dyn Host>;
+        let err = RemoteWorkspace::connect_with(&ssh, "devbox", local)
+            .await
+            .err()
+            .expect("the launcher fails");
+        let RemoteError::Unreachable { target, detail } = &err else {
+            panic!("not unreachable: {err:?}");
+        };
+        assert_eq!(target, "devbox");
+        assert!(detail.contains("last words"), "{detail}");
+        assert!(
+            detail.chars().count() <= DETAIL_CHARS + 1,
+            "{}",
+            detail.len()
+        );
+        assert!(
+            !detail.chars().any(|c| c.is_control() && c != '\n'),
+            "{detail:?}"
+        );
+        assert!(!detail.contains('\u{202e}'), "{detail:?}");
+        assert!(!err.to_string().contains('\u{1b}'));
+    }
+
+    #[test]
+    fn stderr_tail_keeps_only_the_last_bytes() {
+        let mut kept = Vec::new();
+        keep_last(&mut kept, b"abcdef", 4);
+        keep_last(&mut kept, b"gh", 4);
+        assert_eq!(kept, b"efgh");
+    }
+
+    #[tokio::test]
+    async fn id_zero_after_hello_completes_no_call() {
+        let (client, mut server) = tokio::io::duplex(4096);
+        let (reader, writer) = tokio::io::split(client);
+        let local = Arc::new(Links::default()) as Arc<dyn Host>;
+        let link = Link::start("devbox", reader, writer, None, local);
+        let (tx, rx) = oneshot::channel();
+        lock(&link.pending).insert(7, tx);
+        // No hello is waiting, so the unpairable error is dropped; lines are
+        // read in order, so a wrongly paired call would see it first.
+        let garbage = Line::Response(wire::Response {
+            v: wire::VERSION,
+            id: 0,
+            outcome: Outcome::Err("not for you".into()),
+        });
+        let answer = Line::Response(wire::Response {
+            v: wire::VERSION,
+            id: 7,
+            outcome: Outcome::Ok(Reply::Closed),
+        });
+        for line in [garbage, answer] {
+            let text = wire::encode(&line).expect("encodes");
+            server.write_all(text.as_bytes()).await.expect("write");
+        }
+        assert_eq!(rx.await.expect("answered"), Outcome::Ok(Reply::Closed));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn hello_without_an_answer_times_out() {
+        let (client, _server) = tokio::io::duplex(4096);
+        let (reader, writer) = tokio::io::split(client);
+        let local = Arc::new(Links::default()) as Arc<dyn Host>;
+        let link = Link::start("devbox", reader, writer, None, local);
+        let err = hello(&link).await.expect_err("no answer");
+        let RemoteError::Unreachable { target, detail } = &err else {
+            panic!("not unreachable: {err:?}");
+        };
+        assert_eq!(target, "devbox");
+        assert_eq!(detail, "no answer within 30 s");
     }
 }
