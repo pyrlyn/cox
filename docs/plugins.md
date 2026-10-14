@@ -78,6 +78,8 @@ A handler returns `Result<output, E>` for any error type that implements `Displa
 | `key` | `cox_key` | `CommandIn` → `CommandOut` | terminal leader keys only (PL§15.3) |
 | `render` | `cox_render` | `RenderIn` → `Widget` | for a status segment, panel or overlay (PL§8) |
 | `render_item` | `cox_render_item` | `RenderItemIn` → `Option<Widget>` | for the targets in `ui.render` (PL§8) |
+| `canvas` | `cox_canvas` | `CanvasIn` → `CanvasOut` | desktop only, while the canvas pane shows: when it opens, on `Effects.redraw`, after each of your own tools finishes, and when the pane's size changes enough to matter; within `min(limits.call_ms, 2000 ms)` |
+| `canvas_select` | `cox_canvas_select` | `CanvasSelect` → `Option<CanvasAttach>` | on a click in one of your frames; within `min(limits.call_ms, 500 ms)` |
 | `shutdown` | `cox_shutdown` | `()` → `()` | at session end, best effort |
 
 Payloads that carry a cox protocol type (`Event`, `HookOutcome`, `ToolOutput`, `ProviderEvent`, `Request`) are `serde_json::Value`, because the SDK does not depend on the host crates. Their JSON shape is in `docs/protocol.jsonschema`; everything else is in `docs/plugin-abi.schema.json`.
@@ -129,7 +131,22 @@ The manifest's package identity, resource limits, providers, models, agents, MCP
 
 ## Desktop-only
 
-`[capabilities.desktop]` accepts `inspector`, `toolbar`, `palette`, and `notify`. `InitOut.desktop.inspector` declares one `TabDecl`; `cox_render` fills its `desktop.inspector` slot. `toolbar` and `palette` hold `ActionDecl` values whose `command` must name a declared command, run through `cox_command`. `CommandOut.open_inspector` selects the tab. `cox:desktop/v1` exposes `cox_desktop_notify` with a `DesktopNotice` and at most two `NoticeAction` values. `Widget.image` names a package-relative PNG (at most 256 KiB); the terminal shows its `alt` text. A desktop-only host call on another surface returns `AbiError.not_on_this_surface`. Contributions returned on an unavailable surface are dropped with one informational notice, and a plugin excluded by `surfaces` is skipped with a notice. One digest grant covers every surface.
+`[capabilities.desktop]` accepts `inspector`, `toolbar`, `palette`, `notify`, and `canvas`. `InitOut.desktop.inspector` declares one `TabDecl`; `cox_render` fills its `desktop.inspector` slot. `toolbar` and `palette` hold `ActionDecl` values whose `command` must name a declared command, run through `cox_command`. `CommandOut.open_inspector` selects the tab. `cox:desktop/v1` exposes `cox_desktop_notify` with a `DesktopNotice` and at most two `NoticeAction` values. `Widget.image` names a package-relative PNG (at most 256 KiB); the terminal shows its `alt` text. A desktop-only host call on another surface returns `AbiError.not_on_this_surface`. Contributions returned on an unavailable surface are dropped with one informational notice, and a plugin excluded by `surfaces` is skipped with a notice. One digest grant covers every surface.
+
+### Canvas
+
+`canvas = true` adds a pane of pages you draw beside the transcript. `InitOut.desktop.canvas` declares one `CanvasDecl`: a `title`, an SF Symbol, and `select_attr`, a `data-` attribute of 1–48 characters from `[a-z0-9-]`. `cox_canvas` returns the frames, each a static HTML page with an `id`, a `title` and a `width_pt` (clamped to 200–2560); the pane shows them side by side, each as tall as its content, and the person can zoom. The grant asks for `desktop.canvas` on its own line, even when the plugin's other desktop parts were granted before, because the pane shows the plugin's own HTML. Only the person opens the pane, with ⌘⇧D or the palette's "Show <title>"; nothing a plugin returns can open it.
+
+Caps: at most 12 frames, 1 MiB of HTML in a frame and 4 MiB in one call; a frame `id` matches `^[a-z0-9_.-]{1,64}$` and is unique. A frame over a cap is dropped with a warning. Three missed deadlines in a row stop the canvas for the session; the last frames stay. Both exports run in render context: no kv writes, no notices, no tools. cox compares each frame's HTML with the last one and reloads only the frames that changed.
+
+What a page can do: lay itself out with HTML, inline `<style>` and `style` attributes, and inline SVG; follow the app's light or dark appearance through `prefers-color-scheme`; mark the elements a click may select with `select_attr`. What it cannot do:
+
+- run script: page JavaScript is off, so `<script>` and `on…` attributes do nothing;
+- load anything: images, fonts, style sheets and frames are blocked, from the network, from `data:` URLs and from the page's own scheme alike (a content rule list and a `default-src 'none'` Content-Security-Policy);
+- navigate: links and forms do nothing;
+- keep state: each frame has a non-persistent store.
+
+A click runs the app's own script, which lives in a content world the page cannot reach: it outlines the nearest element that carries `select_attr` and reports its value. cox drops a value over 256 characters or with control characters, then calls `cox_canvas_select` with the frame's `id` and the value. A returned `CanvasAttach` (`name` up to 80 characters, `text` up to 8 KiB, both sanitized) becomes a `text/plain` chip in the composer, which the person sends with their next message or removes; the next click on the same canvas replaces it. `None` adds nothing. Nothing from the canvas reaches the model unless the person sends it. The design is `docs/design/plugin-canvas.md`.
 
 <!-- plugin-api:start -->
 ## API field index
@@ -163,6 +180,7 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 - ABI `InitOut`: `tools`, `commands`, `status`, `panels`, `renderers`, `subscribe`
 - ABI `CommandDecl`: `name`, `description`
 - ABI `Slot`: `status.left`, `status.right`, `panel`, `overlay`
+- ABI `CanvasDecl`: `title`, `symbol`, `select_attr`
 - ABI `EventBatch`: `first_seq`, `dropped`, `events`
 - ABI `Effects`: `redraw`, `notices`
 - ABI `PluginNotice`: `level`, `text`
@@ -190,6 +208,11 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 - ABI `Widget`: `text`, `list`, `list.items`, `list.selected`, `table`, `table.header`, `table.rows`, `table.widths`, `key_value`, `gauge`, `gauge.ratio`, `gauge.label`, `stack`, `stack.vertical`, `stack.children`, `stack.sizes`, `block`, `block.title`, `block.child`
 - ABI `Span`: `text`, `style`, `bold`, `italic`, `link`
 - ABI `StyleToken`: `text`, `dim`, `accent`, `user`, `agent`, `tool`, `ok`, `warn`, `error`, `diff_add`, `diff_del`, `diff_hunk`, `border`, `selection`
+- ABI `CanvasIn`: `width_pt`, `height_pt`
+- ABI `CanvasOut`: `frames`
+- ABI `Frame`: `id`, `title`, `width_pt`, `html`
+- ABI `CanvasSelect`: `frame`, `value`
+- ABI `CanvasAttach`: `name`, `text`
 
 ### Terminal-only
 
@@ -202,10 +225,10 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 ### Desktop-only
 
 - manifest `Capabilities`: `desktop`
-- manifest `DesktopCaps`: `inspector`, `toolbar`, `palette`, `notify`
+- manifest `DesktopCaps`: `inspector`, `toolbar`, `palette`, `notify`, `canvas`
 - ABI `InitOut`: `desktop`
 - ABI `Slot`: `desktop.inspector`
-- ABI `DesktopOut`: `inspector`, `toolbar`, `palette`
+- ABI `DesktopOut`: `inspector`, `toolbar`, `palette`, `canvas`
 - ABI `TabDecl`: `title`, `symbol`
 - ABI `ActionDecl`: `command`, `title`, `symbol`
 - ABI `CommandOut`: `open_inspector`, `open_inspector.kind`

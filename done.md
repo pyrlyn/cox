@@ -11558,3 +11558,325 @@ Check: the three cards' checks; `just test` green.
 Status: done 2026-10-14 · Branch `t33.46-plugin-skills` (T33.46.1–T33.46.3): a plugin package ships Agent Skills with `[[skills]]`, one `skill:<name> <dir>` grant line each, loaded for a granted plugin after the local skills.
 
 Check output: the three cards' checks. Per the creator's brief for this branch, only the touched crates were tested, not `just test`.
+
+#### T33.47.1 API: ABI types and caps
+
+Depends: — · Files: `crates/cox-plugin-api/src/abi.rs`, `crates/cox-plugin-api/src/lib.rs`, `plugins/examples/surfaces/src/lib.rs` (plus the regenerated `docs/plugin-abi.schema.json` and the `docs/plugins.md` field index) · Design: `docs/design/plugin-canvas.md` §1, §2
+
+`DesktopCaps.canvas`; `DesktopOut.canvas: Option<CanvasDecl>`; `CanvasIn`, `CanvasOut`, `Frame`, `CanvasSelect`, `CanvasAttach`; one caps check the host and the app-server client both call.
+
+Plan (Claude Code / claude-opus-5-5): (1) `manifest.rs`: `DesktopCaps.canvas` (`#[serde(default)]`); the existing surface-table check already refuses it when `surfaces` excludes `desktop`. (2) `abi.rs`: `DesktopOut.canvas`, the five payloads, the limits as constants, and the checks: `CanvasDecl::check` (title 1–64 chars, `is_symbol_name`, `is_select_attr` `^data-[a-z0-9-]{1,48}$`), `CanvasOut::capped` (keeps the first 12 frames with a valid unique id `^[a-z0-9_.-]{1,64}$`, at most 1 MiB each and 4 MiB in all, titles cut to 80 chars, widths clamped to 200–2560, and returns one `CanvasError` per drop), `CanvasSelect::check` (a frame id, a value of 1–256 chars without control characters), `CanvasAttach::capped` (name cut to 80 chars, text over 8 KiB refused). The checks are forms and sizes only: sanitizing needs `cox-sanitize`, which this crate may not depend on, so it stays in `cox-app` as for widgets. (3) `lib.rs`: re-exports and the new types in the ABI schema's `defs!`; regenerate both schemas and `scripts/plugin_api_reference.py --write`.
+
+Check: caps unit tests (frame count, sizes, id, `select_attr`, selection value, attachment); the schema and API-reference drift tests; `cargo nextest run -p cox-plugin-api`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.1 canvas ABI types and caps" on branch `t33.47-plugin-canvas`: `DesktopOut.canvas`, `CanvasDecl`, `CanvasIn`, `CanvasOut`, `Frame`, `CanvasSelect`, `CanvasAttach`, `CanvasError`, the limits as constants, and `CanvasDecl::check`, `CanvasOut::capped`, `CanvasSelect::check`, `CanvasAttach::capped`, re-exported and in the ABI schema. The manifest key moved to T33.47.2 so this task stays within three files. The new `DesktopOut` field also needed `canvas: None` in the struct literals of the surfaces example and of two `cox-app` tests (one line each).
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-app` — 436 passed, with `canvas_decl_checks_title_symbol_and_attribute`, `canvas_out_keeps_valid_frames_within_the_limits`, `canvas_out_caps_the_frame_count_and_the_total_size`, `canvas_selection_needs_a_frame_id_and_a_plain_bounded_value`, `canvas_attachment_cuts_the_name_and_refuses_long_text`, `desktop_payloads_round_trip`, `abi_schema_matches_committed_file` and `plugin_api_reference_covers_both_schemas`; `cargo check --workspace --all-targets` and the `plugins/` workspace check clean; clippy `-D warnings` (host and `wasm32-unknown-unknown`) and `cargo fmt --check` clean.
+
+#### T33.47.2 Manifest key, grant line and design text
+
+Depends: T33.47.1 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` (plus the regenerated `docs/plugin.schema.json` and field index) · Design: `docs/design/plugin-canvas.md` §1
+
+`DesktopCaps.canvas` (moved here from T33.47.1, so each task stays within three files); the `desktop.canvas` grant line; PL§4 (`cox_redraw` under the canvas), §14 decision 17, the §15.4 canvas row and rules in place of "HTML or web views — never", §15.5's `canvas` key.
+
+Plan (Claude Code / claude-opus-5-5): (1) `DesktopCaps.canvas` with `#[serde(default)]` and the test that it parses and is refused when `surfaces` excludes `desktop` (the existing surface-table check covers it); regenerate `docs/plugin.schema.json` and the field index. (2) `capability_list` adds `("desktop.canvas", caps.desktop.canvas)`; `grant_new_canvas_needs_approval` beside the existing desktop grant test. (3) PL§4 host-function table: `cox_redraw` under any `ui` or `desktop.canvas`; PL§14 decision 17; PL§15.4: the canvas row and its rules in place of "HTML or web views — never" (the pointer added with A156 goes); PL§15.5: `canvas = true` in the example and the grant line in the list.
+
+Check: `manifest_canvas_is_a_desktop_part`; `grant_new_canvas_needs_approval`; the schema drift test; `cargo nextest run -p cox-plugin-api -p cox-plugin`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.2 canvas manifest key and grant line" on branch `t33.47-plugin-canvas`: `DesktopCaps.canvas`, the `desktop.canvas` grant line, PL§4 (`cox_redraw` under the canvas), PL§14 decision 17, the PL§15.4 canvas row and rule in place of "HTML or web views — never", PL§15.5's example and grant-line list; the regenerated manifest schema and field index.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin` — 172 passed, with `manifest_canvas_is_a_desktop_part`, `grant_new_canvas_needs_approval`, `plugin_schema_matches_committed_file` and `plugin_api_reference_covers_both_schemas`; clippy `-D warnings` and `cargo fmt --check` clean.
+
+#### T33.47.3 Host side and SDK
+
+Depends: T33.47.2 · Files: `crates/cox-plugin/src/live.rs`, `crates/cox-plugin/src/hostfn.rs`, `plugins/sdk/src/lib.rs` · Design: `docs/design/plugin-canvas.md` §2
+
+The `InitOut.desktop.canvas` filter (dropped with the other desktop parts off the desktop, and without `desktop.canvas`); `cox_canvas` and `cox_canvas_select` run in render context (read-only host functions); the SDK's `canvas` and `canvas_select` arms.
+
+Plan (Claude Code / claude-opus-5-5): (1) `live.rs`: off the desktop `out.desktop.canvas.take()` joins the dropped list; on the desktop it is cleared without the `desktop.canvas` line; extend `init_drops_by_surface`-style tests. (2) `hostfn.rs`: `outside_render` also refuses inside `cox_canvas` and `cox_canvas_select`. (3) SDK: `register!` arms `canvas` (`CanvasIn` → `CanvasOut`) and `canvas_select` (`CanvasSelect` → `Option<CanvasAttach>`), re-exports, and the doc table.
+
+Check: a canvas declaration is dropped on the terminal and without its grant and kept with it; `cox_kv_put` and `cox_notify` from `cox_canvas` answer `NotInThisContext`; the SDK's export table lists both; `cargo nextest run -p cox-plugin` and the `plugins/` workspace tests.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.3 canvas host side and SDK arms" on branch `t33.47-plugin-canvas`: `InitOut.desktop.canvas` dropped with a notice off the desktop and silently without `desktop.canvas`; `cox_canvas` and `cox_canvas_select` are render context in `outside_render`; the SDK's `canvas` and `canvas_select` arms and their row in the export table.
+
+Check output: `mise exec -- cargo nextest run -p cox-plugin` — 119 passed, with `canvas_is_kept_only_on_the_desktop_with_its_grant` and `canvas_exports_are_render_context`; in `plugins/`, `cargo test -p cox-plugin-sdk` — 10 passed (the `register!` test exports both); clippy `-D warnings` (host, and the SDK for `wasm32-unknown-unknown`) and `cargo fmt --check` clean in both workspaces.
+
+#### T33.47.4 Canvas calls and `cox-app` state
+
+Depends: T33.47.3 · Files: `crates/cox-session/src/plugin_ui.rs`, `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/live.rs` · Design: `docs/design/plugin-canvas.md` §3, §5, §6
+
+`cox-session`: `canvas` and `canvas_select`, the two calls with their deadlines (`min(call_ms, 2 s)` and `min(call_ms, 500 ms)`) and the caps, as plain functions beside `answer`, so the TUI's request enum does not change. `cox-app`: canvas state per session: visible or not, the last frames, three misses stop it, redraw while visible on `Effects.redraw` and after the plugin's own tool calls, unchanged frames not re-sent, and the selection call returning a sanitized, capped attachment.
+
+Check: a fixture plugin's frames come back capped; a slow `cox_canvas` misses three times and stops for the session; no render while hidden; an unchanged frame is not re-sent; a selection on an unknown frame or with a bad value is dropped before the plugin; the attachment is sanitized and capped.
+
+Plan (Claude Code / claude-opus-5-5): (1) `cox-session`: `canvas` and `canvas_select` call `PluginHost::call` with 2 s and 500 ms, which the host already cuts to `call_ms`, then `CanvasOut::capped`, `CanvasSelect::check` and `CanvasAttach::capped`; `tool_plugin` names a `wasm__<id>__` tool's plugin. (2) `cox-app` `plugin_ui.rs`: a `Canvas` per declaration (checked again), shown or hidden, its size, the last frames and the misses; `draw_canvas` and `select_canvas` call without the lock; updates queue for `next_canvas`. (3) `live.rs`: `show_canvas`, `hide_canvas`, `next_canvas`, `select_canvas`, a draw on a blocking thread, a redraw on `PluginAnswer::Redraw` and on the plugin's own `ToolCallDone`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.4 canvas calls and app canvas state" on branch `t33.47-plugin-canvas`. `CanvasUpdate` carries every frame id in order and only the frames whose page changed; the API's `Frame` is reused rather than a parallel app type. Showing the pane clears the last frames, so the first draw after it sends them all, and a full update queue clears them too. A frame's dropped reason and the stop are told as `Warn` notices.
+
+Deviations: about 310 lines of code (plus about 190 of tests) against 200, in the three files the card names; the bulk is the state and the `LiveSession` wrappers, which do not split without leaving the state untested. "A fixture plugin's frames come back capped" is covered by the caps' own tests (T33.47.1) and the fold test feeding `CanvasOut::capped`; a wasm fixture that returns frames would need the extism output kernel in a hand-written module, which the spinning `wat` hosts here avoid.
+
+Check output: `mise exec -- cargo nextest run -p cox-app -p cox-session` — 345 passed, with `a_canvas_sends_only_changed_frames`, `a_slow_canvas_stops_after_three_misses` (a spinning `cox_canvas` under `call_ms` 50), `a_click_reaches_the_plugin_only_on_a_drawn_frame` (a spinning `cox_canvas_select`: an unknown frame and a bad value return at once, a drawn frame waits its 500 ms), `a_canvas_attachment_is_sanitized`, `canvas_calls_fail_open_and_refuse_a_bad_click` and `a_plugin_tool_names_its_plugin`; clippy `-D warnings` and `cargo fmt --check` clean.
+
+
+#### T33.47.5 Wire and remote sessions
+
+Depends: T33.47.4 · Files: `crates/cox-app/src/wire.rs`, `crates/cox-app/src/remote.rs` (plus `docs/app-server.schema.json`) · Design: `docs/design/plugin-canvas.md` §7
+
+`ServerEvent::PluginCanvas`, `Call::CanvasSelect`, `Reply::CanvasAttach`; the client applies the caps again.
+
+Check: `wire_round_trips_every_message`; `app_server_schema_drift`; an over-size `PluginCanvas` from the server is capped by the client.
+
+Plan (Claude Code / claude-opus-5-5): (1) `wire.rs`: `Call::Canvases`, `ShowCanvas`, `HideCanvas`, `CanvasSelect`; `Reply::Canvases`, `Shown`, `CanvasAttach`; `ServerEvent::PluginCanvas`; extend `every_message` and regenerate the schema. (2) `server.rs`: answer the four calls through `LiveSession`, and pump `next_canvas` beside `next_patches`. (3) `remote.rs`: a canvas queue per session on the link, re-capped on arrival; `RemoteSession` `canvases`, `show_canvas`, `hide_canvas`, `next_canvas`, `select_canvas`. (4) `plugin_ui.rs`: `CanvasUpdate::capped` and `PluginCanvas::checked`, so the client and the host share one check.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.5 canvas over the app-server wire" on branch `t33.47-plugin-canvas`. The server's per-session pump selects between the patch and the canvas queues (both pulls are cancel-safe) and ends with the patches. The client re-runs `CanvasOut::capped` on the frames and on the `order` ids, sanitizes titles, drops a declaration whose `select_attr` fails `CanvasDecl::check` (it reaches the page's host script), and re-caps and sanitizes an attachment. A second handle on a session gets a closed canvas queue, as it gets a closed patch stream. A full client queue drops an update; showing the pane again sends every frame.
+
+Deviations: four source files, not two: `server.rs` answers the new calls (its `match` on `Call` is exhaustive), and `plugin_ui.rs` gains the shared client checks rather than a copy in `remote.rs`. About 230 lines of code plus about 200 of tests.
+
+Check output: `mise exec -- cargo nextest run -p cox-app` — 272 passed, with `wire_round_trips_every_message`, `app_server_schema_drift` (schema regenerated), `wire_has_no_secret_message`, `an_over_size_remote_canvas_is_capped_by_the_client` (14 frames and a bad id from the server: 12 kept, widths clamped, titles and plugin sanitized, another session's update not delivered) and `remote_canvas_replies_are_checked_again` (an `onclick` attribute dropped, an attachment sanitized, an over-size one refused); clippy `-D warnings` and `cargo fmt --check` clean.
+
+
+#### T33.47.6 FFI
+
+Depends: T33.47.5 · Files: `crates/cox-ffi/src/session.rs`, `crates/cox-ffi/src/remote.rs`, `crates/cox-ffi/src/types.rs` · Design: `docs/design/plugin-canvas.md` §8
+
+`CanvasView`, `show_canvas`, `canvas_select` on the local and the remote session.
+
+Check: the FFI mirror tests list the new shapes; a local and a remote selection round-trip in tests.
+
+Plan (Claude Code / claude-opus-5-5): (1) `types.rs`: `#[uniffi::remote(Record)]` for `PluginCanvas`, `Frame`, `CanvasUpdate` and `CanvasAttach`, so a field added upstream fails this build. (2) `session.rs` and `remote.rs`: one-expression forwards (`forward_only`) of `plugin_canvases`, `show_canvas`, `hide_canvas`, `next_canvas`, `select_canvas`. (3) A test through `SessionHandle`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.6 canvas calls over the FFI" on branch `t33.47-plugin-canvas`. The records keep their Rust names (`Frame`, not the design's `CanvasView`): the FFI declares cox-app's and the plugin API's own types rather than mirroring them. A local `show_canvas` is async because the draw it starts runs on the runtime; a local `hide_canvas` is not.
+
+Deviations: the test is in `crates/cox-ffi/tests/app.rs`, a fourth file. A remote round trip cannot be built from an integration test (`RemoteSessionHandle::new` is crate-private and a remote needs ssh), so the remote side is covered by `cox-app`'s `remote_canvas_replies_are_checked_again` and `an_over_size_remote_canvas_is_capped_by_the_client` (T33.47.5); the FFI side is checked by `forward_only`.
+
+Check output: `mise exec -- cargo nextest run -p cox-ffi` — 16 passed, with `canvas_calls_cross_the_ffi_and_fail_open` and `every_ffi_body_is_one_forward_expression`; clippy `-D warnings` and `cargo fmt --check` clean.
+
+#### T33.47.7 CoxPlatform: `CanvasPage`
+
+Depends: — · Files: `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/CanvasPage.swift`, `desktop/macos/Packages/CoxPlatform/Tests/CoxPlatformTests/CanvasPageTests.swift` · Design: `docs/design/plugin-canvas.md` §4
+
+The isolated page: content JavaScript off, the block-everything rule list, the navigation decider, a non-persistent store, and the host script and its handler in the `cox-canvas` content world.
+
+Check: a page `<script>` does not run; neither an `https:` nor a `data:` image loads; a link click does not navigate; the host script's post arrives with the attribute value; `swift test` for CoxPlatform.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasPage.swift`: a `WebPage` with content JavaScript off, a non-persistent store, the block-everything rule list, a decider that admits only the load the class starts, and the host script with its handler in the `cox-canvas` world; `selections` streams each click's value. (2) `CanvasPageTests.swift`: Swift Testing against the real WebKit with a fixture holding a page script, an `https:` and a `data:` image and a link. (3) `swift test` in CoxPlatform, swift-format and SwiftLint on both files.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.7 canvas page isolation" on branch `t33.47-plugin-canvas`. The first build loaded the frame with `load(html:baseURL:)` at `about:blank`, as §4 said; its test showed the rule list does not stop a `data:` image (it decoded, width 1). The frame is now served by a `cox-canvas` URL scheme handler at a fresh `cox-canvas://frame/<n>` per load, with `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'`; the rule list lets only that scheme's documents through, and the decider admits only the URL the last `load(html:)` armed, so a reload of an earlier frame is refused too. Design §4 now records the falsified claim and the fix. A test that a second `load(html:)` replaces the frame was added.
+
+Deviations: `docs/design/plugin-canvas.md` is a third file, outside the card's two, to correct §4.
+
+Check output: `swift test` in `desktop/macos/Packages/CoxPlatform` — 43 tests in 2 suites passed, with `aPageScriptDoesNotRun`, `neitherAWebNorADataImageLoads`, `thePageCannotNavigate`, `aClickPostsTheNearestValueAndDoesNotFollowALink`, `aNewLoadReplacesTheFrame` and `theAttributeReachesTheScriptAsJSON`; `xcrun swift-format lint --strict` and `swiftlint lint --strict` clean on both files.
+
+#### T33.47.8.1 CoxClient: the canvas seam and its fixture
+
+Depends: T33.47.6 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxClient/PluginCanvas.swift` (new), `desktop/macos/Packages/CoxModel/Sources/CoxClient/FixturePlugins.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/PluginCanvasTests.swift` (new) · Design: `docs/design/plugin-canvas.md` §3, §5, §8
+
+The client types `PluginCanvas`, `CanvasFrame`, `CanvasUpdate`, `CanvasAttach` and a `CanvasClient` protocol (`pluginCanvases`, `showCanvas`, `hideCanvas`, `nextCanvas`, `selectCanvas`) that a session with canvases also conforms to, so a client without them needs no stubs and `SessionClient` does not grow. The fixture session conforms: a test declares canvases, queues updates and reads back what was shown, hidden and clicked.
+
+Plan (Claude Code / claude-opus-5-5): (1) `PluginCanvas.swift`: the four records mirroring cox-ffi's, and the protocol, its remote-friendly `async throws` calls. (2) `FixturePlugins.swift`: canvases, a queue of updates handed out by `nextCanvas`, the shows, hides and selections recorded, one answer per selection; `FixtureSession: CanvasClient`. (3) `PluginCanvasTests.swift`; `swift test --filter PluginCanvas` in CoxModel, swift-format and SwiftLint.
+
+Check: the fixture lists its canvases, a show is recorded and the queued update comes back, a selection is recorded and answered, `nextCanvas` returns `nil` once the fixture is closed.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.1 canvas client seam" on branch `t33.47-plugin-canvas`. The fixture's canvas state hangs off `FixturePlugins` (`plugins.canvases`), so `FixtureSession`'s stored properties and `CoreClient.swift` do not change. A show sends the update the fixture declared for that plugin, as the core draws on show.
+
+Deviations: none.
+
+Check output: `swift test --filter PluginCanvasTests` in `desktop/macos/Packages/CoxModel` — 5 passed (`aFixtureListsItsCanvases`, `aShowIsRecordedAndSendsTheDrawnUpdate`, `aQueuedRedrawReachesAWaitingPull`, `aClickIsRecordedAndAnswered`, `thePullEndsOnceClosed`); `xcrun swift-format lint --strict` and `swiftlint lint --strict` clean on the three files.
+
+#### T33.47.8.2 CoxModel: `CanvasStore` and the replaceable chip
+
+Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/CanvasStore.swift` (new), `desktop/macos/Packages/CoxModel/Sources/CoxModel/ComposerStore.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/CanvasStoreTests.swift` (new) · Design: §3, §5, §6
+
+The pane's state: the declared canvases, the one shown, its frames in the plugin's order (an unchanged frame keeps its value so its web view stays), `stopped`, and the size sent with each show. A selection's `CanvasAttach` goes to the composer as a `text/plain` attachment; a second one from the same canvas replaces it, and one the person removed is not brought back.
+
+Check: frames follow `order`, changed frames replace, missing ones go, another plugin's update is ignored; hide forgets the frames; a selection adds one chip and a second replaces it; `None` adds nothing.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasStore.swift`: an `@Observable` store over `CanvasClient`, `nil` for a session without canvases; `load`, `show` (hides another plugin's canvas first), `resize` (only a changed size), `hide`, `pump` and `select` (only a frame on the canvas now); `apply` folds an update by id. (2) `ComposerStore.attachSelection`: the chip per plugin, replaced in place while it is still in the draft, carried across a reopen. (3) `CanvasStoreTests.swift` on the T33.47.8.1 fixture.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.2 canvas store and replaceable chip" on branch `t33.47-plugin-canvas`. A stopped update carries no order (cox-app sends `CanvasUpdate::default()` with `stopped`), so the store keeps the last frames and marks the canvas stopped rather than emptying it. The chip is remembered by value, so a chip the person removed or sent is not found and the next selection adds a new one.
+
+Deviations: none.
+
+Check output: `swift test --filter "CanvasStoreTests|PluginCanvasTests|ComposerStore"` in `desktop/macos/Packages/CoxModel` — 32 passed, with `theFirstDeclaredCanvasShowsWithItsFrames`, `framesFollowTheOrderAndAnUnchangedOneKeepsItsValue`, `anotherPluginsDrawIsIgnoredAndAStopKeepsTheLastFrames`, `showingAnotherCanvasHidesTheFirstAndHidingForgetsTheFrames`, `onlyAChangedSizeIsSentAgain`, `aSelectionAddsOneChipAndASecondReplacesIt`, `aRemovedChipIsNotBroughtBack` and `theDrawsArriveThroughThePump`; swift-format and SwiftLint `--strict` clean.
+
+#### T33.47.8.3 CoxCore: the local and remote canvas calls
+
+Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxCore/Sources/CoxCore/PluginConvert.swift`, `desktop/macos/Packages/CoxCore/Sources/CoxCore/LiveCoreClient.swift`, `desktop/macos/Packages/CoxCore/Sources/CoxCore/RemoteClient.swift` · Design: §7, §8
+
+`LiveSession` and `RemoteSession` conform to `CanvasClient` through cox-ffi's calls; the FFI records convert to the client's.
+
+Check: a conversion test keeps every field; `swift test` for CoxCore against a freshly built `CoxFFI.xcframework`.
+
+Plan (Claude Code / claude-opus-5-5): (1) `PluginConvert.swift`: `PluginCanvas`, `CanvasUpdate` (its `Frame`s into `CanvasFrame`) and `CanvasAttach` from cox-ffi's records, field for field. (2) `LiveCoreClient.swift` and `RemoteClient.swift`: `CanvasClient` conformances forwarding to `SessionHandle` and `RemoteSessionHandle`. (3) A conversion test in `ConvertTests.swift`; rebuild `CoxFFI.xcframework` (`scripts/desktop/xcframework.sh`) and run CoxCore's `swift test`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.3 canvas calls in CoxCore" on branch `t33.47-plugin-canvas`. Each conformance sits in its session's own file because `handle` is private there. A local `hideCanvas` and `selectCanvas` cannot fail (the FFI answers without an error); the protocol's `throws` is for the remote ones.
+
+Deviations: the test is in `ConvertTests.swift`, a fourth file.
+
+Check output: `scripts/desktop/xcframework.sh` (dist profile, `CARGO_PROFILE_DIST_DEBUG=0`) built `CoxFFI.xcframework` and the bindings; `swift test` in `desktop/macos/Packages/CoxCore` — 29 passed, with `theCanvasValuesConvert`; swift-format and SwiftLint `--strict` clean on the four files.
+
+#### T33.47.8.7 CoxModel: one canvas store per session
+
+Depends: T33.47.8.2, T33.47.10 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/AppStore.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/AppStoreTests.swift`, `desktop/macos/Packages/CoxModel/Sources/CoxClient/CoreClient.swift` · Design: §3, §6
+
+`AppStore.Shared` gains the session's `CanvasStore`, made with its other stores, and the session's pull task runs the canvas pump beside the patch pull, so two windows on one session share one canvas and one pull; a provider switch makes a fresh one.
+
+Check: two windows on one session share one canvas store; a reopened session gets a new one; the shared pump folds a draw.
+
+Plan (Claude Code / claude-opus-5-5): (1) `AppStore.Shared.canvas`, made with the session's other stores in one `entry` helper that `adopt` and `replace` share. (2) The entry's pull task runs `SessionStore.run` and `CanvasStore.pump` together (`async let`), so cancelling it or closing the client ends both. (3) `FixtureSession.close` ends the fixture's canvas pull, as `LiveSession::close` does since T33.47.10. (4) Tests in `AppStoreTests`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.7 one canvas store per session" on branch `t33.47-plugin-canvas`.
+
+Deviations: none (3 files, about 75 lines).
+
+Check output: `theSessionsPullFoldsTheCanvasDraws` fails with the pump left out of the pull and passes with it; `twoWindowsShareOneCanvasAndASwitchMakesAFreshOne` passes; `swift test` in CoxModel — 181 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
+
+#### T33.47.8.8 CoxPlatform: a frame's content height and zoom
+
+Depends: T33.47.7 · Files: `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/CanvasPage.swift`, `desktop/macos/Packages/CoxPlatform/Tests/CoxPlatformTests/CanvasPageTests.swift` · Design: §3, §4
+
+The pane sizes each frame's box from its content height (§3) and zooms inside the page, since scaling a web view from outside misplaces its clicks; both need script in the `cox-canvas` world, which only `CanvasPage` holds. `show(html:zoom:)` loads, measures the content at 100% and applies the zoom; `zoom(_:)` applies a new one.
+
+Check: a frame reports its content height in quirks and standards mode, not the view's, and its root carries the zoom.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasPage.show(html:zoom:)`: `load`, then measure, then zoom, each script in the `cox-canvas` world. (2) Measure the body's contents with a `Range` plus the body's bottom margin, since in quirks mode the root's and the body's boxes fill the view. (3) `zoom(_:)` sets the root's CSS `zoom`. (4) A test in `CanvasPageTests`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.8 canvas frame height and zoom" on branch `t33.47-plugin-canvas`. Split out of T33.47.8.5 when its wiring needed both, to keep that card at three files.
+
+Deviations: none (2 files, about 55 lines).
+
+Check output: the first measure, the root's bounding box, gave 768 (the view's height) for a 500 px page without a doctype; the `Range` gives 500–540 there and under 100 for a one-line page with a doctype. `swift test` in CoxPlatform — 44 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
+
+#### T33.47.8.10 CoxPlatform: a redraw keeps the scroll and the outline
+
+Depends: T33.47.8.8 · Files: `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/CanvasPage.swift`, `desktop/macos/Packages/CoxPlatform/Tests/CoxPlatformTests/CanvasPageTests.swift` · Design: §6
+
+§6 says a reloaded frame keeps its scroll offset and re-applies the outline when the selected value is still there; `CanvasPage.show` loaded a fresh document and lost both. It now reads them from the old document and restores them on the new one, comparing values rather than building a selector from one the page wrote.
+
+Check: a redraw keeps the scroll and the outline; a draw without the value outlines nothing.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasPage` keeps the selection attribute it was made with. (2) `show` reads the scroll offset and the outlined element's value from the old document, in the `cox-canvas` world, before loading. (3) After the load, the measure and the zoom, it outlines the first element whose attribute equals that value and scrolls back. (4) A test in `CanvasPageTests`.
+
+Status: done 2026-10-14 · Commit "fix: T33.47.8.10 a canvas redraw keeps scroll and outline" on branch `t33.47-plugin-canvas`. Found while writing T33.47.9: design §6 promised it and the app did not do it.
+
+Deviations: none (2 files, about 50 lines).
+
+Check output: `aRedrawKeepsTheScrollAndTheOutlineWhileTheValueIsThere` fails without the change (no outline, `scrollY` 0) and passes with it; `swift test` in CoxPlatform — 45 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
+
+#### T33.47.8.5 App: the pane beside the column
+
+Depends: T33.47.7, T33.47.8.2, T33.47.8.3, T33.47.8.4, T33.47.8.7, T33.47.8.8 · Files: `desktop/macos/App/SessionCanvas.swift` (new), `desktop/macos/App/SessionWindow.swift`, `desktop/macos/App/ShellState.swift` · Design: §3, §4, §5
+
+One `CanvasPage` per frame shown with SwiftUI's `WebView`, loaded again only when its HTML changed; each page's selections go to the store with the frame id the app owns; the pane takes the inspector's place beside the column as the browser does; resizing sends the new size.
+
+Check: the app builds; by hand, with a fixture plugin: two frames show, a click adds a chip, a second click replaces it. No App test target exists, so the logic this wires is tested in T33.47.8.2 and T33.47.8.4.
+
+Plan (Claude Code / claude-opus-5-5): (1) `OpenedSession.canvas` from `AppStore.Shared` (T33.47.8.7). (2) `SessionCanvas`: `PluginCanvasPane` with one `WebView` per frame over a `CanvasPage` that `CanvasPages` keeps by frame id, loads again only when the frame's HTML changed, and drops with its selection listener when the frame goes; the pane's size shows the canvas and then resizes it; the zoom applies inside each page (T33.47.8.8); a click's value goes to `CanvasStore.select` with the frame id the view owns; a store failure is the window's alert. (3) `SessionWindow`: `isCanvasVisible`, the pane beside the column in the browser's place, one of inspector, browser and canvas at a time.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.5 plugin canvas pane in the window" on branch `t33.47-plugin-canvas`. The pane is reachable once T33.47.8.6 adds ⌘⇧D and the palette row, so the hand check moves to that card's Check.
+
+Deviations: none (3 files). `SessionWindow`'s side panes moved into an extension in the same file to keep the struct under SwiftLint's 250-line body.
+
+Check output: `scripts/desktop/app.sh` builds `Cox.app` (exit 0, no warnings in the touched files); `swiftlint lint --strict` and `swift format lint -s` clean on the three files. No App test target exists; the logic this wires is tested in T33.47.8.2, T33.47.8.4, T33.47.8.7 and T33.47.8.8.
+
+#### T33.47.8.9 CoxModel: the palette's pick
+
+Depends: T33.47.8.2 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/CanvasStore.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/CanvasStoreTests.swift` · Design: §3
+
+The palette's "Show <title>" names a canvas but not a size, which only the pane knows. `pick(_:)` switches a shown pane at the size it last sent, and a hidden pane opens on the picked canvas when it next shows.
+
+Check: a pick switches a shown pane at its last size; a pick while hidden is what the next show opens.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasStore.picked` and `pick(_:)`: a shown pane switches at its last size; a hidden one records the pick. (2) `show` prefers the pick to the first declared canvas and clears it. (3) Two tests in `CanvasStoreTests`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.9 canvas pick for the palette" on branch `t33.47-plugin-canvas`. Split out of T33.47.8.6 when its palette rows needed it.
+
+Deviations: none (2 files, about 40 lines).
+
+Check output: `swift test --filter CanvasStoreTests` — 10 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
+
+#### T33.47.8.6 ⌘⇧D, the palette action and the DT§ text
+
+Depends: T33.47.8.5, T33.47.8.9 · Files: `desktop/macos/App/ShellCommands.swift`, `desktop/macos/App/SessionPalette.swift`, `docs/design/desktop.md` · Design: §3, A156
+
+View › Show Canvas on ⌘⇧D, the palette's "Show <title>" per declared canvas, and DT§5.1, §5.5 and §10's text for the pane, the shortcut and the isolation.
+
+Check: the app builds; ⌘⇧D and the palette row toggle the pane by hand; the falsifier 3 measurement (Instruments, by hand) is written into T33.47.8's Check output or left open with why.
+
+Plan (Claude Code / claude-opus-5-5): (1) `ShellActions.isCanvasVisible` and `toggleCanvas`, `nil` while the session declares no canvas; View › Show/Hide Canvas on `ShellShortcut.canvas` (⌘⇧D). (2) The window loads the session's canvases once its plugins are loaded. (3) The palette's `canvas:<plugin>` row per declared canvas, "Show <title>" or "Hide <title>", which picks first (T33.47.8.9) and then shows the pane. (4) DT§5.1's pane, DT§5.5's row, key and zoom keys, and DT§10's isolation.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.6 canvas shortcut, palette rows and DT text" on branch `t33.47-plugin-canvas`.
+
+Deviations: 4 files rather than 3: the three App files the shortcut and the palette need, and `docs/design/desktop.md`, text only. `SessionWindow`'s one-pane-beside-the-column rule moved into a `ViewModifier` in the same file to keep the struct under SwiftLint's 250-line body. The hand check (⌘⇧D and the palette row toggle the pane; two frames show; a click adds a chip and a second replaces it) and the falsifier 3 measurement (Instruments) need a person at the app: an agent here has no way to drive a native window, and no fixture plugin declares a canvas. Both are left open in T33.47.8's Check.
+
+Check output: `scripts/desktop/app.sh` builds `Cox.app` (exit 0, no warnings in the touched files); `swiftlint lint --strict` on `App` and `swift format lint -s` on the three Swift files clean.
+
+#### T33.47.9 User docs
+
+Depends: T33.47.8 · Files: `docs/plugins.md` (and the `ru`/`uk` pages when T33.45.10 has made them) · Design: `docs/design/plugin-canvas.md`
+
+The canvas in the user docs: the manifest key, the grant line, what the page can and cannot do.
+
+Check: the API-reference drift test; `just test` green.
+
+**Order.** T33.1 → T33.2 → T33.3 → T33.4 → T33.5 → T33.6 is the critical path. After it these can run in parallel:
+
+- T33.7–T33.8;
+- T33.9 → (T33.10, T33.11, T33.12, T33.14.1, T33.15); T33.43 → T33.14.2;
+- T33.16 → T33.17 → T33.18;
+- T33.19 (after T32.3) → T33.42;
+- T33.20 → T33.21.
+
+TUI: T33.22 → T33.23 → (T33.24, T33.25, T33.26). SDK and languages: T33.27 → T33.28 → T33.29 → T33.30, then T33.31 → T33.32 → T33.33; T33.34; T33.35 → T33.36; T33.37 → T33.38. Then T33.39; T33.40.1–T33.40.17 (own order below); T33.41 and T33.42 whenever they are wanted. The top table gets rows T33.1–T33.39, T33.41–T33.42 and T33.40.1–T33.40.17; P2 by default, P1 for the blockers T33.1–T33.6 and T33.40.1, P3 for the optional cards (T33.41, T33.40.17), the paid eval E2 (T33.40.10) and the Kotlin/Dart feasibility spikes (T33.35, T33.37).
+
+**T33.40 order.**
+
+- Main line: T33.40.1 and T33.40.2 (in parallel) → T33.40.3 → T33.40.4 → T33.40.5.
+- Risk: T33.40.6 → T33.40.7.
+- Route: T33.40.8, which can start after T33.20 → T33.40.9 → T33.40.10.
+- Docs: T33.40.11 after T33.40.6 and T33.40.9. Its results section is filled by T33.40.7 and T33.40.10.
+- Removal (C1): T33.40.12 → T33.40.13 → T33.40.14 → T33.40.15 → T33.40.16, starting once T33.40.5 and T33.40.6 are done. It does not wait for the evals.
+- T33.40.17 runs whenever the creator has a key.
+
+The paid runs are T33.40.7 (≤ $0.10, approved) and T33.40.10 (≤ $3, needs the creator's go-ahead each time).
+
+Plan (Claude Code / claude-opus-5-5): (1) `docs/plugins.md`: the `canvas` and `canvas_select` rows in the export table, `canvas` in the desktop keys, and a Canvas section with the declaration, the grant line, who opens the pane, the caps, what a page can and cannot do, and how a click becomes a chip. (2) No `ru`/`uk` pages exist yet (T33.45.10 has not made them). (3) The drift test and the docs check.
+
+Status: done 2026-10-14 · Commit "docs: T33.47.9 plugin canvas in the plugin guide" on branch `t33.47-plugin-canvas`.
+
+Deviations: none (1 file).
+
+Check output: `python3 scripts/plugin_api_reference.py` exit 0; `cargo nextest run -p cox-plugin-api` — 55 passed, `plugin_api_reference_covers_both_schemas` among them; `cargo test --locked -p cox --test docs` — 5 passed. `just test` was not run whole: the cox rule for this work is to test the touched crates, and this card touches none.
+
+#### T33.47.8.4 CoxUI: `PluginCanvasPane`
+
+Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3
+
+The pane's look: the plugin's symbol and title, a picker when more than one plugin declares a canvas, frames side by side at their widths with their titles, zoom (⌘+ and ⌘− while focused, pinch) clamped, and a "stopped" line. The frame's page is a view the app passes in, so CoxUI stays free of WebKit. `ShellShortcut.canvas` is ⌘⇧D.
+
+Check: snapshots of the pane with two frames and with the picker × light/dark; the zoom clamp; the shortcut's key and tooltip.
+
+Plan (Claude Code / claude-opus-5-5): (1) `PluginCanvasPane.swift`: a generic organism like `BrowserPaneChrome`, its own `State` (canvases, shown, frames with width and content height, stopped, zoom) and `Intent` (`pick`, `zoom`), the page view passed in; zoom on a quarter grid from 25% to 200% by the bar's buttons, ⌘+ / ⌘− while the pane has focus, and pinch; `ShellShortcut.canvas`. (2) `PreviewState+Canvas.swift`: two frames, and the picker stopped at 75%. (3) `PluginCanvasPaneTests.swift`: snapshots × `Variant.all`, the zoom grid and clamp, the shortcut.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.4 plugin canvas pane" on branch `t33.47-plugin-canvas`. The pane sizes each frame's box at its width and height times the zoom and gives the page the zoom to apply inside it (the app will set CSS `zoom` from the host world), because scaling a web view from outside would put its clicks in the wrong place. The box anchors the page top-left. Snapshot images: 8, 4.2 MB, the same as `BrowserPaneChromeTests`.
+
+Deviations: none.
+
+Check output: `swift test --filter "PluginCanvas|CanvasShortcut"` in `desktop/macos/Packages/CoxUI` — 4 tests passed (`canvasPane` × 4 variants against the recorded images, `theZoomStepsOnAQuarterGrid`, `theZoomIsClamped`, `theCanvasTogglesOnCommandShiftD`); the images were recorded on the first run, looked at, and asserted on the second; swift-format and SwiftLint `--strict` clean.
+
+#### T33.47.10 A closed session ends the canvas pull
+
+Depends: T33.47.4 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/live.rs`, `crates/cox-ffi/tests/app.rs` · Design: §6, DT§4.5
+
+`PluginUi::next_canvas` waited on a channel whose sender lives as long as the session, and the FFI's `next_canvas` holds the session while it waits, so a closed window's pull and its session never went away. `LiveSession::close` now ends the pull as it ends the patch pull. A remote session's already ended on `ServerEvent::Ended`.
+
+Check: `closing_the_session_ends_the_canvas_pull` fails before the fix and passes after it.
+
+Plan (Claude Code / claude-opus-5-5): (1) The failing test first, through the FFI: a waiting `next_canvas`, then `close()`, then the pull must end within five seconds. (2) `PluginUi`: a `watch` flag that `close_canvas` sets, raced against the channel in `next_canvas`. (3) `LiveSession::close` calls it.
+
+Status: done 2026-10-14 · Commit "fix: T33.47.10 a closed session ends the canvas pull" on branch `t33.47-plugin-canvas`. Found while wiring the pane's pump (T33.47.8.7): every closed window would have leaked its session.
+
+Deviations: none.
+
+Check output: `cargo nextest run -p cox-ffi --test app closing_the_session_ends_the_canvas_pull` failed before the fix (the pull did not end in 5 s); after it, `cargo nextest run -p cox-ffi -p cox-app` — 289 passed; clippy `-D warnings` and `cargo fmt --check` clean.
+

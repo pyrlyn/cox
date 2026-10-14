@@ -271,6 +271,9 @@ pub struct DesktopCaps {
     /// Actionable notifications.
     #[serde(default)]
     pub notify: bool,
+    /// The canvas pane of static HTML frames (`docs/design/plugin-canvas.md`).
+    #[serde(default)]
+    pub canvas: bool,
 }
 
 /// A `[[provider]]` section (PL§7a).
@@ -872,6 +875,18 @@ args = ["--stdio"]
         // is still the same table, so the new spelling parses and ORs in.
         let new = new.expect("the new spelling parses");
         assert!(!new.capabilities.ui.keys && new.capabilities.terminal_keys());
+    }
+
+    #[test]
+    fn manifest_canvas_is_a_desktop_part() {
+        let toml = EXAMPLE.replace("keys = true, ", "").replace(
+            "[limits]",
+            "[capabilities.desktop]\ncanvas = true\n\n[limits]",
+        );
+        let mut m = parse(&toml).expect("canvas parses");
+        assert!(m.capabilities.desktop.canvas);
+        m.surfaces = Some(vec![Surface::Terminal]);
+        assert_eq!(m.validate(), Err(ManifestError::SurfaceTable("desktop")));
     }
 
     #[test]

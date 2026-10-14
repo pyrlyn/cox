@@ -14,7 +14,10 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use cox_plugin::{Lane, Redraw};
-use cox_protocol::plugin::{CommandIn, CommandOut, RenderIn, RenderItemIn, Slot, Widget};
+use cox_protocol::plugin::{
+    CanvasAttach, CanvasError, CanvasIn, CanvasOut, CanvasSelect, CommandIn, CommandOut, RenderIn,
+    RenderItemIn, Slot, Widget,
+};
 use cox_protocol::types::{ItemKind, ToolCall, ToolResult};
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -31,6 +34,13 @@ const RENDER: &str = "cox_render";
 const COMMAND: &str = "cox_command";
 const KEY: &str = "cox_key";
 const RENDER_ITEM: &str = "cox_render_item";
+/// `cox_canvas`'s budget (plugin-canvas §2): drawing a page can be real
+/// work, and the app keeps the last frames until the answer comes.
+pub const CANVAS_DEADLINE: Duration = Duration::from_secs(2);
+/// `cox_canvas_select`'s budget: a click waits on it before its chip shows.
+pub const SELECT_DEADLINE: Duration = Duration::from_millis(500);
+const CANVAS: &str = "cox_canvas";
+const CANVAS_SELECT: &str = "cox_canvas_select";
 
 /// What a surface asks of one plugin.
 #[derive(Debug, Clone, PartialEq)]
@@ -242,6 +252,42 @@ fn command_call(host: Option<&PluginHost>, export: &str, input: &CommandIn) -> O
         .flatten()
 }
 
+/// `cox_canvas` within `min(call_ms, 2 s)`, its frames capped, with why
+/// each dropped frame was. `None` is a miss: a timeout, an error, a missing
+/// export or an unknown plugin. Beside [`answer`], not a [`PluginRequest`],
+/// so the surfaces that match that enum (the TUI has no canvas) are
+/// untouched; the caller runs it off its UI thread.
+pub fn canvas(
+    host: Option<&PluginHost>,
+    input: &CanvasIn,
+) -> Option<(CanvasOut, Vec<CanvasError>)> {
+    host?
+        .call::<_, CanvasOut>(Lane::Control, CANVAS, input, CANVAS_DEADLINE)
+        .ok()
+        .flatten()
+        .map(CanvasOut::capped)
+}
+
+/// `cox_canvas_select` within `min(call_ms, 500 ms)`. A click whose value
+/// fails the caps never reaches the plugin, since the page's DOM can hold
+/// anything; an over-size attachment is dropped rather than cut.
+pub fn canvas_select(host: Option<&PluginHost>, select: &CanvasSelect) -> Option<CanvasAttach> {
+    select.check().ok()?;
+    host?
+        .call::<_, Option<CanvasAttach>>(Lane::Control, CANVAS_SELECT, select, SELECT_DEADLINE)
+        .ok()??
+        .and_then(|attach| attach.capped().ok())
+}
+
+/// The plugin whose own tool `name` is (`wasm__<id>__<tool>`), so a surface
+/// can redraw that plugin's canvas once one of its tools finishes.
+pub fn tool_plugin(name: &str) -> Option<&str> {
+    let (id, _) = name
+        .strip_prefix(cox_plugin::tool::PREFIX)?
+        .split_once("__")?;
+    Some(id)
+}
+
 /// The `Redraw` a `PluginTap` calls when a plugin's `Effects.redraw` is set;
 /// `notify` must not block, since the tap's pump thread calls it.
 pub fn redraw(notify: impl Fn(String) + Send + Sync + 'static) -> Redraw {
@@ -295,6 +341,32 @@ mod tests {
                 widget: None,
             }
         );
+    }
+
+    /// plugin-canvas §2: an unknown plugin's canvas is a miss, and a click
+    /// that fails the caps never reaches a plugin.
+    #[test]
+    fn canvas_calls_fail_open_and_refuse_a_bad_click() {
+        let size = CanvasIn {
+            width_pt: 800,
+            height_pt: 600,
+        };
+        assert_eq!(canvas(None, &size), None);
+        let click = |frame: &str, value: &str| CanvasSelect {
+            frame: frame.into(),
+            value: value.into(),
+        };
+        assert_eq!(canvas_select(None, &click("home", "hero")), None);
+        assert!(click("home", "a\u{1b}b").check().is_err());
+        assert!(click("Home!", "hero").check().is_err());
+    }
+
+    /// plugin-canvas §6: only a plugin's own tool redraws its canvas.
+    #[test]
+    fn a_plugin_tool_names_its_plugin() {
+        assert_eq!(tool_plugin("wasm__weft__weft_render"), Some("weft"));
+        assert_eq!(tool_plugin("bash"), None);
+        assert_eq!(tool_plugin("wasm__weft"), None);
     }
 
     /// PL§4: an assistant item reaches `cox_render_item` as `ItemKind`

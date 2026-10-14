@@ -19,6 +19,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use cox_protocol::plugin::CanvasAttach;
+
+use crate::plugin_ui::{CanvasUpdate, PluginCanvas};
 use crate::{
     Block, Changes, Completion, InboxItem, Intent, PluginAlert, Project, SearchHit, SessionEntry,
     TimelinePatch,
@@ -98,6 +101,30 @@ pub enum Call {
         session: SessionId,
         id: String,
     },
+    /// plugin-canvas §7: the canvases the session's plugins declared.
+    Canvases {
+        session: SessionId,
+    },
+    /// The client's pane shows `plugin`'s canvas at this size, newly or
+    /// resized; what it draws streams as `plugin_canvas` notifications.
+    ShowCanvas {
+        session: SessionId,
+        plugin: String,
+        width_pt: u32,
+        height_pt: u32,
+    },
+    /// The client's pane hid `plugin`'s canvas.
+    HideCanvas {
+        session: SessionId,
+        plugin: String,
+    },
+    /// A click on a frame; answered with the composer's attachment, if any.
+    CanvasSelect {
+        session: SessionId,
+        plugin: String,
+        frame: String,
+        value: String,
+    },
     /// Stops the session's patch stream; the session keeps running.
     Close {
         session: SessionId,
@@ -146,6 +173,10 @@ pub enum Reply {
     Plan(Vec<TodoItem>),
     /// Whether the session's plugins granted the action's command.
     Acted(bool),
+    Canvases(#[schemars(with = "Vec<Value>")] Vec<PluginCanvas>),
+    /// A `show_canvas` or `hide_canvas` took effect.
+    Shown,
+    CanvasAttach(#[schemars(with = "Option<Value>")] Option<CanvasAttach>),
     Closed,
 }
 
@@ -184,6 +215,13 @@ pub enum ServerEvent {
     PluginNotice {
         #[schemars(with = "Value")]
         alert: Box<PluginAlert>,
+    },
+    /// plugin-canvas §6: what one draw of a shown canvas changed. The
+    /// client caps it again, since the wire is a boundary too (§7).
+    PluginCanvas {
+        session: SessionId,
+        #[schemars(with = "Value")]
+        update: Box<CanvasUpdate>,
     },
 }
 
@@ -233,6 +271,7 @@ pub fn schema() -> schemars::Schema {
 mod tests {
     use std::path::Path;
 
+    use cox_protocol::plugin::Frame;
     use cox_protocol::types::TodoState;
 
     use super::*;
@@ -299,6 +338,23 @@ mod tests {
                 session: id,
                 id: "plugin:clock:snooze".into(),
             }),
+            request(Call::Canvases { session: id }),
+            request(Call::ShowCanvas {
+                session: id,
+                plugin: "weft".into(),
+                width_pt: 800,
+                height_pt: 600,
+            }),
+            request(Call::HideCanvas {
+                session: id,
+                plugin: "weft".into(),
+            }),
+            request(Call::CanvasSelect {
+                session: id,
+                plugin: "weft".into(),
+                frame: "home".into(),
+                value: "screen#home/hero".into(),
+            }),
             request(Call::Close { session: id }),
             reply(Reply::Projects(Vec::new())),
             reply(Reply::Sessions(Vec::new())),
@@ -321,6 +377,18 @@ mod tests {
                 state: TodoState::Pending,
             }])),
             reply(Reply::Acted(true)),
+            reply(Reply::Canvases(vec![PluginCanvas {
+                plugin: "weft".into(),
+                title: "Screens".into(),
+                symbol: "rectangle.on.rectangle".into(),
+                select_attr: "data-weft-path".into(),
+            }])),
+            reply(Reply::Shown),
+            reply(Reply::CanvasAttach(Some(CanvasAttach {
+                name: "hero".into(),
+                text: "screen home\nnode hero".into(),
+            }))),
+            reply(Reply::CanvasAttach(None)),
             reply(Reply::Closed),
             Line::Response(Response {
                 v: VERSION,
@@ -347,6 +415,20 @@ mod tests {
                         label: "Snooze".into(),
                         id: "plugin:clock:snooze".into(),
                     }],
+                }),
+            }),
+            event(ServerEvent::PluginCanvas {
+                session: id,
+                update: Box::new(CanvasUpdate {
+                    plugin: "weft".into(),
+                    order: vec!["home".into(), "list".into()],
+                    frames: vec![Frame {
+                        id: "list".into(),
+                        title: "List".into(),
+                        width_pt: 390,
+                        html: "<p>\"two\"\nlines</p>".into(),
+                    }],
+                    stopped: false,
                 }),
             }),
         ]

@@ -90,7 +90,8 @@
           "inspector": false,
           "toolbar": false,
           "palette": false,
-          "notify": false
+          "notify": false,
+          "canvas": false
         }
       }
     },
@@ -316,7 +317,8 @@
             "inspector": false,
             "toolbar": false,
             "palette": false,
-            "notify": false
+            "notify": false,
+            "canvas": false
           }
         }
       },
@@ -433,6 +435,11 @@
         },
         "notify": {
           "description": "Actionable notifications.",
+          "type": "boolean",
+          "default": false
+        },
+        "canvas": {
+          "description": "The canvas pane of static HTML frames (`docs/design/plugin-canvas.md`).",
           "type": "boolean",
           "default": false
         }

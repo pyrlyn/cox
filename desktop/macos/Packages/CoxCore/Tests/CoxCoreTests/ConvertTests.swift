@@ -67,6 +67,31 @@ import Testing
   #expect(CoxClient.LinkClick(.file(path: "/w/a.rs", line: 3)) == .file(path: "/w/a.rs", line: 3))
 }
 
+/// T33.47.8.3 (plugin-canvas §8): a canvas, a draw and an attachment cross field for field, the
+/// frame's HTML untouched.
+@Test func theCanvasValuesConvert() {
+  let canvas = CoxFFIBindings.PluginCanvas(
+    plugin: "weft", title: "Design", symbol: "rectangle.on.rectangle",
+    selectAttr: "data-weft-path")
+  #expect(
+    CoxClient.PluginCanvas(canvas)
+      == .init(
+        plugin: "weft", title: "Design", symbol: "rectangle.on.rectangle",
+        selectAttr: "data-weft-path"))
+  let html = "<section data-weft-path=\"screen#home\"><script>x()</script></section>"
+  let update = CoxFFIBindings.CanvasUpdate(
+    plugin: "weft", order: ["home", "cart"],
+    frames: [.init(id: "home", title: "Home", widthPt: 390, html: html)], stopped: true)
+  #expect(
+    CoxClient.CanvasUpdate(update)
+      == .init(
+        plugin: "weft", order: ["home", "cart"],
+        frames: [CanvasFrame(id: "home", title: "Home", widthPt: 390, html: html)], stopped: true))
+  #expect(
+    CoxClient.CanvasAttach(.init(name: "Home", text: "screen#home"))
+      == .init(name: "Home", text: "screen#home"))
+}
+
 @Test func aDocTailKeepsSpanStyleColourAndLineStructure() {
   let span = CoxFFIBindings.Span(
     text: "fn", token: .accent, rgb: 0xB48EAD, light: 0x4F5B66, bold: true, italic: false,

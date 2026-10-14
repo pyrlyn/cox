@@ -216,6 +216,30 @@ impl Server {
             Call::PluginAction { session, id } => {
                 Reply::Acted(self.live(session)?.plugin_action(&id))
             }
+            Call::Canvases { session } => Reply::Canvases(self.live(session)?.plugin_canvases()),
+            Call::ShowCanvas {
+                session,
+                plugin,
+                width_pt,
+                height_pt,
+            } => {
+                self.live(session)?
+                    .show_canvas(&plugin, width_pt, height_pt);
+                Reply::Shown
+            }
+            Call::HideCanvas { session, plugin } => {
+                self.live(session)?.hide_canvas(&plugin);
+                Reply::Shown
+            }
+            Call::CanvasSelect {
+                session,
+                plugin,
+                frame,
+                value,
+            } => {
+                let live = self.live(session)?;
+                Reply::CanvasAttach(live.select_canvas(&plugin, &frame, &value).await)
+            }
             Call::Close { session } => {
                 if let Some(live) = self.sessions.remove(&session) {
                     live.close();
@@ -256,17 +280,25 @@ impl Server {
     }
 }
 
-/// One session's batches, as `next_patches` coalesces them. `send` waits
-/// while the queue is full, which is the backpressure: the controller keeps
-/// folding meanwhile.
+/// One session's batches, as `next_patches` coalesces them, and its canvas
+/// updates; it ends with the patches. `send` waits while the queue is full,
+/// which is the backpressure: the controller keeps folding meanwhile, and a
+/// canvas update waits in its own queue. Both pulls are cancel-safe, so
+/// the one that loses the race keeps what it had.
 async fn pump(live: Arc<LiveSession>, out: mpsc::Sender<Line>) {
     let session = live.id();
-    while let Some(patches) = live.next_patches().await {
-        if out
-            .send(notification(ServerEvent::Patches { session, patches }))
-            .await
-            .is_err()
-        {
+    loop {
+        let event = tokio::select! {
+            patches = live.next_patches() => match patches {
+                Some(patches) => ServerEvent::Patches { session, patches },
+                None => break,
+            },
+            Some(update) = live.next_canvas() => ServerEvent::PluginCanvas {
+                session,
+                update: Box::new(update),
+            },
+        };
+        if out.send(notification(event)).await.is_err() {
             return;
         }
     }

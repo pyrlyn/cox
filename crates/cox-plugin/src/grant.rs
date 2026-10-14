@@ -147,6 +147,7 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
         ("desktop.toolbar", caps.desktop.toolbar),
         ("desktop.palette", caps.desktop.palette),
         ("desktop.notify", caps.desktop.notify),
+        ("desktop.canvas", caps.desktop.canvas),
     ];
     out.extend(
         flags
@@ -518,6 +519,23 @@ mod tests {
             Verdict::NeedsApproval {
                 added: vec!["desktop.inspector".into(), "desktop.notify".into()],
                 removed: vec!["terminal.keys".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn grant_new_canvas_needs_approval() {
+        let mut caps = Capabilities::default();
+        caps.desktop.inspector = true;
+        let stored = grant("d1", &["desktop.inspector"]);
+        caps.desktop.canvas = true;
+        // The canvas shows the plugin's own HTML, so even a granted
+        // desktop plugin asks again for it.
+        assert_eq!(
+            check(&manifest(caps), "d1", Some(&stored)),
+            Verdict::NeedsApproval {
+                added: vec!["desktop.canvas".into()],
+                removed: vec![],
             }
         );
     }

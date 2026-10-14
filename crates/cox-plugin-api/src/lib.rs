@@ -16,11 +16,13 @@ pub mod manifest;
 pub mod ui;
 
 pub use abi::{
-    AbiError, ActionDecl, Advice, Answer, CallTarget, CommandDecl, CommandIn, CommandOut,
-    DecideOut, DecidePoint, DecideResume, DesktopNotice, DesktopOut, Effects, EventBatch, HookCall,
-    HttpReq, HttpResp, InitIn, InitOut, KeyDecl, MAX_NOTICE_ACTIONS, MAX_TOOLBAR_ACTIONS,
-    ModelCall, NoticeAction, NoticeLevel, OwnProvider, PluginNotice, ProviderCall, Question,
-    QuestionItem, RenderIn, RenderItemIn, SessionInfo, Slot, TabDecl, ToolCallIn, is_symbol_name,
+    AbiError, ActionDecl, Advice, Answer, CallTarget, CanvasAttach, CanvasDecl, CanvasError,
+    CanvasIn, CanvasOut, CanvasSelect, CommandDecl, CommandIn, CommandOut, DecideOut, DecidePoint,
+    DecideResume, DesktopNotice, DesktopOut, Effects, EventBatch, FRAME_WIDTHS, Frame, HookCall,
+    HttpReq, HttpResp, InitIn, InitOut, KeyDecl, MAX_ATTACH_TEXT, MAX_CANVAS_FRAMES,
+    MAX_CANVAS_HTML, MAX_FRAME_HTML, MAX_NOTICE_ACTIONS, MAX_TOOLBAR_ACTIONS, ModelCall,
+    NoticeAction, NoticeLevel, OwnProvider, PluginNotice, ProviderCall, Question, QuestionItem,
+    RenderIn, RenderItemIn, SessionInfo, Slot, TabDecl, ToolCallIn, is_symbol_name,
 };
 
 pub use manifest::{
@@ -101,6 +103,10 @@ mod tests {
             AbiError,
             Widget,
             DesktopNotice,
+            CanvasIn,
+            CanvasOut,
+            CanvasSelect,
+            CanvasAttach,
         );
         let schema = json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
