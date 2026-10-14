@@ -225,3 +225,17 @@ fn a_blocked_send_and_a_locked_provider_cross_as_their_own_errors() {
         "{locked:?}"
     );
 }
+
+/// plugin-canvas §5, §8: the canvas calls cross the FFI. A session with no
+/// canvas plugin declares none, shows nothing and drops a click.
+#[tokio::test]
+async fn canvas_calls_cross_the_ffi_and_fail_open() {
+    let dir = scratch(Some(&scenario("read-and-reply")));
+    let session = open(dir.path(), Arc::default()).await.expect("open");
+    assert!(session.plugin_canvases().is_empty());
+    let shown = Arc::clone(&session).show_canvas("weft".into(), 800, 600);
+    assert!(shown.await.is_ok());
+    let click = Arc::clone(&session).select_canvas("weft".into(), "home".into(), "hero".into());
+    assert_eq!(click.await, None);
+    session.hide_canvas("weft".into());
+}

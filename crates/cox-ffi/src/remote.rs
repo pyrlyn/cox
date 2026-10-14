@@ -12,9 +12,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cox_app::TimelinePatch;
+use cox_app::plugin_ui::{CanvasUpdate, PluginCanvas};
 use cox_app::remote::{RemoteSession, RemoteWorkspace};
 use cox_app::{Block, Changes, Completion, Intent, LinkClick, Project, SearchHit, SessionEntry};
 use cox_protocol::ids::{ArchiveId, SessionId};
+use cox_protocol::plugin::CanvasAttach;
 use cox_protocol::types::TodoItem;
 
 use crate::types::OpenRequest;
@@ -170,6 +172,52 @@ impl RemoteSessionHandle {
     /// confirmed, a path comes back as written.
     pub fn open_link(&self, link: String) -> LinkClick {
         self.remote.open_link(&link)
+    }
+
+    /// The canvases the remote session's plugins declared, checked here.
+    pub async fn plugin_canvases(self: Arc<Self>) -> Result<Vec<PluginCanvas>, AppError> {
+        Ok(on_runtime(async move { self.remote.canvases().await }).await??)
+    }
+
+    /// The pane shows `plugin`'s canvas at this size; what it draws arrives
+    /// through `next_canvas`.
+    pub async fn show_canvas(
+        self: Arc<Self>,
+        plugin: String,
+        width_pt: u32,
+        height_pt: u32,
+    ) -> Result<(), AppError> {
+        Ok(
+            on_runtime(async move { self.remote.show_canvas(&plugin, width_pt, height_pt).await })
+                .await??,
+        )
+    }
+
+    /// The pane hid `plugin`'s canvas.
+    pub async fn hide_canvas(self: Arc<Self>, plugin: String) -> Result<(), AppError> {
+        Ok(on_runtime(async move { self.remote.hide_canvas(&plugin).await }).await??)
+    }
+
+    /// The next canvas update, capped on arrival; `None` once closed or
+    /// disconnected.
+    pub async fn next_canvas(self: Arc<Self>) -> Option<CanvasUpdate> {
+        on_runtime(async move { self.remote.next_canvas().await })
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// A click on a frame: the composer's attachment, if any, checked here.
+    pub async fn select_canvas(
+        self: Arc<Self>,
+        plugin: String,
+        frame: String,
+        value: String,
+    ) -> Result<Option<CanvasAttach>, AppError> {
+        Ok(
+            on_runtime(async move { self.remote.select_canvas(&plugin, &frame, &value).await })
+                .await??,
+        )
     }
 
     /// Stops the stream; the remote session keeps running.
