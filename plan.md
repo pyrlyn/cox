@@ -144,8 +144,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T63.2 | todo | P2 | 3 | 0% | |
 | T68.4 | in progress | P2 | 3 | 100% | Claude / sonnet-5.5 |
 | T68.5 | todo | P2 | 3 | 0% |  |
-| T68.6 | in progress | P1 | 3 | 100% | Claude / sonnet-5.5 |
-| T68.7 | in progress | P2 | 3 | 0% | Claude / sonnet-5.5 |
+| T68.6 | in progress | P1 | 3 | 0% | Claude / sonnet-5.5 |
+| T68.7 | in progress | P2 | 3 | 100% | Claude / sonnet-5.5 |
 | T68.8 | todo | P2 | 3 | 0% |  |
 | T68.10 | todo | P2 | 1 | 0% |  |
 

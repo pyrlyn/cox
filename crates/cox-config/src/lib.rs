@@ -94,8 +94,8 @@ mod tests {
     }
 
     /// T52.2: the `[external_agents.<name>]` part of the committed schema
-    /// matches the types, and an entry has exactly the four keys the docs
-    /// name. Narrower than the whole-file test above, so a drift here names
+    /// matches the types, and an entry has exactly the five keys the docs
+    /// name (`target` since T68.7). Narrower than the whole-file test above, so a drift here names
     /// the table that moved.
     #[test]
     fn external_agents_schema_drift() {
@@ -118,6 +118,6 @@ mod tests {
             .keys()
             .map(String::as_str)
             .collect();
-        assert_eq!(keys, ["command", "args", "key_env", "writable"]);
+        assert_eq!(keys, ["command", "args", "key_env", "writable", "target"]);
     }
 }
