@@ -39,7 +39,7 @@
       "default": ""
     },
     "wasm": {
-      "description": "The module to load, relative to the package directory. Absent only\nfor a data-only package — `[[mcp]]` servers and/or `[[agents]]`\nfiles (PL§13/§14, T33.38, T45.3): `validate` then requires\n`capabilities` to be its default and `provider`/`models`/\n`external_agents` to be empty, since every other capability class\nneeds a wasm export to back it.",
+      "description": "The module to load, relative to the package directory. Absent only\nfor a data-only package — `[[mcp]]` servers, `[[agents]]` files\nand/or `[[skills]]` folders (PL§13/§14, T33.38, T45.3, T33.46):\n`validate` then requires\n`capabilities` to be its default and `provider`/`models`/\n`external_agents` to be empty, since every other capability class\nneeds a wasm export to back it.",
       "type": [
         "string",
         "null"
@@ -139,6 +139,14 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/AgentDecl"
+      },
+      "default": []
+    },
+    "skills": {
+      "description": "`[[skills]]` Agent Skills folders the package ships (T33.46); each\nis one approval line, and a local skill of the same name wins over\nit.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SkillDecl"
       },
       "default": []
     }
@@ -749,6 +757,25 @@
       "required": [
         "name",
         "file"
+      ]
+    },
+    "SkillDecl": {
+      "description": "A `[[skills]]` entry (T33.46): a folder inside the package holding a\n`SKILL.md`, the same format as `.cox/skills/<name>/SKILL.md`. Data, not\ncode: the host reads it only for a granted plugin.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The skill's name in the index and the `skill` tool: 1–64 lowercase\nletters, digits and `-`, as its `SKILL.md` frontmatter says.",
+          "type": "string"
+        },
+        "dir": {
+          "description": "The folder, relative to the package directory, whose last component\nis `name`; no `..` component.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "dir"
       ]
     }
   }

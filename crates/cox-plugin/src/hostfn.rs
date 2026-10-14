@@ -1303,6 +1303,7 @@ pub(crate) mod tests {
             external_agents: Vec::new(),
             cloud_agents: Vec::new(),
             agents: Vec::new(),
+            skills: Vec::new(),
         };
         manifest.capabilities.desktop.notify = true;
         manifest.capabilities.terminal.keys = true;

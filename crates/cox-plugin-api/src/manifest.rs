@@ -34,8 +34,9 @@ pub struct PluginManifest {
     #[serde(default)]
     pub description: String,
     /// The module to load, relative to the package directory. Absent only
-    /// for a data-only package — `[[mcp]]` servers and/or `[[agents]]`
-    /// files (PL§13/§14, T33.38, T45.3): `validate` then requires
+    /// for a data-only package — `[[mcp]]` servers, `[[agents]]` files
+    /// and/or `[[skills]]` folders (PL§13/§14, T33.38, T45.3, T33.46):
+    /// `validate` then requires
     /// `capabilities` to be its default and `provider`/`models`/
     /// `external_agents` to be empty, since every other capability class
     /// needs a wasm export to back it.
@@ -73,6 +74,11 @@ pub struct PluginManifest {
     /// wins over it.
     #[serde(default)]
     pub agents: Vec<AgentDecl>,
+    /// `[[skills]]` Agent Skills folders the package ships (T33.46); each
+    /// is one approval line, and a local skill of the same name wins over
+    /// it.
+    #[serde(default)]
+    pub skills: Vec<SkillDecl>,
 }
 
 /// `[limits]`. Absent means "the host default".
@@ -439,6 +445,20 @@ pub struct AgentDecl {
     pub file: String,
 }
 
+/// A `[[skills]]` entry (T33.46): a folder inside the package holding a
+/// `SKILL.md`, the same format as `.cox/skills/<name>/SKILL.md`. Data, not
+/// code: the host reads it only for a granted plugin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SkillDecl {
+    /// The skill's name in the index and the `skill` tool: 1–64 lowercase
+    /// letters, digits and `-`, as its `SKILL.md` frontmatter says.
+    pub name: String,
+    /// The folder, relative to the package directory, whose last component
+    /// is `name`; no `..` component.
+    pub dir: String,
+}
+
 /// The headless protocol an `[[external_agents]]` entry speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -478,9 +498,11 @@ pub enum ManifestError {
     #[error("key_env {0:?} must be an env var name such as CURSOR_API_KEY, not a value")]
     KeyEnv(String),
     /// `wasm` is absent, but the manifest declares something besides
-    /// `[[mcp]]` servers and `[[agents]]` files: only a data-only package
-    /// may omit `wasm`.
-    #[error("wasm is required unless the package only declares [[mcp]] and [[agents]] (PL§13/§14)")]
+    /// `[[mcp]]` servers, `[[agents]]` files and `[[skills]]` folders: only
+    /// a data-only package may omit `wasm`.
+    #[error(
+        "wasm is required unless the package only declares [[mcp]], [[agents]] and [[skills]] (PL§13/§14)"
+    )]
     MissingWasm,
     /// An `[[agents]]` file is absolute, climbs out with `..`, or is not a
     /// `.md` file.
@@ -489,6 +511,18 @@ pub enum ManifestError {
     /// Two `[[agents]]` entries share a name.
     #[error("[[agents]] name {0:?} is declared twice")]
     DuplicateAgent(String),
+    /// A `[[skills]]` name breaks the Agent Skills name rule.
+    #[error("[[skills]] name {0:?} must be 1-64 lowercase letters, digits and -")]
+    SkillName(String),
+    /// A `[[skills]]` dir leaves the package or is not named for its skill,
+    /// which `cox-ext` requires of every `SKILL.md` folder.
+    #[error(
+        "[[skills]] dir {0:?} must be a relative path inside the package, with no .., ending in the skill's name"
+    )]
+    SkillDir(String),
+    /// Two `[[skills]]` entries share a name.
+    #[error("[[skills]] name {0:?} is declared twice")]
+    DuplicateSkill(String),
     /// `surfaces = []`: a plugin that loads nowhere is a mistake, not a choice.
     #[error("surfaces must name at least one of terminal, desktop, headless, acp")]
     NoSurfaces,
@@ -508,7 +542,8 @@ impl PluginManifest {
             return Err(ManifestError::Id(self.id.clone()));
         }
         if self.wasm.is_none() {
-            // `[[mcp]]` and `[[agents]]` need no wasm export to back them.
+            // `[[mcp]]`, `[[agents]]` and `[[skills]]` need no wasm export
+            // to back them.
             let data_only = self.capabilities == Capabilities::default()
                 && self.provider.is_empty()
                 && self.models.is_empty()
@@ -603,6 +638,20 @@ impl PluginManifest {
                 return Err(ManifestError::DuplicateAgent(agent.name.clone()));
             }
         }
+        let mut seen = std::collections::BTreeSet::new();
+        for skill in &self.skills {
+            if !is_skill_name(&skill.name) {
+                return Err(ManifestError::SkillName(skill.name.clone()));
+            }
+            // Approval must not show a folder the loader would refuse.
+            let named = skill.dir.rsplit('/').next() == Some(skill.name.as_str());
+            if !is_package_path(&skill.dir) || !named {
+                return Err(ManifestError::SkillDir(skill.dir.clone()));
+            }
+            if !seen.insert(skill.name.as_str()) {
+                return Err(ManifestError::DuplicateSkill(skill.name.clone()));
+            }
+        }
         Ok(())
     }
 }
@@ -616,6 +665,15 @@ pub fn is_package_path(s: &str) -> bool {
     !s.starts_with('/')
         && s.split('/')
             .all(|c| !c.is_empty() && c != ".." && !c.contains(['\\', ':']))
+}
+
+/// The Agent Skills name rule (`cox_ext::skills` applies it to every
+/// `SKILL.md`); repeated here because this crate has no workspace
+/// dependencies, and refusing at approval beats a skill that never loads.
+fn is_skill_name(s: &str) -> bool {
+    (1..=64).contains(&s.len())
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// A `.md` file inside the package, by [`is_package_path`].
@@ -1093,6 +1151,73 @@ file = "agents/reviewer.md"
             "api = 1\nid = \"review-kit\"\nversion = \"0.1.0\"\nname = \"review\"\n{AGENT}"
         );
         let m = parse(&toml).expect("a wasm-less agents-only manifest parses");
+        assert_eq!(m.wasm, None);
+        assert_eq!(m.validate(), Ok(()));
+        let with_tool = format!("{toml}\n[capabilities]\ntools = [\"summarise\"]\n");
+        let m = parse(&with_tool).expect("structurally valid");
+        assert_eq!(m.validate(), Err(ManifestError::MissingWasm));
+    }
+
+    /// T33.46: a `[[skills]]` entry, appended to the PL§2 fixture.
+    const SKILL: &str = r#"
+[[skills]]
+name = "release-notes"
+dir = "skills/release-notes"
+"#;
+
+    #[test]
+    fn manifest_skills_reject_a_dir_outside_the_package_or_not_named_for_the_skill() {
+        let m = parse(&format!("{EXAMPLE}\n{SKILL}")).expect("parses");
+        assert_eq!(
+            m.skills,
+            vec![SkillDecl {
+                name: "release-notes".into(),
+                dir: "skills/release-notes".into(),
+            }]
+        );
+        assert_eq!(m.validate(), Ok(()));
+        let mut root = m.clone();
+        root.skills[0].dir = "release-notes".into();
+        assert_eq!(root.validate(), Ok(()));
+        for bad in [
+            "../release-notes",
+            "skills/../../release-notes",
+            "/skills/release-notes",
+            "skills\\release-notes",
+            "C:/release-notes",
+            "skills//release-notes",
+            "skills/notes",
+            "skills/release-notes/",
+            "",
+        ] {
+            let mut m = m.clone();
+            m.skills[0].dir = bad.into();
+            assert_eq!(
+                m.validate(),
+                Err(ManifestError::SkillDir(bad.into())),
+                "{bad}"
+            );
+        }
+        for bad in ["Release", "release_notes", "", &"r".repeat(65)] {
+            let mut m = m.clone();
+            m.skills[0].name = bad.to_string();
+            assert_eq!(m.validate(), Err(ManifestError::SkillName(bad.into())));
+        }
+        let mut twice = m;
+        twice.skills.push(twice.skills[0].clone());
+        assert_eq!(
+            twice.validate(),
+            Err(ManifestError::DuplicateSkill("release-notes".into()))
+        );
+    }
+
+    /// T33.46: a skill folder is data, so a skills-only package needs no
+    /// `plugin.wasm`.
+    #[test]
+    fn manifest_skills_only_package_needs_no_wasm() {
+        let toml =
+            format!("api = 1\nid = \"notes-kit\"\nversion = \"0.1.0\"\nname = \"notes\"\n{SKILL}");
+        let m = parse(&toml).expect("a wasm-less skills-only manifest parses");
         assert_eq!(m.wasm, None);
         assert_eq!(m.validate(), Ok(()));
         let with_tool = format!("{toml}\n[capabilities]\ntools = [\"summarise\"]\n");

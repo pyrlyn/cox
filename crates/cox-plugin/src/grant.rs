@@ -197,6 +197,9 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
     for a in &manifest.agents {
         out.insert(format!("subagent:{} {}", a.name, a.file));
     }
+    for s in &manifest.skills {
+        out.insert(format!("skill:{} {}", s.name, s.dir));
+    }
     out.into_iter().collect()
 }
 
@@ -244,6 +247,7 @@ mod tests {
             external_agents: Vec::new(),
             cloud_agents: Vec::new(),
             agents: Vec::new(),
+            skills: Vec::new(),
         }
     }
 
@@ -386,6 +390,28 @@ mod tests {
             check(&m, "d1", Some(&stored)),
             Verdict::NeedsApproval {
                 added: vec!["subagent:reviewer agents/reviewer.md".into()],
+                removed: Vec::new(),
+            }
+        );
+    }
+
+    /// T33.46: a newly declared `[[skills]]` folder is an added approval
+    /// line, so an update cannot slip a skill in under an old grant.
+    #[test]
+    fn grant_new_skill_needs_approval() {
+        let mut m = manifest(Capabilities {
+            kv: true,
+            ..Capabilities::default()
+        });
+        let stored = grant("d1", &["kv"]);
+        m.skills.push(cox_plugin_api::SkillDecl {
+            name: "release-notes".into(),
+            dir: "skills/release-notes".into(),
+        });
+        assert_eq!(
+            check(&m, "d1", Some(&stored)),
+            Verdict::NeedsApproval {
+                added: vec!["skill:release-notes skills/release-notes".into()],
                 removed: Vec::new(),
             }
         );

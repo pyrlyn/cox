@@ -121,7 +121,7 @@ The SDK is a thin layer over one rule, which a guest in any language can follow 
 
 ## Shared
 
-The manifest's package identity, resource limits, providers, models, agents, MCP servers, and shared capabilities apply wherever the plugin loads. `surfaces` optionally narrows loading to `terminal`, `desktop`, `headless`, or `acp`; when absent, it permits all four. `InitIn.surface` tells the guest which one opened the session. `cox:host/v1`, the exports above except `cox_key`, commands, renderers, and the `status.left`, `status.right`, `panel`, and `overlay` slots use this part. Headless and ACP sessions have no UI, so they omit UI grants. `Span.link` accepts an HTTPS URL or workspace-relative path and opens only on a person's click; unsupported links remain text.
+The manifest's package identity, resource limits, providers, models, agents, MCP servers, and shared capabilities apply wherever the plugin loads. `surfaces` optionally narrows loading to `terminal`, `desktop`, `headless`, or `acp`; when absent, it permits all four. `InitIn.surface` tells the guest which one opened the session. `cox:host/v1`, the exports above except `cox_key`, commands, renderers, and the `status.left`, `status.right`, `panel`, and `overlay` slots use this part. Headless and ACP sessions have no UI, so they omit UI grants. `[[skills]]` entries (`name`, `dir`) ship Agent Skills: `dir` is a package folder named for the skill that holds a `SKILL.md` in the `.cox/skills` format. A granted plugin's skills join the session's skill index, and a user or project skill of the same name wins. A package of only `[[mcp]]`, `[[agents]]` and `[[skills]]` needs no `wasm`. `Span.link` accepts an HTTPS URL or workspace-relative path and opens only on a person's click; unsupported links remain text.
 
 ## Terminal-only
 
@@ -138,7 +138,7 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 
 ### Shared
 
-- manifest `PluginManifest`: `api`, `surfaces`, `id`, `version`, `name`, `description`, `wasm`, `wasi`, `limits`, `capabilities`, `provider`, `models`, `mcp`, `external_agents`, `cloud_agents`, `agents`
+- manifest `PluginManifest`: `api`, `surfaces`, `id`, `version`, `name`, `description`, `wasm`, `wasi`, `limits`, `capabilities`, `provider`, `models`, `mcp`, `external_agents`, `cloud_agents`, `agents`, `skills`
 - manifest `Surface`: `terminal`, `desktop`, `headless`, `acp`
 - manifest `Limits`: `memory_mib`, `call_ms`
 - manifest `Capabilities`: `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui`
@@ -156,6 +156,7 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 - manifest `CloudAgentDecl`: `name`, `backend`, `key_env`, `model`, `description`
 - manifest `CloudBackend`: `cursor`
 - manifest `AgentDecl`: `name`, `file`
+- manifest `SkillDecl`: `name`, `dir`
 - ABI `InitIn`: `api`, `plugin_id`, `config`, `session`, `granted`, `surface`
 - ABI `SessionInfo`: `id`, `cwd`
 - ABI `Surface`: `terminal`, `desktop`, `headless`, `acp`
