@@ -346,7 +346,7 @@ Cursor (`agent acp`, `CURSOR_API_KEY`) comes from the granted Cursor plugin's `[
 
 ## `[targets.<name>]` and `[launchers]`
 
-Run targets (T68.2, P68): a machine or container a whole cox session can run on, reached with `--on <name>` and in the desktop app. None by default. **User config only**: a project `.cox/config.toml` cannot add, change or remove an entry or a launcher path, because a target decides which machine receives the session and a launcher path decides which program runs; the loader reverts both with a warning. `cox` must already be installed on the target.
+Run targets (T68.2, P68): a machine or container a whole cox session can run on, reached with `--on <name>` and in the desktop app. None by default. **User config only**: a project `.cox/config.toml` cannot add, change or remove an entry or a launcher path, because a target decides which machine receives the session and a launcher path decides which program runs; the loader reverts both with a warning. `cox` must already be installed on the target. Setup and a worked example per kind are in [docs/targets.md](targets.md).
 
 - `target` — where it runs, as `kind:name`: `ssh:<host or alias>`, `docker:<container>`, `lima:<instance>` or `colima:<profile>`
 - `cwd` — the directory on the target the session starts in. Letters, digits and `- _ . , / : = @ + \` only, because it goes on the remote command line
