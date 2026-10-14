@@ -208,7 +208,7 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 ### Desktop-only
 
 - manifest `Capabilities`: `desktop`
-- manifest `DesktopCaps`: `inspector`, `toolbar`, `palette`, `notify`
+- manifest `DesktopCaps`: `inspector`, `toolbar`, `palette`, `notify`, `canvas`
 - ABI `InitOut`: `desktop`
 - ABI `Slot`: `desktop.inspector`
 - ABI `DesktopOut`: `inspector`, `toolbar`, `palette`, `canvas`

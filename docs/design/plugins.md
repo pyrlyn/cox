@@ -248,7 +248,7 @@ Every payload is JSON through extism's `Json<T>` conversion. The types sit in `c
 | `cox_http(HttpReq)` to a `net`-listed host | `net` | all but render | host-side reqwest; host must match the allow-list; body cap `max_http_response_bytes` |
 | `cox_http(HttpReq)` to a provider section's `base_url` host | that `[[provider]]` section | `cox_provider_stream` only (2026-09-26; `NotInThisContext` everywhere else, including `cox_decide`). Keyed on the calling export as well as the active section, because the section is activated before its call is queued and another export may still be running | host-side reqwest; the host injects the provider's auth header (§7a); the only path a decision plugin may reach its own paid provider from (T33.40.1) |
 | `cox_output(line)` / `cox_cancelled()` | inside `tool_call` | `tool_call` | `ToolCx.output` / `ToolCx.cancel` (`traits.rs:187`) |
-| `cox_redraw()` | any `ui` | all | marks the plugin's slots dirty (§8) |
+| `cox_redraw()` | any `ui`, or `desktop.canvas` | all | marks the plugin's slots and its canvas dirty (§8, §15.4) |
 
 Configuration comes in `InitIn.config`. That is the plugin's `[plugins.<id>]` table from `Config`, which gains `plugins: PluginsConfig { enabled, decide, #[serde(flatten)] entries }`, the same flatten pattern as `HooksConfig` and `McpConfig` (`config.rs:844,876`). The plugin validates its own table.
 
@@ -511,6 +511,7 @@ The creator resolved every open question this design and the Jev use case (A25/A
 14. **No prebuilt Jev plugin archive ships with the release.** Users build it from `plugins/jev` (`just plugin jev`) and install it with `cox plugin install <dir>` (§1).
 15. **Plugin agent definitions are grant-gated, local definitions win** (T45.3, 2026-09-29). An `[[agents]]` file is loaded only for a `Granted` plugin, and each file is its own approval line, so an update that adds or renames one asks again. A `.cox/agents/*.md` or `~/.cox/agents/*.md` definition of the same name wins over the plugin's, with a notice (T45.4). The definition's `permissionMode` can only narrow the parent's mode (T45.2).
 16. **Plugin skills are grant-gated, local skills win** (T33.46, A155, 2026-10-14). A `[[skills]]` folder is read only for a `Granted` plugin, only through the package (no `..`, no symlink, a regular `SKILL.md`), and only when its frontmatter `name` is the approved one; each folder is its own approval line. Its index line joins `system[2]`, which is built once per session, so the cache-stable prefix holds; the body stays out of the prompt until the `skill` tool loads it, as for any skill. A user or project skill of the same name wins, with a notice. The `skill` tool's output names the skill's folder, so a skill can point at files it bundles.
+17. **A plugin canvas shows static HTML, isolated by WebKit** (T33.47, A156, 2026-10-14). The one exception to "no plugin web views" (§15.4): a desktop pane of pages a plugin draws, behind `desktop.canvas`, with page JavaScript off, every load blocked, every navigation but the first refused and no bridge from the page; only the app's script, in its own content world, reports a click. A selection reaches the model only as an attachment the person sends. Approved by the creator through Weft's T106.6 on those guards; the design and its sources are `plugin-canvas.md`.
 
 ## 15. Surfaces: shared, terminal-only and desktop-only (T33.45, A134)
 
@@ -562,6 +563,7 @@ Each contribution is drawn natively by the app from declarative data; a plugin n
 | Palette actions | `palette = true` | `InitOut.desktop.palette: Vec<ActionDecl>` | DS§6.4 `CommandPalette`, Actions group: a `PaletteKind::Action` row (`crates/cox-app/src/palette.rs`) with id `plugin:<id>:<command>` and the symbol in its well | the same command is already in the TUI palette as `/<id>:<name>` |
 | Actionable notifications | `notify = true` | host function `cox_desktop_notify(DesktopNotice { level, title, body, actions })` in `cox:desktop/v1`; at most 2 actions `{ label, command }`; allowed in every export but render; level capped at `warn`; at most one per 10 s per plugin | DT§5.6: posted through `cox_app::app::Host` like an inbox item, its actions mapped back by CoxPlatform's `NotificationActions` (T37.27); posted only when the app is not frontmost or the session is not visible, otherwise shown as a notice | `Err(NotOnThisSurface)`; `cox_notify` is the shared notice |
 | Images in widgets | none (shows only bytes the digest covers) | `Widget::Image { path, alt }`: a package-relative PNG path (no `..`, `\` or `:` component, as an `[[agents]]` file), at most 256 KiB, counted by §8's node cap; never a URL, so the app never fetches for a plugin | DS§6.3 `PluginWidgetView` draws the image, `alt` as its accessibility label | the `alt` text as one dim line |
+| Canvas (A156, `plugin-canvas.md`) | `canvas = true` | `InitOut.desktop.canvas: Option<CanvasDecl { title, symbol, select_attr }>`; exports `cox_canvas(CanvasIn) -> CanvasOut { frames }` (at most 12 frames, 1 MiB each, 4 MiB in all) and `cox_canvas_select(CanvasSelect { frame, value }) -> Option<CanvasAttach { name, text }>` (at most 8 KiB); render-context host functions; redrawn by §8's model while the pane shows | a pane beside the transcript like the browser pane (⌘⇧D), one isolated WebKit page per frame; a selection lands in the composer as a `text/plain` attachment | not offered |
 
 Rules for all of them:
 
@@ -569,7 +571,8 @@ Rules for all of them:
 - `symbol` is an SF Symbol name matching `[a-z0-9.]{1,64}`. A name the system does not know draws `puzzlepiece.extension`. That `NSImage(systemSymbolName:accessibilityDescription:)` returns nil for an unknown name is verified by test, not by Apple's page (https://developer.apple.com/documentation/appkit/nsimage/init(systemsymbolname:accessibilitydescription:)), which did not render its text to a fetch on 2026-10-03: CoxUI's `PluginSymbolTests.anUnknownSymbolDrawsTheExtensionGlyph` (T33.45.7) passes on macOS 27 (2026-10-13), and CI runs it on its macOS runner.
 - `CommandOut` gains `OpenInspector`, the desktop counterpart of `OpenOverlay`.
 - Every string passes `cox_sanitize::sanitize` in `cox-app` before Swift sees it, as `WidgetView` does today.
-- **Not offered (open: the creator has not confirmed this, A134):** a sidebar section — the sidebar lists the window's sessions across projects (DS§6.4 `Sidebar`), while a plugin instance lives in one session (T33.44), so it would need a window-scoped plugin lifetime the host does not have; menu-bar items — the palette covers them and the menu bar is app-wide; plugin-supplied SwiftUI, HTML or web views — never; HTML from MCP servers is `v0.3-mcp-apps.md`'s separate path. A156 (T33.47) opens one narrow exception, static HTML with no page script, network or navigation, in a desktop pane: `plugin-canvas.md`; this row changes when T33.47.2 lands.
+- The canvas is the one contribution with exports of its own, `cox_canvas` and `cox_canvas_select`, and the one whose content is not a widget tree: static HTML the app shows with page script, every load and every navigation but the first off, and only the app's own script in its own content world, which reports a click (`plugin-canvas.md` §4). The HTML is untrusted and not filtered; WebKit's isolation is the boundary. A selection becomes a composer attachment the person sends or removes, never a turn of its own, and the plugin cannot open the pane.
+- **Not offered (open: the creator has not confirmed this, A134):** a sidebar section — the sidebar lists the window's sessions across projects (DS§6.4 `Sidebar`), while a plugin instance lives in one session (T33.44), so it would need a window-scoped plugin lifetime the host does not have; menu-bar items — the palette covers them and the menu bar is app-wide; plugin-supplied SwiftUI or scripted web views — never; static HTML only through the canvas above; HTML from MCP servers is `v0.3-mcp-apps.md`'s separate path.
 
 ### 15.5 Declaring surfaces
 
@@ -589,12 +592,13 @@ inspector = true
 toolbar = true
 palette = true
 notify = true
+canvas = true
 ```
 
 - `surfaces` takes `terminal`, `desktop`, `headless` and `acp`; absent means all four, so every existing manifest loads where it loads today. An empty list is an error. A UI-only plugin lists the two UI surfaces and skips `cox_init` in headless and ACP runs.
 - A surface table whose surface `surfaces` excludes is an error: it asks for something that can never run.
 - `ui.keys` stays accepted under `api = 1` as an alias of `terminal.keys` (the loader ORs them). `cox plugin new` and the docs write the new spelling; the alias goes at the next ABI major.
-- **Grant lines** (T33.6) gain `terminal.keys`, `desktop.inspector`, `desktop.toolbar`, `desktop.palette` and `desktop.notify`. A stored `ui.keys` line reads as `terminal.keys`, so nobody is asked again. `surfaces` adds no line: it only narrows.
+- **Grant lines** (T33.6) gain `terminal.keys`, `desktop.inspector`, `desktop.toolbar`, `desktop.palette`, `desktop.notify` and `desktop.canvas` (A156). A stored `ui.keys` line reads as `terminal.keys`, so nobody is asked again. `surfaces` adds no line: it only narrows.
 - **One grant covers both surfaces.** A grant stays per digest. The TUI modal and the CLI prompt (§3) list every line, the surface parts marked "terminal only" or "desktop only"; the app has no grant dialog and loads only `Granted` plugins, like headless (§3), so a grant given in the terminal or the CLI covers the app too, and nobody is asked twice.
 - `cox plugin list` (text and `--json`) and `cox doctor` show each plugin's surfaces.
 
