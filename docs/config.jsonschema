@@ -2351,7 +2351,7 @@
       ]
     },
     "ExternalAgentConfig": {
-      "description": "One `[external_agents.<name>]` entry (T52.2, DT§3.3.1): an ACP agent a\ntop-level session can be driven by. The name is the TOML key. User\nconfig only: a project config can set none of it (the guards in\n`cox-config`'s `load.rs`), because an entry runs a program and widens\nwhere it may write. It always runs under the sandbox wrap, with network\non and file limits kept.",
+      "description": "One `[external_agents.<name>]` entry (T52.2, DT§3.3.1): an ACP agent a\ntop-level session can be driven by. The name is the TOML key. User\nconfig only: a project config can set none of it (the guards in\n`cox-config`'s `load.rs`), because an entry runs a program and widens\nwhere it may write. It always runs under the sandbox wrap, with network\non and file limits kept, unless it names a `target` (T68.7).",
       "type": "object",
       "properties": {
         "command": {
@@ -2379,6 +2379,14 @@
             "type": "string"
           },
           "default": []
+        },
+        "target": {
+          "description": "Run `cox run --output-format stream-json` on this target instead of a\nlocal program (T68.7): a `[targets.<name>]` name or a literal\n`kind:name`. `command`, `args`, `key_env` and `writable` then do\nnothing: the remote `cox` uses its own keys and sandbox, and the prompt\ngoes over stdin. Each call needs a `TargetAgent(<kind:name>)`\nallow rule in your own config.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
