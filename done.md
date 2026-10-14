@@ -11617,3 +11617,20 @@ Deviations: about 310 lines of code (plus about 190 of tests) against 200, in th
 
 Check output: `mise exec -- cargo nextest run -p cox-app -p cox-session` — 345 passed, with `a_canvas_sends_only_changed_frames`, `a_slow_canvas_stops_after_three_misses` (a spinning `cox_canvas` under `call_ms` 50), `a_click_reaches_the_plugin_only_on_a_drawn_frame` (a spinning `cox_canvas_select`: an unknown frame and a bad value return at once, a drawn frame waits its 500 ms), `a_canvas_attachment_is_sanitized`, `canvas_calls_fail_open_and_refuse_a_bad_click` and `a_plugin_tool_names_its_plugin`; clippy `-D warnings` and `cargo fmt --check` clean.
 
+
+#### T33.47.5 Wire and remote sessions
+
+Depends: T33.47.4 · Files: `crates/cox-app/src/wire.rs`, `crates/cox-app/src/remote.rs` (plus `docs/app-server.schema.json`) · Design: `docs/design/plugin-canvas.md` §7
+
+`ServerEvent::PluginCanvas`, `Call::CanvasSelect`, `Reply::CanvasAttach`; the client applies the caps again.
+
+Check: `wire_round_trips_every_message`; `app_server_schema_drift`; an over-size `PluginCanvas` from the server is capped by the client.
+
+Plan (Claude Code / claude-opus-5-5): (1) `wire.rs`: `Call::Canvases`, `ShowCanvas`, `HideCanvas`, `CanvasSelect`; `Reply::Canvases`, `Shown`, `CanvasAttach`; `ServerEvent::PluginCanvas`; extend `every_message` and regenerate the schema. (2) `server.rs`: answer the four calls through `LiveSession`, and pump `next_canvas` beside `next_patches`. (3) `remote.rs`: a canvas queue per session on the link, re-capped on arrival; `RemoteSession` `canvases`, `show_canvas`, `hide_canvas`, `next_canvas`, `select_canvas`. (4) `plugin_ui.rs`: `CanvasUpdate::capped` and `PluginCanvas::checked`, so the client and the host share one check.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.5 canvas over the app-server wire" on branch `t33.47-plugin-canvas`. The server's per-session pump selects between the patch and the canvas queues (both pulls are cancel-safe) and ends with the patches. The client re-runs `CanvasOut::capped` on the frames and on the `order` ids, sanitizes titles, drops a declaration whose `select_attr` fails `CanvasDecl::check` (it reaches the page's host script), and re-caps and sanitizes an attachment. A second handle on a session gets a closed canvas queue, as it gets a closed patch stream. A full client queue drops an update; showing the pane again sends every frame.
+
+Deviations: four source files, not two: `server.rs` answers the new calls (its `match` on `Call` is exhaustive), and `plugin_ui.rs` gains the shared client checks rather than a copy in `remote.rs`. About 230 lines of code plus about 200 of tests.
+
+Check output: `mise exec -- cargo nextest run -p cox-app` — 272 passed, with `wire_round_trips_every_message`, `app_server_schema_drift` (schema regenerated), `wire_has_no_secret_message`, `an_over_size_remote_canvas_is_capped_by_the_client` (14 frames and a bad id from the server: 12 kept, widths clamped, titles and plugin sanitized, another session's update not delivered) and `remote_canvas_replies_are_checked_again` (an `onclick` attribute dropped, an attachment sanitized, an over-size one refused); clippy `-D warnings` and `cargo fmt --check` clean.
+
