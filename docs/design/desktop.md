@@ -1010,6 +1010,34 @@ always names the cause and one action.
   control reachable by keyboard; contrast checked in both themes.
 - **Language.** English first, String Catalogs from day one; Russian next.
 
+### 5.10 Connect to Target (T68.5)
+
+File › Connect to Target… (also in the command palette) replaces Connect to Host. A target is
+`ssh:<host>`, `docker:<container>`, `lima:<instance>` or `colima:<profile>` (A158, `docs/config.md`
+`[targets.*]`). The sheet is one modal with these parts, which a Windows or Linux app repeats as is:
+
+1. **Kind picker**: SSH, Docker, Lima, Colima, in that order.
+2. **Listed targets of the picked kind**, from the core's `targets()` (configured ones first, then
+   the containers and VMs running now; a launcher that is missing or hangs lists nothing and is
+   never an error). The saved `desktop.remote_hosts` aliases are listed as `ssh:<alias>`. Picking a
+   row connects to that row's target text exactly, so a configured name may differ from the
+   container it names.
+3. **Free-text name** under the picked kind, sent as `kind:name`. The client only refuses an empty
+   name or one with whitespace; the core checks every name again before anything runs and its
+   reason shows in the sheet.
+4. **Connect**, which keeps the sheet up until the target answered. The core's `hello` result
+   (`HostInfo`: wire version, cox version, OS, architecture and sandbox backend) then replaces the
+   picker: `macOS · arm64 · cox 0.9.1` and `Sandbox: bwrap`, or, when the target has no sandbox,
+   `No sandbox there: cox asks before every command` (D7). **Done** closes the sheet; the target's
+   sessions are already a sidebar group, so the person has seen where a session will run before
+   opening one.
+
+An ssh target keeps its bare alias as its group name, as before targets; any other kind shows its
+`kind:name`. Only an ssh alias is saved (to `desktop.remote_hosts`, user config) and reconnected at
+launch; a container or VM comes from `[targets.*]` or from the running listing. The logic (grouping,
+validation, the `hello` wording, the group id) lives in CoxModel's `TargetList` and `HostHello`;
+the view only shows them, and the FFI adds one forward, `RemoteHandle.info()`.
+
 ## 6. Where things live
 
 ```
