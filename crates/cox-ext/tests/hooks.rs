@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cox_ext::hooks::ShellHooks;
-use cox_protocol::config::{HookConfig, HooksConfig};
+use cox_protocol::config::{HookConfig, HookKind, HooksConfig};
 use cox_protocol::traits::Hook;
 use cox_protocol::types::{HookEvent, HookOutcome};
 use serde_json::json;
@@ -23,6 +23,7 @@ fn hooks(event: &str, matcher: Option<&str>, command: &str, timeout_s: Option<u3
             matcher: matcher.map(str::to_string),
             command: command.to_string(),
             timeout_s,
+            kind: HookKind::Command,
         }],
     );
     let config = HooksConfig {
