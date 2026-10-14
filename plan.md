@@ -65,7 +65,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 75% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | todo | P2 | 4 | 0% | |
-| T33.47.8.2 | todo | P2 | 3 | 0% | |
 | T33.47.8.3 | todo | P2 | 2 | 0% | |
 | T33.47.8.4 | todo | P2 | 3 | 0% | |
 | T33.47.8.5 | todo | P2 | 3 | 0% | |
@@ -1155,14 +1154,6 @@ The pane beside the transcript with frames side by side and zoom, ⌘⇧D, the p
 Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a selection adds one chip and a second replaces it; the falsifier 3 measurement written into the card's Check output.
 
 Split by A157 into T33.47.8.1–T33.47.8.6, one layer each; this card closes when they are done.
-
-#### T33.47.8.2 CoxModel: `CanvasStore` and the replaceable chip
-
-Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/CanvasStore.swift` (new), `desktop/macos/Packages/CoxModel/Sources/CoxModel/ComposerStore.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/CanvasStoreTests.swift` (new) · Design: §3, §5, §6
-
-The pane's state: the declared canvases, the one shown, its frames in the plugin's order (an unchanged frame keeps its value so its web view stays), `stopped`, and the size sent with each show. A selection's `CanvasAttach` goes to the composer as a `text/plain` attachment; a second one from the same canvas replaces it, and one the person removed is not brought back.
-
-Check: frames follow `order`, changed frames replace, missing ones go, another plugin's update is ignored; hide forgets the frames; a selection adds one chip and a second replaces it; `None` adds nothing.
 
 #### T33.47.8.3 CoxCore: the local and remote canvas calls
 

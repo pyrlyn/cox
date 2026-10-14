@@ -11683,3 +11683,19 @@ Deviations: none.
 
 Check output: `swift test --filter PluginCanvasTests` in `desktop/macos/Packages/CoxModel` — 5 passed (`aFixtureListsItsCanvases`, `aShowIsRecordedAndSendsTheDrawnUpdate`, `aQueuedRedrawReachesAWaitingPull`, `aClickIsRecordedAndAnswered`, `thePullEndsOnceClosed`); `xcrun swift-format lint --strict` and `swiftlint lint --strict` clean on the three files.
 
+#### T33.47.8.2 CoxModel: `CanvasStore` and the replaceable chip
+
+Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/CanvasStore.swift` (new), `desktop/macos/Packages/CoxModel/Sources/CoxModel/ComposerStore.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/CanvasStoreTests.swift` (new) · Design: §3, §5, §6
+
+The pane's state: the declared canvases, the one shown, its frames in the plugin's order (an unchanged frame keeps its value so its web view stays), `stopped`, and the size sent with each show. A selection's `CanvasAttach` goes to the composer as a `text/plain` attachment; a second one from the same canvas replaces it, and one the person removed is not brought back.
+
+Check: frames follow `order`, changed frames replace, missing ones go, another plugin's update is ignored; hide forgets the frames; a selection adds one chip and a second replaces it; `None` adds nothing.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasStore.swift`: an `@Observable` store over `CanvasClient`, `nil` for a session without canvases; `load`, `show` (hides another plugin's canvas first), `resize` (only a changed size), `hide`, `pump` and `select` (only a frame on the canvas now); `apply` folds an update by id. (2) `ComposerStore.attachSelection`: the chip per plugin, replaced in place while it is still in the draft, carried across a reopen. (3) `CanvasStoreTests.swift` on the T33.47.8.1 fixture.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.2 canvas store and replaceable chip" on branch `t33.47-plugin-canvas`. A stopped update carries no order (cox-app sends `CanvasUpdate::default()` with `stopped`), so the store keeps the last frames and marks the canvas stopped rather than emptying it. The chip is remembered by value, so a chip the person removed or sent is not found and the next selection adds a new one.
+
+Deviations: none.
+
+Check output: `swift test --filter "CanvasStoreTests|PluginCanvasTests|ComposerStore"` in `desktop/macos/Packages/CoxModel` — 32 passed, with `theFirstDeclaredCanvasShowsWithItsFrames`, `framesFollowTheOrderAndAnUnchangedOneKeepsItsValue`, `anotherPluginsDrawIsIgnoredAndAStopKeepsTheLastFrames`, `showingAnotherCanvasHidesTheFirstAndHidingForgetsTheFrames`, `onlyAChangedSizeIsSentAgain`, `aSelectionAddsOneChipAndASecondReplacesIt`, `aRemovedChipIsNotBroughtBack` and `theDrawsArriveThroughThePump`; swift-format and SwiftLint `--strict` clean.
+
