@@ -67,7 +67,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.47.8 | todo | P2 | 4 | 0% | |
 | T33.47.8.5 | todo | P2 | 3 | 0% | |
 | T33.47.8.6 | todo | P2 | 2 | 0% | |
-| T33.47.8.7 | todo | P2 | 2 | 0% | |
 | T33.47.9 | todo | P2 | 1 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
@@ -1153,14 +1152,6 @@ The pane beside the transcript with frames side by side and zoom, ⌘⇧D, the p
 Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a selection adds one chip and a second replaces it; the falsifier 3 measurement written into the card's Check output.
 
 Split by A157 into T33.47.8.1–T33.47.8.7, one layer each; this card closes when they are done.
-
-#### T33.47.8.7 CoxModel: one canvas store per session
-
-Depends: T33.47.8.2, T33.47.10 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/AppStore.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/AppStoreTests.swift` · Design: §3, §6
-
-`AppStore.Shared` gains the session's `CanvasStore`, made with its other stores, and the session's pull task runs the canvas pump beside the patch pull, so two windows on one session share one canvas and one pull; a provider switch makes a fresh one.
-
-Check: two windows on one session share one canvas store; a reopened session gets a new one; the shared pump folds a draw.
 
 #### T33.47.8.5 App: the pane beside the column
 

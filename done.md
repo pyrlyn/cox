@@ -11715,6 +11715,22 @@ Deviations: the test is in `ConvertTests.swift`, a fourth file.
 
 Check output: `scripts/desktop/xcframework.sh` (dist profile, `CARGO_PROFILE_DIST_DEBUG=0`) built `CoxFFI.xcframework` and the bindings; `swift test` in `desktop/macos/Packages/CoxCore` — 29 passed, with `theCanvasValuesConvert`; swift-format and SwiftLint `--strict` clean on the four files.
 
+#### T33.47.8.7 CoxModel: one canvas store per session
+
+Depends: T33.47.8.2, T33.47.10 · Files: `desktop/macos/Packages/CoxModel/Sources/CoxModel/AppStore.swift`, `desktop/macos/Packages/CoxModel/Tests/CoxModelTests/AppStoreTests.swift`, `desktop/macos/Packages/CoxModel/Sources/CoxClient/CoreClient.swift` · Design: §3, §6
+
+`AppStore.Shared` gains the session's `CanvasStore`, made with its other stores, and the session's pull task runs the canvas pump beside the patch pull, so two windows on one session share one canvas and one pull; a provider switch makes a fresh one.
+
+Check: two windows on one session share one canvas store; a reopened session gets a new one; the shared pump folds a draw.
+
+Plan (Claude Code / claude-opus-5-5): (1) `AppStore.Shared.canvas`, made with the session's other stores in one `entry` helper that `adopt` and `replace` share. (2) The entry's pull task runs `SessionStore.run` and `CanvasStore.pump` together (`async let`), so cancelling it or closing the client ends both. (3) `FixtureSession.close` ends the fixture's canvas pull, as `LiveSession::close` does since T33.47.10. (4) Tests in `AppStoreTests`.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.8.7 one canvas store per session" on branch `t33.47-plugin-canvas`.
+
+Deviations: none (3 files, about 75 lines).
+
+Check output: `theSessionsPullFoldsTheCanvasDraws` fails with the pump left out of the pull and passes with it; `twoWindowsShareOneCanvasAndASwitchMakesAFreshOne` passes; `swift test` in CoxModel — 181 tests passed; `swiftlint lint --strict` and `swift format lint -s` clean.
+
 #### T33.47.8.4 CoxUI: `PluginCanvasPane`
 
 Depends: T33.47.8.1 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Organisms/PluginCanvasPane.swift` (new), `desktop/macos/Packages/CoxUI/Sources/CoxUI/Previews/PreviewState+Canvas.swift` (new), `desktop/macos/Packages/CoxUI/Tests/CoxUITests/PluginCanvasPaneTests.swift` (new) · Design: §3
