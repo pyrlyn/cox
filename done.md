@@ -11651,3 +11651,18 @@ Deviations: the test is in `crates/cox-ffi/tests/app.rs`, a fourth file. A remot
 
 Check output: `mise exec -- cargo nextest run -p cox-ffi` — 16 passed, with `canvas_calls_cross_the_ffi_and_fail_open` and `every_ffi_body_is_one_forward_expression`; clippy `-D warnings` and `cargo fmt --check` clean.
 
+#### T33.47.7 CoxPlatform: `CanvasPage`
+
+Depends: — · Files: `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/CanvasPage.swift`, `desktop/macos/Packages/CoxPlatform/Tests/CoxPlatformTests/CanvasPageTests.swift` · Design: `docs/design/plugin-canvas.md` §4
+
+The isolated page: content JavaScript off, the block-everything rule list, the navigation decider, a non-persistent store, and the host script and its handler in the `cox-canvas` content world.
+
+Check: a page `<script>` does not run; neither an `https:` nor a `data:` image loads; a link click does not navigate; the host script's post arrives with the attribute value; `swift test` for CoxPlatform.
+
+Plan (Claude Code / claude-opus-5-5): (1) `CanvasPage.swift`: a `WebPage` with content JavaScript off, a non-persistent store, the block-everything rule list, a decider that admits only the load the class starts, and the host script with its handler in the `cox-canvas` world; `selections` streams each click's value. (2) `CanvasPageTests.swift`: Swift Testing against the real WebKit with a fixture holding a page script, an `https:` and a `data:` image and a link. (3) `swift test` in CoxPlatform, swift-format and SwiftLint on both files.
+
+Status: done 2026-10-14 · Commit "feat: T33.47.7 canvas page isolation" on branch `t33.47-plugin-canvas`. The first build loaded the frame with `load(html:baseURL:)` at `about:blank`, as §4 said; its test showed the rule list does not stop a `data:` image (it decoded, width 1). The frame is now served by a `cox-canvas` URL scheme handler at a fresh `cox-canvas://frame/<n>` per load, with `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'`; the rule list lets only that scheme's documents through, and the decider admits only the URL the last `load(html:)` armed, so a reload of an earlier frame is refused too. Design §4 now records the falsified claim and the fix. A test that a second `load(html:)` replaces the frame was added.
+
+Deviations: `docs/design/plugin-canvas.md` is a third file, outside the card's two, to correct §4.
+
+Check output: `swift test` in `desktop/macos/Packages/CoxPlatform` — 43 tests in 2 suites passed, with `aPageScriptDoesNotRun`, `neitherAWebNorADataImageLoads`, `thePageCannotNavigate`, `aClickPostsTheNearestValueAndDoesNotFollowALink`, `aNewLoadReplacesTheFrame` and `theAttributeReachesTheScriptAsJSON`; `xcrun swift-format lint --strict` and `swiftlint lint --strict` clean on both files.

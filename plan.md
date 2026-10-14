@@ -63,8 +63,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
-| T33.47 | in progress | P2 | 4 | 65% | Claude Code / claude-opus-5-5 |
-| T33.47.7 | todo | P2 | 3 | 0% | |
+| T33.47 | in progress | P2 | 4 | 75% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | todo | P2 | 4 | 0% | |
 | T33.47.9 | todo | P2 | 1 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
@@ -1141,14 +1140,6 @@ Depends: T33.45.7 · Design: `docs/design/plugin-canvas.md`, A156
 A plugin that produces UI (Weft's `plugins/cox`, whose agent writes app screens) has no way to show them drawn: the desktop API is widgets only and PL§15.4 refused web views. The creator approved, through Weft's T106.6, a narrow kind of web view behind its own grant line, `desktop.canvas`: a pane beside the transcript holding *frames*, each a static HTML page a plugin draws, shown with page JavaScript off, every load blocked, every navigation but the first refused, and only a host-owned script in its own content world, which reports a click. The plugin turns the selection into text that the app adds to the composer as a `text/plain` attachment the person sends or removes. Redraws follow PL§8. The design, the caps, the isolation and its sources, and four open questions with recommendations are in the design document. The build is T33.47.1–T33.47.9; this card closes when they are done.
 
 Check: the nine cards' checks; `just test` green.
-
-#### T33.47.7 CoxPlatform: `CanvasPage`
-
-Depends: — · Files: `desktop/macos/Packages/CoxPlatform/Sources/CoxPlatform/CanvasPage.swift`, `desktop/macos/Packages/CoxPlatform/Tests/CoxPlatformTests/CanvasPageTests.swift` · Design: `docs/design/plugin-canvas.md` §4
-
-The isolated page: content JavaScript off, the block-everything rule list, the navigation decider, a non-persistent store, and the host script and its handler in the `cox-canvas` content world.
-
-Check: a page `<script>` does not run; neither an `https:` nor a `data:` image loads; a link click does not navigate; the host script's post arrives with the attribute value; `swift test` for CoxPlatform.
 
 #### T33.47.8 The pane, the shortcut and the composer chip
 
