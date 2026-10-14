@@ -63,6 +63,10 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
+| T33.46 | in progress | P2 | 3 | 0% | Claude Code / claude-opus-5-5 |
+| T33.46.1 | in progress | P2 | 2 | 0% | Claude Code / claude-opus-5-5 |
+| T33.46.2 | todo | P2 | 2 | 0% | |
+| T33.46.3 | todo | P2 | 3 | 0% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
@@ -1129,6 +1133,38 @@ Check: a `cox-plugin` test loads the example (a command and a status segment, a 
 Depends: T33.45.9 · Files: `docs/ru/plugins.md`, `docs/uk/plugins.md` (new directories) · Design: `docs/design/plugins.md` §15, A134
 
 Check: both cover all three parts and every heading of the English page; `just test` green.
+
+#### T33.46 Plugins ship skills
+
+Depends: T45.4 · Design: `docs/design/plugins.md` §2, §3, §12, §14 decision 16, A155
+
+A plugin package cannot carry Agent Skills: `plugin.toml` has `[[agents]]` and `[[mcp]]` but no skills, so a plugin that wants to teach the model how to use its tools (Weft's `plugins/cox`, which ships the Weft authoring guide as a skill to Claude Code and Cursor) has no way to. Add a data-only `[[skills]]` entry: `name` and `dir`, a package-relative folder holding a `SKILL.md` in the same format as `.cox/skills/<name>/SKILL.md`. Each entry is one grant line, `skill:<name> <dir>`. A granted plugin's skills join the session's skills after the local ones, so a user or project skill of the same name wins, with a notice. The `skill` tool names the skill's folder in its output, so a skill can point at files it bundles. The build is T33.46.1–T33.46.3; this card closes when they are done.
+
+Check: the three cards' checks; `just test` green.
+
+#### T33.46.1 Manifest and grant: `[[skills]]`
+
+Depends: — · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` (plus the regenerated `docs/plugin.schema.json` and `docs/plugins.md` field index) · Design: A155
+
+Plan (Claude Code / claude-opus-5-5): (1) `SkillDecl { name, dir }` and `PluginManifest.skills` (`#[serde(default)]`), beside `AgentDecl`. `validate`: `name` is 1–64 lowercase letters, digits and `-` (the Agent Skills rule `cox-ext` applies at load); `dir` is an `is_package_path` whose last component is `name`, because `cox-ext` requires a skill's name to equal its folder, so a declaration that could never load is refused before approval; names are unique. New errors `SkillName`, `SkillDir`, `DuplicateSkill`; `MissingWasm`'s text names `[[skills]]` too. A skills-only package needs no wasm, like `[[agents]]`. (2) `capability_list` adds `skill:<name> <dir>`. (3) PL§2 example and rules, the PL§3 line list, PL§12 and PL§14 decision 16; regenerate the schema (delete it and rerun `plugin_schema_matches_committed_file`) and `scripts/plugin_api_reference.py --write`.
+
+Check: unit tests `manifest_skills_reject_a_dir_outside_the_package_or_not_named_for_the_skill`, `manifest_skills_only_package_needs_no_wasm`, `grant_new_skill_needs_approval`; the schema and API-reference drift tests pass; `cargo nextest run -p cox-plugin-api -p cox-plugin`.
+
+#### T33.46.2 `cox-ext`: a plugin skill file, merge, and the skill's folder
+
+Depends: — · Files: `crates/cox-ext/src/skills.rs`, `crates/cox-ext/tests/skills.rs` · Design: A155
+
+`pub fn parse_file(path) -> Result<Skill, String>` (the parser `discover` uses, for files outside the skill dirs, like `agents::parse_file`) and `pub fn merge(local: &mut Discovered, plugin: Vec<Skill>, plugin_id)`: a name already loaded is kept and the plugin's skill is skipped with a notice. `SkillTool`'s output adds the line `Base directory: <folder>` after the heading, and `structured.dir`, so the model can read files the skill bundles (every skill, not only a plugin's: a local skill can bundle files too).
+
+Check: `skills_plugin_skill_loses_to_a_local_one_with_a_notice`, `skills_invoke_names_the_skill_folder`; the existing tests updated for the new line; `cargo nextest run -p cox-ext`.
+
+#### T33.46.3 Session: a granted plugin's skills
+
+Depends: T33.46.1, T33.46.2 · Files: `crates/cox-session/src/plugins.rs`, `crates/cox-session/src/lib.rs`, `crates/cox/tests/plugins.rs` · Design: A155
+
+`Plugins.skill_defs`, filled for a granted plugin like `agent_defs`: each `<dir>/SKILL.md` is reached through `package_program` (no `..`, no symlink on the way, a regular file), parsed with `cox_ext::skills::parse_file`, and kept only when its frontmatter `name` is the approved one; anything else is a notice (D14). `lib.rs` merges them after `discover`, before `prefix_texts` and `SkillTool::new`, so the index and the tool see them. `cox ext list` is unchanged (it lists files, not plugins).
+
+Check: an e2e test in `crates/cox/tests/plugins.rs` installs a wasm-less skills package with `--yes` and finds the skill in the `skill` tool's output under a scripted session; a symlinked `SKILL.md` is skipped with a notice; `cargo nextest run -p cox-session -p cox` and the `--no-default-features` build of `cox-session`.
 
 **Order.** T33.1 → T33.2 → T33.3 → T33.4 → T33.5 → T33.6 is the critical path. After it these can run in parallel:
 
@@ -3250,6 +3286,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
   - T66.1 depends on T66.1.1 and now touches only `compact.rs` and its test.
   - The `## Archived outputs` section is appended in `Session::compact` after `summarise`, not inside `WorkingState::render`. The old wording conflicted with "the summary ends with it", because the state block comes before the model text, and the `llm` strategy has no state block at all.
 - A154 §1.1 `cox-ext` row, §3 P7 (new T7.9, done the same day) — `cox-ext` reads SKILL.md, command and subagent frontmatter with serde-saphyr 1.3 instead of serde_yaml 0.9, by the creator (2026-10-12). Why: serde_yaml is deprecated and pulled unsafe-libyaml, unmaintained (RUSTSEC-2024-0449), which `deny.toml` ignored only until 2026-12-31; serde-saphyr is maintained and already listed in `rust.md`. Effect: the parser keeps the YAML 1.2 reading (`strict_booleans`, non-finite floats kept as text) and one-line errors; the one difference is that a quoted `'true'` now reads as a bool (test `frontmatter_quoted_true_is_a_bool`); the RUSTSEC-2024-0449 ignore is removed. No decision changes.
+- A155 §3 P33 (new T33.46, T33.46.1–T33.46.3), docs/design/plugins.md §2, §3, §12, §14 — by the creator (2026-10-14), through Weft's T106.5 ("extend cox where it lacks what the Weft plugin needs"): a plugin package may ship Agent Skills with a data-only `[[skills]]` entry (`name`, `dir`), one grant line each (`skill:<name> <dir>`), loaded only for a granted plugin and read only through the package (no `..`, no symlinks). A local skill of the same name wins, with a notice. Why: a plugin that brings tools has no way to bring the instructions for them; Weft's cox plugin ships its authoring guide as a skill to Claude Code and Cursor. Effect: PL§12's "plugins adding text to the system prompt (skills do that)" now reads that a plugin adds prompt text only as a granted skill's index line in `system[2]`, which is built once per session, so the cache-stable prefix holds; new PL§14 decision 16. The `skill` tool's output names the skill's folder (all skills), so a skill can refer to files it bundles. No new dependency.
 
 ## 7. Risk register
 

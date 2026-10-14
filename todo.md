@@ -25,6 +25,10 @@
 - T33.45.7. FFI and Swift: the desktop contributions
 - T33.45.8. SDK and the surfaces example
 - T33.45.10. Docs: Russian and Ukrainian translations
+- T33.46. Plugins ship skills
+- T33.46.1. Manifest and grant: `[[skills]]`
+- T33.46.2. `cox-ext`: a plugin skill file, merge, and the skill's folder
+- T33.46.3. Session: a granted plugin's skills
 - T35.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T37.32. Signing, notarization, Sparkle, bundled CLI, Homebrew cask
 - T37.32.2. Developer ID signing, notarization, Sparkle, bundled CLI, Homebrew cask
