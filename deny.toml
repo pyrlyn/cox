@@ -64,6 +64,11 @@ ignore = [
     # the fixes are only in 48.0.4+ and 49.0.2+. Lift together with the pin.
     # https://rustsec.org/advisories/RUSTSEC-2026-0327.html
     { id = "RUSTSEC-2026-0327", reason = "wasmtime 43 via extism 1.30.0: unvalidated result count of an async-lifted component-model callback overflows a native stack buffer. Only hosts running components with async-lifted exports are affected; extism 1.30.0 and cox load core modules only (no `wasmtime::component` anywhere in either). Temporary: wasmtime is pinned to extism's major and extism cannot be upgraded yet; fixed in 48.0.4 / 49.0.2; remove when extism ships wasmtime >= 48.0.4 and the pin is lifted; review by 2026-12-31. https://rustsec.org/advisories/RUSTSEC-2026-0327.html" },
+    # Issued 2026-10-14. Same pin as above: the fixes are only in wasmtime
+    # 48.0.6 / 49.0.3, and extism 1.30.0 still requires 43 (T33.43).
+    { id = "RUSTSEC-2026-0359", reason = "wasmtime 43 via extism 1.30.0: a guest can crash the host with a long chain of recursive types when the top type is dropped. No workaround, and it is guest-triggerable. wasmtime stays on extism's major until extism ships >= 48.0.6 (T33.43); review by 2026-12-31. https://rustsec.org/advisories/RUSTSEC-2026-0359.html" },
+    { id = "RUSTSEC-2026-0362", reason = "wasmtime 43 via extism 1.30.0: mixing a sync re-entry into a store that was entered asynchronously can panic or move !Send host state. Not guest-triggerable; cox never calls wasmtime, and the embedder must write that shape itself. Fixed in 48.0.6 / 49.0.3; remove when extism ships that and the pin is lifted (T33.43); review by 2026-12-31. https://rustsec.org/advisories/RUSTSEC-2026-0362.html" },
+    { id = "RUSTSEC-2026-0363", reason = "wasmtime 43 via extism 1.30.0: component-model handle tables are capped per instance and charged to no store limit. Only component-model guests are affected; extism 1.30.0 and cox load core modules only (no `wasmtime::component`). Fixed in 48.0.6 / 49.0.3; remove when extism ships wasmtime >= 48.0.6 (T33.43); review by 2026-12-31. https://rustsec.org/advisories/RUSTSEC-2026-0363.html" },
 ]
 
 [sources]
