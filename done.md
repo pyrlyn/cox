@@ -9191,6 +9191,17 @@ Result: `Call::Hello` / `Reply::Hello(HostInfo { wire, cox, os, arch, sandbox })
 
 Check (2026-10-14): `cargo nextest run -p cox-app` 273/273; `-p cox --test remote` 1/1; `-p cox-ffi` 15/15 (before the review round, which changed no FFI-visible type); clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean.
 
+#### T68.9 End-to-end tests with fake launchers
+
+Model: Claude / sonnet-5.5 · Depends: T68.1 · Size: ~60 + tests · Priority: P1 · Complexity: 2
+
+Goal: test-support scripts named `ssh`, `docker`, `limactl` and `colima` that check their argv and exec the local `cox app-server --stdio` against a scratch `COX_HOME`, used by every P68 card; one `#[ignore]` test per real backend (`colima`, `lima`, `docker` under Colima) for a manual run. Done when `crates/cox/tests/targets.rs` runs a turn through each fake launcher with the scripted provider.
+
+Status: done 2026-10-14
+Result: `crates/cox/tests/support/fake_launcher.rs` (one fake launcher for all four kinds; the argv prefix is written out by hand so a wrong `cox_target::command` fails a test) and `crates/cox/tests/targets.rs`: a full scripted turn over the public `cox_app::wire` types through fake ssh, docker (with and without `--context`), limactl and colima; `fake_launcher_sees_no_api_key`; extra `fake_launcher_refuses_an_argv_it_was_not_given`. `tests/remote.rs` uses the shared helper. `cox` dev-depends on `cox-target`. The `#[ignore]` real-backend tests (`COX_TEST_COLIMA_PROFILE`, `COX_TEST_LIMA_INSTANCE`, `COX_TEST_DOCKER_CONTAINER`) were not run.
+
+Check (2026-10-14): `cargo nextest run -p cox --test targets --test remote --test deps` 17 passed, 3 skipped (ignored); clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean.
+
 #### T37.44.16 The shared file walker skips `.git/`
 
 Depends: — · Size: ~40 · Files: `crates/cox-search` (the walker), its tests
