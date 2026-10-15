@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use cox_protocol::config::HookConfig;
+use cox_protocol::config::{HookConfig, HookKind};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -60,7 +60,37 @@ struct Entry {
     #[serde(rename = "type")]
     kind: String,
     command: String,
+    /// Claude's `prompt` hook stores its text here, not in `command`.
+    prompt: String,
+    /// Claude's `http` hook stores its URL here, not in `command`.
+    url: String,
     timeout: Option<u32>,
+}
+
+/// `command` / `prompt` / `http` become a cox hook. Anything else (including
+/// a missing type, and Claude's `agent` type) is skipped: the runner only
+/// knows these three, and a silent drop hid the rest.
+fn classify(entry: &Entry) -> Option<(HookKind, String)> {
+    match entry.kind.as_str() {
+        "command" => Some((HookKind::Command, entry.command.clone())),
+        "prompt" => Some((
+            HookKind::Prompt,
+            if entry.prompt.is_empty() {
+                entry.command.clone()
+            } else {
+                entry.prompt.clone()
+            },
+        )),
+        "http" => Some((
+            HookKind::Http,
+            if entry.url.is_empty() {
+                entry.command.clone()
+            } else {
+                entry.url.clone()
+            },
+        )),
+        _ => None,
+    }
 }
 
 /// `~/.claude/settings.json`, `.claude/settings.json`,
@@ -98,14 +128,24 @@ pub fn load(paths: &[PathBuf]) -> ClaudeSettings {
         for (event, matchers) in file.hooks {
             let list = s.hooks.entry(event).or_default();
             for m in matchers {
-                // Claude also has `prompt`/`agent` hook types that call a
-                // model; only `command` maps onto cox's runner.
-                for e in m.hooks.into_iter().filter(|e| e.kind == "command") {
-                    list.push(HookConfig {
-                        matcher: m.matcher.clone(),
-                        command: e.command,
-                        timeout_s: e.timeout,
-                    });
+                for e in m.hooks {
+                    match classify(&e) {
+                        Some((kind, command)) => list.push(HookConfig {
+                            matcher: m.matcher.clone(),
+                            command,
+                            timeout_s: e.timeout,
+                            kind,
+                        }),
+                        None => s.notices.push(format!(
+                            "claude settings {}: hook type {} skipped",
+                            path.display(),
+                            if e.kind.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                e.kind
+                            }
+                        )),
+                    }
                 }
             }
         }

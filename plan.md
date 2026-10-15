@@ -2817,26 +2817,6 @@ Rationale in §6 A148. Idea-only: the source is the public Claude Code documenta
 
 **Not taken yet:** hooks of type `agent` (a later amendment, after T67.2), and `/security-review` (no card until the creator asks for one).
 
-#### T67.1 Hook kinds in config and in the Claude settings import
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2
-
-Goal: a hook entry carries a `kind` (`command`, the default, `prompt` or `http`). The Claude settings import keeps `prompt` and `http` entries; today `cox-ext/src/claude_settings.rs:103` keeps only `type == "command"` and drops the rest silently. The import now warns about any other type and skips it.
-
-Files:
-- `crates/cox-protocol/src/config.rs`: `HookKind { #[default] Command, Prompt, Http }` (`snake_case`), and `HookConfig.kind` with `#[serde(default)]`. `command` holds the command, the prompt text or the URL, by kind.
-- `crates/cox-ext/src/claude_settings.rs`
-- `docs/config.md` and the regenerated `docs/config.jsonschema` (the schema drift test)
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-protocol -p cox-ext -p cox-config
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `old_hook_config_without_kind_parses_as_command` and `claude_settings_import_keeps_prompt_and_http_hooks` pass, and the schema drift test is green.
-
 #### T67.2 Run prompt and http hooks, failing open
 
 Model: grok-4.7 · Status: open · Depends: T67.1 · Size: ~180 · Priority: P1 · Complexity: 3

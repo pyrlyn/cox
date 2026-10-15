@@ -1,3 +1,25 @@
+#### T67.1 Hook kinds in config and in the Claude settings import
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-14 · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-ext/src/claude_settings.rs`, `crates/cox-ext/src/hooks.rs`, `docs/config.md`, `docs/config.jsonschema`
+Goal: a hook entry carries a `kind` (`command`, the default, `prompt` or `http`). The Claude settings import keeps `prompt` and `http` entries; it warns about any other type and skips it.
+What landed:
+- `HookKind { Command, Prompt, Http }` (`snake_case`, default `command`) on `HookConfig`. `command` holds the shell line, the prompt text or the URL. An entry with no `kind` parses as `command`. An unknown kind is rejected.
+- The Claude import keeps `type: command|prompt|http`. Prompt text comes from `prompt` (else `command`); an HTTP URL comes from `url` (else `command`). Any other type, including a missing type and `agent`, is a notice and is skipped.
+- The shell runner skips a non-command entry (`Continue`) so a kept prompt is not `sh -c`'d. T67.2 runs those kinds. `Continue` leaves later command hooks in the same chain running.
+- `default.toml`'s `[hooks]` comment names `kind`, so generated `docs/config.md` does too. `docs/config.jsonschema` gained `HookKind` and `HookConfig.kind` (default `command`).
+Not done: workspace `clippy` and `cargo nextest run --workspace` were not run locally (CI runs them). `prompt` and `http` hooks are stored and not executed (T67.2).
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-protocol -p cox-ext -p cox-config
+223 tests run: 223 passed (including old_hook_config_without_kind_parses_as_command, claude_settings_import_keeps_prompt_and_http_hooks, prompt_hook_is_not_run_as_a_shell_command, config_jsonschema_matches_committed_file, config_docs_config_md_matches_default_toml)
+$ mise exec -- cargo clippy -p cox-protocol -p cox-ext -p cox-config -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -q -p cox -- doctor
+exit 1: ANTHROPIC_API_KEY is not set (expected here; keyring is off). toolchain, COX_HOME, db, sandbox, git, prices and plugin cache passed.
+```
+
 #### T33.18 Providers, ABI form (`PluginProvider`)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-09 · Depends: T33.14.1, T33.17 · Size: ~190 (landed larger; see Not done) · Priority: P2 · Complexity: 5 · Files: `crates/cox-plugin/src/provider.rs`, `crates/cox-plugin/src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-session/src/provider.rs`

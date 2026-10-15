@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use cox_protocol::config::{HookConfig, HooksConfig};
+use cox_protocol::config::{HookConfig, HookKind, HooksConfig};
 use cox_protocol::traits::Hook;
 use cox_protocol::types::{HookEvent, HookOutcome};
 use serde_json::Value;
@@ -62,6 +62,12 @@ impl Hook for ShellHooks {
         chain(hooks, payload, |hook, payload| {
             let (tool, cwd, shell) = (&tool, &self.cwd, &self.shell);
             async move {
+                // T67.2 runs prompt and http. Until then their text is
+                // kept on the entry and not passed to a shell: a prompt
+                // is not a command line.
+                if hook.kind != HookKind::Command {
+                    return HookOutcome::Continue;
+                }
                 match matches(hook.matcher.as_deref(), tool) {
                     Ok(true) => {}
                     Ok(false) => return HookOutcome::Continue,
@@ -294,6 +300,7 @@ mod tests {
                 matcher: Some("(".into()),
                 command: "echo never".into(),
                 timeout_s: None,
+                kind: HookKind::Command,
             }],
         );
         let config = HooksConfig {
@@ -352,6 +359,7 @@ mod tests {
                 matcher: None,
                 command: command.into(),
                 timeout_s: None,
+                kind: HookKind::Command,
             }],
         );
         let config = HooksConfig {
@@ -469,5 +477,39 @@ mod tests {
                 input: serde_json::json!({"additional_context":"remember x"})
             }
         );
+    }
+
+    /// A prompt hook's text is not a shell line. T67.2 runs it; until then
+    /// the runner skips it, so a kept import cannot execute the prompt.
+    #[tokio::test]
+    async fn prompt_hook_is_not_run_as_a_shell_command() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join("ran");
+        let mut events = HashMap::new();
+        events.insert(
+            "PreToolUse".to_string(),
+            vec![HookConfig {
+                matcher: None,
+                command: format!("touch {}", marker.display()),
+                timeout_s: None,
+                kind: HookKind::Prompt,
+            }],
+        );
+        let hooks = ShellHooks::new(
+            &HooksConfig {
+                events,
+                ..HooksConfig::default()
+            },
+            dir.path().to_path_buf(),
+        );
+        let out = hooks
+            .run(
+                HookEvent::PreToolUse,
+                serde_json::json!({ "tool_name": "bash" }),
+                Duration::from_secs(5),
+            )
+            .await;
+        assert_eq!(out, HookOutcome::Continue);
+        assert!(!marker.exists(), "the prompt text was executed");
     }
 }
