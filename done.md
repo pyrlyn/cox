@@ -11907,3 +11907,12 @@ Deviations: none.
 
 Check output: `cargo nextest run -p cox-ffi --test app closing_the_session_ends_the_canvas_pull` failed before the fix (the pull did not end in 5 s); after it, `cargo nextest run -p cox-ffi -p cox-app` — 289 passed; clippy `-D warnings` and `cargo fmt --check` clean.
 
+
+
+### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
+
+Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 100,382,464 bytes. With creator approval, updated only the Darwin-arm64 binary-size baseline; startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. Quiet footprint check passes timing and RSS and measures 100,382,464 bytes.
+
+### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
+
+Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 100,382,464 bytes. With creator approval, updated only the Darwin-arm64 binary-size baseline; startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. Quiet footprint check passes timing and RSS and measures 100,382,464 bytes.
