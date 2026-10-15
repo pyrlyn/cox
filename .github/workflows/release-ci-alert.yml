@@ -7,7 +7,7 @@ name: release-ci-alert
 # Inputs and permissions: https://github.com/pyrlyn/ci/blob/main/docs/reusable-workflows.md
 on:
   workflow_run:
-    workflows: [pipeline, ci, license-check, Release]
+    workflows: [pipeline, CI]
     types: [completed]
 
 concurrency:
