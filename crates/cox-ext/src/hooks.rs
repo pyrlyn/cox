@@ -30,6 +30,12 @@ pub struct ShellHooks {
     /// unless the session passes the host's shell (T57.2: Git Bash or
     /// PowerShell on Windows, the same program a `!` line runs in).
     shell: PathBuf,
+    /// HTTP hooks POST through this client. Production uses
+    /// [`cox_web::client`], which refuses private addresses.
+    http: cox_web::Client,
+    /// A loopback test turns the private-address check off. Production
+    /// leaves it on, so a repo-supplied URL cannot reach the host.
+    http_guard: bool,
 }
 
 impl ShellHooks {
@@ -38,7 +44,18 @@ impl ShellHooks {
             events: config.events.clone(),
             cwd,
             shell: PathBuf::from("sh"),
+            http: cox_web::client(),
+            http_guard: true,
         }
+    }
+
+    /// Replaces the HTTP client and skips the private-address check.
+    /// Wiremock listens on loopback, which [`cox_web::client`] refuses.
+    #[cfg(test)]
+    fn with_http(mut self, http: cox_web::Client) -> Self {
+        self.http = http;
+        self.http_guard = false;
+        self
     }
 
     pub fn with_shell(mut self, shell: PathBuf) -> Self {
@@ -60,12 +77,17 @@ impl Hook for ShellHooks {
             .unwrap_or_default()
             .to_string();
         chain(hooks, payload, |hook, payload| {
-            let (tool, cwd, shell) = (&tool, &self.cwd, &self.shell);
+            let (tool, cwd, shell, http, http_guard) = (
+                &tool,
+                &self.cwd,
+                &self.shell,
+                self.http.clone(),
+                self.http_guard,
+            );
             async move {
-                // T67.2 runs prompt and http. Until then their text is
-                // kept on the entry and not passed to a shell: a prompt
-                // is not a command line.
-                if hook.kind != HookKind::Command {
+                // A prompt is judged in cox-core, which holds the provider.
+                // Running it here would pass the prompt text to a shell.
+                if hook.kind == HookKind::Prompt {
                     return HookOutcome::Continue;
                 }
                 match matches(hook.matcher.as_deref(), tool) {
@@ -85,6 +107,9 @@ impl Hook for ShellHooks {
                 let limit = hook
                     .timeout_s
                     .map_or(timeout, |s| Duration::from_secs(u64::from(s)));
+                if hook.kind == HookKind::Http {
+                    return run_http(&http, http_guard, &hook.command, &payload, limit).await;
+                }
                 run_one(shell, &hook.command, &payload, limit, cwd).await
             }
         })
@@ -168,6 +193,47 @@ fn matches(matcher: Option<&str>, tool: &str) -> Result<bool, regex::Error> {
         None | Some("") | Some("*") => Ok(true),
         Some(m) if !m.contains(|c: char| ".$^*+?()[]{}|\\".contains(c)) => Ok(m == tool),
         Some(m) => regex::Regex::new(m).map(|re| re.is_match(tool)),
+    }
+}
+
+async fn run_http(
+    http: &cox_web::Client,
+    guard: bool,
+    url: &str,
+    payload: &Value,
+    limit: Duration,
+) -> HookOutcome {
+    if guard && cox_web::refused_literal(url).is_some() {
+        return HookOutcome::Failed {
+            error: format!("http hook {url}: private address refused"),
+        };
+    }
+    match cox_web::post_json(http, url, &payload.to_string(), limit).await {
+        Ok(text) => http_verdict(&text),
+        Err(error) => HookOutcome::Failed {
+            error: format!("http hook {url}: {error}"),
+        },
+    }
+}
+
+/// The same answer shape as a prompt hook. Anything but `ok: false` allows
+/// the call; unparseable text is `Failed`, which the core fails open.
+fn http_verdict(text: &str) -> HookOutcome {
+    match serde_json::from_str::<Value>(text.trim()) {
+        Ok(value) if value.get("ok").and_then(Value::as_bool) == Some(false) => {
+            let reason = value
+                .get("reason")
+                .and_then(Value::as_str)
+                .filter(|reason| !reason.is_empty())
+                .unwrap_or("blocked by hook");
+            HookOutcome::Block {
+                reason: reason.to_string(),
+            }
+        }
+        Ok(_) => HookOutcome::Continue,
+        Err(error) => HookOutcome::Failed {
+            error: format!("unparseable http hook answer: {error}"),
+        },
     }
 }
 
@@ -479,8 +545,8 @@ mod tests {
         );
     }
 
-    /// A prompt hook's text is not a shell line. T67.2 runs it; until then
-    /// the runner skips it, so a kept import cannot execute the prompt.
+    /// A prompt hook's text is not a shell line. The core judges it; the
+    /// runner must not pass that text to `sh -c`.
     #[tokio::test]
     async fn prompt_hook_is_not_run_as_a_shell_command() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -511,5 +577,45 @@ mod tests {
             .await;
         assert_eq!(out, HookOutcome::Continue);
         assert!(!marker.exists(), "the prompt text was executed");
+    }
+
+    /// A stalled endpoint is `Failed`. The core's fail-open path turns that
+    /// into a warning and lets the call through; a timeout must not block.
+    #[tokio::test]
+    async fn http_hook_timeout_fails_open() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_delay(Duration::from_secs(5)))
+            .mount(&server)
+            .await;
+        let mut events = HashMap::new();
+        events.insert(
+            "PreToolUse".into(),
+            vec![HookConfig {
+                matcher: None,
+                command: format!("{}/hook", server.uri()),
+                timeout_s: Some(1),
+                kind: HookKind::Http,
+            }],
+        );
+        let hooks = ShellHooks::new(
+            &HooksConfig {
+                events,
+                ..HooksConfig::default()
+            },
+            PathBuf::from("."),
+        )
+        .with_http(cox_web::client_for_tests());
+        let out = hooks
+            .run(
+                HookEvent::PreToolUse,
+                serde_json::json!({ "tool_name": "bash" }),
+                Duration::from_secs(5),
+            )
+            .await;
+        assert!(
+            matches!(out, HookOutcome::Failed { ref error } if error.contains("timed out")),
+            "{out:?}"
+        );
     }
 }

@@ -7,6 +7,9 @@ license.workspace = true
 
 [dependencies]
 cox-protocol = { path = "../cox-protocol", version = "0.1.2" }
+# T67.2: an http hook POSTs through cox-web so reqwest stays in the crate
+# that opens the socket.
+cox-web = { path = "../cox-web", version = "0.1.2" }
 # T44.2: presence text names another session's worktree path to the model,
 # through the one terminal-text guard.
 cox-sanitize = { path = "../cox-sanitize", version = "0.1.2" }
@@ -29,6 +32,7 @@ workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 [dev-dependencies]
 insta = { workspace = true }
 tempfile = { workspace = true }
+wiremock = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 

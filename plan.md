@@ -2817,30 +2817,6 @@ Rationale in §6 A148. Idea-only: the source is the public Claude Code documenta
 
 **Not taken yet:** hooks of type `agent` (a later amendment, after T67.2), and `/security-review` (no card until the creator asks for one).
 
-#### T67.2 Run prompt and http hooks, failing open
-
-Model: grok-4.7 · Status: open · Depends: T67.1 · Size: ~180 · Priority: P1 · Complexity: 3
-
-Goal: a `prompt` hook sends its prompt and the hook input to the cheap tier through `Session::side_call` and parses `{"ok": bool, "reason": string}`; `ok: false` blocks like a command hook's deny. An `http` hook POSTs the hook input as JSON and reads the same answer shape. Any error, timeout or unparseable answer is a warning and lets the call through (D14).
-
-Files:
-- `crates/cox-core/src/hooks.rs`: the `prompt` branch. The core already holds the provider, so it opens no socket.
-- `crates/cox-ext/src/hooks.rs`: the `http` branch in the runner, with `timeout_s`.
-- `crates/cox-web/src/lib.rs`: a `post_json` beside the existing GET, so `reqwest` stays in the crate that opens the socket (`deps.rs`).
-
-Steps:
-1. The judge sees only the hook input and the prompt, with no tools. Its answer is untrusted: anything but a well-formed `ok: false` allows.
-2. The side call records a `usage` row like every other side call; confirm that `side_call` does, and fix it here if not.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core -p cox-ext -p cox-web
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `prompt_hook_blocks_when_judge_says_not_ok`, `prompt_hook_unparseable_answer_fails_open` and `http_hook_timeout_fails_open` (wiremock) pass.
-
 #### T67.3 Five more hook events
 
 Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P1 · Complexity: 2

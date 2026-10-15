@@ -255,6 +255,49 @@ pub async fn fetch(
     })
 }
 
+/// POSTs `json_body` and returns the response body. `timeout` bounds the
+/// call. A non-2xx answer, a transport error or a timeout is `Err`, and a
+/// body over 64 KiB is [`ToolError::TooLarge`] so a hook verdict cannot
+/// grow without a limit. The caller picks the client: production passes
+/// [`client`] (private addresses stay refused) and a loopback test passes
+/// [`client_for_tests`].
+pub async fn post_json(
+    http: &Client,
+    url: &str,
+    json_body: &str,
+    timeout: Duration,
+) -> Result<String, ToolError> {
+    let call = async {
+        let response = http
+            .post(url)
+            .timeout(timeout)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(json_body.to_owned())
+            .send()
+            .await
+            .map_err(fetch_error)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ToolError::Denied {
+                why: format!("{url} answered HTTP {status}"),
+            });
+        }
+        let text = response.text().await.map_err(fetch_error)?;
+        const CAP: usize = 64 * 1024;
+        if text.len() > CAP {
+            return Err(ToolError::TooLarge {
+                bytes: text.len() as u64,
+                cap: CAP as u64,
+            });
+        }
+        Ok(text)
+    };
+    match tokio::time::timeout(timeout, call).await {
+        Ok(result) => result,
+        Err(_) => Err(ToolError::Timeout),
+    }
+}
+
 fn fetch_error(e: reqwest::Error) -> ToolError {
     if e.is_timeout() {
         return ToolError::Timeout;

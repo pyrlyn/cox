@@ -1,3 +1,27 @@
+#### T67.2 Run prompt and http hooks, failing open
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-15 · Depends: T67.1 · Size: ~180 (landed larger; see Not done) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/hooks.rs`, `crates/cox-ext/src/hooks.rs`, `crates/cox-web/src/lib.rs`, `crates/cox-core/Cargo.toml`, `crates/cox-ext/Cargo.toml`, `crates/cox/tests/deps.rs`
+Goal: a `prompt` hook sends its prompt and the hook input to the cheap tier through `Session::side_call` and parses `{"ok": bool, "reason": string}`; `ok: false` blocks like a command hook's deny. An `http` hook POSTs the hook input as JSON and reads the same answer shape. Any error, timeout or unparseable answer is a warning and lets the call through (D14).
+What landed:
+- Prompt hooks are judged in `cox-core` before the shell/http runner. The judge is `Session::side_call` with `Job::Hook` (cheap tier), an empty tool list, the prompt plus one JSON-answer line as the system text, and the hook payload as the user text. `{"ok": false}` blocks; a missing or empty reason still blocks with "blocked by hook". Anything else that parses as JSON allows. A missing or unparseable answer is `Failed`.
+- `side_call` already inserts a `usage` row. The block test asserts a `Job::Hook` + `Tier::Cheap` row, so `side.rs` is unchanged.
+- An `http` hook POSTs the payload as JSON through `cox_web::post_json` (per-request timeout, 64 KiB cap, non-2xx is `Denied`). Production uses `cox_web::client()` and refuses a private-address literal. A timeout, transport error or unparseable body is `Failed`. The runner still returns `Continue` for `HookKind::Prompt`, so the prompt text is never `sh -c`'d.
+- Fail-open stays in the core (`settle`): `Failed` becomes a `Notice(Warn)` and `Continue` when `hooks.fail_open` (the default), and a block otherwise. Later hooks still run after a warning.
+Not done: workspace `clippy --workspace --all-targets` was not finished locally. After `libasound2-dev`, `whisper-rs-sys` fails to link (`ld` cannot find `-lstdc++`). The three crates named by the Check are clippy-clean. CI runs the workspace clippy. The card names three source files and ~180 lines; the matcher regex on `cox-core`, the `cox-web` edge on `cox-ext` (and `deps.rs`), and the three named tests take it over 200 lines and three files. `cargo hakari generate --diff` was empty.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-core -p cox-ext -p cox-web
+462 tests run: 462 passed, 1 skipped (including prompt_hook_blocks_when_judge_says_not_ok, prompt_hook_unparseable_answer_fails_open, http_hook_timeout_fails_open, prompt_hook_is_not_run_as_a_shell_command)
+$ mise exec -- cargo nextest run -p cox --test deps -- no_crate_below_cox_depends_on_core
+1 passed
+$ mise exec -- cargo clippy -p cox-core -p cox-ext -p cox-web --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -q -p cox -- doctor
+exit 1: ANTHROPIC_API_KEY is not set (expected here; keyring is off). toolchain, COX_HOME, db, sandbox, git, prices and plugin cache passed.
+```
+
 #### T67.1 Hook kinds in config and in the Claude settings import
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-14 · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-ext/src/claude_settings.rs`, `crates/cox-ext/src/hooks.rs`, `docs/config.md`, `docs/config.jsonschema`
