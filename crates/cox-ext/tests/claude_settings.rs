@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use cox_ext::claude_settings::{load, paths};
-use cox_protocol::config::HookConfig;
+use cox_protocol::config::{HookConfig, HookKind};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude")
@@ -31,11 +31,20 @@ fn claude_settings_lift_rules_hooks_and_env_across_files() {
     assert!(s.ask.is_empty());
     assert_eq!(
         s.hooks["PreToolUse"],
-        [HookConfig {
-            matcher: Some("Bash".into()),
-            command: "rtk hook".into(),
-            timeout_s: Some(10),
-        }]
+        [
+            HookConfig {
+                matcher: Some("Bash".into()),
+                command: "rtk hook".into(),
+                timeout_s: Some(10),
+                kind: HookKind::Command,
+            },
+            HookConfig {
+                matcher: Some("Bash".into()),
+                command: "is this safe?".into(),
+                timeout_s: None,
+                kind: HookKind::Prompt,
+            },
+        ]
     );
     assert_eq!(s.hooks["Stop"][0].matcher, None);
     assert_eq!(s.env["FOO"], "local");
@@ -103,5 +112,63 @@ fn claude_keybindings_json_flattens_context_blocks() {
             .notices
             .len(),
         1
+    );
+}
+
+/// T67.1: `prompt` and `http` entries are kept (the text or URL lands in
+/// `command`), and any other type is a notice, not a silent drop.
+#[test]
+fn claude_settings_import_keeps_prompt_and_http_hooks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("settings.json");
+    std::fs::write(
+        &path,
+        r#"{
+            "hooks": {
+                "PreToolUse": [{
+                    "matcher": "Bash",
+                    "hooks": [
+                        { "type": "prompt", "prompt": "is this safe?" },
+                        { "type": "http", "url": "https://hooks.example/pre", "timeout": 5 },
+                        { "type": "agent", "prompt": "review it" },
+                        { "timeout": 1, "command": "echo dropped" }
+                    ]
+                }]
+            }
+        }"#,
+    )
+    .expect("write");
+    let s = load(std::slice::from_ref(&path));
+    assert_eq!(
+        s.hooks["PreToolUse"],
+        [
+            HookConfig {
+                matcher: Some("Bash".into()),
+                command: "is this safe?".into(),
+                timeout_s: None,
+                kind: HookKind::Prompt,
+            },
+            HookConfig {
+                matcher: Some("Bash".into()),
+                command: "https://hooks.example/pre".into(),
+                timeout_s: Some(5),
+                kind: HookKind::Http,
+            },
+        ]
+    );
+    assert_eq!(s.notices.len(), 2, "{:?}", s.notices);
+    assert!(
+        s.notices
+            .iter()
+            .any(|n| n.contains("hook type agent skipped")),
+        "{:?}",
+        s.notices
+    );
+    assert!(
+        s.notices
+            .iter()
+            .any(|n| n.contains("hook type (none) skipped")),
+        "{:?}",
+        s.notices
     );
 }

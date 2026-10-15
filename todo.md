@@ -114,7 +114,6 @@
 - T66.12. Design: resident sessions and a supervisor
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
-- T67.1. Hook kinds in config and in the Claude settings import
 - T67.2. Run prompt and http hooks, failing open
 - T67.3. Five more hook events
 - T67.4. `/goal`: a judged stop condition
