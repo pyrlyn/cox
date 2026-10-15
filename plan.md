@@ -56,7 +56,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.15 | todo | P2 | 3 | 0% | |
 | T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
-| T33.43 | todo | P1 | 2 | 0% | |
+| T33.43 | in progress | P1 | 2 | 30% | Codex / GPT-6.1-sol |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
 | T33.45.7 | todo | P2 | 4 | 0% | |
@@ -1077,9 +1077,9 @@ Check: the offline pytest (body construction, redaction, no key means a clear ex
 
 #### T33.43 Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 
-Depends: an extism release after v1.30.0 that pins wasmtime ≥ 48 (extism `main` already pins 48; checked 2026-09-26) · Size: ~30 · Files: `Cargo.toml`, `Cargo.lock`, `deny.toml`
-Goal: move the workspace `extism` and the direct `wasmtime` (declared only for its `anyhow` feature) to that release, then remove the `RUSTSEC-2026-0222`, `RUSTSEC-2026-0269`, `RUSTSEC-2026-0316` and `RUSTSEC-2026-0327` entries (0316 needs wasmtime >= 48.0.3, 0327 needs >= 48.0.4) from `deny.toml` `ignore` (A55, research.md P39). Also check whether the direct `wasmtime` declaration is still needed. The bump was approved in advance by the creator (A55), but only onto a published crates.io release, never a git dependency. It unblocks the WASI preopens in T33.14.2. If no such release exists by 2026-12-31, bring it back to the creator.
-Check: `cargo deny check advisories` passes with no wasmtime ignores; the `cox-plugin` tests and `slim_build_has_no_wasm_runtime` pass; `scripts/footprint.sh` stays within the 20 MiB budget (PL§12).
+Depends: published Extism release with patched Wasmtime · Size: ~30 · Files: `Cargo.toml`, `Cargo.lock`, `deny.toml`, `research.md`
+Goal: update workspace `extism` and its direct `wasmtime` feature-unifier to the published Extism 1.41.0 / Wasmtime 49 line, then remove every now-fixed advisory ignore from `deny.toml`. Preserve the exception-handling feature, verify whether the direct `wasmtime` declaration remains necessary, and document any advisories that remain with reachability analysis. The creator approved this bump in advance (A55); use published crates.io releases only. This unblocks the WASI preopens in T33.14.2.
+Check: isolated `cargo audit --no-fetch` and `cargo deny check advisories` pass without fixed-advisory ignores; `cox-plugin` tests, `slim_build_has_no_wasm_runtime`, workspace clippy/fmt pass; `scripts/footprint.sh` stays within the 20 MiB budget (PL§12).
 
 #### T33.45 Design the plugin API: shared, terminal-only and desktop-only
 
