@@ -54,21 +54,6 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 ignore = [
     "RUSTSEC-2025-0141", # bincode 1.3.3 via syntect
     "RUSTSEC-2024-0320", # yaml-rust 0.4.5 via syntect
-    # T33.3 (A52): wasmtime 43.0.2 via extism 1.30.0 (research.md R§4.3.5
-    # P39). Ignored with a deadline, not forever.
-    { id = "RUSTSEC-2026-0222", reason = "wasmtime 43 via extism 1.30.0: not guest-triggerable; needs the embedder to put an object from one Engine into another Engine's Store through specific APIs (debug_register_module, StructRefPre/ArrayRefPre/ExnRefPre::new, Tag::new, breakpoints). Neither extism nor cox calls them, and each extism Plugin keeps its own Engine and Store with no cross-plugin objects. Remove when extism ships wasmtime >= 48 (extism main already pins 48; no release since v1.30.0, 2026-06-04); review by 2026-12-31" },
-    { id = "RUSTSEC-2026-0269", reason = "wasmtime 43 via extism 1.30.0: a WASI filesystem sandbox escape through trailing slashes. cox builds every plugin with WASI off and no preopens (cox-plugin host.rs), so no guest has a filesystem to escape; preopens (T33.14) stay blocked until the bump. Remove when extism ships wasmtime >= 48 (extism main already pins 48; no release since v1.30.0, 2026-06-04); review by 2026-12-31" },
-    { id = "RUSTSEC-2026-0316", reason = "wasmtime 43 via extism 1.30.0: a guest-returned value lifted through the component-model `Val` API can allocate past the hostcall fuel limit. Only hosts using `wasmtime::component::Val` are affected; extism 1.30.0 and cox use core modules only (no `wasmtime::component` anywhere in either). Fixed in 48.0.3; remove when extism ships wasmtime >= 48.0.3 (T33.43); review by 2026-12-31" },
-    # Temporary exception: wasmtime stays pinned to 43 because extism 1.30.0
-    # (the newest release) requires that major and cannot be upgraded yet;
-    # the fixes are only in 48.0.4+ and 49.0.2+. Lift together with the pin.
-    # https://rustsec.org/advisories/RUSTSEC-2026-0327.html
-    { id = "RUSTSEC-2026-0327", reason = "wasmtime 43 via extism 1.30.0: unvalidated result count of an async-lifted component-model callback overflows a native stack buffer. Only hosts running components with async-lifted exports are affected; extism 1.30.0 and cox load core modules only (no `wasmtime::component` anywhere in either). Temporary: wasmtime is pinned to extism's major and extism cannot be upgraded yet; fixed in 48.0.4 / 49.0.2; remove when extism ships wasmtime >= 48.0.4 and the pin is lifted; review by 2026-12-31. https://rustsec.org/advisories/RUSTSEC-2026-0327.html" },
-    # Issued 2026-10-14. Same pin as above: the fixes are only in wasmtime
-    # 48.0.6 / 49.0.3, and extism 1.30.0 still requires 43 (T33.43).
-    { id = "RUSTSEC-2026-0359", reason = "wasmtime 43 via extism 1.30.0: a guest can crash the host with a long chain of recursive types when the top type is dropped. No workaround, and it is guest-triggerable. wasmtime stays on extism's major until extism ships >= 48.0.6 (T33.43); review by 2026-12-31. https://rustsec.org/advisories/RUSTSEC-2026-0359.html" },
-    { id = "RUSTSEC-2026-0362", reason = "wasmtime 43 via extism 1.30.0: mixing a sync re-entry into a store that was entered asynchronously can panic or move !Send host state. Not guest-triggerable; cox never calls wasmtime, and the embedder must write that shape itself. Fixed in 48.0.6 / 49.0.3; remove when extism ships that and the pin is lifted (T33.43); review by 2026-12-31. https://rustsec.org/advisories/RUSTSEC-2026-0362.html" },
-    { id = "RUSTSEC-2026-0363", reason = "wasmtime 43 via extism 1.30.0: component-model handle tables are capped per instance and charged to no store limit. Only component-model guests are affected; extism 1.30.0 and cox load core modules only (no `wasmtime::component`). Fixed in 48.0.6 / 49.0.3; remove when extism ships wasmtime >= 48.0.6 (T33.43); review by 2026-12-31. https://rustsec.org/advisories/RUSTSEC-2026-0363.html" },
 ]
 
 [sources]

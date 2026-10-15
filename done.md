@@ -11953,3 +11953,12 @@ Deviations: none.
 
 Check output: `cargo nextest run -p cox-ffi --test app closing_the_session_ends_the_canvas_pull` failed before the fix (the pull did not end in 5 s); after it, `cargo nextest run -p cox-ffi -p cox-app` — 289 passed; clippy `-D warnings` and `cargo fmt --check` clean.
 
+
+
+### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
+
+Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 99,197,840 bytes (+27.5%). The creator approved accepting the security-mandated size increase; updated only the Darwin-arm64 binary-size baseline. Startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. After regenerating the stale workspace-hack, the rebuilt release measured 99,197,840 bytes and the footprint check passed.
+
+### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
+
+Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 99,197,840 bytes (+27.5%). The creator approved accepting the security-mandated size increase; updated only the Darwin-arm64 binary-size baseline. Startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. After regenerating the stale workspace-hack, the rebuilt release measured 99,197,840 bytes and the footprint check passed.
