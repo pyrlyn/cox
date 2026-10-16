@@ -81,6 +81,21 @@ clean
 ```
 `cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
 
+#### T64.18 Drop the unread `State::Compacting`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-core/src/session.rs`, `crates/cox-core/src/compact.rs`, `crates/cox-core/tests/compact.rs`
+Goal: remove the `#[allow(dead_code)]` variant `State::Compacting`, which `compact` wrote but nothing matched, without changing what the session refuses while a compaction runs.
+What landed:
+- `State` is private to `cox-core` (not re-exported, carried by no `Event`), so no UI or status query could read `Compacting`. Compaction already reports through `Event::Compacted` and notices, so the variant, its `#[allow(dead_code)]` and its doc line are gone.
+- The write was not dead in effect: `rewind`, `/mode`, `user_tool`, the repo map and plugin model switches all treat any non-`Idle` state as busy, so a manual `/compact` on an idle session was protected from a concurrent `/rewind` only because of it. `compact` now sets the existing `State::Assembling` (compaction builds the next request's context) and restores the previous state afterwards, as before.
+- Test `compact_refuses_a_rewind_while_the_summary_is_written`: a provider that parks the summariser call; a `Rewind` submitted meanwhile is refused with "a turn is running" and cuts no history.
+Not done: no UI shows a "compacting" status; none exists today and `Event::Compacted` is the signal surfaces use.
+Check:
+- Mutation: with the state write removed (state stays `Idle`), the new test failed (`the rewind cut nothing`: history was emptied). Restored with `Assembling`.
+- `cargo nextest run -p cox-core`: 391 run, 391 passed, 1 skipped.
+- `cargo clippy -p cox-core --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
