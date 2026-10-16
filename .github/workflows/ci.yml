@@ -58,12 +58,11 @@ jobs:
         [
         {"os": "ubuntu-latest", "target": "x86_64-unknown-linux-gnu"},
         {"os": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-gnu"},
-        {"os": "macos-latest", "target": "aarch64-apple-darwin"}
+        {"os": "xcode-27", "target": "aarch64-apple-darwin"}
         ]
       # The manifest is virtual with `default-members`; ci-rust's default `package-args`
       # (--workspace) already covers every member, so no `clippy-args` here.
       tools: nextest
-      xcode-version: ""
       # Linux job A (plan.md T4.2): the sandbox must pick bubblewrap; job B
       # (sandbox-landlock) covers the Landlock fallback. cox-voice's build
       # packages (T54.2) for `--workspace` and `--all-features`.
@@ -305,7 +304,7 @@ jobs:
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: macos-latest
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -369,7 +368,7 @@ jobs:
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: macos-latest
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -442,7 +441,7 @@ jobs:
       && (needs.changes.result != 'success'
       || needs.changes.outputs.swift == 'true' || needs.changes.outputs.rust == 'true')
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: macos-latest
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
