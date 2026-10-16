@@ -12271,6 +12271,28 @@ Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49
 
 Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 99,197,840 bytes (+27.5%). The creator approved accepting the security-mandated size increase; updated only the Darwin-arm64 binary-size baseline. Startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. After regenerating the stale workspace-hack, the rebuilt release measured 99,197,840 bytes and the footprint check passed.
 
+#### T69.4 Budgeted `quick_check` when the store opens
+
+Model: Claude Code / haiku-5.5 · Depends: — · Priority: P3 · Complexity: 1 · Files: `crates/cox-store/src/lib.rs` (and its tests), `crates/cox-store/Cargo.toml`
+
+Goal: After WAL is on, `Store::open` runs `PRAGMA quick_check(1)` with a ~200 ms budget: `ok` continues; a finding is a `StoreError` the session prints and refuses; a timeout logs and opens anyway. Not repeated per query.
+
+Why: `enable_wal` had no integrity check, so a corrupt database failed later and obscurely.
+
+Source: [codex `codex-rs/state/src/sqlite/validation.rs` L16–66](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/state/src/sqlite/validation.rs#L16-L66). Implemented similar, not copied: codex uses sqlx and a progress handler; cox is on Diesel.
+
+Plan: (1) failing test: a damaged `cox.db` must make `Store::open` return `Corrupt`. (2) the check runs on its own read-only-capable connection through `libsqlite3-sys` (already a direct dependency), because Diesel hides the SQLite handle and the budget needs a progress handler. (3) call it in `Store::open` between `enable_wal` and migrations. (4) tests for healthy, damaged and interrupted cases.
+
+Status: done 2026-10-16 · Branch `t69.4-store-quick-check`, commit `feat(store): T69.4 budgeted quick_check on open`.
+
+What landed: `Store::open` runs `quick_check` after `enable_wal` and before migrations. A finding returns `StoreError::Corrupt { path }` and logs SQLite's text at error level. A budget overrun, or a check SQLite cannot run, logs at warn level and opens. The check uses `libsqlite3-sys` with a progress handler that interrupts at 200 ms, which Diesel cannot express. `tracing` is now a `cox-store` dependency; it was already a workspace dependency.
+
+Not done: the session's print of the refusal goes through the existing `StoreError` display, and no `cox-session` or CLI test exercises it. No test runs a database large enough to exceed 200 ms for real; the timeout test uses a zero budget. The `cox` crate's `deps.rs` was not run, since only `cox-store` was built.
+
+Deviations: the first draft of the damaged-file test wiped every page after page 1; the WAL switch then failed with `Open` before the check ran, so the test damages page 2 only. The card's Files line did not list `Cargo.toml`, but logging needs `tracing`, which `cox-store` did not have.
+
+Check output: `cargo nextest run -p cox-store` — 45 passed, 2 skipped. `damaged_store_file_is_refused_on_open` failed before the change (`Store::open` returned `Ok` on a damaged page 2) and passes after it. `clippy -p cox-store --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
 #### T69.5 Compaction rejects a tiny summary and survives a context overflow
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3

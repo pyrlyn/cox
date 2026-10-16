@@ -148,7 +148,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | todo | P2 | 1 | 0% |  |
 | T69.2 | todo | P1 | 2 | 0% | |
-| T69.4 | todo | P3 | 1 | 0% | |
+| T69.3 | todo | P2 | 1 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
 | T69.7 | todo | P3 | 3 | 0% | |
 
@@ -3066,21 +3066,21 @@ Files: `crates/cox-core/src/session.rs`, `crates/cox-permission/src/lib.rs` (the
 
 Done when tests prove: flag off writes nothing; flag on appends one line and a second approval does not duplicate; an opaque PowerShell line and a deny match are not persisted; the `docs/compat.md` row is deleted. Check: `mise exec -- cargo nextest run -p cox-core -E 'test(allow_for_session)'`, `bash scripts/leftovers.sh`.
 
-#### T69.4 Budgeted `quick_check` when the store opens
+#### T69.3 Default read-only metadata dirs in a writable workspace
 
-Model: - · Status: open · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1
+Model: - · Status: open · Depends: — · Size: ~60 · Priority: P2 · Complexity: 1
 
-Goal: After WAL is on, `Store::open` runs `PRAGMA quick_check(1)` with a ~200 ms budget: `ok` continues; a finding is a `StoreError` the session prints and refuses; a timeout logs and opens anyway. Not repeated per query.
+Goal: Add `.agents`, `.codex` and `.aws` to the default `sandbox.readonly_in_workspace` (now `.git`, `.cox`, `.claude`). A user who set the list keeps it.
 
-Why: `enable_wal` (`cox-store/src/lib.rs` ~L271) has no integrity check, so a corrupt database fails later and obscurely.
+Why: home-directory `Read(~/.aws/**)` does not cover a repo-local `.aws`.
 
-Source: [codex `codex-rs/state/src/sqlite/validation.rs` L16–66](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/state/src/sqlite/validation.rs#L16-L66)
+Source: [codex `codex-rs/protocol/src/permissions.rs` L40–51](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/protocol/src/permissions.rs#L40-L51)
 
-Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy:** codex uses sqlx and a progress handler; cox is on Diesel.
+Licence: Apache-2.0, implement similar, not copy; the four-name constant is too small to need a `NOTICE`. **Implement similar:** a config default with a one-line comment naming the codex commit and path. Do not copy `seatbelt.rs`.
 
-Files: `crates/cox-store/src/lib.rs` (and its tests)
+Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, the seatbelt and bwrap argument snapshots
 
-Done when a new database opens and a forced short deadline still opens. Check: `mise exec -- cargo nextest run -p cox-store`.
+Done when the default grows, a user list is unchanged and the snapshots pass. Check: `mise exec -- cargo nextest run -p cox-sandbox -p cox-protocol`.
 
 #### T69.6 After compaction, reattach live tasks, todos and subagents
 
