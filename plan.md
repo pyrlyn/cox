@@ -150,7 +150,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | todo | P2 | 3 | 0% |  |
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | todo | P2 | 1 | 0% |  |
-| T69.1 | todo | P1 | 3 | 0% | |
+| T69.1 | in progress | P1 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T69.2 | todo | P1 | 2 | 0% | |
 | T69.3 | todo | P2 | 1 | 0% | |
 | T69.4 | todo | P3 | 1 | 0% | |
@@ -3084,7 +3084,7 @@ Rationale in §6 A159. Found by reading openai/codex at `f0c5077c34ec7a76b4ad913
 
 #### T69.1 PowerShell and cmd readers hit existing `Read` denies
 
-Model: - · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
+Model: Claude Code / sonnet-5.5 · Status: in progress · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
 
 Goal: `Get-Content`, `gc`, `type` and `more` on one plain command are classified read-only with the path on the segment, so `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa` instead of only asking; writers (`Remove-Item`, `Set-Content`, `Out-File`) keep their path; pipelines, `;`, `$(`, variables and unknown aliases stay opaque `Exec`.
 
@@ -3095,6 +3095,8 @@ Source: [codex `codex-rs/shell-command/src/command_safety/powershell_parser.rs` 
 Licence: Apache-2.0 (both), implement similar, not copy (per-file header and a root `NOTICE` needed). **Implement similar, do not copy:** the codex parser is a `.ps1` child process and grok's file is thousands of lines bound to its own types.
 
 Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-core/tests/permission.rs`
+
+Plan: (1) failing tests in `classify.rs` and `cox-core/tests/permission.rs`; (2) `command_risk` rates `Get-Content`/`gc` read-only when their arguments are plain words, and `walk` makes a reader that is not the one command of the line opaque `Exec`; the existing `Read` deny guard then sees the path; (3) nextest on `cox-tools` and `cox-core`, clippy, fmt.
 
 Done when `unparsed_powershell_command_asks` is extended (four reader lines naming `~/.ssh/id_rsa` are read-only and not opaque; `Remove-Item` is not read-only; a pipeline stays opaque) and `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa`. Check: `mise exec -- cargo nextest run -p cox-tools -E 'test(unparsed_powershell)'`, `mise exec -- cargo nextest run -p cox-core -E 'test(permission)'`.
 
