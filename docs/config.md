@@ -170,7 +170,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `mode` = `"workspace-write"` — read-only | workspace-write | danger-full-access
 - `network` = `false`
 - `writable` = `[]` — extra writable roots
-- `readonly_in_workspace` = `[".git", ".cox", ".claude"]`
+- `readonly_in_workspace` = `[".git", ".cox", ".claude", ".agents", ".codex", ".aws"]`
 - `linux_backend` = `"auto"` — auto | bwrap | landlock | none
 ## `[budget]`
 
