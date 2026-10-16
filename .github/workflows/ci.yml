@@ -8,8 +8,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
-# Build and test jobs need only to read the repository; a job that needs more
-# (revert-on-failure) declares its own.
+# Build and test jobs need only to read the repository; a job that needs more declares its own.
 permissions:
   contents: read
 
@@ -115,7 +114,7 @@ jobs:
 
   # P57 (T57.1): `cargo check` and clippy for x64 and ARM64 Windows over the
   # crates that build there, listed once in the justfile (`windows_crates`);
-  # each P57 card adds its crates. Not in revert-on-failure's `needs`: it is
+  # each P57 card adds its crates. It is
   # required for a merge only once T57.11 builds the whole workspace.
   # Off until the Windows work is built and tested on a Windows host (creator,
   # 2026-09-29); CI comes after that.
@@ -563,26 +562,3 @@ jobs:
 
       - name: docs check
         run: just docs-check
-
-  revert-on-failure:
-    name: revert-on-failure
-    needs:
-      [
-        rust, sandbox-landlock, plugins, plugin-examples, deny, audit,
-        footprint-macos, footprint-linux, docs,
-      ]
-    if: >-
-      always()
-      && github.event_name == 'push'
-      && github.ref == 'refs/heads/main'
-      && contains(join(needs.*.result, ','), 'failure')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      # The shared action skips new branches, bot and earlier auto-revert commits, bases
-      # missing locally and pushes touching .github/ (GITHUB_TOKEN cannot push workflow
-      # files). No re-apply PR, as before (that would need pull-requests: write).
-      - uses: pyrlyn/ci/.github/actions/revert-on-failure@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
-        with:
-          reapply-pr: "false"
