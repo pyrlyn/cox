@@ -4,7 +4,7 @@
 
 **Before you start.** Delegate one-off shell (build, test, git, cargo), API/HTTP calls, and file listings to a low-cost model; do not run those from the main context. `plan.md` §0 lists the decisions; do not re-argue them in a task.
 
-**Read first.** `plan.md` — decisions, architecture, every open task with its Check. `research.md` — evidence and the fact-check ledger. `report.html` — the same evidence for humans. Do not add work that is not in `plan.md`; propose it as a plan amendment (`plan.md` §6).
+**Read first.** `plan.md` — decisions, architecture, every open task with its Check. `research.md` — evidence and the fact-check ledger. `docs/report.html` — the same evidence for humans. Do not add work that is not in `plan.md`; propose it as a plan amendment (`plan.md` §6).
 
 **Toolchain.** Rust is pinned in `mise.toml`. Run everything as `mise exec -- cargo <cmd>` (or `mise activate`). Never install or switch a global toolchain.
 
