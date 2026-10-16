@@ -1,3 +1,25 @@
+#### T69.8 Integer compact threshold
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-16 · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1 · Files: `crates/cox-core/src/compact.rs`
+Goal: `needs_compaction` compares in integers (`last * 10_000 >= scaled_compact_at * max_context`, saturating, false for a zero window) instead of `f64`.
+Plan (Claude Code / haiku-5.5): (1) claim-named tests in `compact.rs` first: the 0.07/100 boundary, a saturating huge threshold, a zero window, and a NaN threshold; run them against the f64 code. (2) Replace the float comparison in `needs_compaction` with `u64` math on `compact_at` scaled to parts per 10 000 (`round`, then `saturating_mul`), with an explicit `max_context == 0 || compact_at.is_nan()` guard. (3) Run `cox-core` nextest, clippy and fmt.
+What landed: the integer comparison in `needs_compaction` only. The signature, the `compact_at` config field and its default (0.75) are unchanged. `threshold` and `near` stay as they are: they serve the pre-call fit check (§1.10). NaN keeps the old never-fires answer, since a bare float-to-int cast would read NaN as 0 and compact every turn.
+Not done: "a window above 2^53 is exact" cannot be reached through this function: it takes `u32` token counts (`session.rs` passes `u32`), so the largest window is about 4.3e9, and the u64 math is exact for every input the signature admits. The 4-decimal scale is a precision limit: a `compact_at` with more than four decimals is rounded to the nearest 0.0001, where the f64 path kept the full value. The new tests do not cover that rounding.
+Check: the boundary test is the one that fails on the f64 code. The other new tests (saturation, zero window, NaN) pass on f64 as well; they guard the integer version against the naive mistakes (overflow, a zero window that compacts every turn, NaN firing every turn).
+```text
+$ mise exec -- cargo nextest run -p cox-core compact_trigger   (f64 code, new tests added)
+FAIL compact::tests::compact_trigger_boundary_is_exact_where_f64_rounds_up: assertion failed: needs_compaction(7, 100, 0.07)
+PASS compact_trigger_is_a_fraction_of_max_context, compact_trigger_saturates_on_huge_threshold, compact_trigger_zero_window_never_fires
+$ mise exec -- cargo nextest run -p cox-core compact_trigger   (integer code)
+5 tests run: 5 passed (adds compact_trigger_nan_threshold_never_fires)
+$ mise exec -- cargo nextest run -p cox-core
+394 tests run: 394 passed, 1 skipped
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check -p cox-core
+clean
+```
+
 #### T67.2 Run prompt and http hooks, failing open
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-15 · Depends: T67.1 · Size: ~180 (landed larger; see Not done) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/hooks.rs`, `crates/cox-ext/src/hooks.rs`, `crates/cox-web/src/lib.rs`, `crates/cox-core/Cargo.toml`, `crates/cox-ext/Cargo.toml`, `crates/cox/tests/deps.rs`
@@ -81,6 +103,54 @@ clean
 ```
 `cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
 
+#### T64.18 Drop the unread `State::Compacting`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-core/src/session.rs`, `crates/cox-core/src/compact.rs`, `crates/cox-core/tests/compact.rs`
+Goal: remove the `#[allow(dead_code)]` variant `State::Compacting`, which `compact` wrote but nothing matched, without changing what the session refuses while a compaction runs.
+What landed:
+- `State` is private to `cox-core` (not re-exported, carried by no `Event`), so no UI or status query could read `Compacting`. Compaction already reports through `Event::Compacted` and notices, so the variant, its `#[allow(dead_code)]` and its doc line are gone.
+- The write was not dead in effect: `rewind`, `/mode`, `user_tool`, the repo map and plugin model switches all treat any non-`Idle` state as busy, so a manual `/compact` on an idle session was protected from a concurrent `/rewind` only because of it. `compact` now sets the existing `State::Assembling` (compaction builds the next request's context) and restores the previous state afterwards, as before.
+- Test `compact_refuses_a_rewind_while_the_summary_is_written`: a provider that parks the summariser call; a `Rewind` submitted meanwhile is refused with "a turn is running" and cuts no history.
+Not done: no UI shows a "compacting" status; none exists today and `Event::Compacted` is the signal surfaces use.
+Check:
+- Mutation: with the state write removed (state stays `Idle`), the new test failed (`the rewind cut nothing`: history was emptied). Restored with `Assembling`.
+- `cargo nextest run -p cox-core`: 391 run, 391 passed, 1 skipped.
+- `cargo clippy -p cox-core --all-targets -- -D warnings`: clean.
+
+#### T64.14 Name an unreadable session lock holder as unknown
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 1 · Files: `crates/cox-store/src/lock.rs`
+Goal: a session lock file whose text is corrupt, truncated or unreadable never reads as a free session or as a live holder's pid; the session is busy with an explicit unknown holder.
+What landed:
+- Finding re-checked: busy was already decided by the kernel lock (`WouldBlock`), not by the file text, so a held lock with corrupt text already returned `Holder::default()` as busy. What was wrong was that pid 0 was an implicit sentinel written out in two copies of the parse-or-default code (`claim` and `holder`).
+- `Holder::is_unknown()` names the sentinel (pid 0 is never a real holder) and `Holder::read_from` is the one place the text is parsed; `claim`, `holder` and `Display` use them. No type, field or signature changed, so `cox-session`, `cox-app` and `cox-ffi` are untouched: the desktop only tests `heldBy != nil`, and the CLI message already says "another cox process".
+- Stale-lock recovery is unchanged and cannot steal a live session: there is no pid check. A corrupt file with no lock held is claimed and rewritten; a held lock is never taken over whatever the text says ("taking it over is not available yet" stays in `SessionError::SessionBusy`).
+- Tests: `corrupt_holder_text_is_busy_with_unknown_holder` (garbage, empty, truncated JSON, invalid UTF-8, each held by a second open file description; both `claim` and `holder` report busy and unknown), `readable_holder_text_is_not_unknown`, `corrupt_text_without_a_lock_does_not_block_the_session`.
+Not done: the new tests passed on the old behavior apart from `is_unknown`; before the fix they failed to compile (3 errors, no `is_unknown`). A holder text that parses with only some fields still becomes unknown, since the fields are required.
+Check:
+- `cargo nextest run -p cox-store`: 45 run, 45 passed, 2 skipped (ignored child-process helpers).
+- `cargo clippy -p cox-store --all-targets -- -D warnings`: clean.
+
+#### T64.10 Skip an MCP stdio server the sandbox cannot wrap
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-session/src/mcp.rs`, `docs/design/plugins.md`, `docs/how-it-works.md`
+Goal: a stdio MCP server from config, `.mcp.json` or `~/.claude.json` whose argv the host cannot wrap (Landlock-only host, or no sandbox backend) must not be spawned with host privileges. It was started bare with a notice.
+What landed:
+- `wrap_or_drop_stdio_servers(found, mode, wrap)` holds the decision, with the wrap passed in so it runs on a host whose real backend wraps everything. `sandbox_stdio_servers` calls it with the existing `sandboxed_argv` (no second wrap, no change to `sandbox.rs`). A server the wrap refuses is removed from `found.servers` and `found.sources` and named in one notice ("skipped"). The session still opens and the other servers load, so the failure is fatal for the server only (fail open on extensions).
+- Unchanged: `danger-full-access` (no wrap, the user's own choice), a per-server `sandbox = false` (explicit opt-out), HTTP servers and plugin servers (`plugin_mcp` already refused where the wrap is impossible).
+- Tests: `unwrappable_stdio_server_is_skipped_not_run_bare` and `danger_full_access_keeps_an_unwrappable_server`. `docs/design/plugins.md` §7c and `docs/how-it-works.md` state the new behaviour; `docs/tools.md` already said "refused".
+Not done: the Landlock refusal itself is Linux-only and was not run here (macOS); the test injects the refusal. The `plan.md` findings row for T64.10 is marked `done`, as T64.1 is. Chosen reading of "refuse or quarantine": refuse per server with a warning, not a session error.
+Check:
+- Mutation: with the `remove` lines taken out of the `Err` arm, `unwrappable_stdio_server_is_skipped_not_run_bare` failed (the server stayed in `found.servers`). Restored.
+```text
+$ mise exec -- cargo nextest run -p cox-session
+77 tests run: 77 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-session --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
 #### T64.13 Match the OAuth `state` before the loopback accepts a callback
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-mcp/src/auth.rs`, `crates/cox-mcp/Cargo.toml`
@@ -111,6 +181,21 @@ Check:
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T69.3 Default read-only metadata dirs in a writable workspace
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-16 · Depends: — · Priority: P2 · Complexity: 1 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, `docs/config.jsonschema`, `docs/design/sandbox.md`, `plan.md`, `done.md`
+Goal: add `.agents`, `.codex` and `.aws` to the default `sandbox.readonly_in_workspace` (was `.git`, `.cox`, `.claude`). A user who set the list keeps it.
+What landed:
+- `SandboxConfig::default()` and `default.toml` now list `.git`, `.cox`, `.claude`, `.agents`, `.codex`, `.aws`. The hand-written default has a one-line comment naming codex `codex-rs/protocol/src/permissions.rs` L40-51 at f0c5077c; the set is implemented independently, `seatbelt.rs` is not copied.
+- `docs/config.md` and `docs/config.jsonschema` (both `default` arrays) were regenerated through their drift tests (`config_docs_config_md_matches_default_toml`, `config_jsonschema_matches_committed_file`), not hand-edited. `docs/design/sandbox.md` names the six dirs in its claim (2).
+- Tests in `crates/cox-protocol/src/config.rs`: `sandbox_readonly_defaults_cover_metadata_dirs` (default and `default.toml` agree on the six names) and `user_sandbox_readonly_list_is_kept` (a user list of `["vendor"]` stays exactly that).
+Not done: the seatbelt and bwrap argument snapshots did not change, because their tests build their own explicit lists rather than reading the default. The binary was not run against a real `~/.aws` or repo-local `.agents`. Workspace-wide clippy was not run; the touched crates are clippy-clean.
+Check:
+- Before the change: `cargo nextest run -p cox-protocol sandbox_readonly` failed with `left: [".git", ".cox", ".claude"]`, missing `.agents`, `.codex`, `.aws`. The user-list test passed before the change; it is a regression guard.
+- `cargo nextest run --no-fail-fast -p cox-sandbox -p cox-protocol -p cox-config`: 189 run, 189 passed.
+- `cargo clippy -p cox-protocol -p cox-sandbox -p cox-config --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.11 Delete the dead `revert-on-failure` job from `ci.yml`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 1 · Files: `.github/workflows/ci.yml`
@@ -123,6 +208,34 @@ Check:
 - `actionlint -shellcheck= .github/workflows/ci.yml` (1.7.12): one finding, the intentional `if: false` on the `windows` job (creator, 2026-09-29), present before this change; nothing new. The `shellcheck` shim is not installed here, so shellcheck was skipped.
 - YAML parses (ruby `YAML.load_file`): 17 jobs, every `needs:` entry names an existing job.
 - `grep -rn revert-on-failure .github` and `grep -n revert .github/workflows/ci.yml`: no matches.
+
+#### T64.17 Guard project `memory.dir`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
+Goal: a project `.cox/config.toml` can no longer point `memory.dir` anywhere. `cox-session` reads the memory index into the model's context and writes extracted facts to that directory, so an unguarded value let a cloned repository read or write files outside its checkout.
+What landed:
+- `apply_project_guards` reverts a project `memory.dir` to the value without the project layer (with a `GuardViolation`) unless it is empty (the default location), equals the user's value, or passes `root_inside`, the same test the `core.workspace_roots` guard uses: absolute, existing, and canonically inside the git root. A relative path, `..` and a symlink out of the checkout all fail it.
+- `memory.dir` is in `GUARDED_KEYS` with its own reason, so `source_of("memory.dir")` reports the user's layer after a revert. The field doc, `docs/config.jsonschema` and `plan.md` §1.6 say what a project may set.
+- Test `project_config_cannot_point_memory_dir_outside_the_checkout`: an existing directory inside the checkout, the user's own value and an empty value stay; `/`, a relative path, a symlink out and `<root>/..` revert, with the violation, its reason and the provenance checked. It failed before the fix (`memory.dir` stayed `/`).
+Not done: a project `memory.dir` that does not exist yet is reverted, because `root_inside` needs the path to exist to resolve symlinks; create the directory first. The user, env and flag layers are not guarded.
+Check:
+- `cargo nextest run -p cox-config -p cox-protocol`: 160 run, 160 passed (includes `every_guarded_key_has_its_own_reason` and `config_jsonschema_matches_committed_file`).
+- `cargo clippy -p cox-config -p cox-protocol --all-targets -- -D warnings`: clean.
+
+#### T64.20 Enforce a subagent definition's tool allowlist; drop the unused `AgentDef::restrict`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-core/src/subagent.rs`, `crates/cox-protocol/src/agent.rs`
+Goal: one place decides which parent tools a child gets, and a discovered definition's `tools:` is a ceiling. The finding said `AgentDef::restrict` had only test callers.
+What landed:
+- Investigation: `AgentDef::restrict` (`cox-protocol/src/agent.rs`) filtered the parent's tools by `def.tools`, but no child is opened through it. `AgentTool::resolve` flattens the def into `Resolved` and `AgentTool::tools_for` applies the allowlist, so `restrict` duplicated that filter. `tools_for` also let the call's own `tools` argument (written by the model) replace the allowlist instead of narrowing it, so `agent {preset: "reviewer", tools: ["bash"]}` gave a `tools: [read, grep]` definition's child `bash`. `docs/design/extensions.md` says definitions "narrow a child's tools ... never widen". That was a real gap, not just dead code.
+- `Resolved.allowlist_is_a_ceiling` is set for a discovered def only; `tools_for` intersects the call's `tools` with the def's list. An empty `tools:` still means every parent tool.
+- `AgentDef::restrict` and its test are deleted, so there is one implementation.
+- Tests (`subagent::tests`): `agent_call_tools_cannot_widen_a_defs_allowlist`, `agent_call_tools_still_narrow_a_defs_allowlist`, `agent_def_without_tools_lets_a_call_pick_any_parent_tool`.
+Not done: a built-in preset's list (`explore`, `shell`) is still replaced by the call's `tools`. Existing scenarios and tests rely on that (`tools = ["echo"]` on `explore`), and `explore` stays read-only through `Risk::ReadOnly`. `shell` can be given a write tool by the model; the child's `cox_permission::Engine` still decides each call. Not changed here; a separate decision. The permission engine is unchanged.
+Check:
+- Mutation: with the def flagged `allowlist_is_a_ceiling: false`, `agent_call_tools_cannot_widen_a_defs_allowlist` failed (2 other new tests passed). Restored.
+- `cargo nextest run -p cox-protocol -p cox-core`: 510 run, 510 passed, 1 skipped (pre-existing).
+- `cargo clippy -p cox-protocol -p cox-core --all-targets -- -D warnings`: clean.
 
 #### T64.22 One keyring on/off switch and service name for the provider lookup and the MCP store
 
@@ -167,6 +280,64 @@ Check:
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T64.15.1 Open a confined path without following a swapped symlink
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 3 · Files: `crates/cox-sandbox/src/open.rs`, `crates/cox-sandbox/src/path.rs`, `crates/cox-sandbox/src/lib.rs`, `crates/cox-sandbox/Cargo.toml`, `crates/cox-tools/src/lib.rs`, `plan.md`
+Goal: a path `confine` approved cannot be redirected outside the roots by a symlink swapped in before the open. T64.15 was split on claim: this is part A, the helper; T64.15.2 (read-side call sites) and T64.15.3 (write side through a parent-directory descriptor) stay open.
+What landed:
+- `cox_sandbox::open::open_confined(roots, path, &OpenOptions) -> Result<File, ToolError>`: on Unix it opens with `O_NOFOLLOW` (a symlink leaf fails with `ELOOP` and maps to `Confined`), then reads the descriptor's real path (Linux `/proc/self/fd/N`, macOS `fcntl(F_GETPATH)` through `nix`, no `unsafe`) and requires it under the canonical roots, or closes the file and returns `Confined`. An unreadable real path fails closed. Non-Unix targets do a plain open; the doc comment records the remaining window there and that `truncate`/`create` act before the check (T64.15.3).
+- `path::canonical_roots` is extracted from `confine` so both checks use the same roots and the same `path_starts_with`.
+- `nix` (feature `fs`) moves from a Linux-only to a `cfg(unix)` dependency of `cox-sandbox`; `cargo hakari generate --diff` reports no `workspace-hack` change. `cox-tools` re-exports the module as `cox_tools::open`.
+Not done: no call site uses it yet (T64.15.2, T64.15.3). The Linux `/proc` path and the Windows build were not compiled or run locally (macOS host; cross builds need a C toolchain); CI covers them.
+Check:
+- Before the fix: the leaf-swap and parent-swap tests assert that `std::fs::read` of the confined path returns the outside file's contents, which is the bug.
+- `cargo nextest run -p cox-sandbox`: 31 run, 31 passed (6 new in `open::tests`).
+- `cargo clippy -p cox-sandbox -p cox-tools --all-targets -- -D warnings`: clean.
+
+#### T64.7 Revert a project-added or changed `mcp.servers`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `crates/cox-mcp/src/trust.rs`, `crates/cox-app/src/settings.rs`, `desktop/macos/Packages/CoxModel/Sources/CoxClient/Dropped.swift`, `docs/config.md`, `docs/config.jsonschema`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot add or change an MCP server. A stdio server is a program cox spawns and a `url` server is a URL cox contacts with `${VAR}` expanded from the environment, so a cloned project could run a command or leak an environment variable. `lsp.servers` already reverted whole; `mcp.servers` only had the T33.42 sandbox-off check.
+What landed:
+- `apply_project_guards` replaces the T33.42 sandbox-only block with a whole-map revert modelled on `lsp.servers`: when the merged `mcp.servers` differs from the layers without the project, it reports one `mcp.servers` violation (the changed names sorted, then the kept names sorted or `none`) and restores the user map. Stdio and URL servers are covered, and a project `sandbox = false` on a user server is just one more difference. `[mcp] timeout_s`, `deferred` and `enabled` stay project-tunable.
+- `GUARDED_KEYS` swaps `mcp.servers.*.sandbox` for `mcp.servers` (still 21 keys), with the reason "A project may not choose which MCP servers run"; `source_of("mcp.servers.<name>.command")` reports the pre-project layer.
+- The doc text now says the table is user config only: `McpConfig::servers`, `default.toml` (and its copy in `plan.md`), `docs/config.md`, `docs/config.jsonschema`, `trust::user_config_layer`, the `Dropped.key` comments in `cox-app` and the Swift mirror, and plan §1.6.
+- Tests `project_config_cannot_set_mcp_servers`, `project_sandbox_off_on_a_user_mcp_server_is_reverted` and `project_mcp_server_identical_to_user_is_no_violation`; the first replaces `config_project_cannot_disable_an_mcp_server_sandbox`.
+Not done: a project `.mcp.json` bypasses the config loader and stays unguarded (a separate surface; asking before spawning its stdio servers is a follow-up). An unsandboxed stdio server is still T64.10. `cox-mcp` and `cox-app` were comment-only changes and were not built.
+Check:
+- Before the fix: `cargo nextest run -p cox-config` on the three new tests: 3 run, 1 passed, 2 failed (`project_config_cannot_set_mcp_servers`: `left: Some("evil") right: Some("gh-mcp")`; `project_sandbox_off_on_a_user_mcp_server_is_reverted`: the old `mcp.servers.*.sandbox` violation, not `mcp.servers`).
+- `cargo nextest run -p cox-config -p cox-protocol`: 163 run, 163 passed (after regenerating `docs/config.md` and `docs/config.jsonschema`).
+- `cargo clippy -p cox-config -p cox-protocol --all-targets -- -D warnings`: clean.
+
+#### T64.19 Drop the unused `keyring` dependency from `cox`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 1 · Files: `crates/cox/Cargo.toml`, `crates/cox/tests/deps.rs`, `Cargo.lock`, `plan.md`
+Goal: `crates/cox` declared `keyring` but no file under it calls the crate (unused since T37.31, when the key lookup moved to `cox-provider-http` and MCP tokens to `cox-mcp`).
+What landed:
+- The `keyring` line is gone from `crates/cox/Cargo.toml`; no feature list referenced it. Only one `Cargo.lock` line changed (the `cox` package's dependency list); other crates still use `keyring` and no version moved.
+- Test `cox_does_not_depend_on_keyring` in `crates/cox/tests/deps.rs` checks the manifest of `cox` directly, since the crate still reaches `keyring` transitively.
+- plan §1 and `toolchain.md` needed no change: neither lists `keyring` under `cox`, and `cox-provider-http`, `cox-mcp` and `cox-store` keep it.
+Not done: nothing.
+Check:
+- Before the fix: `cargo nextest run -p cox --test deps -E 'test(cox_does_not_depend_on_keyring)'` failed with `crates/cox must not depend on keyring directly`.
+- After: `cargo nextest run -p cox --test deps`: 11 run, 11 passed.
+- `cargo clippy -p cox --all-targets -- -D warnings`: clean.
+
+#### T64.5 Revert a project `sandbox.network` and extra `sandbox.writable`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot open network access or extra writable directories in the sandbox that the user's own config keeps closed. Only `sandbox.mode = "danger-full-access"` was guarded, so a cloned project could set `sandbox.network = true` and `sandbox.writable = ["/etc"]`.
+What landed:
+- `apply_project_guards` reverts `sandbox.network = true` when the config without the project layer has it off, with one `sandbox.network` violation. Turning it off or keeping the user's `true` is not a violation.
+- It drops every project `sandbox.writable` entry the user layer does not list and reports one `sandbox.writable` violation naming the dropped paths and the kept ones. figment replaces the array wholesale, so keeping a subset of the user's roots, or an empty list, is not a violation.
+- Both keys join `GUARDED_KEYS` with their own reasons, so `source_of` reports the post-revert layer. The `SandboxConfig` doc comments, `docs/config.jsonschema` and plan §1.6 now name the guards.
+- Tests `project_config_cannot_enable_sandbox_network`, `project_config_may_keep_or_turn_off_sandbox_network`, `project_config_cannot_add_writable_paths` (with and without a user list) and `project_config_may_keep_or_narrow_writable_paths`; `every_guarded_key_has_its_own_reason` covers the new keys.
+Not done: `mcp.servers` (T64.7) stays open. Path entries are compared literally, not canonicalized, the way `core.workspace_roots` compares user roots.
+Check:
+- Before the fix: `cargo nextest run -p cox-config sandbox_network writable_paths` failed with `assertion failed: !loaded.config.sandbox.network` and `left: ["/data/ok", "/etc", "/home/me/.ssh"] right: ["/data/ok"]` (the two keep/narrow tests passed).
+- `cargo nextest run -p cox-config -p cox-protocol`: 212 run, 212 passed (cox-config 47, including the config schema drift test).
+- `cargo clippy -p cox-config -p cox-protocol --all-targets -- -D warnings` and `cargo fmt --check`: clean.
+
 #### T64.16 Resolve relative bash tokens for the read-deny
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-permission/src/lib.rs`, `plan.md`, `done.md`
@@ -180,6 +351,22 @@ Check:
 - Before the fix: `cargo nextest run -p cox-permission` ran 16, 15 passed, 1 failed: `cat id_rsa in /home/alice/.ssh must be denied, got Allow { by: Policy }`.
 - `cargo nextest run -p cox-permission`: 16 run, 16 passed. `cargo nextest run -p cox-core --test permission --test policy_matrix`: 98 run, 98 passed.
 - `cargo clippy -p cox-permission --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
+#### T69.1 PowerShell and cmd readers hit existing `Read` denies
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 3 · Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-core/tests/permission.rs`, `plan.md`, `done.md`
+Goal: `Get-Content`, `gc`, `type` and `more` on one plain command are read-only with the path on the segment, so `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa` instead of only asking; writers keep their path; pipelines, chains, variables and attached `-Path:` values stay `Exec`. The bash grammar parses these lines, but `Get-Content` was an unknown command (`Exec`), and the read-path guard in `Engine::decide` runs only for `ReadOnly` calls. `type` and `more` were already in `READ_ONLY`.
+Licence: Apache-2.0 sources (codex `powershell_parser.rs`, grok-build `shell_access.rs`) read for the idea only; nothing copied, so no per-file header or `NOTICE` is needed.
+What landed:
+- `classify.rs`: `is_ps_reader` (`Get-Content`, `gc`, case-insensitive, as PowerShell is) and `plain_ps_args`; `command_risk` rates such a reader `ReadOnly` only when no argument holds `$`, a backtick, brackets or braces and no flag carries an attached value (`-Path:~/.ssh/id_rsa`, which the guard would skip because it ignores tokens starting with `-`). `walk` makes a reader whose parent is not the line's top level (a pipeline, `&&` list, redirect) `Exec` with opaque segments.
+- No PowerShell parser child process; no change to `cox-permission` (it builds on the cwd resolution from T64.16).
+- Tests `unparsed_powershell_readers_are_read_only_with_their_path`, `unparsed_powershell_writers_and_composites_are_not_read_only` (eleven composite lines, writers keep their segment), and in `cox-core/tests/permission.rs` `read_deny_stops_a_windows_reader` (five lines) and `windows_reader_guard_leaves_other_lines_alone`.
+Not done: Windows path forms (`~\.ssh\id_rsa`, `C:\Users\...`) are not resolved by `token_path`, so a backslash path still reaches the guard unmatched; other cmdlets (`Select-String`, `Import-Csv`) and the full-name alias `Microsoft.PowerShell.Management\Get-Content` stay `Exec` and are asked.
+Check:
+- Before the fix: `cargo nextest run -p cox-tools -E 'test(unparsed_powershell)'` failed 2 of 3 (`Get-Content ~/.ssh/id_rsa` classified `Exec`, left `Exec` right `ReadOnly`; the pipeline line was not opaque). `cargo nextest run -p cox-core --test permission -E 'test(windows_reader)'` failed 4 of 8 (`gc ~/.ssh/id_rsa`: left `Ask`, right `Deny`; `Get-Content README.md`: left `Ask`, right `Allow`).
+- `cargo nextest run -p cox-tools -p cox-core -p cox-permission`: 659 run, 659 passed, 2 skipped.
+- `cargo clippy -p cox-tools -p cox-core --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
@@ -434,6 +621,34 @@ $ mise exec -- cargo clippy -p cox-plugin -p cox-session --all-targets -- -D war
 clean
 $ mise exec -- cargo fmt --check
 clean
+```
+
+
+#### T33.14.2 Filesystem preopens
+
+Split from T33.14 by the creator 2026-10-03 because the preopens waited on T33.43; the `cox_http` half is T33.14.1.
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Depends: T33.9, T33.43 · Size: ~120 · Priority: P2 · Complexity: 3 · Files: `crates/cox-plugin/src/fs.rs`, `src/host.rs`, `src/live.rs`, `crates/cox-session/src/plugins.rs`
+Goal: WASI preopens come only from `fs` and pass `confine`; reads mount `ro:`; `.git` and `.cox` are never writable. WASI is on only when `wasi = true` or `fs` is set.
+Plan: `cox-plugin` may not depend on `cox-sandbox`, so `fs.rs` takes the caller's `confine` as an injected closure (`FsRoots`) and `cox-session` passes `cox_tools::path::confine`. `fs::mounts` maps `capabilities.fs` to extism `allowed_paths`; `PluginHost::load_with_fs` builds the plugin with them; `LivePlugins::set_fs` and `Live::load` wire it.
+Check: `fs_write_to_dot_git_is_refused`, `wasi_ctx_has_no_env`.
+What landed: `crates/cox-plugin/src/fs.rs` (`FsRoots`, `Mounts`, `mounts`, `FsError`): `$WORKSPACE` mounts at `/workspace` and `$PLUGIN_DATA` (`<home>/plugin-data/<id>/`, created on demand) at `/data`; each root goes through the injected `confine`; reads mount `ro:`; a root also granted for write is not mounted twice; an `fs.write` root is refused when it is inside `.git`/`.cox` or one exists beneath it (bounded walk, 50 000 entries, larger trees refused); WASI is on only for `wasi = true` or a non-empty `fs`; a grant with no session roots fails the load. `PluginHost::load_with_fs` (`load_with` is the no-WASI case). `cox-session` sets the roots to the session cwd and `<home>/plugin-data`. `docs/design/plugins.md` §11 describes it.
+Not done: no end-to-end session test through `cox-session` with a real plugin package (the guard is covered at the `mounts` and `PluginHost` levels with inline WAT); a symlink inside a write root is not followed by the `.git`/`.cox` walk (WASI refuses one that leaves the mount). Windows was not exercised.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-plugin
+PASS cox-plugin fs::tests::fs_write_to_dot_git_is_refused
+PASS cox-plugin fs::tests::reads_mount_read_only_and_writes_do_not
+PASS cox-plugin fs::tests::plugin_data_is_created_and_writable_even_under_dot_cox
+PASS cox-plugin fs::tests::wasi_is_on_only_for_the_flag_or_a_grant
+PASS cox-plugin fs::tests::a_grant_without_roots_or_outside_confine_is_refused
+PASS cox-plugin host::tests::wasi_ctx_has_no_env
+PASS cox-plugin host::tests::wasi_is_off_unless_the_mounts_turn_it_on
+PASS cox-plugin host::tests::read_only_preopen_refuses_a_create_and_a_writable_one_allows_it
+Summary: 127 tests run: 127 passed, 0 skipped
+$ mise exec -- cargo nextest run -p cox --test deps    -> 10 passed
+$ mise exec -- cargo nextest run -p cox-session plugin -> 23 passed
+$ mise exec -- cargo clippy -p cox-plugin -p cox-session --all-targets -- -D warnings -> clean
+$ mise exec -- cargo fmt -p cox-plugin -p cox-session (check) -> clean
 ```
 
 #### T58.4 Move the decisions still in CoxModel into `cox-app`
@@ -10350,6 +10565,32 @@ Check: `cargo test -p cox-tools --test bash` — 11 passed (table updated: `carg
 `crates/cox-tools/src/edit.rs` `apply_replace` spliced every fallback window against the original byte offsets, right-to-left; two windows that overlap (lines that normalize identically) with a shorter `new` made the left window's `end_byte` run past the shrunken string — `replace_range` panicked with "range end index out of range", against the project's no-panic rule, and the code's own comment admitted it. Found by the 2026-10-07 audit. Fix: `replace_all` keeps only non-overlapping windows (a dropped window's lines sit inside the one already replaced); the single-match path is unchanged. The regression test seeds three lines that normalize identically and asserts the exact output; verified it panics on the pre-fix code.
 Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/edit.rs`, `crates/cox-tools/tests/edit.rs`
 Check: `cargo test -p cox-tools --test edit` — 6 passed (new: `edit_replace_all_overlapping_fallback_windows_do_not_panic`).
+#### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
+
+Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Plan (Claude Code / sonnet-5.5): (1) Failing tests first in `crates/cox-tools/tests/edit.rs` (`read` with `anchors` into `edit` with `ops`: indent-only change, stale batch, bottom-up, CRLF, confinement). (2) New `anchor.rs`: whitespace-collapsed SHA-256 to a 3-letter code, `render`, `apply` with all-or-nothing validation. (3) `read.rs` gains `anchors`; `edit.rs` gains `ops` beside `old`/`new`, still through `confine`. (4) Run `cargo nextest run -p cox-tools`, clippy, fmt.
+
+Goal: `read` gains an anchors mode that renders `N:abc→line` (3 letters from a whitespace-normalized hash you write); `edit` accepts `{op: replace|insert_after, anchor, content}` besides `old_string`. One stale anchor rejects the whole batch with the fresh anchor and three neighbours; ops apply bottom-up; default `read` output is unchanged.
+
+Why: a stale `old_string` costs a full re-read (`edit.rs` L160–198). Larger than the others: split further when claimed.
+
+Source: [grok-build `grok_build_hashline/scheme.rs` L1–56](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/scheme.rs#L1-L56), [`util/hash.rs` L1–52](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/util/hash.rs#L1-L52), [`read_file.rs` L21–67](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/read_file.rs#L21-L67), [`edit/mod.rs` L50–63](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/edit/mod.rs#L50-L63)
+
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy** (`scheme.rs`, `hash.rs`, `edit/apply.rs`). Not the `implementations/codex/` (OpenAI, needs its `NOTICE`) or `implementations/opencode/` (MIT) trees.
+
+Files: new `crates/cox-tools/src/anchor.rs`, `read`, `edit`
+
+Done when an indent-only change still matches, a content change is `Stale` and names the new anchor, two ops apply bottom-up, and a path outside the workspace is confined. Check: `mise exec -- cargo nextest run -p cox-tools edit`.
+
+Status: done 2026-10-16 · Commit "feat(tools): T69.7 content-hash anchors for read and edit" on branch `t69.7-edit-anchors`.
+
+What landed: `anchor.rs` (3-letter code from a whitespace-collapsed SHA-256, `render`, `apply`); `read` takes `anchors: true` and prints `N:abc→line`, default output unchanged; `edit` takes `ops: [{op: replace|insert_after, anchor, content}]` instead of `old`/`new` (both together are `Denied`). Every anchor is checked against the original lines first; any stale one rejects the whole batch and names the fresh anchor of its line plus one line before and two after; otherwise the ops apply bottom-up against the numbers the model read. The path still goes through `confine` at the existing call site, CRLF and a missing final newline are kept, and the pre-image is archived as before. `edit`'s `required` list shrank from `path, old, new` to `path` so `ops` can stand alone, which changes the tool schema once, deliberately; no schema snapshot exists in the repo for it.
+
+Not done: no `Stale` variant on `cox_protocol::ToolError` (it stays `Denied` with the message, as the other `edit` failures); a hash collision (1 in 17 576) lets a changed line through, as documented in `anchor.rs`; no `insert_before` or range ops.
+
+Check output: before the code, the seven `anchors::` tests in `crates/cox-tools/tests/edit.rs` failed (the `ops` field was unknown to `edit`); after it `mise exec -- cargo nextest run -p cox-tools` — 257 passed, 1 skipped; `cargo clippy -p cox-tools --all-targets -- -D warnings` and `cargo fmt --check -p cox-tools` clean.
+
 #### T62.5 web_fetch refuses private, loopback and link-local addresses
 
 `web_fetch` is `Risk::ReadOnly` with a scheme check only, and `cox-web::fetch` followed five redirects with no address filtering: the model could read `169.254.169.254`, an internal `localhost` service or an RFC1918 host without any approval and see the body. Found by the 2026-10-07 audit. Fix, three layers: every connection resolves through a `PublicOnly` resolver (getaddrinfo on the blocking pool) that refuses loopback, link-local, RFC1918-private, unspecified and broadcast addresses, mapped IPv4 included, and strips refused addresses when the name has public ones; a custom redirect policy re-checks IP-literal redirect targets (literals skip DNS) and carries the old five-hop limit; and `WebFetchTool` checks the first URL's literal host (`refused_literal`), because the first request meets neither the resolver nor the policy. `fetch_error` surfaces the guard's words from reqwest's source chain. The tool spec now tells the model the refusal exists.
@@ -10399,6 +10640,26 @@ Not done: the whole-workspace nextest was not run locally (CI runs it); benchmar
 mise exec -- cargo nextest run -p cox-app best_of: 21 tests run: 21 passed
 mise exec -- cargo clippy -p cox-app -p cox-tools --all-targets -- -D warnings: clean
 mise exec -- cargo fmt --check: clean
+```
+
+#### T52.25 `cox-ffi` and CoxModel carry the merge
+
+Depends: T52.24 · Size: ~80 · Files: `crates/cox-ffi/src/lib.rs`, `crates/cox-ffi/src/types.rs`, CoxModel `BestOfStore`
+Goal: `App.best_of_merge` and `mergeable` forwarded as one-expression bodies (D11, A90), `BestOfMerge` and `Launched.merged_from` in the `#[uniffi::remote]` types; `BestOfStore` holds the chosen candidates and the chosen merger, and refreshes the comparison when the merge candidate appears.
+Check: `cox-ffi`'s `tests/forward_only.rs`; `just desktop-xcframework`; `swift test --package-path desktop/macos/Packages/CoxModel --filter BestOf`.
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16
+What landed: `types.rs` declares `BestOfMerge` with `#[uniffi::remote(Record)]` (`Launched.merged_from` was already declared by T52.24). `lib.rs` exports `App.best_of_merge(merge, theme) -> BestOfLaunch` (async, through `on_runtime`) and `App.mergeable(id) -> [u32]`, each one forwarding expression. Swift: `CoxClient` gains `BestOfMerge`, `BestOfMergeError`, and `merge`/`mergeable` on `BestOfClient`; `FixtureBestOf` applies the core's three refusals and adds the merger as a running candidate; `CoxCore/BestOfConvert.swift` forwards both calls to the generated bindings. `BestOfStore` keeps `mergeable` (read with the comparison), `chosen` (`toggle`, trimmed to `mergeable` on every read), `merger`, `mergeRequest` (two or more chosen and a merger, `from` ascending) and `merge(theme:)`, which reads the comparison again so the merge candidate shows at once, clears the choice when the merge started and keeps it, with the refusal as `failure`, when the core refused. DT§3.3.4 records the contract for Windows and Linux clients.
+
+Not done: `just desktop-xcframework` and the Swift packages that link `CoxFFIBindings` (`CoxCore`, the app target) were not built locally; the new Swift conversions were checked against the bindings `uniffi-bindgen` generates from the debug build (`bestOfMerge(merge:theme:) async throws -> BestOfLaunch`, `mergeable(id:) throws -> [UInt32]`, `BestOfMerge(id:from:by:)`) and CI's desktop-macos job builds them. The UI (Merge button, sheet) is T52.26.
+
+Check:
+```
+mise exec -- cargo nextest run -p cox-ffi: 18 tests run: 18 passed (forward_only::every_ffi_body_is_one_forward_expression, deps ffi_depends_only_on_app_and_protocol, app::best_of_merge_and_mergeable_cross_and_refuse_an_unknown_group)
+swift test --filter BestOf (desktop/macos/Packages/CoxModel): 11 tests passed, 4 new: bestOfMergeStoreHoldsTheChosenCandidatesAndBuildsTheRequest, bestOfMergeAddsTheMergeCandidateAndClearsTheChoice, bestOfMergeOfAPickedGroupIsOfferedNothingAndRefused, bestOfMergeFailureIsShownAfterTheComparisonIsRead (before the change the test target did not compile: no BestOfMerge, mergeable, merge or chosen)
+mise exec -- cargo clippy -p cox-ffi --all-targets -- -D warnings: clean
+mise exec -- cargo fmt --check: clean
+swiftlint --strict (CoxModel/Sources, CoxCore/Sources) and swift-format lint --strict --recursive (CoxModel, CoxCore): clean
 ```
 
 #### T59.1 Deterministic working state pre-fills compaction
@@ -11184,6 +11445,18 @@ Plan: in `cloud_agents.rs`, at the end of a run (done, terminal status or cancel
 Result: `crates/cox-session/src/cloud_agents.rs`: when a run ends (a terminal status, `result`, or a cancel) `settle` reads `GET /v1/agents/{id}/usage` (the run's own entry, else the agent total; counts saturate to `u32`), then claims `cloud_run_mark_usage_recorded`, and only the winner gets the tokens; `task_turn` returns them, so the core's external-turn path writes the one row: provider external, cost $0, job `agent`, Cursor's input, output, cache read and cache write tokens, and the model from `ledger_model` (the preset's requested model, or `cursor:auto`). A row that is not terminal yet, or a failed usage read, leaves the claim for the next resume. Resume: `open` with `resume` spawns `cloud_agents::resume_runs` for the granted cloud drivers (the open never waits on the network); for each unsettled `cloud_runs` row of the session (driver chosen by backend, preferring the same model) it finalizes a run that `GET` reports terminal (the sanitized `result` is the task's result item, then the usage row), follows a run still going until it ends and then finalizes it (never cancelled from here, so closing cox again leaves it running), and writes the row for a terminal run whose usage read had failed. Errors become one sanitized warning notice per run.
 Deviations: the card names `cloud_agents.rs` and `lineage.rs`; `lineage::resume` only rebuilds history and has neither the session nor the drivers, so the resume hook is in `lib.rs`'s `open` instead and `lineage.rs` is unchanged. Core seams: `ExternalAgent::ledger_model` (default `name()`, `cox-protocol`), used by `Session::external_turn`, whose row write moved into `insert_external_usage`; public `Session::complete_resumed_task` (`TaskCompleted`, pointer line and notice, as a live task's end) and `Session::record_resumed_task_usage` (the same row at job `agent` and the session's tier) in `cox-core/src/tasks.rs`. `cox-store`: `cloud_runs_non_terminal` became `cloud_runs_unsettled` (not terminal, or terminal with no usage row yet), so a failed usage read is retried rather than lost. A resumed run's row is under the resumed (parent) session, since the child session that ran the task is gone. Not done: cancelling a reattached run (the task is not in the resumed process's task registry, so `task_stop` cannot reach it); a stream that ends without a terminal status delivers its answer but leaves the run for the next resume, which can deliver it a second time.
 Check output: `mise exec -- cargo nextest run -p cox-session cloud_agent_usage_row_is_billed_externally_with_cursor_tokens cloud_agent_usage_row_is_written_once resume_reattaches_to_a_running_cloud_run resume_finalizes_a_run_that_finished_while_closed` — 4 passed; `mise exec -- cargo nextest run -p cox-session -p cox-core -p cox-store -p cox-protocol -p cox-cursor-cloud` — 628 passed, 3 skipped; `-p cox --test deps` — 10 passed; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean; `cox doctor`, a scripted `cox run -p` and a `cox run --continue -p` against a scratch `COX_HOME` ran.
+
+#### T56.8 Offline end-to-end over hand-written fixtures
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-12 · Priority: P3 · Complexity: 3 · Depends: T56.7 · Size: ~160 · Files: `crates/cox/tests/cloud_agents.rs` (new); fixtures `tests/fixtures/cursor-cloud/*.json`, `*.sse` and a fixture plugin package with a `[[cloud_agents]]` entry
+Goal: the real binary against a scratch `COX_HOME`, a wiremock server standing in for `api.cursor.com` (host override for tests only, never a manifest field), and a fixture repository with a GitHub remote: `cox run -p --output-format stream-json` dispatches a background cloud task, the approval is asked (`--answer` allow), the task events appear in the stream, the ledger holds one `billed_externally` row, and no request body contains the fixture's git user name or email.
+Check: `mise exec -- cargo nextest run -p cox cloud_agent_headless_run_end_to_end cloud_agent_requests_carry_no_git_identity`.
+Done when: the tests pass offline with no key.
+Out of scope: a live account (T56.10).
+Plan: (1) `cloud_agents::drivers` reads the test-only env `COX_CURSOR_CLOUD_URL` and points the Cursor client there through a new `Client::with_loopback_base_url`, which refuses any host but loopback, so the override can never carry the key off the machine and is not a manifest field. (2) Hand-written fixtures in `crates/cox/tests/fixtures/cursor-cloud/` (`create_agent.json`, `stream.sse`, `usage.json`, `plugin/{plugin.toml,plugin.wasm}`) from the public endpoint docs only (A40 step 3). (3) `crates/cox/tests/cloud_agents.rs`: a scratch `COX_HOME`, `cox plugin install --yes` of the fixture package, a fixture git repo with a GitHub `origin` and a commit by a distinctive user, a wiremock server, a scripted parent that calls `agent(preset)`. Tests: `cloud_agent_headless_run_end_to_end` (task events in the stream-json, one external-provider $0 usage row in the ledger, the run row `FINISHED`) and `cloud_agent_requests_carry_no_git_identity` (no request body, header or path has the git name or email). Deviation to record: T56.6 made the approval an exact `CloudAgent(owner/repo)` allow rule (a background task has no prompt), so the test grants it in config instead of passing `--answer`; a third test checks that without the rule no request leaves. Verify with the Check, clippy, fmt, and the binary against a scratch `COX_HOME`.
+Result: `crates/cox/tests/cloud_agents.rs` drives the real binary against a scratch `COX_HOME`, a wiremock server and a fixture repository whose `origin` is `https://github.com/acme/widgets.git` and whose commit is by a distinctive git user. `cox plugin install --yes` grants the fixture package `tests/fixtures/cursor-cloud/plugin` (`[[cloud_agents]] name = "cursor-cloud"`); `tests/scenarios/cloud_agent.toml` scripts the parent's `agent(preset: "cursor-cloud")`; the hand-written responses are `create_agent.json`, `stream.sse` and `usage.json` there (public endpoint docs only, A40 step 3). `cloud_agent_headless_run_end_to_end`: `task_created` and `task_completed` in the stream-json, the run's text (thinking left out) in the finish notice, one external-provider `$0` row (`cursor:auto`, 120/45/60/30 tokens), the `cloud_runs` row `FINISHED` with usage recorded. `cloud_agent_requests_carry_no_git_identity`: exactly the three endpoints, no git name or email in any URL, header or body, a `cox/<version>` User-Agent, a clean GitHub URL, `autoCreatePR: false`. `cloud_agent_without_an_allow_rule_makes_no_request`: no request and no Cursor tokens. The host override is `COX_CURSOR_CLOUD_URL`, read in `cloud_agents::drivers` and passed to the new `Client::with_loopback_base_url`, which accepts loopback only (test `client_loopback_override_refuses_every_other_host`); it is not a manifest field. `cox-config` ignores the name in its `COX_*` env layer (`config_ignores_test_only_cox_env_vars` covers it), since otherwise it parsed as the config key `cursor.cloud.url`.
+Deviations: the card says the approval is asked and answered with `--answer`; since T56.6 a background task has no prompt, so approval is the exact `CloudAgent(acme/widgets)` allow rule in the scratch config and the third test covers its absence. Gaps found, not fixed: when the engine refuses a cloud run, the refusal text (which names the rule) reaches the task's error but the stream's finish notice says only "the subagent produced no answer"; a refused task still gets an empty external usage row; a run reattached by a resumed session cannot be cancelled, and a stream ending without a terminal status may deliver twice on resume (both T56.7 known gaps). The fixture WAT module duplicates the one in `external_agents_cursor.rs` as `plugin/plugin.wasm` data, since the package must be a directory `plugin install` can read.
+Check output: `mise exec -- cargo nextest run -p cox cloud_agent_headless_run_end_to_end cloud_agent_requests_carry_no_git_identity` — 2 passed (with `cloud_agent_without_an_allow_rule_makes_no_request`, 3 of 3 in `--test cloud_agents`, 15 s); `cargo nextest run --no-fail-fast -p cox-cursor-cloud -p cox-config -p cox-session -p cox` — 326 of 327 passed, the one failure being the third new test's first draft, fixed and re-run green (3 of 3); `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean.
 
 #### T33.40.3 Jev provider export
 
@@ -12076,3 +12349,61 @@ Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49
 ### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
 
 Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 99,197,840 bytes (+27.5%). The creator approved accepting the security-mandated size increase; updated only the Darwin-arm64 binary-size baseline. Startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. After regenerating the stale workspace-hack, the rebuilt release measured 99,197,840 bytes and the footprint check passed.
+
+#### T69.4 Budgeted `quick_check` when the store opens
+
+Model: Claude Code / haiku-5.5 · Depends: — · Priority: P3 · Complexity: 1 · Files: `crates/cox-store/src/lib.rs` (and its tests), `crates/cox-store/Cargo.toml`
+
+Goal: After WAL is on, `Store::open` runs `PRAGMA quick_check(1)` with a ~200 ms budget: `ok` continues; a finding is a `StoreError` the session prints and refuses; a timeout logs and opens anyway. Not repeated per query.
+
+Why: `enable_wal` had no integrity check, so a corrupt database failed later and obscurely.
+
+Source: [codex `codex-rs/state/src/sqlite/validation.rs` L16–66](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/state/src/sqlite/validation.rs#L16-L66). Implemented similar, not copied: codex uses sqlx and a progress handler; cox is on Diesel.
+
+Plan: (1) failing test: a damaged `cox.db` must make `Store::open` return `Corrupt`. (2) the check runs on its own read-only-capable connection through `libsqlite3-sys` (already a direct dependency), because Diesel hides the SQLite handle and the budget needs a progress handler. (3) call it in `Store::open` between `enable_wal` and migrations. (4) tests for healthy, damaged and interrupted cases.
+
+Status: done 2026-10-16 · Branch `t69.4-store-quick-check`, commit `feat(store): T69.4 budgeted quick_check on open`.
+
+What landed: `Store::open` runs `quick_check` after `enable_wal` and before migrations. A finding returns `StoreError::Corrupt { path }` and logs SQLite's text at error level. A budget overrun, or a check SQLite cannot run, logs at warn level and opens. The check uses `libsqlite3-sys` with a progress handler that interrupts at 200 ms, which Diesel cannot express. `tracing` is now a `cox-store` dependency; it was already a workspace dependency.
+
+Not done: the session's print of the refusal goes through the existing `StoreError` display, and no `cox-session` or CLI test exercises it. No test runs a database large enough to exceed 200 ms for real; the timeout test uses a zero budget. The `cox` crate's `deps.rs` was not run, since only `cox-store` was built.
+
+Deviations: the first draft of the damaged-file test wiped every page after page 1; the WAL switch then failed with `Open` before the check ran, so the test damages page 2 only. The card's Files line did not list `Cargo.toml`, but logging needs `tracing`, which `cox-store` did not have.
+
+Check output: `cargo nextest run -p cox-store` — 45 passed, 2 skipped. `damaged_store_file_is_refused_on_open` failed before the change (`Store::open` returned `Ok` on a damaged page 2) and passes after it. `clippy -p cox-store --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+
+#### T69.5 Compaction rejects a tiny summary and survives a context overflow
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
+
+Goal: `summary_is_usable` requires ≥ 500 trimmed characters (a shorter body is a failed attempt, not a replacement for history). A context-window error retries down a ladder (full pointer transcript → tool results cut to the head/tail pointer → `working_state` alone plus the last user request), one retry per step. After the ladder fails on size, auto-compact is suppressed until a later call reports a smaller `last_context_tokens` or the user runs `/compact`.
+
+Why: a failed compact leaves `last_context_tokens` unchanged and the next turn calls `compact` again (`session.rs` ~L1473–1482); `summarise` (`compact.rs` L694–763) accepts any non-empty string.
+
+Source: [grok-build `xai-grok-compaction/src/code_compaction/config.rs` L15–20](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/config.rs#L15-L20), [`summary.rs` L120–125](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/summary.rs#L120-L125), [`sample.rs` L81–120](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/sample.rs#L81-L120), [`failure.rs` L9–23](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/failure.rs#L9-L23), [`xai-grok-shell/src/session/compaction.rs` L405–479](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/compaction.rs#L405-L479)
+
+Licence: Apache-2.0, Copyright 2023-2026 SpaceXAI, implement similar, not copy (header, Apache text, `THIRD-PARTY-NOTICES`, change notice §4(b)). **Implement similar, do not copy:** bound to their `ConversationItem` types, and a paste adds Apache's patent clause to cox's tri-license.
+
+Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/prompts/compact.md`, `crates/cox-core/tests/compact.rs`
+
+Plan: (1) failing tests first in `tests/compact.rs`: a 40-character summary keeps history; a first `ContextTooLong` on the `compact` job is followed by a strictly smaller second request; a ladder that fails on size three times sets the suppress flag, the next turn sends no `compact` request, `/compact` still runs. (2) `compact.rs`: `summary_is_usable` (≥ 500 trimmed characters of model text, checked in `compact`, not for `/handoff`, which replaces no history); `summarise` walks the ladder (full pointer transcript, tool results cut to head/tail, `working_state` alone) and skips a step that is not smaller than the last one tried; a size failure stores `compact_suppressed_at` (the `last_context_tokens` it failed at) in `Inner`; `compact` skips `Auto` and `PreCall` while `last_context_tokens` has not dropped below it, and `Manual` clears it. (3) `prompts/compact.md` states the minimum. (4) Lengthen the scripted summaries of the existing compaction tests. Verify: `mise exec -- cargo nextest run -p cox-core compact`, the full `-p cox-core` run, clippy, fmt.
+
+Done when a 40-character summary does not replace history, a context-length error is followed by a smaller second request, a second size error sets the suppress flag, the next turn skips the compact job, and `/compact` still runs. Check: `mise exec -- cargo nextest run -p cox-core compact`.
+
+What landed: `compact.rs` rejects a model reply under `MIN_SUMMARY_CHARS` (500 trimmed characters, counted on the model's own text, not the `working_state` prefix); `/handoff` passes a floor of 1 because it replaces no history. `summarise` returns `Result<String, SummaryFailure>` (`Failed`, `TooShort`, `TooLong`) and walks a ladder on `ProviderError::ContextTooLong`: the full pointer transcript, then tool results cut to 200 bytes of head and tail on char boundaries (`clip`), then the `working_state` block alone; a rung that is empty or not smaller than the last one tried is skipped, and any other provider error stops at once. A `TooShort` or `TooLong` failure keeps history, stores the `last_context_tokens` it failed at in `Inner::compact_suppressed_at` and emits a notice that auto-compaction is paused; `Auto` and `PreCall` return quietly while the context has not dropped below it, `Manual` clears it, and `ContextTooLong` is never gated. `prompts/compact.md` tells the model a reply under 500 characters is discarded. Existing tests that scripted tiny summaries (`tests/compact.rs`, `repomap.rs`, `big_tool_output_mid_turn.toml`) now carry a padded `## Decisions` body, and one insta snapshot gained that body.
+Not done: no wait time or count is added to the ladder beyond one request per rung; a summary that is long enough but poor is not judged.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-core --test compact compact_   (new tests, before the fix)
+FAIL compact_rejects_a_summary_under_500_characters   (Compacted emitted for "far too short to stand in for a session")
+FAIL compact_retries_a_too_long_summary_request_with_a_smaller_input   (notice "compaction summariser returned nothing")
+FAIL compact_gives_up_after_three_too_long_requests_and_pauses_auto   (no pause notice, no compact request on the fourth turn)
+$ mise exec -- cargo nextest run -p cox-core
+395 tests run: 395 passed, 1 skipped
+$ mise exec -- cargo nextest run -p cox-session -p cox-app -p cox -E 'test(/compact|handoff|summar/)'
+10 tests run: 10 passed, 533 skipped
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check -p cox-core
+clean
+```

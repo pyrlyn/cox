@@ -20,6 +20,7 @@
 // drop this allow once its public items are documented.
 #![allow(missing_docs)]
 
+pub mod anchor;
 pub mod ask_user;
 pub mod bash;
 pub mod checkpoint;
@@ -49,6 +50,9 @@ pub mod write;
 /// for existing callers.
 pub use cox_sandbox::path;
 pub use cox_sandbox::sandbox;
+
+/// T64.15.1: the open that pairs with `path::confine`, next to it.
+pub use cox_sandbox::open;
 
 /// T32.4: `outline` (AST signature extraction) moved to `cox-syntax`
 /// (dependency (a): tree-sitter and its five grammars are each a C build);

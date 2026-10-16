@@ -14,22 +14,24 @@ New bugs, dead code and moves from a read-only Cursor cloud review of clean `mai
 | T64.2 | P0 | bug | done | `load.rs:453-470`; `cox-session/src/lib.rs:231-235`; `cox-core/src/turn.rs:505` | A project `core.workspace_roots` is not guarded and becomes `ToolCx.roots` for `confine`. Revert project roots outside the git root and the user's roots. |
 | T64.3 | P0 | bug | done | `cox-protocol/src/config.rs:515-517`; `GUARDED_KEYS` at `load.rs:453-470` | A project can set `providers.*.base_url` or add providers, and the user's API keys follow that URL. Revert project `base_url`, `api_key_env` and new `[providers.*]` tables. |
 | T64.4 | P1 | bug | done | `load.rs:197-206`; `cox-permission/src/lib.rs:317-318` | A project may set `permissions.mode = auto` (only `bypass` is reverted). Revert any project mode wider than the user layer. |
-| T64.5 | P1 | bug | confirmed | `load.rs:228-237`; `cox-sandbox/src/sandbox/mod.rs:199-207` | A project may set `sandbox.network = true` and extra `sandbox.writable`. Revert them unless the user layer already allows them. |
+| T64.5 | P1 | bug | done | `load.rs:228-237`; `cox-sandbox/src/sandbox/mod.rs:199-207` | A project may set `sandbox.network = true` and extra `sandbox.writable`. Revert them unless the user layer already allows them. |
 | T64.6 | P1 | bug | done | `cox-permission/src/policy.rs:33-37`; no approval check in the project guards | A project may set `permissions.approval = on-failure`, which auto-runs confined `Exec`. Refuse a project approval looser than the user layer. |
-| T64.7 | P1 | bug | confirmed | `load.rs:1085-1120` (test keeps `mcp.servers["new"]`); LSP revert at `:295-323` | A project may add MCP stdio servers. Revert project-added or changed `mcp.servers` the way `lsp.servers` is reverted. |
+| T64.7 | P1 | bug | done | `load.rs:1085-1120` (test keeps `mcp.servers["new"]`); LSP revert at `:295-323` | A project may add MCP stdio servers. Revert project-added or changed `mcp.servers` the way `lsp.servers` is reverted. |
 | T64.8 | P1 | bug | done | `cox-core/src/turn.rs:286-291`; `cox-tools/src/write.rs:102-107`; `cox-tools/src/edit.rs:80-85` | `write`/`edit` are `Concurrency::Parallel`, so same-path calls in one batch race and the last rename wins. Group the parallel batch by `touches()` path. |
 | T64.9 | P1 | bug | confirmed (documented design) | `cox-sandbox/src/sandbox/landlock.rs:53-65` | Landlock grants read of `/`, so read-only and workspace-write sandboxes can read the whole disk. Narrow reads to the workspace roots, or refuse Landlock where read isolation is required. |
-| T64.10 | P1 | bug | confirmed | `cox-session/src/mcp.rs:122-130`, `:158-165`; `cox-session/src/sandbox.rs:89-97` | An MCP stdio server that cannot be wrapped under Landlock runs with host privileges plus a notice. Refuse or quarantine it. |
+| T64.10 | P1 | bug | done | `cox-session/src/mcp.rs:122-130`, `:158-165`; `cox-session/src/sandbox.rs:89-97` | An MCP stdio server that cannot be wrapped under Landlock runs with host privileges plus a notice. Refuse or quarantine it. |
 | T64.11 | P1 | bug | done | `.github/workflows/ci.yml:3-11`, `:470-481` | `revert-on-failure` needs a push to `main`, but `ci.yml` has no `push` trigger, so the job never runs. Add the trigger or delete the job. |
 | T64.12 | P2 | bug | done | `cox-web/src/lib.rs:48-66` | The `web_fetch` client fallback drops `.timeout(TIMEOUT)`. Fail closed, or set the timeout on the fallback. |
 | T64.13 | P2 | bug | done | `cox-mcp/src/auth.rs:228-256` | The OAuth loopback forwards the first TCP connection's query; `state` is checked only later. Accept only `GET /callback` and keep listening until `state` matches. |
-| T64.14 | P2 | bug | confirmed | `cox-store/src/lock.rs:100-105` | An unreadable or corrupt session lock file becomes `Holder::default()` (pid 0). Treat it as busy with an unknown holder. |
-| T64.15 | P2 | bug | suspected | `cox-sandbox/src/path.rs:41-76`; `cox-tools/src/read.rs:89-96` | `confine` then `std::fs::read`/`write` leaves a symlink-swap window. Open with `O_NOFOLLOW`/`openat`, or serialize readers and writers per path. |
+| T64.14 | P2 | bug | done | `cox-store/src/lock.rs:100-105` | An unreadable or corrupt session lock file becomes `Holder::default()` (pid 0). Treat it as busy with an unknown holder. |
+| T64.15.1 | P2 | bug | done | `cox-sandbox/src/open.rs` | `confine` then `std::fs::read`/`write` leaves a symlink-swap window. Part A: `open_confined` opens with `O_NOFOLLOW` and checks the descriptor's real path against the canonical roots; tests show `std::fs::read` follows a leaf or parent swap and the helper refuses both. |
+| T64.15.2 | P2 | bug | confirmed | `cox-tools/src/read.rs:103`; `edit.rs:107`; `write.rs:191`; `v4a/tool.rs:131` | Part B: open through `cox_tools::open::open_confined` at the read side — `read`, `edit`, `write`'s prior-content read and `apply_patch`. Deferred, not in this task: the `lsp`, `repomap` and checkpoint reads. |
+| T64.15.3 | P2 | bug | confirmed | `cox-tools/src/write.rs:46-76` (`stage`, `atomic_write`) | Part C: a swapped parent directory still redirects `create_dir_all`, the temp file and the rename. Open the parent with `O_DIRECTORY`/`O_NOFOLLOW`, check its real path, then `openat`/`renameat` relative to that descriptor. |
 | T64.16 | P2 | bug | done | `cox-permission/src/lib.rs:256-268` | The Bash read-deny skips relative tokens: `deny Read(~/.ssh/**)` misses `cat id_rsa` run inside `~/.ssh`. Resolve relative tokens against the session cwd. |
-| T64.17 | P2 | bug | confirmed | `cox-protocol/src/config.rs:1416-1417`; `cox-session/src/lib.rs:552-559` | A project may point `memory.dir` anywhere. Guard it like the other path keys. |
-| T64.18 | P2 | dead code | confirmed | `cox-core/src/session.rs:53-55` (`#[allow(dead_code)]`); set at `compact.rs:413` | `State::Compacting` is written but never matched. Match it in the UI/status, or drop it and its allow. |
-| T64.19 | P2 | dead code | confirmed | `crates/cox/Cargo.toml:106-107` | `crates/cox` depends on `keyring`, but `cox/src` has no `keyring::` (unused since T37.31). Remove the dependency. |
-| T64.20 | P2 | dead code | confirmed | `cox-protocol/src/agent.rs:57` | `AgentDef::restrict` has only test callers. Call it where `cox-core`/`cox-session` open a child, or make it `pub(crate)`. |
+| T64.17 | P2 | bug | done | `cox-protocol/src/config.rs:1416-1417`; `cox-session/src/lib.rs:552-559` | A project may point `memory.dir` anywhere. Guard it like the other path keys. |
+| T64.18 | P2 | dead code | done | `cox-core/src/session.rs:53-55` (`#[allow(dead_code)]`); set at `compact.rs:413` | `State::Compacting` is written but never matched. Match it in the UI/status, or drop it and its allow. |
+| T64.19 | P2 | dead code | done | `crates/cox/Cargo.toml:106-107` | `crates/cox` depends on `keyring`, but `cox/src` has no `keyring::` (unused since T37.31). Remove the dependency. |
+| T64.20 | P2 | dead code | done | `cox-protocol/src/agent.rs:57` | `AgentDef::restrict` has only test callers. Call it where `cox-core`/`cox-session` open a child, or make it `pub(crate)`. |
 | T64.21 | P2 | dead code | done | `report.html` (39,581 bytes, tracked, not ignored); `AGENTS.md:7` | Gitignore it if it is generated, or move it under `docs/` and update `AGENTS.md`. |
 | T64.22 | P2 | move | done | `cox-provider-http/src/http.rs:84-88` and `cox-mcp/src/auth.rs:69-100` → one keyring helper | Share `keyring_enabled` and the `Entry::new("cox", …)` policy (~20 lines). Extract a `secret-store` crate only when a third consumer appears. |
 | T64.23 | P2 | move | confirmed | `brand/build.mjs:1-18` → `@pyrlyn/brand` | Upstream only the generic merge/table code. `tokens.json` and the logos stay here. |
@@ -40,7 +42,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.4 | todo | P2 | 4 | 0% | |
@@ -69,14 +70,12 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T37.33 | todo | P1 | 3 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
-| T52.25 | todo | P2 | 2 | 0% | |
 | T52.26 | todo | P2 | 3 | 0% | |
 | T53.5 | todo | P3 | 3 | 0% | |
 | T53.6 | todo | P3 | 2 | 0% | |
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.8 | todo | P3 | 3 | 0% | |
 | T56.9 | todo | P3 | 1 | 0% | |
 | T56.10 | todo | P3 | 2 | 0% | |
 | T56.11 | todo | P3 | 2 | 0% | |
@@ -145,14 +144,9 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | todo | P2 | 3 | 0% |  |
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | todo | P2 | 1 | 0% |  |
-| T69.1 | todo | P1 | 3 | 0% | |
 | T69.2 | todo | P1 | 2 | 0% | |
 | T69.3 | todo | P2 | 1 | 0% | |
-| T69.4 | todo | P3 | 1 | 0% | |
-| T69.5 | todo | P1 | 3 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
-| T69.7 | todo | P3 | 3 | 0% | |
-| T69.8 | todo | P3 | 1 | 0% | |
 
 ## Reference
 
@@ -513,7 +507,7 @@ fail_open = true
 [mcp]
 timeout_s = 30
 deferred = true
-servers = {}                        # [mcp.servers.<name>] command/args/url/env/sandbox — same shape as .mcp.json, plus sandbox=false to opt a named stdio server out of the sandbox wrap (default true, T33.42)
+servers = {}                        # [mcp.servers.<name>] command/args/url/env/sandbox — same shape as .mcp.json, plus sandbox=false to opt a named stdio server out of the sandbox wrap (default true, T33.42); [mcp.servers.<name>] is user config only — a project config cannot set mcp.servers (a repository must not choose a program cox runs or a URL it contacts)
 
 [plugins]
 enabled = true                      # --no-plugins / COX_PLUGINS_ENABLED; project config may turn it off, never back on (T33.6)
@@ -531,7 +525,11 @@ endpoint = ""
 redact = true
 ```
 
-Precedence (D13): embedded defaults < `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `.claude/settings.json` (permissions/hooks/env only, imported) < `COX_<SECTION>_<KEY>` (e.g. `COX_TIERS_CODE_MODEL`) < CLI flags. Before figment runs, `dotenvy` loads `.env` then `.env.local` walking up from cwd (T0.7); missing files are ignored; already-set variables are left alone, so a key that arrived only via `.env` still shows as `env` in `cox config show --sources`. Project config may not raise `budget.*`, set `permissions.mode` wider than the user layer's (`plan` < `default` < `auto` < `bypass`, T64.4), set `permissions.approval` looser than the user layer's (`never` < `untrusted` < `on-request` < `on-failure`, T64.6), set `sandbox.mode = "danger-full-access"`, set `tiers.think.confirm = false`, add hook commands (T64.1), name a `core.workspace_roots` entry outside its git root that the user does not list (T64.2), change a provider section's `base_url` or `api_key_env` or add a `[providers.<name>]` table (T64.3); violations are reported by `cox config show` and ignored. `cox config show --sources` prints every effective key with its origin; `cox config set <key> <value>` edits the user file with `toml_edit` preserving comments.
+Precedence (D13): embedded defaults < `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `.claude/settings.json` (permissions/hooks/env only, imported) < `COX_<SECTION>_<KEY>` (e.g. `COX_TIERS_CODE_MODEL`) < CLI flags. Before figment runs, `dotenvy` loads `.env` then `.env.local` walking up from cwd (T0.7); missing files are ignored; already-set variables are left alone, so a key that arrived only via `.env` still shows as `env` in `cox config show --sources`. Project config may not raise `budget.*`, set `permissions.mode` wider than the user layer's (`plan` < `default` < `auto` < `bypass`, T64.4), set `permissions.approval` looser than the user layer's (`never` < `untrusted` < `on-request` < `on-failure`, T64.6), set `sandbox.mode = "danger-full-access"`, set `tiers.think.confirm = false`, add hook commands (T64.1), name a `core.workspace_roots` entry outside its git root that the user does not list (T64.2), change a provider section's `base_url` or `api_key_env` or add a `[providers.<name>]` table (T64.3), add or change an `[mcp.servers.<name>]` entry (T64.7); violations are reported by `cox config show` and ignored. `cox config show --sources` prints every effective key with its origin; `cox config set <key> <value>` edits the user file with `toml_edit` preserving comments.
+
+Precedence (D13): embedded defaults < `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `.claude/settings.json` (permissions/hooks/env only, imported) < `COX_<SECTION>_<KEY>` (e.g. `COX_TIERS_CODE_MODEL`) < CLI flags. Before figment runs, `dotenvy` loads `.env` then `.env.local` walking up from cwd (T0.7); missing files are ignored; already-set variables are left alone, so a key that arrived only via `.env` still shows as `env` in `cox config show --sources`. Project config may not raise `budget.*`, set `permissions.mode` wider than the user layer's (`plan` < `default` < `auto` < `bypass`, T64.4), set `permissions.approval` looser than the user layer's (`never` < `untrusted` < `on-request` < `on-failure`, T64.6), set `sandbox.mode = "danger-full-access"`, set `sandbox.network = true` or list a `sandbox.writable` root the user layer does not (T64.5), set `tiers.think.confirm = false`, add hook commands (T64.1), name a `core.workspace_roots` entry outside its git root that the user does not list (T64.2), change a provider section's `base_url` or `api_key_env` or add a `[providers.<name>]` table (T64.3); violations are reported by `cox config show` and ignored. `cox config show --sources` prints every effective key with its origin; `cox config set <key> <value>` edits the user file with `toml_edit` preserving comments.
+
+Precedence (D13): embedded defaults < `~/.cox/config.toml` < `<git root>/.cox/config.toml` < `.claude/settings.json` (permissions/hooks/env only, imported) < `COX_<SECTION>_<KEY>` (e.g. `COX_TIERS_CODE_MODEL`) < CLI flags. Before figment runs, `dotenvy` loads `.env` then `.env.local` walking up from cwd (T0.7); missing files are ignored; already-set variables are left alone, so a key that arrived only via `.env` still shows as `env` in `cox config show --sources`. Project config may not raise `budget.*`, set `permissions.mode` wider than the user layer's (`plan` < `default` < `auto` < `bypass`, T64.4), set `permissions.approval` looser than the user layer's (`never` < `untrusted` < `on-request` < `on-failure`, T64.6), set `sandbox.mode = "danger-full-access"`, set `tiers.think.confirm = false`, add hook commands (T64.1), name a `core.workspace_roots` entry outside its git root that the user does not list (T64.2), change a provider section's `base_url` or `api_key_env` or add a `[providers.<name>]` table (T64.3); point `memory.dir` outside its git root (T64.17); violations are reported by `cox config show` and ignored. `cox config show --sources` prints every effective key with its origin; `cox config set <key> <value>` edits the user file with `toml_edit` preserving comments.
 
 ### 1.7 Storage schema (`cox-store`)
 
@@ -872,13 +870,6 @@ Every card in this phase:
 - runs the three standard commands.
 
 Host unit tests use inline WAT (R§4.3.5 P15); no `.wasm` is ever committed. **Blockers** (everything after them depends on them): T33.1, T33.2, T33.3, T33.5, T33.6.
-
-#### T33.14.2 Filesystem preopens
-
-Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43; the `cox_http` half is T33.14.1.
-Depends: T33.9, T33.43 (preopens stay off until wasmtime ≥ 48, A55) · Size: ~120 · Files: `crates/cox-plugin/src/fs.rs`
-Goal: WASI preopens come only from `fs` and pass `confine`; reads mount `ro:`; `.git` and `.cox` are never writable. WASI is on only when `wasi = true` or `fs` is set.
-Check: `fs_write_to_dot_git_is_refused`, `wasi_ctx_has_no_env`.
 
 #### T33.34 Go: SDK wrapper, template, example
 
@@ -1483,12 +1474,6 @@ Every card keeps the P51 rules, and:
 - a remote session never sends API keys or the Keychain's secrets over the wire and never forwards the ssh agent;
 - plugin widgets reach the screen only through `cox_sanitize::sanitize` and PL§8's limits, as in the TUI.
 
-#### T52.25 `cox-ffi` and CoxModel carry the merge
-
-Depends: T52.24 · Size: ~80 · Files: `crates/cox-ffi/src/lib.rs`, `crates/cox-ffi/src/types.rs`, CoxModel `BestOfStore`
-Goal: `App.best_of_merge` and `mergeable` forwarded as one-expression bodies (D11, A90), `BestOfMerge` and `Launched.merged_from` in the `#[uniffi::remote]` types; `BestOfStore` holds the chosen candidates and the chosen merger, and refreshes the comparison when the merge candidate appears.
-Check: `cox-ffi`'s `tests/forward_only.rs`; `just desktop-xcframework`; `swift test --package-path desktop/macos/Packages/CoxModel --filter BestOf`.
-
 #### T52.26 CoxUI: Merge in the best-of compare view
 
 Depends: T52.25 · Size: ~180 · Files: CoxUI `BestOfCompare` screen, the merge sheet (new molecule), `desktop/macos/App` wiring
@@ -1565,14 +1550,6 @@ Every card in this phase:
 - reads the key from `CURSOR_API_KEY` through `cox_provider::http::resolve_key` (tests inject `resolve_key_with`; no test touches a real key or keychain) and never writes it to a log, an error or the rollout;
 - runs every string from Cursor (stream text, tool names, artifact names, errors) through `cox_sanitize::sanitize`;
 - makes no network call in tests (wiremock and hand-written fixtures only, D12).
-
-#### T56.8 Offline end-to-end over hand-written fixtures
-
-Depends: T56.7 · Size: ~160 · Files: `crates/cox/tests/cloud_agents.rs` (new); fixtures `tests/fixtures/cursor-cloud/*.json`, `*.sse` and a fixture plugin package with a `[[cloud_agents]]` entry
-Goal: the real binary against a scratch `COX_HOME`, a wiremock server standing in for `api.cursor.com` (host override for tests only, never a manifest field), and a fixture repository with a GitHub remote: `cox run -p --output-format stream-json` dispatches a background cloud task, the approval is asked (`--answer` allow), the task events appear in the stream, the ledger holds one `billed_externally` row, and no request body contains the fixture's git user name or email.
-Check: `mise exec -- cargo nextest run -p cox cloud_agent_headless_run_end_to_end cloud_agent_requests_carry_no_git_identity`.
-Done when: the tests pass offline with no key.
-Out of scope: a live account (T56.10).
 
 #### T56.9 Docs: cloud agents for users and in EA
 
@@ -3039,27 +3016,13 @@ Rationale in §6 A159. Found by reading openai/codex at `f0c5077c34ec7a76b4ad913
 
 **Agents.** Implementing agents use Grok 4.6, Grok 4.7 or Composer 2.5 only. English comments and docs. No card is claimed by this plan.
 
-**Order.** Independent. T69.5 before T69.6 and T69.8 (same file). T69.1 before T69.2 (T69.2 refuses opaque segments).
+**Order.** Independent. T69.5 before T69.6 (same file). T69.1 before T69.2 (T69.2 refuses opaque segments).
+
+**Order.** Independent. T69.1 before T69.2 (T69.2 refuses opaque segments).
 
 **Not taken (codex and grok-build already behind cox):** codex middle truncation and "N tokens truncated" markers (lossy; `truncate.rs` keeps an `expand` id), the network MITM proxy, Starlark exec policy, compaction prompts, `process-hardening`; grok-build bytes/4 estimator, tool-pair snapping, two-pass prefire, TUI, config overlay.
 
 **rtok follow-ups (outside cox; for pyrlyn/rtok `plan.md`, not claimed here).** Lossless tool-schema shrink on the proxy ([codex `codex-rs/tools/src/json_schema/compaction.rs` L14–153](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/tools/src/json_schema/compaction.rs#L14-L153), Apache-2.0, implement similar: archive the original, add an `expand` id); MCP results fit after JSON escaping ([codex `codex-rs/utils/output-truncation/src/lib.rs` L43–87](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/utils/output-truncation/src/lib.rs#L43-L87), Apache-2.0, implement similar); `rtok doctor` budgeted `quick_check` (codex `state/src/sqlite/validation.rs`, doctor only, never the hook path); do not deny a native `Read` of `AGENTS.md`, `CLAUDE.md` or `SKILL.md` ([grok-build `read_file/mod.rs` L244–278](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build/read_file/mod.rs#L244-L278), Apache-2.0, implement similar; D6 forbids copying into a plugin).
-
-#### T69.1 PowerShell and cmd readers hit existing `Read` denies
-
-Model: - · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
-
-Goal: `Get-Content`, `gc`, `type` and `more` on one plain command are classified read-only with the path on the segment, so `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa` instead of only asking; writers (`Remove-Item`, `Set-Content`, `Out-File`) keep their path; pipelines, `;`, `$(`, variables and unknown aliases stay opaque `Exec`.
-
-Why: `classify.rs` lines 526–538 make every line the bash grammar cannot parse opaque, and `Rule::read_path_rule` (`cox-permission/src/rules.rs` lines 140–145) only sees extracted paths, so a PowerShell read of a denied file is asked, not denied. No long-lived PowerShell parser child (a new attack surface on the approval path).
-
-Source: [codex `codex-rs/shell-command/src/command_safety/powershell_parser.rs` L19–44](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/shell-command/src/command_safety/powershell_parser.rs#L19-L44); [grok-build `crates/codegen/xai-grok-permission-rules/src/shell_access.rs` L2371–2392](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-permission-rules/src/shell_access.rs#L2371-L2392)
-
-Licence: Apache-2.0 (both), implement similar, not copy (per-file header and a root `NOTICE` needed). **Implement similar, do not copy:** the codex parser is a `.ps1` child process and grok's file is thousands of lines bound to its own types.
-
-Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-core/tests/permission.rs`
-
-Done when `unparsed_powershell_command_asks` is extended (four reader lines naming `~/.ssh/id_rsa` are read-only and not opaque; `Remove-Item` is not read-only; a pipeline stays opaque) and `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa`. Check: `mise exec -- cargo nextest run -p cox-tools -E 'test(unparsed_powershell)'`, `mise exec -- cargo nextest run -p cox-core -E 'test(permission)'`.
 
 #### T69.2 Honor `permissions.allow_for_session_persists`
 
@@ -3093,38 +3056,6 @@ Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, 
 
 Done when the default grows, a user list is unchanged and the snapshots pass. Check: `mise exec -- cargo nextest run -p cox-sandbox -p cox-protocol`.
 
-#### T69.4 Budgeted `quick_check` when the store opens
-
-Model: - · Status: open · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1
-
-Goal: After WAL is on, `Store::open` runs `PRAGMA quick_check(1)` with a ~200 ms budget: `ok` continues; a finding is a `StoreError` the session prints and refuses; a timeout logs and opens anyway. Not repeated per query.
-
-Why: `enable_wal` (`cox-store/src/lib.rs` ~L271) has no integrity check, so a corrupt database fails later and obscurely.
-
-Source: [codex `codex-rs/state/src/sqlite/validation.rs` L16–66](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/state/src/sqlite/validation.rs#L16-L66)
-
-Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy:** codex uses sqlx and a progress handler; cox is on Diesel.
-
-Files: `crates/cox-store/src/lib.rs` (and its tests)
-
-Done when a new database opens and a forced short deadline still opens. Check: `mise exec -- cargo nextest run -p cox-store`.
-
-#### T69.5 Compaction rejects a tiny summary and survives a context overflow
-
-Model: - · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
-
-Goal: `summary_is_usable` requires ≥ 500 trimmed characters (a shorter body is a failed attempt, not a replacement for history). A context-window error retries down a ladder (full pointer transcript → tool results cut to the head/tail pointer → `working_state` alone plus the last user request), one retry per step. After the ladder fails on size, auto-compact is suppressed until a later call reports a smaller `last_context_tokens` or the user runs `/compact`.
-
-Why: a failed compact leaves `last_context_tokens` unchanged and the next turn calls `compact` again (`session.rs` ~L1473–1482); `summarise` (`compact.rs` L694–763) accepts any non-empty string.
-
-Source: [grok-build `xai-grok-compaction/src/code_compaction/config.rs` L15–20](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/config.rs#L15-L20), [`summary.rs` L120–125](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/summary.rs#L120-L125), [`sample.rs` L81–120](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/sample.rs#L81-L120), [`failure.rs` L9–23](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/failure.rs#L9-L23), [`xai-grok-shell/src/session/compaction.rs` L405–479](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/compaction.rs#L405-L479)
-
-Licence: Apache-2.0, Copyright 2023-2026 SpaceXAI, implement similar, not copy (header, Apache text, `THIRD-PARTY-NOTICES`, change notice §4(b)). **Implement similar, do not copy:** bound to their `ConversationItem` types, and a paste adds Apache's patent clause to cox's tri-license.
-
-Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/prompts/compact.md`, `crates/cox-core/tests/compact.rs`
-
-Done when a 40-character summary does not replace history, a context-length error is followed by a smaller second request, a second size error sets the suppress flag, the next turn skips the compact job, and `/compact` still runs. Check: `mise exec -- cargo nextest run -p cox-core compact`.
-
 #### T69.6 After compaction, reattach live tasks, todos and subagents
 
 Model: - · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
@@ -3141,22 +3072,6 @@ Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/tasks.rs` (read on
 
 Done when a running shell task id is in the summary and absent from the dropped turns, an idle session adds no block, and size stays ≤ 2048. Check: `mise exec -- cargo nextest run -p cox-core compact`.
 
-#### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
-
-Model: - · Status: open · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
-
-Goal: `read` gains an anchors mode that renders `N:abc→line` (3 letters from a whitespace-normalized hash you write); `edit` accepts `{op: replace|insert_after, anchor, content}` besides `old_string`. One stale anchor rejects the whole batch with the fresh anchor and three neighbours; ops apply bottom-up; default `read` output is unchanged.
-
-Why: a stale `old_string` costs a full re-read (`edit.rs` L160–198). Larger than the others: split further when claimed.
-
-Source: [grok-build `grok_build_hashline/scheme.rs` L1–56](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/scheme.rs#L1-L56), [`util/hash.rs` L1–52](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/util/hash.rs#L1-L52), [`read_file.rs` L21–67](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/read_file.rs#L21-L67), [`edit/mod.rs` L50–63](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/edit/mod.rs#L50-L63)
-
-Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy** (`scheme.rs`, `hash.rs`, `edit/apply.rs`). Not the `implementations/codex/` (OpenAI, needs its `NOTICE`) or `implementations/opencode/` (MIT) trees.
-
-Files: new `crates/cox-tools/src/anchor.rs`, `read`, `edit`
-
-Done when an indent-only change still matches, a content change is `Stale` and names the new anchor, two ops apply bottom-up, and a path outside the workspace is confined. Check: `mise exec -- cargo nextest run -p cox-tools edit`.
-
 #### T69.8 Integer compact threshold
 
 Model: - · Status: open · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1
@@ -3172,6 +3087,22 @@ Licence: Apache-2.0, may be copied with attribution. **Implement similar:** the 
 Files: `crates/cox-core/src/compact.rs`
 
 Done when the 750/1000 test stays green and a window above 2^53 is exact. Check: `mise exec -- cargo nextest run -p cox-core compact_trigger`.
+
+#### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
+
+Model: - · Status: open · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Goal: `read` gains an anchors mode that renders `N:abc→line` (3 letters from a whitespace-normalized hash you write); `edit` accepts `{op: replace|insert_after, anchor, content}` besides `old_string`. One stale anchor rejects the whole batch with the fresh anchor and three neighbours; ops apply bottom-up; default `read` output is unchanged.
+
+Why: a stale `old_string` costs a full re-read (`edit.rs` L160–198). Larger than the others: split further when claimed.
+
+Source: [grok-build `grok_build_hashline/scheme.rs` L1–56](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/scheme.rs#L1-L56), [`util/hash.rs` L1–52](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/util/hash.rs#L1-L52), [`read_file.rs` L21–67](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/read_file.rs#L21-L67), [`edit/mod.rs` L50–63](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/edit/mod.rs#L50-L63)
+
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy** (`scheme.rs`, `hash.rs`, `edit/apply.rs`). Not the `implementations/codex/` (OpenAI, needs its `NOTICE`) or `implementations/opencode/` (MIT) trees.
+
+Files: new `crates/cox-tools/src/anchor.rs`, `read`, `edit`
+
+Done when an indent-only change still matches, a content change is `Stale` and names the new anchor, two ops apply bottom-up, and a path outside the workspace is confined. Check: `mise exec -- cargo nextest run -p cox-tools edit`.
 
 ---
 

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// Best of n over cox-ffi (T52.11): `App.bestOf`, `compare` and `pick` as CoxClient's values.
+// Best of n over cox-ffi (T52.11, T52.25): `App.bestOf`, `compare`, `pick`, `bestOfMerge` and
+// `mergeable` as CoxClient's values.
 // Field for field; nothing is decided here. Separate from `LiveCoreClient.swift` like the other
 // conversions, so that file stays the list of calls into Rust for one session.
 
@@ -31,6 +32,21 @@ extension LiveCoreClient: BestOfClient {
   public func pick(_ id: String, keep: UInt32, discard: Bool) async throws -> CoxClient.Picked {
     let picked = try await app.pick(id: id, keep: keep, discard: discard)
     return CoxClient.Picked(pruned: picked.pruned, dirty: picked.dirty, refused: picked.refused)
+  }
+
+  public func merge(
+    _ request: CoxClient.BestOfMerge, theme: String
+  ) async throws -> CoxClient.BestOfLaunch {
+    let launch = try await app.bestOfMerge(
+      merge: CoxFFIBindings.BestOfMerge(
+        id: request.id, from: request.from, by: CoxFFIBindings.Candidate(request.merger)),
+      theme: theme)
+    return CoxClient.BestOfLaunch(
+      id: launch.group.id, sessions: launch.sessions.map { LiveSession($0) })
+  }
+
+  public func mergeable(_ id: String) async throws -> [UInt32] {
+    try app.mergeable(id: id)
   }
 }
 
