@@ -1119,7 +1119,6 @@ dependencies = [
  "crossterm",
  "dotenvy",
  "insta",
- "keyring",
  "portable-pty",
  "predicates",
  "reqwest 0.12.28",
@@ -1614,6 +1613,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
+ "tracing",
  "workspace-hack",
 ]
 

@@ -210,3 +210,167 @@ fn edit_replace_all_overlapping_fallback_windows_do_not_panic() {
     // and is dropped, leaving line 2 untouched.
     assert_eq!(after, "B\nAAA \n");
 }
+
+/// T69.7: content-hash anchors, driven through `read` (which renders them)
+/// and `edit` (which consumes them), so the two halves cannot drift apart.
+mod anchors {
+    use super::*;
+    use cox_tools::read::ReadTool;
+
+    fn run<T: Tool>(
+        tool: T,
+        dir: &tempfile::TempDir,
+        input: serde_json::Value,
+    ) -> Result<String, ToolError> {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime")
+            .block_on(tool.call(input, &cx(dir.path().to_path_buf())))
+            .map(|out| out.text)
+    }
+
+    /// The `N:abc` anchor `read` prints for line `n`.
+    fn anchor_of(dir: &tempfile::TempDir, n: usize) -> String {
+        let text = run(
+            ReadTool,
+            dir,
+            serde_json::json!({ "path": "f.txt", "anchors": true }),
+        )
+        .expect("read");
+        let prefix = format!("{n}:");
+        text.lines()
+            .find(|l| l.starts_with(&prefix))
+            .and_then(|l| l.split('→').next())
+            .expect("anchor line")
+            .to_string()
+    }
+
+    fn contents(dir: &tempfile::TempDir) -> String {
+        std::fs::read_to_string(dir.path().join("f.txt")).expect("read back")
+    }
+
+    #[test]
+    fn edit_read_without_anchors_is_unchanged() {
+        let dir = write_fixture("a\nb\n");
+        let text = run(ReadTool, &dir, serde_json::json!({ "path": "f.txt" })).expect("read");
+        assert!(text.starts_with("1\ta\n2\tb"), "got {text:?}");
+    }
+
+    #[test]
+    fn edit_anchor_survives_an_indent_only_change() {
+        let dir = write_fixture("fn f() {\n    let x = 1;\n}\n");
+        let anchor = anchor_of(&dir, 2);
+        std::fs::write(
+            dir.path().join("f.txt"),
+            "fn f() {\n        let  x = 1;\n}\n",
+        )
+        .expect("reindent");
+        run(
+            EditTool,
+            &dir,
+            serde_json::json!({
+                "path": "f.txt",
+                "ops": [{ "op": "replace", "anchor": anchor, "content": "    let x = 2;" }]
+            }),
+        )
+        .expect("indent-only change still matches");
+        assert_eq!(contents(&dir), "fn f() {\n    let x = 2;\n}\n");
+    }
+
+    #[test]
+    fn edit_stale_anchor_names_the_fresh_one_and_changes_nothing() {
+        let dir = write_fixture("one\ntwo\nthree\nfour\n");
+        let stale = anchor_of(&dir, 2);
+        std::fs::write(dir.path().join("f.txt"), "one\nTWO changed\nthree\nfour\n").expect("drift");
+        let fresh = anchor_of(&dir, 2);
+        assert_ne!(stale, fresh);
+
+        let err = run(
+            EditTool,
+            &dir,
+            serde_json::json!({
+                "path": "f.txt",
+                "ops": [
+                    { "op": "replace", "anchor": anchor_of(&dir, 1), "content": "uno" },
+                    { "op": "replace", "anchor": stale, "content": "dos" }
+                ]
+            }),
+        )
+        .expect_err("stale anchor rejects the batch");
+        match err {
+            ToolError::Denied { why } => {
+                assert!(why.contains("stale"), "got {why}");
+                assert!(why.contains(&format!("{fresh}→TWO changed")), "got {why}");
+                assert!(why.contains("three"), "neighbours shown: {why}");
+            }
+            other => panic!("expected Denied, got {other:?}"),
+        }
+        assert_eq!(contents(&dir), "one\nTWO changed\nthree\nfour\n");
+    }
+
+    #[test]
+    fn edit_two_anchored_ops_apply_bottom_up() {
+        let dir = write_fixture("a\nb\nc\nd\n");
+        let (a1, a3) = (anchor_of(&dir, 1), anchor_of(&dir, 3));
+        run(
+            EditTool,
+            &dir,
+            serde_json::json!({
+                "path": "f.txt",
+                "ops": [
+                    { "op": "insert_after", "anchor": a1, "content": "a2\na3" },
+                    { "op": "replace", "anchor": a3, "content": "C" }
+                ]
+            }),
+        )
+        .expect("both ops apply against the original line numbers");
+        assert_eq!(contents(&dir), "a\na2\na3\nb\nC\nd\n");
+    }
+
+    #[test]
+    fn edit_anchored_ops_keep_crlf_and_missing_final_newline() {
+        let dir = write_fixture("a\r\nb");
+        let anchor = anchor_of(&dir, 2);
+        run(
+            EditTool,
+            &dir,
+            serde_json::json!({
+                "path": "f.txt",
+                "ops": [{ "op": "insert_after", "anchor": anchor, "content": "c" }]
+            }),
+        )
+        .expect("edit");
+        assert_eq!(contents(&dir), "a\r\nb\r\nc");
+    }
+
+    #[test]
+    fn edit_anchored_path_outside_the_workspace_is_confined() {
+        let dir = write_fixture("a\n");
+        let err = run(
+            EditTool,
+            &dir,
+            serde_json::json!({
+                "path": "../escape.txt",
+                "ops": [{ "op": "replace", "anchor": "1:aaa", "content": "x" }]
+            }),
+        )
+        .expect_err("outside the workspace");
+        assert!(matches!(err, ToolError::Confined { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn edit_rejects_ops_mixed_with_old_string() {
+        let dir = write_fixture("a\n");
+        let err = run(
+            EditTool,
+            &dir,
+            serde_json::json!({
+                "path": "f.txt", "old": "a", "new": "b",
+                "ops": [{ "op": "replace", "anchor": anchor_of(&dir, 1), "content": "x" }]
+            }),
+        )
+        .expect_err("one mode per call");
+        assert!(matches!(err, ToolError::Denied { .. }), "got {err:?}");
+        assert_eq!(contents(&dir), "a\n");
+    }
+}

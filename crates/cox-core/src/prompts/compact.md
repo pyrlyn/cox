@@ -1,7 +1,8 @@
 You are compacting a coding session. Summarise the transcript below so the same
 agent can continue the work without it. Keep every file path, identifier,
 command, exact error text and number that still matters; drop narration and
-anything superseded. Write at most 2048 tokens under exactly these headings:
+anything superseded. Write at most 2048 tokens under exactly these headings; a
+reply under 500 characters is discarded and the session keeps its full history:
 
 ## Goal
 ## Decisions
