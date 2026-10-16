@@ -300,6 +300,12 @@ impl Catalog {
         self.rows.values()
     }
 
+    /// Every priced row as a price table, so a call to a model only a
+    /// plugin's `[[models]]` prices is still costed (T33.40.4).
+    pub fn price_table(&self) -> PriceTable {
+        PriceTable::from_prices(self.rows.values().filter_map(|r| r.price.clone()).collect())
+    }
+
     /// `source` is used only when the row does not exist yet.
     fn row_mut(&mut self, id: &str, source: &RowSource) -> &mut ModelRow {
         self.rows
@@ -562,6 +568,25 @@ source_url = "https://example.test"
             (price.input, price.cache_read, price.cache_write),
             (0.042, 0.042, 0.042)
         );
+    }
+
+    #[test]
+    fn price_table_costs_a_plugin_only_model() {
+        let models = [ModelDecl {
+            price: Some(decl_price(0.042)),
+            ..decl("acme-coder")
+        }];
+        let plugins = [PluginModels {
+            plugin: "jev",
+            models: &models,
+        }];
+        let table = Catalog::load(&Config::default(), &plugins, None)
+            .expect("catalog")
+            .price_table();
+        let model = cox_protocol::types::ModelId("acme-coder".into());
+        assert_eq!(table.price_for(&model).expect("priced").input, 0.042);
+        let builtin = cox_protocol::types::ModelId("jev-latest".into());
+        assert!(table.price_for(&builtin).is_some(), "built-in rows stay");
     }
 
     #[test]
