@@ -122,6 +122,21 @@ Not done: a project `memory.dir` that does not exist yet is reverted, because `r
 Check:
 - `cargo nextest run -p cox-config -p cox-protocol`: 160 run, 160 passed (includes `every_guarded_key_has_its_own_reason` and `config_jsonschema_matches_committed_file`).
 - `cargo clippy -p cox-config -p cox-protocol --all-targets -- -D warnings`: clean.
+
+#### T64.6 Revert a project `permissions.approval` looser than the user layer
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot make confined `Exec` run unasked when the user's own config asks. `permissions.approval = "on-failure"` was not guarded, so a cloned project could set it.
+What landed:
+- `apply_project_guards` compares `ApprovalPolicy::looseness()` of the project-merged policy with the policy without the project layer and, when the project's is looser, reverts it and reports one `permissions.approval` violation naming the project value and the kept policy. Keeping or tightening it (`never` < `untrusted` < `on-request` < `on-failure`) is not a violation.
+- `ApprovalPolicy::looseness()` in `cox-protocol` is the one definition of that order (an exhaustive match); `name()` gives the kebab-case config name for the violation. `cox-permission` has no private ordering of the enum (it matches single variants in `policy.rs` and `lib.rs`), so there was nothing to make delegate. `permissions.approval` joins `GUARDED_KEYS` with its own reason.
+- The `PermissionsConfig.approval` doc comment, `docs/config.jsonschema` and plan §1.6 now name the guard.
+- Tests `project_config_cannot_loosen_the_approval_policy` (five user/project pairs, including `on-failure` with no user policy, which failed before the fix) and `project_config_may_keep_or_tighten_the_approval_policy`; `every_guarded_key_has_its_own_reason` covers the new key.
+Not done: sandbox keys (T64.5) and `mcp.servers` (T64.7) stay open.
+Check:
+- Before the fix: `cargo test -p cox-config approval_policy` failed with `user None, project on-failure: left: OnFailure, right: OnRequest`.
+- `cargo nextest run -p cox-config -p cox-permission -p cox-protocol`: 175 run, 175 passed.
+- `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
 #### T64.12 Keep the timeout on the `web_fetch` fallback client

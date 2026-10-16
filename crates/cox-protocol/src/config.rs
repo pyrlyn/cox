@@ -862,7 +862,7 @@ pub enum CompactionStrategy {
 pub struct PermissionsConfig {
     /// `permissions.mode`; project config may not widen it beyond the user's mode.
     pub mode: PermissionMode,
-    /// `permissions.approval`.
+    /// `permissions.approval`; project config may not loosen it beyond the user's policy.
     pub approval: ApprovalPolicy,
     /// `allow` rule strings (plan.md §1.8 grammar).
     pub allow: Vec<String>,

@@ -1215,7 +1215,7 @@
           "default": "default"
         },
         "approval": {
-          "description": "`permissions.approval`.",
+          "description": "`permissions.approval`; project config may not loosen it beyond the user's policy.",
           "$ref": "#/$defs/ApprovalPolicy",
           "default": "on-request"
         },
