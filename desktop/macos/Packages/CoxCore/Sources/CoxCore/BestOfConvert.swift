@@ -90,7 +90,7 @@ extension CoxClient.CandidateView {
       files: view.files.map {
         CoxClient.FileStat(path: $0.path, added: $0.added, removed: $0.removed)
       },
-      costUsd: view.costUsd, durationMs: view.durationMs)
+      costUsd: view.costUsd, durationMs: view.durationMs, mergedFrom: view.mergedFrom)
     // The core's own label and totals, in case they ever differ from the sum of the rows.
     (label, added, removed) = (view.label, view.added, view.removed)
   }
