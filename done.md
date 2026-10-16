@@ -258,6 +258,20 @@ Check:
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T64.19 Drop the unused `keyring` dependency from `cox`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 1 · Files: `crates/cox/Cargo.toml`, `crates/cox/tests/deps.rs`, `Cargo.lock`, `plan.md`
+Goal: `crates/cox` declared `keyring` but no file under it calls the crate (unused since T37.31, when the key lookup moved to `cox-provider-http` and MCP tokens to `cox-mcp`).
+What landed:
+- The `keyring` line is gone from `crates/cox/Cargo.toml`; no feature list referenced it. Only one `Cargo.lock` line changed (the `cox` package's dependency list); other crates still use `keyring` and no version moved.
+- Test `cox_does_not_depend_on_keyring` in `crates/cox/tests/deps.rs` checks the manifest of `cox` directly, since the crate still reaches `keyring` transitively.
+- plan §1 and `toolchain.md` needed no change: neither lists `keyring` under `cox`, and `cox-provider-http`, `cox-mcp` and `cox-store` keep it.
+Not done: nothing.
+Check:
+- Before the fix: `cargo nextest run -p cox --test deps -E 'test(cox_does_not_depend_on_keyring)'` failed with `crates/cox must not depend on keyring directly`.
+- After: `cargo nextest run -p cox --test deps`: 11 run, 11 passed.
+- `cargo clippy -p cox --all-targets -- -D warnings`: clean.
+
 #### T64.5 Revert a project `sandbox.network` and extra `sandbox.writable`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
