@@ -81,6 +81,20 @@ clean
 ```
 `cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
 
+#### T64.13 Match the OAuth `state` before the loopback accepts a callback
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-mcp/src/auth.rs`, `crates/cox-mcp/Cargo.toml`
+Goal: the MCP login's loopback listener returned the query of the first TCP connection, whatever it was, and `state` was checked only afterwards by rmcp. Any local process that connected first could end the login with a failure, or feed it a code of its choosing.
+What landed:
+- `login` reads the `state` rmcp put in the authorization URL. `callback(listener, state)` now loops: only `GET /callback` with that `state` is accepted (200); other paths or methods get 404, a missing or different `state` gets 400, and the listener keeps waiting. The overall `LOGIN_TIMEOUT` still bounds the wait, and a new 5 s `REQUEST_TIMEOUT` per connection stops a silent connection from stalling the accept loop.
+- `judge` is the pure verdict (`Accept`/`NotFound`/`BadRequest`); `state` is percent-decoded with `url::form_urlencoded` (the `url` crate was already a workspace dependency, now also used by `cox-mcp`; row updated in `toolchain.md`).
+- Tests `callback_ignores_junk_and_waits_for_the_matching_state` (real loopback listener on `127.0.0.1:0`: wrong path, wrong method, wrong state and missing state each get 404/400 and the wait continues; the matching request then returns its code) and `judge_decodes_the_state_before_comparing`.
+Not done: a callback with the right `state` but no `code` (e.g. `error=access_denied`) is still passed on, so rmcp reports it as a failed login, as before. The `plan.md` findings row for T64.13 is marked `done`.
+Check:
+- Mutation: with the `state` comparison forced true, `callback_ignores_junk_and_waits_for_the_matching_state` failed (the wrong-state request got 200). Restored.
+- `cargo nextest run -p cox-mcp`: 45 run, 45 passed.
+- `cargo clippy -p cox-mcp --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean.
+
 #### T64.4 Revert a project `permissions.mode` wider than the user layer
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-permission/src/lib.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
@@ -95,6 +109,21 @@ Check:
 - Before the fix: `cargo nextest run -p cox-config permission_mode` failed with `user None, project auto: left: Auto, right: Default`.
 - `cargo nextest run -p cox-config -p cox-permission -p cox-protocol`: 173 run, 173 passed.
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
+#### T69.3 Default read-only metadata dirs in a writable workspace
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-16 · Depends: — · Priority: P2 · Complexity: 1 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, `docs/config.jsonschema`, `docs/design/sandbox.md`, `plan.md`, `done.md`
+Goal: add `.agents`, `.codex` and `.aws` to the default `sandbox.readonly_in_workspace` (was `.git`, `.cox`, `.claude`). A user who set the list keeps it.
+What landed:
+- `SandboxConfig::default()` and `default.toml` now list `.git`, `.cox`, `.claude`, `.agents`, `.codex`, `.aws`. The hand-written default has a one-line comment naming codex `codex-rs/protocol/src/permissions.rs` L40-51 at f0c5077c; the set is implemented independently, `seatbelt.rs` is not copied.
+- `docs/config.md` and `docs/config.jsonschema` (both `default` arrays) were regenerated through their drift tests (`config_docs_config_md_matches_default_toml`, `config_jsonschema_matches_committed_file`), not hand-edited. `docs/design/sandbox.md` names the six dirs in its claim (2).
+- Tests in `crates/cox-protocol/src/config.rs`: `sandbox_readonly_defaults_cover_metadata_dirs` (default and `default.toml` agree on the six names) and `user_sandbox_readonly_list_is_kept` (a user list of `["vendor"]` stays exactly that).
+Not done: the seatbelt and bwrap argument snapshots did not change, because their tests build their own explicit lists rather than reading the default. The binary was not run against a real `~/.aws` or repo-local `.agents`. Workspace-wide clippy was not run; the touched crates are clippy-clean.
+Check:
+- Before the change: `cargo nextest run -p cox-protocol sandbox_readonly` failed with `left: [".git", ".cox", ".claude"]`, missing `.agents`, `.codex`, `.aws`. The user-list test passed before the change; it is a regression guard.
+- `cargo nextest run --no-fail-fast -p cox-sandbox -p cox-protocol -p cox-config`: 189 run, 189 passed.
+- `cargo clippy -p cox-protocol -p cox-sandbox -p cox-config --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
 #### T64.11 Delete the dead `revert-on-failure` job from `ci.yml`
