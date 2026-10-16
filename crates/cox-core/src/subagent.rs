@@ -113,6 +113,10 @@ struct Resolved {
     /// `None` means every parent tool (an `AgentDef` with an empty
     /// `tools:`); built-in presets always name theirs explicitly.
     tools: Option<Vec<String>>,
+    /// The allowlist is a discovered def's own (T64.20): a call's `tools`
+    /// may only narrow it. A built-in preset's list is a default a call
+    /// replaces, which `agent`'s documented `tools` argument relies on.
+    allowlist_is_a_ceiling: bool,
     read_only: bool,
     max_turns: u32,
     result_cap_tokens: usize,
@@ -225,6 +229,7 @@ impl AgentTool {
                 name: p.name.to_string(),
                 job: p.job.clone(),
                 tools: Some(p.tools.iter().map(|s| s.to_string()).collect()),
+                allowlist_is_a_ceiling: false,
                 read_only: p.read_only,
                 max_turns: p.max_turns,
                 result_cap_tokens: p.result_cap_tokens,
@@ -243,6 +248,7 @@ impl AgentTool {
                 name: def.name.clone(),
                 job: Job::Agent,
                 tools: (!def.tools.is_empty()).then(|| def.tools.clone()),
+                allowlist_is_a_ceiling: true,
                 read_only: false,
                 max_turns: CUSTOM_MAX_TURNS,
                 result_cap_tokens: CUSTOM_RESULT_CAP_TOKENS,
@@ -264,6 +270,7 @@ impl AgentTool {
                 name: name.to_string(),
                 job: Job::Agent,
                 tools: Some(Vec::new()),
+                allowlist_is_a_ceiling: false,
                 read_only: false,
                 max_turns: CUSTOM_MAX_TURNS,
                 result_cap_tokens: CUSTOM_RESULT_CAP_TOKENS,
@@ -299,23 +306,31 @@ impl AgentTool {
     }
 
     /// The parent's tools this call may hand to the child: the resolved
-    /// allowlist (or the call's `tools`, narrowed to it for a read-only
-    /// preset), never `agent` itself.
+    /// allowlist (or the call's `tools`, which for a def can only narrow it
+    /// and for a read-only preset is narrowed to read-only tools), never
+    /// `agent` itself.
     fn tools_for(&self, resolved: &Resolved, input: &Value) -> Vec<Arc<dyn Tool>> {
         if resolved.external.is_some() {
             return Vec::new();
         }
-        let wanted: Option<Vec<String>> = input
-            .get("tools")
-            .and_then(Value::as_array)
-            .map(|names| {
+        let requested: Option<Vec<String>> =
+            input.get("tools").and_then(Value::as_array).map(|names| {
                 names
                     .iter()
                     .filter_map(Value::as_str)
                     .map(str::to_string)
                     .collect()
-            })
-            .or_else(|| resolved.tools.clone());
+            });
+        // The model writes the call's `tools`, but a def's `tools:` is the
+        // user's boundary for that child ("narrow, never widen",
+        // docs/design/extensions.md): naming a tool outside it adds nothing.
+        let wanted = match (requested, &resolved.tools) {
+            (Some(asked), Some(allowed)) if resolved.allowlist_is_a_ceiling => {
+                Some(asked.into_iter().filter(|n| allowed.contains(n)).collect())
+            }
+            (Some(asked), _) => Some(asked),
+            (None, allowed) => allowed.clone(),
+        };
         self.parent
             .tools
             .iter()
@@ -1314,6 +1329,99 @@ mod tests {
         .expect("session");
         session.set_agent_defs(defs);
         AgentTool::new(session)
+    }
+
+    /// A do-nothing tool with a given name, for `tools_for` claims.
+    struct Named(&'static str);
+
+    #[async_trait]
+    impl Tool for Named {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: self.0.into(),
+                description: String::new(),
+                input_schema: json!({"type": "object"}),
+                deferred: false,
+                risk: Risk::ReadOnly,
+                concurrency: Concurrency::Parallel,
+            }
+        }
+        fn subject(&self, _input: &Value) -> String {
+            self.0.into()
+        }
+        async fn call(&self, _input: Value, _cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+            Err(ToolError::Io)
+        }
+    }
+
+    /// The tool names `tools_for` hands a child for `input`, over a parent
+    /// that has `read`, `grep` and `bash`.
+    fn child_tool_names(defs: Vec<AgentDef>, input: Value) -> Vec<String> {
+        let store = Arc::new(crate::MemoryStore::new());
+        let provider =
+            Arc::new(cox_provider::scripted::Scripted::from_toml("", "").expect("scripted"));
+        let tools: Vec<Arc<dyn Tool>> = ["read", "grep", "bash"]
+            .into_iter()
+            .map(|n| Arc::new(Named(n)) as Arc<dyn Tool>)
+            .collect();
+        let session = Session::new(
+            cox_protocol::Config::default(),
+            provider,
+            tools,
+            store.clone(),
+            store,
+            PathBuf::from("/tmp/cox-subagent-unit"),
+        )
+        .expect("session");
+        session.set_agent_defs(defs);
+        let tool = AgentTool::new(session);
+        let resolved = tool.resolve(&input).expect("resolve");
+        let kept = tool.tools_for(&resolved, &input);
+        kept.iter().map(|t| t.spec().name).collect()
+    }
+
+    fn reviewer(tools: &[&str]) -> AgentDef {
+        AgentDef {
+            name: "reviewer".into(),
+            description: "d".into(),
+            tools: tools.iter().map(|t| t.to_string()).collect(),
+            model: None,
+            path: PathBuf::from("<test>/.cox/agents/reviewer.md"),
+            body: String::new(),
+            disabled: false,
+            permission_mode: None,
+        }
+    }
+
+    /// T64.20: the model writes the call's `tools`; a def's `tools:` is the
+    /// user's boundary, so naming `bash` hands the child nothing extra.
+    #[test]
+    fn agent_call_tools_cannot_widen_a_defs_allowlist() {
+        let call = json!({"task": "t", "preset": "reviewer", "tools": ["read", "bash"]});
+        assert_eq!(
+            child_tool_names(vec![reviewer(&["read", "grep"])], call),
+            ["read"]
+        );
+    }
+
+    #[test]
+    fn agent_call_tools_still_narrow_a_defs_allowlist() {
+        let narrower = json!({"task": "t", "preset": "reviewer", "tools": ["grep"]});
+        assert_eq!(
+            child_tool_names(vec![reviewer(&["read", "grep"])], narrower),
+            ["grep"]
+        );
+        let none = json!({"task": "t", "preset": "reviewer"});
+        assert_eq!(
+            child_tool_names(vec![reviewer(&["read", "grep"])], none),
+            ["read", "grep"]
+        );
+    }
+
+    #[test]
+    fn agent_def_without_tools_lets_a_call_pick_any_parent_tool() {
+        let call = json!({"task": "t", "preset": "reviewer", "tools": ["bash"]});
+        assert_eq!(child_tool_names(vec![reviewer(&[])], call), ["bash"]);
     }
 
     #[test]
