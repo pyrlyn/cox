@@ -152,7 +152,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T69.4 | todo | P3 | 1 | 0% | |
 | T69.5 | todo | P1 | 3 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
-| T69.7 | todo | P3 | 3 | 0% | |
+| T69.7 | in progress | P3 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T69.8 | todo | P3 | 1 | 0% | |
 
 ## Reference
@@ -3151,7 +3151,9 @@ Done when a running shell task id is in the summary and absent from the dropped 
 
 #### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
 
-Model: - · Status: open · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+Model: Claude Code / sonnet-5.5 · Status: in progress · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Plan (Claude Code / sonnet-5.5): (1) Failing tests first in `crates/cox-tools/tests/edit.rs` (`read` with `anchors` into `edit` with `ops`: indent-only change, stale batch, bottom-up, CRLF, confinement). (2) New `anchor.rs`: whitespace-collapsed SHA-256 to a 3-letter code, `render`, `apply` with all-or-nothing validation. (3) `read.rs` gains `anchors`; `edit.rs` gains `ops` beside `old`/`new`, still through `confine`. (4) Run `cargo nextest run -p cox-tools`, clippy, fmt.
 
 Goal: `read` gains an anchors mode that renders `N:abc→line` (3 letters from a whitespace-normalized hash you write); `edit` accepts `{op: replace|insert_after, anchor, content}` besides `old_string`. One stale anchor rejects the whole batch with the fresh anchor and three neighbours; ops apply bottom-up; default `read` output is unchanged.
 
