@@ -12021,3 +12021,39 @@ Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49
 ### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
 
 Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 99,197,840 bytes (+27.5%). The creator approved accepting the security-mandated size increase; updated only the Darwin-arm64 binary-size baseline. Startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. After regenerating the stale workspace-hack, the rebuilt release measured 99,197,840 bytes and the footprint check passed.
+
+#### T69.5 Compaction rejects a tiny summary and survives a context overflow
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
+
+Goal: `summary_is_usable` requires ≥ 500 trimmed characters (a shorter body is a failed attempt, not a replacement for history). A context-window error retries down a ladder (full pointer transcript → tool results cut to the head/tail pointer → `working_state` alone plus the last user request), one retry per step. After the ladder fails on size, auto-compact is suppressed until a later call reports a smaller `last_context_tokens` or the user runs `/compact`.
+
+Why: a failed compact leaves `last_context_tokens` unchanged and the next turn calls `compact` again (`session.rs` ~L1473–1482); `summarise` (`compact.rs` L694–763) accepts any non-empty string.
+
+Source: [grok-build `xai-grok-compaction/src/code_compaction/config.rs` L15–20](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/config.rs#L15-L20), [`summary.rs` L120–125](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/summary.rs#L120-L125), [`sample.rs` L81–120](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/sample.rs#L81-L120), [`failure.rs` L9–23](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/failure.rs#L9-L23), [`xai-grok-shell/src/session/compaction.rs` L405–479](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/compaction.rs#L405-L479)
+
+Licence: Apache-2.0, Copyright 2023-2026 SpaceXAI, implement similar, not copy (header, Apache text, `THIRD-PARTY-NOTICES`, change notice §4(b)). **Implement similar, do not copy:** bound to their `ConversationItem` types, and a paste adds Apache's patent clause to cox's tri-license.
+
+Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/prompts/compact.md`, `crates/cox-core/tests/compact.rs`
+
+Plan: (1) failing tests first in `tests/compact.rs`: a 40-character summary keeps history; a first `ContextTooLong` on the `compact` job is followed by a strictly smaller second request; a ladder that fails on size three times sets the suppress flag, the next turn sends no `compact` request, `/compact` still runs. (2) `compact.rs`: `summary_is_usable` (≥ 500 trimmed characters of model text, checked in `compact`, not for `/handoff`, which replaces no history); `summarise` walks the ladder (full pointer transcript, tool results cut to head/tail, `working_state` alone) and skips a step that is not smaller than the last one tried; a size failure stores `compact_suppressed_at` (the `last_context_tokens` it failed at) in `Inner`; `compact` skips `Auto` and `PreCall` while `last_context_tokens` has not dropped below it, and `Manual` clears it. (3) `prompts/compact.md` states the minimum. (4) Lengthen the scripted summaries of the existing compaction tests. Verify: `mise exec -- cargo nextest run -p cox-core compact`, the full `-p cox-core` run, clippy, fmt.
+
+Done when a 40-character summary does not replace history, a context-length error is followed by a smaller second request, a second size error sets the suppress flag, the next turn skips the compact job, and `/compact` still runs. Check: `mise exec -- cargo nextest run -p cox-core compact`.
+
+What landed: `compact.rs` rejects a model reply under `MIN_SUMMARY_CHARS` (500 trimmed characters, counted on the model's own text, not the `working_state` prefix); `/handoff` passes a floor of 1 because it replaces no history. `summarise` returns `Result<String, SummaryFailure>` (`Failed`, `TooShort`, `TooLong`) and walks a ladder on `ProviderError::ContextTooLong`: the full pointer transcript, then tool results cut to 200 bytes of head and tail on char boundaries (`clip`), then the `working_state` block alone; a rung that is empty or not smaller than the last one tried is skipped, and any other provider error stops at once. A `TooShort` or `TooLong` failure keeps history, stores the `last_context_tokens` it failed at in `Inner::compact_suppressed_at` and emits a notice that auto-compaction is paused; `Auto` and `PreCall` return quietly while the context has not dropped below it, `Manual` clears it, and `ContextTooLong` is never gated. `prompts/compact.md` tells the model a reply under 500 characters is discarded. Existing tests that scripted tiny summaries (`tests/compact.rs`, `repomap.rs`, `big_tool_output_mid_turn.toml`) now carry a padded `## Decisions` body, and one insta snapshot gained that body.
+Not done: no wait time or count is added to the ladder beyond one request per rung; a summary that is long enough but poor is not judged.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-core --test compact compact_   (new tests, before the fix)
+FAIL compact_rejects_a_summary_under_500_characters   (Compacted emitted for "far too short to stand in for a session")
+FAIL compact_retries_a_too_long_summary_request_with_a_smaller_input   (notice "compaction summariser returned nothing")
+FAIL compact_gives_up_after_three_too_long_requests_and_pauses_auto   (no pause notice, no compact request on the fourth turn)
+$ mise exec -- cargo nextest run -p cox-core
+395 tests run: 395 passed, 1 skipped
+$ mise exec -- cargo nextest run -p cox-session -p cox-app -p cox -E 'test(/compact|handoff|summar/)'
+10 tests run: 10 passed, 533 skipped
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check -p cox-core
+clean
+```
