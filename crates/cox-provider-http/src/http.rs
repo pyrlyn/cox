@@ -81,11 +81,10 @@ pub fn resolve_key_with(
 /// `COX_KEYRING=off` (A49): cargo sets that for every test and dev run so a
 /// rebuilt binary never raises a keychain prompt.
 fn platform_keyring(section: &str) -> Option<String> {
-    let switch = std::env::var(cox_protocol::config::KEYRING_ENV).ok();
-    if !cox_protocol::config::keyring_enabled(switch.as_deref()) {
+    if !cox_protocol::config::keyring_enabled_in_env() {
         return None;
     }
-    keyring::Entry::new("cox", section)
+    keyring::Entry::new(cox_protocol::config::KEYRING_SERVICE, section)
         .and_then(|e| e.get_password())
         .ok()
 }
@@ -225,8 +224,7 @@ mod tests {
     /// nothing instead of raising a keychain prompt.
     #[test]
     fn tests_run_with_the_keyring_switched_off() {
-        let switch = std::env::var(cox_protocol::config::KEYRING_ENV).ok();
-        assert!(!cox_protocol::config::keyring_enabled(switch.as_deref()));
+        assert!(!cox_protocol::config::keyring_enabled_in_env());
     }
 
     #[test]

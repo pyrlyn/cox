@@ -28,9 +28,6 @@ use tokio::net::TcpListener;
 /// How long a login waits for the browser to come back.
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Keyring service every cox credential is filed under.
-const SERVICE: &str = "cox";
-
 /// Where a server's credentials are kept. One implementation per surface:
 /// the keyring for the binary, memory for tests.
 pub trait Secrets: Send + Sync {
@@ -84,20 +81,18 @@ pub fn stored(server: &str) -> Result<Option<StoredCredentials>, AuthError> {
 /// `COX_KEYRING=off` (A49) makes every entry "not there": reads find nothing
 /// and writes fail with a message, instead of a keychain prompt.
 fn entry(account: &str) -> Result<keyring::Entry, AuthError> {
-    let switch = std::env::var(cox_protocol::config::KEYRING_ENV).ok();
-    if !cox_protocol::config::keyring_enabled(switch.as_deref()) {
+    if !cox_protocol::config::keyring_enabled_in_env() {
         return Err(AuthError::CredentialStoreError(format!(
             "keyring disabled by {}",
             cox_protocol::config::KEYRING_ENV
         )));
     }
-    keyring::Entry::new(SERVICE, account)
+    keyring::Entry::new(cox_protocol::config::KEYRING_SERVICE, account)
         .map_err(|e| AuthError::CredentialStoreError(e.to_string()))
 }
 
 fn read(account: &str) -> Result<Option<StoredCredentials>, AuthError> {
-    let switch = std::env::var(cox_protocol::config::KEYRING_ENV).ok();
-    if !cox_protocol::config::keyring_enabled(switch.as_deref()) {
+    if !cox_protocol::config::keyring_enabled_in_env() {
         return Ok(None);
     }
     match entry(account)?.get_password() {
