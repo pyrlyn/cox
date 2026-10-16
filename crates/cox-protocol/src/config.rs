@@ -860,7 +860,7 @@ pub enum CompactionStrategy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct PermissionsConfig {
-    /// `permissions.mode`; project config may not set this to `bypass`.
+    /// `permissions.mode`; project config may not widen it beyond the user's mode.
     pub mode: PermissionMode,
     /// `permissions.approval`.
     pub approval: ApprovalPolicy,
