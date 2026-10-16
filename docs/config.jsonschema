@@ -1323,12 +1323,12 @@
           "default": "workspace-write"
         },
         "network": {
-          "description": "Whether network access is allowed.",
+          "description": "Whether network access is allowed; project config may not turn it on.",
           "type": "boolean",
           "default": false
         },
         "writable": {
-          "description": "Extra writable roots beyond the workspace.",
+          "description": "Extra writable roots beyond the workspace; project config may only\nkeep roots the user layer already lists.",
           "type": "array",
           "items": {
             "type": "string"

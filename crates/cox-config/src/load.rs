@@ -143,6 +143,8 @@ impl GuardViolation {
             "permissions.approval" => "A project may not loosen the approval policy beyond yours",
             "permissions.allow" => "A project may not allow a tool call",
             "sandbox.mode" => "A project may not turn the sandbox off",
+            "sandbox.network" => "A project may not turn on sandbox network access",
+            "sandbox.writable" => "A project may not widen where the sandbox can write",
             "plugins.enabled" => "A project may not turn plugins back on",
             "tiers.think.confirm" => "A project may not skip the think tier's confirmation",
             "mcp.servers.*.sandbox" => "A project may not run an MCP server unsandboxed",
@@ -163,8 +165,10 @@ impl GuardViolation {
 /// Reverts any guarded key `full` set relative to `without_project` back to
 /// `without_project`'s value, returning what it reverted (plan.md §1.6:
 /// "budget.* may not be raised above user/default, permissions.mode wider
-/// than the user's, permissions.approval looser than the user's, sandbox.mode = \"danger-full-access\" or
-/// tiers.think.confirm = false are ignored from the project file with a warning to stderr").
+/// than the user's, permissions.approval looser than the user's,
+/// sandbox.mode = \"danger-full-access\", sandbox.network = true or
+/// sandbox.writable entries beyond the user's, or tiers.think.confirm = false
+/// are ignored from the project file with a warning to stderr").
 ///
 /// `git_root` is the checkout the project layer came from, the only place
 /// a project-chosen workspace root or `memory.dir` may point into (T64.2,
@@ -307,6 +311,43 @@ fn apply_project_guards(
             reverted_to: format!("{:?}", without_project.sandbox.mode).to_lowercase(),
         });
         full.sandbox.mode = without_project.sandbox.mode;
+    }
+
+    // T64.5: network access and extra writable roots are what the sandbox
+    // withholds from a command a cloned repository chose, so the project
+    // layer may keep or narrow the user's grant, never extend it. figment
+    // replaces `writable` wholesale, so the user's roots are what a project
+    // entry is compared against and only the ones the user lists survive.
+    if full.sandbox.network && !without_project.sandbox.network {
+        violations.push(GuardViolation {
+            key: "sandbox.network",
+            project_value: "true".to_string(),
+            reverted_to: "false".to_string(),
+        });
+        full.sandbox.network = false;
+    }
+    let user_writable = &without_project.sandbox.writable;
+    let (kept, added): (Vec<PathBuf>, Vec<PathBuf>) = full
+        .sandbox
+        .writable
+        .iter()
+        .cloned()
+        .partition(|path| user_writable.contains(path));
+    if !added.is_empty() {
+        let display = |paths: &[PathBuf]| {
+            rule_list(
+                &paths
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        violations.push(GuardViolation {
+            key: "sandbox.writable",
+            project_value: display(&added),
+            reverted_to: display(&kept),
+        });
+        full.sandbox.writable = kept;
     }
 
     // T33.6 (PL§1, D14): a repository must not switch plugins back on
@@ -671,7 +712,7 @@ fn rule_list(rules: &[String]) -> String {
 /// table, T64.3) is left out: its keys never reach the effective config,
 /// and listing it would send every project-set provider key to the
 /// pre-project figment.
-const GUARDED_KEYS: [&str; 22] = [
+const GUARDED_KEYS: [&str; 24] = [
     "budget.session_usd",
     "budget.monthly_usd",
     "budget.warn_at",
@@ -691,6 +732,8 @@ const GUARDED_KEYS: [&str; 22] = [
     "providers.*.api_key_env",
     "providers.*.base_url",
     "sandbox.mode",
+    "sandbox.network",
+    "sandbox.writable",
     "tiers.think.confirm",
     "tui.status_line.command",
     "voice",
@@ -1926,6 +1969,92 @@ mod tests {
                     assert!(
                         violation(&loaded, "permissions.approval").is_none(),
                         "{case}"
+                    );
+                },
+            );
+        }
+    }
+
+    /// T64.5: network access lets a command a cloned repository chose reach
+    /// out, so a project may not turn it on unless the user layer already did.
+    #[test]
+    fn project_config_cannot_enable_sandbox_network() {
+        load_with_project(None, "[sandbox]\nnetwork = true\n", |loaded| {
+            assert!(!loaded.config.sandbox.network);
+            let v = violation(&loaded, "sandbox.network").expect("a network violation");
+            assert_eq!(v.project_value, "true");
+            assert_eq!(v.reverted_to, "false");
+            assert_eq!(
+                v.reason(),
+                "A project may not turn on sandbox network access"
+            );
+        });
+    }
+
+    #[test]
+    fn project_config_may_keep_or_turn_off_sandbox_network() {
+        let allowed = [
+            (Some("true"), "true", true),
+            (Some("true"), "false", false),
+            (None, "false", false),
+        ];
+        for (user, project, expected) in allowed {
+            let user_toml = user.map(|n| format!("[sandbox]\nnetwork = {n}\n"));
+            load_with_project(
+                user_toml.as_deref(),
+                &format!("[sandbox]\nnetwork = {project}\n"),
+                |loaded| {
+                    let case = format!("user {user:?}, project {project}");
+                    assert_eq!(loaded.config.sandbox.network, expected, "{case}");
+                    assert!(violation(&loaded, "sandbox.network").is_none(), "{case}");
+                },
+            );
+        }
+    }
+
+    /// T64.5: an extra writable root is a directory outside the workspace a
+    /// command can modify; the project may only name ones the user lists.
+    #[test]
+    fn project_config_cannot_add_writable_paths() {
+        load_with_project(
+            Some("[sandbox]\nwritable = [\"/data/ok\"]\n"),
+            "[sandbox]\nwritable = [\"/data/ok\", \"/etc\", \"/home/me/.ssh\"]\n",
+            |loaded| {
+                assert_eq!(loaded.config.sandbox.writable, [PathBuf::from("/data/ok")]);
+                let v = violation(&loaded, "sandbox.writable").expect("a writable violation");
+                assert_eq!(v.project_value, "/etc, /home/me/.ssh");
+                assert_eq!(v.reverted_to, "/data/ok");
+                assert_eq!(
+                    v.reason(),
+                    "A project may not widen where the sandbox can write"
+                );
+            },
+        );
+        load_with_project(None, "[sandbox]\nwritable = [\"/etc\"]\n", |loaded| {
+            assert!(loaded.config.sandbox.writable.is_empty());
+            let v = violation(&loaded, "sandbox.writable").expect("a writable violation");
+            assert_eq!(v.reverted_to, "none");
+        });
+    }
+
+    #[test]
+    fn project_config_may_keep_or_narrow_writable_paths() {
+        let user = "[sandbox]\nwritable = [\"/data/a\", \"/data/b\"]\n";
+        let cases = [
+            ("[\"/data/a\", \"/data/b\"]", vec!["/data/a", "/data/b"]),
+            ("[\"/data/b\"]", vec!["/data/b"]),
+            ("[]", vec![]),
+        ];
+        for (project, expected) in cases {
+            load_with_project(
+                Some(user),
+                &format!("[sandbox]\nwritable = {project}\n"),
+                |loaded| {
+                    let expected: Vec<PathBuf> = expected.iter().map(PathBuf::from).collect();
+                    assert_eq!(loaded.config.sandbox.writable, expected, "{project}");
+                    assert!(
+                        violation(&loaded, "sandbox.writable").is_none(),
+                        "{project}"
                     );
                 },
             );

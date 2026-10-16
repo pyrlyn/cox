@@ -258,6 +258,21 @@ Check:
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T64.5 Revert a project `sandbox.network` and extra `sandbox.writable`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot open network access or extra writable directories in the sandbox that the user's own config keeps closed. Only `sandbox.mode = "danger-full-access"` was guarded, so a cloned project could set `sandbox.network = true` and `sandbox.writable = ["/etc"]`.
+What landed:
+- `apply_project_guards` reverts `sandbox.network = true` when the config without the project layer has it off, with one `sandbox.network` violation. Turning it off or keeping the user's `true` is not a violation.
+- It drops every project `sandbox.writable` entry the user layer does not list and reports one `sandbox.writable` violation naming the dropped paths and the kept ones. figment replaces the array wholesale, so keeping a subset of the user's roots, or an empty list, is not a violation.
+- Both keys join `GUARDED_KEYS` with their own reasons, so `source_of` reports the post-revert layer. The `SandboxConfig` doc comments, `docs/config.jsonschema` and plan §1.6 now name the guards.
+- Tests `project_config_cannot_enable_sandbox_network`, `project_config_may_keep_or_turn_off_sandbox_network`, `project_config_cannot_add_writable_paths` (with and without a user list) and `project_config_may_keep_or_narrow_writable_paths`; `every_guarded_key_has_its_own_reason` covers the new keys.
+Not done: `mcp.servers` (T64.7) stays open. Path entries are compared literally, not canonicalized, the way `core.workspace_roots` compares user roots.
+Check:
+- Before the fix: `cargo nextest run -p cox-config sandbox_network writable_paths` failed with `assertion failed: !loaded.config.sandbox.network` and `left: ["/data/ok", "/etc", "/home/me/.ssh"] right: ["/data/ok"]` (the two keep/narrow tests passed).
+- `cargo nextest run -p cox-config -p cox-protocol`: 212 run, 212 passed (cox-config 47, including the config schema drift test).
+- `cargo clippy -p cox-config -p cox-protocol --all-targets -- -D warnings` and `cargo fmt --check`: clean.
+
 #### T64.16 Resolve relative bash tokens for the read-deny
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-permission/src/lib.rs`, `plan.md`, `done.md`
