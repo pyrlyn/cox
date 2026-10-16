@@ -1119,7 +1119,6 @@ dependencies = [
  "crossterm",
  "dotenvy",
  "insta",
- "keyring",
  "portable-pty",
  "predicates",
  "reqwest 0.12.28",
