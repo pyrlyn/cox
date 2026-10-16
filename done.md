@@ -123,6 +123,19 @@ Check:
 - `cargo nextest run -p cox-config -p cox-protocol`: 160 run, 160 passed (includes `every_guarded_key_has_its_own_reason` and `config_jsonschema_matches_committed_file`).
 - `cargo clippy -p cox-config -p cox-protocol --all-targets -- -D warnings`: clean.
 
+#### T64.22 One keyring on/off switch and service name for the provider lookup and the MCP store
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-provider-http/src/http.rs`, `crates/cox-mcp/src/auth.rs`
+Goal: `cox-provider-http` (provider key lookup) and `cox-mcp` (OAuth store) read `COX_KEYRING` and name the `cox` keyring service in one place, so they cannot disagree on what "off" means.
+What landed:
+- `cox_protocol::config::keyring_enabled_in_env()` reads `KEYRING_ENV` and applies `keyring_enabled`; `cox_protocol::config::KEYRING_SERVICE` (`"cox"`) replaces the string literal in `http.rs` and `auth.rs`'s private `SERVICE`. Three copies of the env-read-then-`keyring_enabled` lines (`platform_keyring`, `entry`, `read`) and the `tests_run_with_the_keyring_switched_off` test now call the helper. Old public paths and the injection seams (`resolve_key_with`, `Memory`) are unchanged; behaviour is identical.
+- Home: `cox-protocol`, because `crates/cox/tests/deps.rs` lets `cox-mcp` depend on `cox-protocol` only, and `cox-protocol` already owned `KEYRING_ENV` and `keyring_enabled`. It stays free of the `keyring` crate and of I/O beyond reading one env var.
+- Test `keyring_enabled_in_env_follows_the_live_variable`: `off` and ` False ` disable, `on` and an unset variable enable. It reads only the switch.
+Not done: each site still calls `keyring::Entry::new(KEYRING_SERVICE, account)` itself (one line each). A single constructor would need `keyring` in `cox-protocol` (which has no I/O), `cox-mcp` depending on `cox-provider-http` (a `deps.rs` rule change that also pulls reqwest 0.12 in) or a new `secret-store` crate; the plan row defers that crate until a third consumer appears. `deps.rs` was not run locally (no Cargo.toml edge changed).
+Check:
+- `cargo nextest run -p cox-protocol -p cox-provider-http -p cox-mcp`: 179 tests run, 179 passed.
+- `cargo clippy -p cox-protocol -p cox-provider-http -p cox-mcp --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean.
+
 #### T64.21 Move `report.html` under `docs/`
 
 Model: Claude Code / haiku-4.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 1 · Files: `report.html` → `docs/report.html`, `AGENTS.md` (`CLAUDE.md` is a symlink to it)
@@ -151,6 +164,21 @@ Check:
 - Before the fix: `cargo test -p cox-config approval_policy` failed with `user None, project on-failure: left: OnFailure, right: OnRequest`.
 - `cargo nextest run -p cox-config -p cox-permission -p cox-protocol`: 175 run, 175 passed.
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
+#### T64.16 Resolve relative bash tokens for the read-deny
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-permission/src/lib.rs`, `plan.md`, `done.md`
+Goal: a `Read(...)` deny also stops a read-only bash command that names the file relatively. The comment on `token_path` said relatives cannot match, but the command runs in the session cwd, so `cat id_rsa` inside `~/.ssh` read a denied key.
+What landed:
+- `Engine` keeps the cwd it was compiled with (the same cwd the bash tool runs in) and `token_path` resolves a relative token against it, lexically (`normalize` folds `.` and `..`, no filesystem access). `cat ../.ssh/id_rsa` from a sibling directory and `cat ./x/../../.ssh/id_rsa` fold to the same absolute path the rule globs match. Absolute and `~/` tokens are folded the same way. Flags and empty tokens are skipped.
+- The misleading comment is replaced by one saying why relatives are resolved and why a bare word may resolve too (fail closed; only a path inside a denied tree can match).
+- Tests `bash_read_deny_matches_relative_token_inside_denied_dir` (six cwd/command pairs) and `bash_read_deny_allows_relative_token_outside_denied_tree` (five pairs that stay allowed).
+Not done: a glob token (`cat *` inside `~/.ssh`) is still trimmed to nothing and not matched; a shell `cd` inside the command line is not tracked, so only the session cwd is used; a symlink inside the cwd is not followed (lexical resolution only).
+Check:
+- Before the fix: `cargo nextest run -p cox-permission` ran 16, 15 passed, 1 failed: `cat id_rsa in /home/alice/.ssh must be denied, got Allow { by: Policy }`.
+- `cargo nextest run -p cox-permission`: 16 run, 16 passed. `cargo nextest run -p cox-core --test permission --test policy_matrix`: 98 run, 98 passed.
+- `cargo clippy -p cox-permission --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
