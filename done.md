@@ -95,6 +95,40 @@ Check:
 - `cargo nextest run -p cox-core`: 391 run, 391 passed, 1 skipped.
 - `cargo clippy -p cox-core --all-targets -- -D warnings`: clean.
 
+#### T64.14 Name an unreadable session lock holder as unknown
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 1 · Files: `crates/cox-store/src/lock.rs`
+Goal: a session lock file whose text is corrupt, truncated or unreadable never reads as a free session or as a live holder's pid; the session is busy with an explicit unknown holder.
+What landed:
+- Finding re-checked: busy was already decided by the kernel lock (`WouldBlock`), not by the file text, so a held lock with corrupt text already returned `Holder::default()` as busy. What was wrong was that pid 0 was an implicit sentinel written out in two copies of the parse-or-default code (`claim` and `holder`).
+- `Holder::is_unknown()` names the sentinel (pid 0 is never a real holder) and `Holder::read_from` is the one place the text is parsed; `claim`, `holder` and `Display` use them. No type, field or signature changed, so `cox-session`, `cox-app` and `cox-ffi` are untouched: the desktop only tests `heldBy != nil`, and the CLI message already says "another cox process".
+- Stale-lock recovery is unchanged and cannot steal a live session: there is no pid check. A corrupt file with no lock held is claimed and rewritten; a held lock is never taken over whatever the text says ("taking it over is not available yet" stays in `SessionError::SessionBusy`).
+- Tests: `corrupt_holder_text_is_busy_with_unknown_holder` (garbage, empty, truncated JSON, invalid UTF-8, each held by a second open file description; both `claim` and `holder` report busy and unknown), `readable_holder_text_is_not_unknown`, `corrupt_text_without_a_lock_does_not_block_the_session`.
+Not done: the new tests passed on the old behavior apart from `is_unknown`; before the fix they failed to compile (3 errors, no `is_unknown`). A holder text that parses with only some fields still becomes unknown, since the fields are required.
+Check:
+- `cargo nextest run -p cox-store`: 45 run, 45 passed, 2 skipped (ignored child-process helpers).
+- `cargo clippy -p cox-store --all-targets -- -D warnings`: clean.
+
+#### T64.10 Skip an MCP stdio server the sandbox cannot wrap
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-session/src/mcp.rs`, `docs/design/plugins.md`, `docs/how-it-works.md`
+Goal: a stdio MCP server from config, `.mcp.json` or `~/.claude.json` whose argv the host cannot wrap (Landlock-only host, or no sandbox backend) must not be spawned with host privileges. It was started bare with a notice.
+What landed:
+- `wrap_or_drop_stdio_servers(found, mode, wrap)` holds the decision, with the wrap passed in so it runs on a host whose real backend wraps everything. `sandbox_stdio_servers` calls it with the existing `sandboxed_argv` (no second wrap, no change to `sandbox.rs`). A server the wrap refuses is removed from `found.servers` and `found.sources` and named in one notice ("skipped"). The session still opens and the other servers load, so the failure is fatal for the server only (fail open on extensions).
+- Unchanged: `danger-full-access` (no wrap, the user's own choice), a per-server `sandbox = false` (explicit opt-out), HTTP servers and plugin servers (`plugin_mcp` already refused where the wrap is impossible).
+- Tests: `unwrappable_stdio_server_is_skipped_not_run_bare` and `danger_full_access_keeps_an_unwrappable_server`. `docs/design/plugins.md` §7c and `docs/how-it-works.md` state the new behaviour; `docs/tools.md` already said "refused".
+Not done: the Landlock refusal itself is Linux-only and was not run here (macOS); the test injects the refusal. The `plan.md` findings row for T64.10 is marked `done`, as T64.1 is. Chosen reading of "refuse or quarantine": refuse per server with a warning, not a session error.
+Check:
+- Mutation: with the `remove` lines taken out of the `Err` arm, `unwrappable_stdio_server_is_skipped_not_run_bare` failed (the server stayed in `found.servers`). Restored.
+```text
+$ mise exec -- cargo nextest run -p cox-session
+77 tests run: 77 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-session --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
 #### T64.13 Match the OAuth `state` before the loopback accepts a callback
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-mcp/src/auth.rs`, `crates/cox-mcp/Cargo.toml`
@@ -123,6 +157,21 @@ Check:
 - Before the fix: `cargo nextest run -p cox-config permission_mode` failed with `user None, project auto: left: Auto, right: Default`.
 - `cargo nextest run -p cox-config -p cox-permission -p cox-protocol`: 173 run, 173 passed.
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
+#### T69.3 Default read-only metadata dirs in a writable workspace
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-16 · Depends: — · Priority: P2 · Complexity: 1 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, `docs/config.jsonschema`, `docs/design/sandbox.md`, `plan.md`, `done.md`
+Goal: add `.agents`, `.codex` and `.aws` to the default `sandbox.readonly_in_workspace` (was `.git`, `.cox`, `.claude`). A user who set the list keeps it.
+What landed:
+- `SandboxConfig::default()` and `default.toml` now list `.git`, `.cox`, `.claude`, `.agents`, `.codex`, `.aws`. The hand-written default has a one-line comment naming codex `codex-rs/protocol/src/permissions.rs` L40-51 at f0c5077c; the set is implemented independently, `seatbelt.rs` is not copied.
+- `docs/config.md` and `docs/config.jsonschema` (both `default` arrays) were regenerated through their drift tests (`config_docs_config_md_matches_default_toml`, `config_jsonschema_matches_committed_file`), not hand-edited. `docs/design/sandbox.md` names the six dirs in its claim (2).
+- Tests in `crates/cox-protocol/src/config.rs`: `sandbox_readonly_defaults_cover_metadata_dirs` (default and `default.toml` agree on the six names) and `user_sandbox_readonly_list_is_kept` (a user list of `["vendor"]` stays exactly that).
+Not done: the seatbelt and bwrap argument snapshots did not change, because their tests build their own explicit lists rather than reading the default. The binary was not run against a real `~/.aws` or repo-local `.agents`. Workspace-wide clippy was not run; the touched crates are clippy-clean.
+Check:
+- Before the change: `cargo nextest run -p cox-protocol sandbox_readonly` failed with `left: [".git", ".cox", ".claude"]`, missing `.agents`, `.codex`, `.aws`. The user-list test passed before the change; it is a regression guard.
+- `cargo nextest run --no-fail-fast -p cox-sandbox -p cox-protocol -p cox-config`: 189 run, 189 passed.
+- `cargo clippy -p cox-protocol -p cox-sandbox -p cox-config --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
 #### T64.11 Delete the dead `revert-on-failure` job from `ci.yml`
