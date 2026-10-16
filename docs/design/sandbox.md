@@ -5,7 +5,8 @@
 Instruction files are requests; the sandbox is the guarantee (D7). The
 measurable claim: under `sandbox.mode = workspace-write`, a command that `bash`
 spawns cannot (1) write outside the workspace roots and the scratch
-directories, (2) write `.git`, `.cox` or `.claude` inside them, (3) open a
+directories, (2) write `.git`, `.cox`, `.claude`, `.agents`, `.codex` or `.aws` inside
+them, (3) open a
 network socket unless `[sandbox].network = true` — on macOS, and on Linux both
 with and without bubblewrap. Invariant 11
 (`sandbox_denies_write_outside_workspace`), proved by `sandbox_macos_*` and

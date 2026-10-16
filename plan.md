@@ -19,7 +19,7 @@ New bugs, dead code and moves from a read-only Cursor cloud review of clean `mai
 | T64.7 | P1 | bug | confirmed | `load.rs:1085-1120` (test keeps `mcp.servers["new"]`); LSP revert at `:295-323` | A project may add MCP stdio servers. Revert project-added or changed `mcp.servers` the way `lsp.servers` is reverted. |
 | T64.8 | P1 | bug | done | `cox-core/src/turn.rs:286-291`; `cox-tools/src/write.rs:102-107`; `cox-tools/src/edit.rs:80-85` | `write`/`edit` are `Concurrency::Parallel`, so same-path calls in one batch race and the last rename wins. Group the parallel batch by `touches()` path. |
 | T64.9 | P1 | bug | confirmed (documented design) | `cox-sandbox/src/sandbox/landlock.rs:53-65` | Landlock grants read of `/`, so read-only and workspace-write sandboxes can read the whole disk. Narrow reads to the workspace roots, or refuse Landlock where read isolation is required. |
-| T64.10 | P1 | bug | confirmed | `cox-session/src/mcp.rs:122-130`, `:158-165`; `cox-session/src/sandbox.rs:89-97` | An MCP stdio server that cannot be wrapped under Landlock runs with host privileges plus a notice. Refuse or quarantine it. |
+| T64.10 | P1 | bug | done | `cox-session/src/mcp.rs:122-130`, `:158-165`; `cox-session/src/sandbox.rs:89-97` | An MCP stdio server that cannot be wrapped under Landlock runs with host privileges plus a notice. Refuse or quarantine it. |
 | T64.11 | P1 | bug | done | `.github/workflows/ci.yml:3-11`, `:470-481` | `revert-on-failure` needs a push to `main`, but `ci.yml` has no `push` trigger, so the job never runs. Add the trigger or delete the job. |
 | T64.12 | P2 | bug | done | `cox-web/src/lib.rs:48-66` | The `web_fetch` client fallback drops `.timeout(TIMEOUT)`. Fail closed, or set the timeout on the fallback. |
 | T64.13 | P2 | bug | done | `cox-mcp/src/auth.rs:228-256` | The OAuth loopback forwards the first TCP connection's query; `state` is checked only later. Accept only `GET /callback` and keep listening until `state` matches. |
@@ -148,7 +148,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.10 | todo | P2 | 1 | 0% |  |
 | T69.1 | todo | P1 | 3 | 0% | |
 | T69.2 | todo | P1 | 2 | 0% | |
-| T69.3 | todo | P2 | 1 | 0% | |
 | T69.4 | todo | P3 | 1 | 0% | |
 | T69.5 | todo | P1 | 3 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
@@ -3084,22 +3083,6 @@ Licence: Apache-2.0, implement similar, not copy (header and `NOTICE` needed). *
 Files: `crates/cox-core/src/session.rs`, `crates/cox-permission/src/lib.rs` (the `grants_for` pair), `docs/compat.md`, `docs/config.md`
 
 Done when tests prove: flag off writes nothing; flag on appends one line and a second approval does not duplicate; an opaque PowerShell line and a deny match are not persisted; the `docs/compat.md` row is deleted. Check: `mise exec -- cargo nextest run -p cox-core -E 'test(allow_for_session)'`, `bash scripts/leftovers.sh`.
-
-#### T69.3 Default read-only metadata dirs in a writable workspace
-
-Model: - · Status: open · Depends: — · Size: ~60 · Priority: P2 · Complexity: 1
-
-Goal: Add `.agents`, `.codex` and `.aws` to the default `sandbox.readonly_in_workspace` (now `.git`, `.cox`, `.claude`). A user who set the list keeps it.
-
-Why: home-directory `Read(~/.aws/**)` does not cover a repo-local `.aws`.
-
-Source: [codex `codex-rs/protocol/src/permissions.rs` L40–51](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/protocol/src/permissions.rs#L40-L51)
-
-Licence: Apache-2.0, implement similar, not copy; the four-name constant is too small to need a `NOTICE`. **Implement similar:** a config default with a one-line comment naming the codex commit and path. Do not copy `seatbelt.rs`.
-
-Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, the seatbelt and bwrap argument snapshots
-
-Done when the default grows, a user list is unchanged and the snapshots pass. Check: `mise exec -- cargo nextest run -p cox-sandbox -p cox-protocol`.
 
 #### T69.4 Budgeted `quick_check` when the store opens
 
