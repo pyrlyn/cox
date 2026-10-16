@@ -131,7 +131,7 @@ pub struct SettingsView {
 /// out (`plan.md` §1.6), so the person sees why their setting still holds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Dropped {
-    /// Dotted; `mcp.servers.*.sandbox` names the servers in `value`.
+    /// Dotted; `mcp.servers` names the changed servers in `value`.
     pub key: String,
     /// What the project set.
     pub value: String,
