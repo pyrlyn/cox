@@ -1,6 +1,7 @@
-# sccache with Cloudflare R2 as the shared cache. Without the R2 secrets and variables (a fork
-# pull request, Dependabot, a repository where they are not created yet) this step turns the
-# wrapper off and the build runs as before, so CI never fails because of the cache.
+# sccache with Cloudflare R2 as the shared cache, configured by sccache-r2 (pyrlyn/crates).
+# Without the R2 secrets and variables (a fork pull request, Dependabot, a repository where
+# they are not created yet) sccache-r2 turns the wrapper off and the build runs as before, so
+# CI never fails because of a missing cache. A malformed endpoint or bucket name does fail.
 # mise.toml sets RUSTC_WRAPPER to its own sccache wherever it installed one; this action
 # overrides that for the rest of the job: R2 when configured, nothing otherwise.
 # Needs the repository secrets R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and the variables SCCACHE_BUCKET and SCCACHE_ENDPOINT.
@@ -31,41 +32,17 @@ runs:
       id: cfg
       shell: bash
       env:
-        ACCESS_KEY_ID: ${{ inputs.access-key-id }}
-        SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
-        BUCKET: ${{ inputs.bucket }}
-        ENDPOINT: ${{ inputs.endpoint }}
+        R2_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        R2_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        SCCACHE_BUCKET: ${{ inputs.bucket }}
+        SCCACHE_ENDPOINT: ${{ inputs.endpoint }}
+        SCCACHE_R2_READ_ONLY: ${{ inputs.read-only }}
       run: |
-        if [ -n "$ACCESS_KEY_ID" ] && [ -n "$SECRET_ACCESS_KEY" ] && [ -n "$BUCKET" ] && [ -n "$ENDPOINT" ]; then
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "enabled=false" >> "$GITHUB_OUTPUT"
-          # mise may have exported its own sccache as the wrapper; without a backend, drop it.
-          echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
-          echo "::notice::sccache is off: the R2 secrets or variables are not available here"
-        fi
+        # The install must not go through a wrapper mise exported before sccache exists.
+        RUSTC_WRAPPER= cargo install --locked --quiet sccache-r2@=SCCACHE_R2_VERSION
+        sccache-r2 github
 
     - if: steps.cfg.outputs.enabled == 'true'
       uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       with:
         version: v0.18.0
-
-    - if: steps.cfg.outputs.enabled == 'true'
-      shell: bash
-      env:
-        ACCESS_KEY_ID: ${{ inputs.access-key-id }}
-        SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
-        BUCKET: ${{ inputs.bucket }}
-        ENDPOINT: ${{ inputs.endpoint }}
-        READ_ONLY: ${{ inputs.read-only }}
-      run: |
-        {
-          echo "RUSTC_WRAPPER=sccache"
-          echo "CARGO_INCREMENTAL=0"
-          echo "SCCACHE_BUCKET=$BUCKET"
-          echo "SCCACHE_ENDPOINT=$ENDPOINT"
-          echo "SCCACHE_REGION=auto"
-          echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID"
-          echo "AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY"
-          if [ "$READ_ONLY" = "true" ]; then echo "SCCACHE_S3_RW_MODE=READ_ONLY"; fi
-        } >> "$GITHUB_ENV"
