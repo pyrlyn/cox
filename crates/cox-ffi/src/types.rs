@@ -18,8 +18,8 @@ use cox_app::AgentChoice;
 use cox_app::Holder;
 use cox_app::SessionInfo;
 use cox_app::best_of::{
-    BestOf, BestOfId, BestOfRequest, Candidate, CandidateState, CandidateView, Launch, Launched,
-    Picked,
+    BestOf, BestOfId, BestOfMerge, BestOfRequest, Candidate, CandidateState, CandidateView, Launch,
+    Launched, Picked,
 };
 use cox_app::complete::{Splice, TypedToken};
 use cox_app::diffmodel::{DiffHunk, DiffLine, DiffLineKind, DiffModel, WordRange};
@@ -1502,7 +1502,7 @@ impl From<BrowserFailure> for BrowserError {
     }
 }
 
-// Best of n (T52.9, T52.10, T52.11): the launch, the compare view's columns
+// Best of n (T52.9, T52.10, T52.11, T52.25): the launch, the compare view's columns
 // and what a pick did.
 uniffi::custom_type!(BestOfId, String, {
     remote,
@@ -1521,6 +1521,15 @@ pub struct BestOfRequest {
     pub project: PathBuf,
     pub prompt: String,
     pub candidates: Vec<Candidate>,
+}
+
+/// What `App.best_of_merge` merges (T52.24, T52.25): the chosen candidates of
+/// group `id`, and who merges them.
+#[uniffi::remote(Record)]
+pub struct BestOfMerge {
+    pub id: BestOfId,
+    pub from: Vec<u32>,
+    pub by: Candidate,
 }
 
 #[uniffi::remote(Record)]

@@ -30,7 +30,7 @@ struct CapsuleStyle: ButtonStyle {
   }
 
   func makeBody(configuration: Configuration) -> some View {
-    ControlStateReader(isPressed: configuration.isPressed) { state in
+    ControlStateReader(isPressed: configuration.isPressed, isChosen: emphasis == .active) { state in
       CapsuleFace(
         label: configuration.label, emphasis: emphasis, state: state, isIcon: isIcon)
     }

@@ -21,7 +21,7 @@ public struct TurnGutter: View {
   public var body: some View {
     if let open {
       Button(action: open) { label }
-        .buttonStyle(.plain)
+        .buttonStyle(.coxPlain)
         .help("Rewind to before turn \(turn)")
         .accessibilityLabel("Turn \(turn), rewind")
     } else {

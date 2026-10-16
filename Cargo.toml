@@ -205,8 +205,8 @@ async-trait = "0.1"
 # Lints every member inherits through `[lints] workspace = true`. CI runs
 # clippy with `-D warnings`, so `warn` here fails CI just like `deny`.
 # `unsafe_code` is denied; the few places that need it (edition-2024 env
-# mutation, fork/exec hooks, libproc and Landlock FFI, the uniffi glue) carry
-# a targeted `allow` with a `// why:` comment.
+# mutation, fork/exec hooks, libproc, Landlock and SQLite progress-handler FFI,
+# the uniffi glue) carry a targeted `allow` with a `// why:` comment.
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"

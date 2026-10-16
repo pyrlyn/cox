@@ -74,6 +74,7 @@ public struct TasksTab: View {
           let open = Self.openAction(item.id, kind: item.kind, send: send)
           TaskItemRow(item: item, actions: [open])
             .onTapGesture { open.perform() }
+            .coxPointer(.control())
             .accessibilityAction { open.perform() }
         }
       }

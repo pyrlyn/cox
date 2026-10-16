@@ -82,7 +82,7 @@ private struct Segment: View {
         }
         .contentShape(Capsule())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain(isChosen: look != nil))
   }
 }
 

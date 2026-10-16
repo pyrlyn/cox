@@ -142,7 +142,7 @@ public struct MenuBarPanel: View {
         }
         .modifier(MenuRow())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.coxPlain)
     }
   }
 
@@ -163,7 +163,7 @@ public struct MenuBarPanel: View {
       }
       .modifier(MenuRow())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
   }
 
   private var footer: some View {
@@ -203,7 +203,7 @@ public struct MenuBarPanel: View {
     .textStyle(.body, tabularDigits: true)
     .modifier(MenuRow())
     if let action {
-      Button(action: action) { line }.buttonStyle(.plain)
+      Button(action: action) { line }.buttonStyle(.coxPlain)
     } else {
       line
     }

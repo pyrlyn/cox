@@ -291,7 +291,8 @@ pub(crate) mod tests {
 
     impl Recording {
         pub(crate) fn turns(n: usize) -> Self {
-            let toml = "[[turn]]\ntext = \"ok\"\n".repeat(n);
+            // Long enough to pass as the compaction summary too (T69.5).
+            let toml = format!("[[turn]]\ntext = \"{}\"\n", "ok ".repeat(200)).repeat(n);
             Self {
                 inner: Scripted::from_toml(&toml, "").expect("scenario"),
                 seen: StdMutex::new(Vec::new()),

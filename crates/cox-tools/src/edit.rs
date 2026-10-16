@@ -33,9 +33,49 @@ use cox_protocol::{
 use serde_json::{Value, json};
 use similar::TextDiff;
 
+use crate::anchor;
 use crate::open::read_confined;
 use crate::path::confine;
 use crate::write::{atomic_write, str_field};
+
+/// One `edit` call is either the text-matching form or an anchored batch
+/// (T69.7); mixing them would leave unclear which one wins.
+enum Mode {
+    Text {
+        old: String,
+        new: String,
+        replace_all: bool,
+    },
+    Anchored(Vec<anchor::Op>),
+}
+
+impl Mode {
+    fn parse(input: &Value) -> Result<Self, ToolError> {
+        let Some(ops) = input.get("ops") else {
+            return Ok(Self::Text {
+                old: str_field(input, "old")?,
+                new: str_field(input, "new")?,
+                replace_all: input
+                    .get("replace_all")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            });
+        };
+        if ["old", "new", "replace_all"]
+            .iter()
+            .any(|k| input.get(k).is_some())
+        {
+            return Err(ToolError::Denied {
+                why: "pass either `ops` or `old`/`new`, not both".to_string(),
+            });
+        }
+        serde_json::from_value(ops.clone())
+            .map(Self::Anchored)
+            .map_err(|e| ToolError::Denied {
+                why: format!("invalid ops: {e}"),
+            })
+    }
+}
 
 pub struct EditTool;
 
@@ -53,7 +93,12 @@ impl Tool for EditTool {
                 file is not valid UTF-8 text), `ambiguous match: N candidates` (with the \
                 matching line numbers — narrow `old` to make it unique), `denied: old_string \
                 not found. Closest lines:\n<line>: <text>` (no match even with the whitespace \
-                fallback — the closest lines are shown for reference), `io error`."
+                fallback — the closest lines are shown for reference), `io error`. \
+                Instead of `old`/`new` you may pass `ops`, a batch of `{op: \"replace\" | \
+                \"insert_after\", anchor, content}` that name lines by the anchors `read` prints \
+                with `anchors: true` (an indent-only change keeps an anchor valid). If any anchor \
+                is stale the whole batch is rejected with `denied: stale anchor` and the fresh \
+                anchors; otherwise the ops apply together against the line numbers you read."
                 .to_string(),
             input_schema: json!({
                 "type": "object",
@@ -74,9 +119,31 @@ impl Tool for EditTool {
                         "type": "boolean",
                         "description": "Replace every match instead of requiring exactly one.",
                         "default": false
+                    },
+                    "ops": {
+                        "type": "array",
+                        "description": "Anchored edits instead of `old`/`new`: each names a line by the `N:abc` anchor `read` prints with `anchors: true`.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "op": {
+                                    "type": "string",
+                                    "enum": ["replace", "insert_after"]
+                                },
+                                "anchor": {
+                                    "type": "string",
+                                    "description": "e.g. `12:abc`."
+                                },
+                                "content": {
+                                    "type": "string",
+                                    "description": "Lines to put in place of the anchored line, or after it. Empty with `replace` deletes the line."
+                                }
+                            },
+                            "required": ["op", "anchor", "content"]
+                        }
                     }
                 },
-                "required": ["path", "old", "new"]
+                "required": ["path"]
             }),
             deferred: false,
             risk: Risk::Write,
@@ -98,28 +165,17 @@ impl Tool for EditTool {
 
     async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
         let path_arg = str_field(&input, "path")?;
-        let old = str_field(&input, "old")?;
-        let new = str_field(&input, "new")?;
-        let replace_all = input
-            .get("replace_all")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let mode = Mode::parse(&input)?;
 
         let path = confine(&cx.writable_roots, &cx.cwd, &path_arg)?;
 
-        edit_at(path, &old, &new, replace_all, cx).await
+        edit_at(path, &mode, cx).await
     }
 }
 
 /// Everything after `confine`: its own function so a test can swap the path
 /// for a symlink between the two, the window T64.15 closes.
-async fn edit_at(
-    path: PathBuf,
-    old: &str,
-    new: &str,
-    replace_all: bool,
-    cx: &ToolCx,
-) -> Result<ToolOutput, ToolError> {
+async fn edit_at(path: PathBuf, mode: &Mode, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
     let raw = read_confined(&cx.writable_roots, &path)?;
     if raw.contains(&0) {
         return Err(ToolError::Binary);
@@ -136,7 +192,14 @@ async fn edit_at(
         original.clone()
     };
 
-    let new_work = apply_replace(&work, old, new, replace_all)?;
+    let new_work = match mode {
+        Mode::Text {
+            old,
+            new,
+            replace_all,
+        } => apply_replace(&work, old, new, *replace_all)?,
+        Mode::Anchored(ops) => anchor::apply(&work, ops)?,
+    };
     let result = if crlf {
         new_work.replace('\n', "\r\n")
     } else {
@@ -424,10 +487,13 @@ mod tests {
         swap.swap_leaf("secret.txt");
         swap.swap_parent("sub");
 
+        let mode = Mode::Text {
+            old: "secret".to_string(),
+            new: "changed".to_string(),
+            replace_all: false,
+        };
         for path in [leaf, nested] {
-            let err = edit_at(path, "secret", "changed", false, &cx)
-                .await
-                .expect_err("must refuse");
+            let err = edit_at(path, &mode, &cx).await.expect_err("must refuse");
             assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
         }
         assert_eq!(swap.outside_secret(), crate::swap_fixture::SECRET);
