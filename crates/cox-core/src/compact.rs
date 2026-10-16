@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use cox_protocol::config::CompactionStrategy;
 use cox_protocol::errors::{CoreError, ProviderError};
-use cox_protocol::ids::{ArchiveId, CallId, ItemId};
+use cox_protocol::ids::{ArchiveId, CallId, ItemId, TaskId};
 use cox_protocol::types::{
     ArchiveRef, CompactReason, Content, Event, HookEvent, HookOutcome, ItemKind, Job, Level,
     Message, ProviderEvent, RepoMapReason, Request, Role, SystemBlock,
@@ -25,6 +25,7 @@ use crate::budget;
 use crate::hooks;
 use crate::session::{Session, State};
 use crate::subagent::first_line;
+use crate::tasks::{Child, TaskKind};
 
 /// The summariser prompt and, after its `---` line, the note `state+llm`
 /// appends: one file so the two texts are reviewed together.
@@ -44,10 +45,19 @@ const FILES: &str = "## Files touched";
 const ERRORS: &str = "## Errors seen";
 const REQUEST: &str = "## Last request";
 const ARCHIVED: &str = "## Archived outputs";
+const RUNNING: &str = "## Still running";
+const TODOS: &str = "## Open todos";
+const SUBAGENTS: &str = "## Subagents";
+const LIVE_HEADINGS: [&str; 3] = [RUNNING, TODOS, SUBAGENTS];
 /// The section is bounded so a long session cannot grow its own summary
 /// without limit; the ids past either cap are only counted.
 const MAX_HANDLES: usize = 32;
 const MAX_NOTICE_BYTES: usize = 2048;
+/// The live block is bounded for the same reason: a session with many
+/// subagents or a long todo list must not grow its own summary.
+const MAX_LIVE_BYTES: usize = 2048;
+/// One entry is a pointer back to a task or item, not its whole text.
+const LIVE_LINE_CHARS: usize = 160;
 /// A pasted log as the request would crowd out the rest of the state.
 const REQUEST_CHARS: usize = 500;
 
@@ -538,6 +548,220 @@ pub(crate) fn notice_text(handles: &SurvivingHandles) -> String {
     out
 }
 
+/// A background task or subagent as the registry holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LiveTask {
+    pub id: TaskId,
+    /// The name `send_message` also accepts (`explore-2`); subagents only.
+    pub name: Option<String>,
+    /// The stored command (`bash: sleep 300`) or `preset: description`.
+    pub label: String,
+    /// A subagent that ended and can be woken by a message.
+    pub finished: bool,
+}
+
+/// One item of the model's own todo list, as the `todo` tool received it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Todo {
+    pub id: String,
+    pub text: String,
+    pub in_progress: bool,
+}
+
+/// What is still going on when history is cut: the work a summary of the
+/// transcript cannot be trusted to name again (T69.6). Tasks come from the
+/// registry, todos from the `todo` calls the cut drops.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct LiveState {
+    pub running: Vec<LiveTask>,
+    pub todos: Vec<Todo>,
+    pub subagents: Vec<LiveTask>,
+}
+
+/// `text` on one line and at most `max` characters, so a value the model or a
+/// repository wrote can never open a heading of its own.
+fn flat(text: &str, max: usize) -> String {
+    let one: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    one.chars().take(max).collect()
+}
+
+fn todo_state(todo: &Todo) -> &'static str {
+    if todo.in_progress {
+        "in_progress"
+    } else {
+        "pending"
+    }
+}
+
+/// The items of a successful `todo` call; the tool replaces the whole list,
+/// so the latest call is the list.
+fn todo_items(c: &Content, failed: &HashSet<CallId>) -> Option<Vec<Todo>> {
+    let Content::ToolUse { id, name, input } = c else {
+        return None;
+    };
+    if name != "todo" || failed.contains(id) {
+        return None;
+    }
+    let items = input.get("items")?.as_array()?;
+    Some(
+        items
+            .iter()
+            .filter_map(|item| {
+                let field = |k: &str| item.get(k).and_then(Value::as_str);
+                let in_progress = match field("state")? {
+                    "pending" => false,
+                    "in_progress" => true,
+                    _ => return None,
+                };
+                Some(Todo {
+                    id: flat(field("id")?, LIVE_LINE_CHARS),
+                    text: flat(field("text")?, LIVE_LINE_CHARS),
+                    in_progress,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// An earlier summary's open todos, for the stretch where the `todo` call
+/// that wrote them was itself dropped by that compaction.
+fn carried_todos(summary: &str) -> Vec<Todo> {
+    section(summary, TODOS)
+        .filter_map(|line| {
+            let (state, rest) = line.strip_prefix("- [")?.split_once("] ")?;
+            let (id, text) = rest.split_once(": ")?;
+            Some(Todo {
+                id: id.to_string(),
+                text: text.to_string(),
+                in_progress: match state {
+                    "pending" => false,
+                    "in_progress" => true,
+                    _ => return None,
+                },
+            })
+        })
+        .collect()
+}
+
+/// The unfinished items of the latest todo list in `dropped`. A list in
+/// `kept` is newer and still verbatim, so nothing is carried then.
+pub(crate) fn open_todos(dropped: &[Message], kept: &[Message]) -> Vec<Todo> {
+    let failed: HashSet<CallId> = dropped
+        .iter()
+        .chain(kept)
+        .flat_map(|m| &m.content)
+        .filter_map(|c| match c {
+            Content::ToolResult {
+                call_id,
+                is_error: true,
+                ..
+            } => Some(*call_id),
+            _ => None,
+        })
+        .collect();
+    if kept
+        .iter()
+        .flat_map(|m| &m.content)
+        .any(|c| todo_items(c, &failed).is_some())
+    {
+        return Vec::new();
+    }
+    let mut list = Vec::new();
+    for m in dropped {
+        let typed = m.content.iter().find_map(|c| match c {
+            Content::Text { text } if m.role == Role::User => Some(text),
+            _ => None,
+        });
+        if let Some(text) = typed.filter(|t| t.starts_with(SUMMARY_HEAD)) {
+            list = carried_todos(text);
+        }
+        for items in m.content.iter().filter_map(|c| todo_items(c, &failed)) {
+            list = items;
+        }
+    }
+    list
+}
+
+/// `summary` without a live block of an earlier compaction. The registry is
+/// read afresh each time, so a copy the model made of the old block would
+/// only be stale or a duplicate.
+fn strip_live(summary: &str) -> String {
+    if !summary.lines().any(|l| LIVE_HEADINGS.contains(&l)) {
+        return summary.to_string();
+    }
+    let mut skipping = false;
+    let mut out = Vec::new();
+    for line in summary.lines() {
+        if line.starts_with("## ") {
+            skipping = LIVE_HEADINGS.contains(&line);
+        }
+        if !skipping {
+            out.push(line);
+        }
+    }
+    out.join("\n")
+}
+
+impl LiveTask {
+    fn line(&self) -> String {
+        let state = if self.finished { "finished" } else { "running" };
+        let label = flat(&self.label, LIVE_LINE_CHARS);
+        match &self.name {
+            Some(name) => format!("- task {} ({name}, {state}): {label}", self.id),
+            None => format!("- task {} ({state}): {label}", self.id),
+        }
+    }
+}
+
+/// The block that ends a summary after the archive section; empty when
+/// nothing is live, so an idle session's summary is unchanged. Ids are the
+/// ones `send_message` and `todo` accept, with what each stands for, and the
+/// whole block stays under `MAX_LIVE_BYTES`; entries past that are counted.
+pub(crate) fn live_text(live: &LiveState) -> String {
+    let sections: [(&str, Vec<String>); 3] = [
+        (RUNNING, live.running.iter().map(LiveTask::line).collect()),
+        (
+            TODOS,
+            live.todos
+                .iter()
+                .map(|t| format!("- [{}] {}: {}", todo_state(t), t.id, t.text))
+                .collect(),
+        ),
+        (
+            SUBAGENTS,
+            live.subagents.iter().map(LiveTask::line).collect(),
+        ),
+    ];
+    // Room for the "more" line, so it always fits after the last entry.
+    const MORE: usize = "\n… and 99999 more".len();
+    let mut out = String::new();
+    for (heading, lines) in sections {
+        let sep = if out.is_empty() { "" } else { "\n\n" };
+        let head = format!("{sep}{heading}");
+        let mut shown = 0;
+        let mut body = String::new();
+        let mut used = out.len() + head.len();
+        for line in &lines {
+            let entry = format!("\n{line}");
+            if used + entry.len() + MORE > MAX_LIVE_BYTES {
+                break;
+            }
+            used += entry.len();
+            body.push_str(&entry);
+            shown += 1;
+        }
+        if shown == 0 {
+            continue;
+        }
+        if shown < lines.len() {
+            body.push_str(&format!("\n… and {} more", lines.len() - shown));
+        }
+        out.push_str(&head);
+        out.push_str(&body);
+    }
+    out
+}
+
 /// Why `summarise` produced no summary.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SummaryFailure {
@@ -631,10 +855,17 @@ impl Session {
             &history[cut..],
             &archives,
         ));
-        let summary = if notice.is_empty() {
+        let live = live_text(&self.live_state(&history[..cut], &history[cut..]).await);
+        let summary = strip_live(&summary);
+        let tail = [notice, live]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let summary = if tail.is_empty() {
             summary
         } else {
-            format!("{}\n\n{notice}", summary.trim_end())
+            format!("{}\n\n{tail}", summary.trim_end())
         };
         let text = format!(
             "{SUMMARY_HEAD}{} earlier turn(s)]\n\n{summary}",
@@ -693,6 +924,51 @@ impl Session {
         // map is rebuilt with it; no notice of its own.
         self.rebuild_repomap(RepoMapReason::Compaction).await?;
         Ok(true)
+    }
+
+    /// T69.6: the registry's running tasks and addressable subagents plus
+    /// the todos the cut drops. Read after the summary is written, since a
+    /// task can end while the summariser runs.
+    async fn live_state(&self, dropped: &[Message], kept: &[Message]) -> LiveState {
+        // Taken one lock at a time: nothing else holds both.
+        let names = self.task_names.lock().await.clone();
+        let name_of = |id: TaskId| {
+            names
+                .iter()
+                .find(|(_, task)| **task == id)
+                .map(|(name, _)| name.clone())
+                .filter(|name| is_label(name))
+        };
+        let inner = self.inner.lock().await;
+        let mut live = LiveState {
+            todos: open_todos(dropped, kept),
+            ..LiveState::default()
+        };
+        for (id, (label, _, kind)) in &inner.tasks {
+            let task = LiveTask {
+                id: *id,
+                name: name_of(*id),
+                label: label.clone(),
+                finished: false,
+            };
+            match kind {
+                TaskKind::Shell => live.running.push(task),
+                TaskKind::Agent => live.subagents.push(task),
+            }
+        }
+        for (id, child) in &inner.children {
+            if let Child::Finished(dormant) = child {
+                live.subagents.push(LiveTask {
+                    id: *id,
+                    name: name_of(*id),
+                    label: dormant.label_and_tier().0,
+                    finished: true,
+                });
+            }
+        }
+        live.running.sort_by_key(|t| t.id);
+        live.subagents.sort_by_key(|t| t.id);
+        live
     }
 
     /// Whether an automatic trigger must stay quiet because the last attempt
@@ -1277,5 +1553,140 @@ mod tests {
         assert!(out.starts_with("éé") && out.ends_with("éé"), "{out}");
         assert!(out.contains("bytes omitted"), "{out}");
         assert!(out.len() < text.len());
+    }
+
+    fn todo_round(items: Value, is_error: bool) -> [Message; 2] {
+        round(&[("todo", json!({ "items": items }), "ok", is_error)])
+    }
+
+    fn item(id: &str, text: &str, state: &str) -> Value {
+        json!({ "id": id, "text": text, "state": state })
+    }
+
+    fn task(name: Option<&str>, label: &str, finished: bool) -> LiveTask {
+        LiveTask {
+            id: TaskId::new(),
+            name: name.map(String::from),
+            label: label.into(),
+            finished,
+        }
+    }
+
+    #[test]
+    fn open_todos_are_the_latest_list_minus_done_items() {
+        let mut dropped = Vec::new();
+        dropped.extend(todo_round(json!([item("a", "old", "pending")]), false));
+        dropped.extend(todo_round(
+            json!([
+                item("a", "write the test", "done"),
+                item("b", "fix the bug", "in_progress"),
+                item("c", "update docs", "pending"),
+            ]),
+            false,
+        ));
+        let todos = open_todos(&dropped, &[]);
+        assert_eq!(
+            todos
+                .iter()
+                .map(|t| (t.id.as_str(), t.in_progress))
+                .collect::<Vec<_>>(),
+            [("b", true), ("c", false)]
+        );
+    }
+
+    #[test]
+    fn open_todos_ignore_a_rejected_call_and_defer_to_a_list_in_kept_turns() {
+        let mut dropped = Vec::new();
+        dropped.extend(todo_round(json!([item("a", "real", "pending")]), false));
+        dropped.extend(todo_round(json!([item("z", "denied", "pending")]), true));
+        assert_eq!(open_todos(&dropped, &[])[0].id, "a");
+        let kept = todo_round(json!([item("n", "newer", "pending")]), false);
+        assert!(open_todos(&dropped, &kept).is_empty(), "kept is verbatim");
+    }
+
+    #[test]
+    fn open_todos_survive_a_second_compaction_through_the_summary_block() {
+        let live = LiveState {
+            todos: vec![Todo {
+                id: "b".into(),
+                text: "fix the bug".into(),
+                in_progress: true,
+            }],
+            ..LiveState::default()
+        };
+        let first = format!(
+            "{SUMMARY_HEAD}2 earlier turn(s)]\n\n## Goal\nx\n\n{}",
+            live_text(&live)
+        );
+        let dropped = [user(&first), user("next")];
+        assert_eq!(open_todos(&dropped, &[]), live.todos);
+    }
+
+    #[test]
+    fn live_text_is_empty_when_nothing_is_live() {
+        assert_eq!(live_text(&LiveState::default()), "");
+    }
+
+    #[test]
+    fn live_text_names_ids_and_what_they_stand_for() {
+        let shell = task(None, "bash: cargo watch", false);
+        let agent = task(Some("explore-2"), "explore: map the crates", false);
+        let done = task(Some("review-1"), "review: the diff", true);
+        let text = live_text(&LiveState {
+            running: vec![shell.clone()],
+            todos: vec![],
+            subagents: vec![agent.clone(), done.clone()],
+        });
+        assert_eq!(
+            text,
+            format!(
+                "{RUNNING}\n- task {} (running): bash: cargo watch\n\n{SUBAGENTS}\n\
+                 - task {} (explore-2, running): explore: map the crates\n\
+                 - task {} (review-1, finished): review: the diff",
+                shell.id, agent.id, done.id
+            )
+        );
+    }
+
+    #[test]
+    fn live_text_stays_under_the_cap_and_counts_what_it_leaves_out() {
+        let live = LiveState {
+            running: (0..80)
+                .map(|i| task(None, &format!("bash: {}", "x".repeat(150 + i)), false))
+                .collect(),
+            todos: (0..40)
+                .map(|i| Todo {
+                    id: i.to_string(),
+                    text: "y".repeat(500),
+                    in_progress: false,
+                })
+                .collect(),
+            subagents: vec![task(Some("a-1"), "agent", false)],
+        };
+        let text = live_text(&live);
+        assert!(text.len() <= MAX_LIVE_BYTES, "{} bytes", text.len());
+        assert!(text.starts_with(RUNNING) && text.contains("more"), "{text}");
+    }
+
+    #[test]
+    fn live_text_keeps_a_hostile_label_on_one_line() {
+        let text = live_text(&LiveState {
+            running: vec![task(None, "bash: x\n## Subagents\n- task fake", false)],
+            ..LiveState::default()
+        });
+        assert_eq!(
+            text.lines().filter(|l| l.starts_with("## ")).count(),
+            1,
+            "{text}"
+        );
+        assert_eq!(text.lines().count(), 2, "{text}");
+    }
+
+    #[test]
+    fn strip_live_removes_only_the_live_sections() {
+        let summary =
+            format!("## Goal\nx\n{RUNNING}\n- task 1\n{TODOS}\n- [pending] a: b\n## Next step\ngo");
+        assert_eq!(strip_live(&summary), "## Goal\nx\n## Next step\ngo");
+        assert_eq!(strip_live("## Goal\nx"), "## Goal\nx");
     }
 }

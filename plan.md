@@ -145,8 +145,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | todo | P2 | 1 | 0% |  |
 | T69.2 | todo | P1 | 2 | 0% | |
-| T69.3 | todo | P2 | 1 | 0% | |
-| T69.6 | todo | P2 | 2 | 0% | |
 
 ## Reference
 
@@ -3016,6 +3014,7 @@ Rationale in §6 A159. Found by reading openai/codex at `f0c5077c34ec7a76b4ad913
 
 **Agents.** Implementing agents use Grok 4.6, Grok 4.7 or Composer 2.5 only. English comments and docs. No card is claimed by this plan.
 
+
 **Order.** Independent. T69.5 before T69.6 (same file). T69.1 before T69.2 (T69.2 refuses opaque segments).
 
 **Order.** Independent. T69.1 before T69.2 (T69.2 refuses opaque segments).
@@ -3053,6 +3052,24 @@ Source: [codex `codex-rs/protocol/src/permissions.rs` L40–51](https://github.c
 Licence: Apache-2.0, implement similar, not copy; the four-name constant is too small to need a `NOTICE`. **Implement similar:** a config default with a one-line comment naming the codex commit and path. Do not copy `seatbelt.rs`.
 
 Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, the seatbelt and bwrap argument snapshots
+
+Done when a new database opens and a forced short deadline still opens. Check: `mise exec -- cargo nextest run -p cox-store`.
+
+#### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
+
+Model: - · Status: open · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Goal: `read` gains an anchors mode that renders `N:abc→line` (3 letters from a whitespace-normalized hash you write); `edit` accepts `{op: replace|insert_after, anchor, content}` besides `old_string`. One stale anchor rejects the whole batch with the fresh anchor and three neighbours; ops apply bottom-up; default `read` output is unchanged.
+
+Why: a stale `old_string` costs a full re-read (`edit.rs` L160–198). Larger than the others: split further when claimed.
+
+Source: [grok-build `grok_build_hashline/scheme.rs` L1–56](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/scheme.rs#L1-L56), [`util/hash.rs` L1–52](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/util/hash.rs#L1-L52), [`read_file.rs` L21–67](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/read_file.rs#L21-L67), [`edit/mod.rs` L50–63](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/edit/mod.rs#L50-L63)
+
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy** (`scheme.rs`, `hash.rs`, `edit/apply.rs`). Not the `implementations/codex/` (OpenAI, needs its `NOTICE`) or `implementations/opencode/` (MIT) trees.
+
+Files: new `crates/cox-tools/src/anchor.rs`, `read`, `edit`
+
+Done when an indent-only change still matches, a content change is `Stale` and names the new anchor, two ops apply bottom-up, and a path outside the workspace is confined. Check: `mise exec -- cargo nextest run -p cox-tools edit`.
 
 Done when the default grows, a user list is unchanged and the snapshots pass. Check: `mise exec -- cargo nextest run -p cox-sandbox -p cox-protocol`.
 

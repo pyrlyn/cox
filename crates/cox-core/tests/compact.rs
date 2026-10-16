@@ -1088,3 +1088,134 @@ async fn compact_refuses_a_rewind_while_the_summary_is_written() {
     provider.release.notify_one();
     compacting.await.expect("join").expect("compact");
 }
+
+/// T69.6: a session whose only tool is the real `bash`, so a backgrounded
+/// call registers a task in the core's own registry.
+fn open_bash(toml: &str) -> (Session, mpsc::Receiver<Event>) {
+    let dir = std::env::temp_dir().join(format!("cox-t69-6-{}", cox_protocol::ids::CallId::new()));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let dir = dir.canonicalize().expect("canonical");
+    let mut config = cox_protocol::Config::default();
+    config.core.workspace_roots = vec![dir.clone()];
+    config.permissions.allow = vec!["Bash".into()];
+    let provider = Arc::new(Scripted::from_toml(toml, "").expect("scenario"));
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        config,
+        provider,
+        vec![Arc::new(cox_tools::bash::BashTool)],
+        store.clone(),
+        store,
+        dir,
+    )
+    .expect("session");
+    let rx = session.events().expect("events once");
+    (session, rx)
+}
+
+/// Four turns in which turn one backgrounds `sleep 300`, then a summary,
+/// then (when `second` is set) two more turns and a second summary.
+fn live_scenario(second: Option<&str>) -> String {
+    let mut toml = format!(
+        concat!(
+            "[[turn]]\ntext = \"starting\"\n",
+            "tool_calls = [{{ name = \"bash\", input = {{ command = \"sleep 300\", background = true }} }}]\n",
+            "[[turn]]\ntext = \"started\"\n",
+            "[[turn]]\ntext = \"second\"\n",
+            "[[turn]]\ntext = \"third\"\n",
+            "[[turn]]\ntext = \"## Goal\\nwatch the server\\n## Decisions\\n{}\"\n",
+        ),
+        pad()
+    );
+    if let Some(second) = second {
+        toml.push_str(&format!(
+            "[[turn]]\ntext = \"fourth\"\n[[turn]]\ntext = \"fifth\"\n[[turn]]\ntext = \"{second}\"\n"
+        ));
+    }
+    toml
+}
+
+fn created_task(events: &[Event]) -> cox_protocol::ids::TaskId {
+    events
+        .iter()
+        .find_map(|e| match e {
+            Event::TaskCreated { task, .. } => Some(*task),
+            _ => None,
+        })
+        .expect("TaskCreated")
+}
+
+async fn first_summary(session: &Session) -> String {
+    match &session.history().await[0].content[0] {
+        Content::Text { text } => text.clone(),
+        other => panic!("not a summary: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn compact_names_a_running_shell_task_the_summary_never_wrote() {
+    let (session, mut rx) = open_bash(&live_scenario(None));
+    let first = user_turn(&session, &mut rx, "t0").await;
+    let task = created_task(&first);
+    for t in ["t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    let summary = first_summary(&session).await;
+    assert!(
+        summary.contains(&format!(
+            "## Still running\n- task {task} (running): bash: sleep 300"
+        )),
+        "{summary}"
+    );
+    assert!(!summary.contains("## Open todos"), "{summary}");
+    assert!(!summary.contains("## Subagents"), "{summary}");
+    session.end();
+}
+
+#[tokio::test]
+async fn compact_adds_no_live_block_to_an_idle_session() {
+    let (session, _, _) = three_turns().await;
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    let summary = first_summary(&session).await;
+    for heading in ["## Still running", "## Open todos", "## Subagents"] {
+        assert!(!summary.contains(heading), "{summary}");
+    }
+}
+
+#[tokio::test]
+async fn compact_second_pass_lists_a_task_once_and_drops_the_models_copy() {
+    // The model repeating the block it read in the first summary must not
+    // double it: the registry is the one source.
+    let second = format!(
+        "## Goal\\nwatch the server\\n## Decisions\\n{}\\n## Still running\\n- task GONE: stale",
+        pad()
+    );
+    let (session, mut rx) = open_bash(&live_scenario(Some(&second)));
+    let task = created_task(&user_turn(&session, &mut rx, "t0").await);
+    for t in ["t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("first");
+    for t in ["t3", "t4"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("second");
+    let summary = first_summary(&session).await;
+    assert_eq!(summary.matches("## Still running").count(), 1, "{summary}");
+    assert_eq!(summary.matches(&task.to_string()).count(), 1, "{summary}");
+    assert!(!summary.contains("GONE"), "{summary}");
+    session.end();
+}
