@@ -1,0 +1,9 @@
+api = 1
+id = "cursor-cloud"
+version = "0.1.0"
+name = "Cursor Cloud"
+wasm = "plugin.wasm"
+
+[[cloud_agents]]
+name = "cursor-cloud"
+backend = "cursor"

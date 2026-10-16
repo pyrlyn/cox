@@ -8,7 +8,7 @@
 
 /// A value the project set that the guard list reverted, with why.
 public struct Dropped: Identifiable, Equatable, Sendable {
-  /// Dotted; `mcp.servers.*.sandbox` names the servers in `value`.
+  /// Dotted; `mcp.servers` names the changed servers in `value`.
   public var key: String
   /// What the project set.
   public var value: String

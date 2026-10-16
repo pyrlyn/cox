@@ -148,6 +148,23 @@ fn models_reach_swift_with_the_code_tiers_model_first() {
 }
 
 #[tokio::test]
+async fn best_of_merge_and_mergeable_cross_and_refuse_an_unknown_group() {
+    use cox_app::best_of::{BestOfId, BestOfMerge, Candidate};
+    let dir = scratch(None);
+    let app = ffi_app(dir.path(), Arc::default());
+    let id = BestOfId("no-such-group".into());
+    let err = app.mergeable(id.clone()).err();
+    assert!(matches!(err, Some(AppError::Workspace { .. })), "{err:?}");
+    let merge = BestOfMerge {
+        id,
+        from: vec![0, 1],
+        by: Candidate::Cox { model: None },
+    };
+    let refused = app.best_of_merge(merge, "dark".into()).await.err();
+    assert!(refused.is_some(), "an unknown group must not start a merge");
+}
+
+#[tokio::test]
 async fn usable_providers_ask_the_host_keychain() {
     let dir = scratch(None);
     let mut keyed = MemoryHost::default();

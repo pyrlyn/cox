@@ -1,0 +1,6 @@
+[[turn]]
+text = "delegating"
+tool_calls = [{ name = "agent", input = { task = "find the race in the retry loop", preset = "cursor-cloud" } }]
+
+[[turn]]
+text = "done"

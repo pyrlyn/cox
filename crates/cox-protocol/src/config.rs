@@ -914,9 +914,10 @@ impl Default for PermissionsConfig {
 pub struct SandboxConfig {
     /// `sandbox.mode`; project config may not set this to `danger-full-access`.
     pub mode: SandboxMode,
-    /// Whether network access is allowed.
+    /// Whether network access is allowed; project config may not turn it on.
     pub network: bool,
-    /// Extra writable roots beyond the workspace.
+    /// Extra writable roots beyond the workspace; project config may only
+    /// keep roots the user layer already lists.
     pub writable: Vec<PathBuf>,
     /// Paths inside the workspace that stay read-only even in `workspace-write`.
     pub readonly_in_workspace: Vec<PathBuf>,
@@ -1184,7 +1185,8 @@ pub struct McpConfig {
     pub deferred: bool,
     /// `--no-mcp` sets this to `false`; not a `default.toml` key.
     pub enabled: bool,
-    /// `[mcp.servers.<name>]` entries.
+    /// `[mcp.servers.<name>]` entries. User config only: a project config
+    /// cannot add or change a server (T64.7); `.mcp.json` is a separate surface.
     pub servers: HashMap<String, McpServerConfig>,
 }
 
@@ -1457,7 +1459,7 @@ pub struct MemoryConfig {
     pub enabled: bool,
     /// Whether end-of-session extraction runs (on the `memory` job's tier).
     pub extract: bool,
-    /// Override for `~/.cox/projects/<slug>/memory`; empty means default.
+    /// Override for `~/.cox/projects/<slug>/memory`; empty means default. A project config may only name an existing absolute directory inside its own git root (T64.17).
     pub dir: String,
     /// The bar a `salience` `Score` must clear to keep an extracted item
     /// (T33.21.1); fixed here, never moved by the plugin's answer.

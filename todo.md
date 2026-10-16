@@ -1,6 +1,5 @@
 # Todo
 
-- T33.14.2. Filesystem preopens
 - T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
 - T33.40.4. Jev plugin as a provider, end to end and offline
@@ -29,17 +28,14 @@
 - T37.32.2. Developer ID signing, notarization, Sparkle, bundled CLI, Homebrew cask
 - T37.32.3. Debug macOS app DMG on CI, every feature, Developer ID-signed
 - T37.33. Performance budget suite
-- T37.51. macOS app: pointer from the shared rule
 - T39.7. Optional: live check against the real Gemini endpoint (needs the creator's key)
 - T43.6. Bench the map on and off
-- T52.25. `cox-ffi` and CoxModel carry the merge
 - T52.26. CoxUI: Merge in the best-of compare view
 - T53.5. Freeze ABI `api = 1`
 - T53.6. `cox-plugin-api` ready for crates.io
 - T53.7. `cox-plugin-sdk` ready for crates.io
 - T53.8. Go SDK module ready to tag
 - T53.9. Templates and docs use the published SDKs
-- T56.8. Offline end-to-end over hand-written fixtures
 - T56.9. Docs: cloud agents for users and in EA
 - T56.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T56.11. No usage row for a cloud run that never started

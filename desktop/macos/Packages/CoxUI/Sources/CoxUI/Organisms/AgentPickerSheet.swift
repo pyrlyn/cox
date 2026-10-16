@@ -67,7 +67,7 @@ public struct AgentPickerSheet: View {
             .padding(.vertical, Space.s)
             .contentShape(Rectangle())
           }
-          .buttonStyle(.plain)
+          .buttonStyle(.coxPlain(isChosen: row.id == state.selection))
           .disabled(row.unavailable != nil)
           .accessibilityAddTraits(row.id == state.selection ? .isSelected : [])
         }

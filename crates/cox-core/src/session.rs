@@ -42,7 +42,7 @@ use crate::turn::{consume_provider, results_message, run_signed_tools, run_tools
 pub enum State {
     /// No turn in flight.
     Idle,
-    /// Building the next provider request.
+    /// Building the next provider request, or compacting the history it carries.
     Assembling,
     /// A provider stream is open.
     Streaming,
@@ -50,9 +50,6 @@ pub enum State {
     RunningTools,
     /// Waiting on `Submission::Approve`.
     AwaitingApproval,
-    /// Compaction is running (wired in T8.1).
-    #[allow(dead_code)]
-    Compacting,
     /// Emitting `TurnDone` and flushing.
     Finishing,
     /// `Submission::Interrupt` is draining work.
@@ -129,6 +126,9 @@ pub(crate) struct Inner {
     pub(crate) renamed: bool,
     /// Context size of the last main call, for the §1.10 auto trigger.
     pub(crate) last_context_tokens: u32,
+    /// The context size at which the last compaction failed on the summary,
+    /// so the auto triggers stay quiet until `/compact` or a smaller context.
+    pub(crate) compact_suppressed_at: Option<u32>,
     /// The last main call's usage: `ContextBreakdown.cached` (A98).
     last_usage: Option<cox_protocol::types::Usage>,
     /// The model catalog `ContextBreakdown.window` is read from (A98),
@@ -616,6 +616,7 @@ impl Session {
                 detach: HashMap::new(),
                 extracted: Vec::new(),
                 last_context_tokens: 0,
+                compact_suppressed_at: None,
                 last_usage: None,
                 catalog: None,
                 retried_after_too_long: false,

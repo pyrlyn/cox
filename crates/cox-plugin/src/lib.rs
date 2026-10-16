@@ -47,6 +47,7 @@ pub mod discover;
 pub mod error;
 pub mod events;
 pub mod external_agent;
+pub mod fs;
 pub mod grant;
 pub mod hooks;
 pub mod host;

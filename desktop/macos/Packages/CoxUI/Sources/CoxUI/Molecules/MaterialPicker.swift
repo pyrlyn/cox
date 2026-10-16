@@ -87,7 +87,7 @@ private struct MaterialSwatch: View {
       }
       .contentShape(face)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain(isChosen: isSelected))
   }
 }
 
