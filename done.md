@@ -436,6 +436,34 @@ $ mise exec -- cargo fmt --check
 clean
 ```
 
+
+#### T33.14.2 Filesystem preopens
+
+Split from T33.14 by the creator 2026-10-03 because the preopens waited on T33.43; the `cox_http` half is T33.14.1.
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Depends: T33.9, T33.43 · Size: ~120 · Priority: P2 · Complexity: 3 · Files: `crates/cox-plugin/src/fs.rs`, `src/host.rs`, `src/live.rs`, `crates/cox-session/src/plugins.rs`
+Goal: WASI preopens come only from `fs` and pass `confine`; reads mount `ro:`; `.git` and `.cox` are never writable. WASI is on only when `wasi = true` or `fs` is set.
+Plan: `cox-plugin` may not depend on `cox-sandbox`, so `fs.rs` takes the caller's `confine` as an injected closure (`FsRoots`) and `cox-session` passes `cox_tools::path::confine`. `fs::mounts` maps `capabilities.fs` to extism `allowed_paths`; `PluginHost::load_with_fs` builds the plugin with them; `LivePlugins::set_fs` and `Live::load` wire it.
+Check: `fs_write_to_dot_git_is_refused`, `wasi_ctx_has_no_env`.
+What landed: `crates/cox-plugin/src/fs.rs` (`FsRoots`, `Mounts`, `mounts`, `FsError`): `$WORKSPACE` mounts at `/workspace` and `$PLUGIN_DATA` (`<home>/plugin-data/<id>/`, created on demand) at `/data`; each root goes through the injected `confine`; reads mount `ro:`; a root also granted for write is not mounted twice; an `fs.write` root is refused when it is inside `.git`/`.cox` or one exists beneath it (bounded walk, 50 000 entries, larger trees refused); WASI is on only for `wasi = true` or a non-empty `fs`; a grant with no session roots fails the load. `PluginHost::load_with_fs` (`load_with` is the no-WASI case). `cox-session` sets the roots to the session cwd and `<home>/plugin-data`. `docs/design/plugins.md` §11 describes it.
+Not done: no end-to-end session test through `cox-session` with a real plugin package (the guard is covered at the `mounts` and `PluginHost` levels with inline WAT); a symlink inside a write root is not followed by the `.git`/`.cox` walk (WASI refuses one that leaves the mount). Windows was not exercised.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-plugin
+PASS cox-plugin fs::tests::fs_write_to_dot_git_is_refused
+PASS cox-plugin fs::tests::reads_mount_read_only_and_writes_do_not
+PASS cox-plugin fs::tests::plugin_data_is_created_and_writable_even_under_dot_cox
+PASS cox-plugin fs::tests::wasi_is_on_only_for_the_flag_or_a_grant
+PASS cox-plugin fs::tests::a_grant_without_roots_or_outside_confine_is_refused
+PASS cox-plugin host::tests::wasi_ctx_has_no_env
+PASS cox-plugin host::tests::wasi_is_off_unless_the_mounts_turn_it_on
+PASS cox-plugin host::tests::read_only_preopen_refuses_a_create_and_a_writable_one_allows_it
+Summary: 127 tests run: 127 passed, 0 skipped
+$ mise exec -- cargo nextest run -p cox --test deps    -> 10 passed
+$ mise exec -- cargo nextest run -p cox-session plugin -> 23 passed
+$ mise exec -- cargo clippy -p cox-plugin -p cox-session --all-targets -- -D warnings -> clean
+$ mise exec -- cargo fmt -p cox-plugin -p cox-session (check) -> clean
+```
+
 #### T58.4 Move the decisions still in CoxModel into `cox-app`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-03 · Depends: — · Size: an audit (~40 lines in `docs/design/desktop-windows.md` or this card) plus one sub-card per move · Files: see the sub-cards

@@ -1,6 +1,5 @@
 # Todo
 
-- T33.14.2. Filesystem preopens
 - T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
 - T33.40.4. Jev plugin as a provider, end to end and offline
