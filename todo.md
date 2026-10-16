@@ -38,7 +38,6 @@
 - T53.9. Templates and docs use the published SDKs
 - T56.9. Docs: cloud agents for users and in EA
 - T56.10. Optional: live check against a real Cursor account (needs the creator's key)
-- T56.12. A refused cloud run tells the user why
 - T57.1. Windows CI job: `cargo check` over a growing crate list
 - T57.4. `path::confine` on Windows paths
 - T57.5. One kill path for process trees: hooks and the session environment
