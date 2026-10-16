@@ -20,6 +20,7 @@
 // drop this allow once its public items are documented.
 #![allow(missing_docs)]
 
+pub mod anchor;
 pub mod ask_user;
 pub mod bash;
 pub mod checkpoint;
