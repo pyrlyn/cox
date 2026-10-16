@@ -135,6 +135,7 @@ impl GuardViolation {
                 "A project may not run more subagents at once than you allow"
             }
             "core.workspace_roots" => "A project may not widen the directories tools can reach",
+            "memory.dir" => "A project may not choose where your memory files are read and written",
             "providers.*.base_url" => "A project may not choose where your API keys are sent",
             "providers.*.api_key_env" => "A project may not choose which API key a provider sends",
             "providers" => "A project may not add a model provider",
@@ -142,9 +143,11 @@ impl GuardViolation {
             "permissions.approval" => "A project may not loosen the approval policy beyond yours",
             "permissions.allow" => "A project may not allow a tool call",
             "sandbox.mode" => "A project may not turn the sandbox off",
+            "sandbox.network" => "A project may not turn on sandbox network access",
+            "sandbox.writable" => "A project may not widen where the sandbox can write",
             "plugins.enabled" => "A project may not turn plugins back on",
             "tiers.think.confirm" => "A project may not skip the think tier's confirmation",
-            "mcp.servers.*.sandbox" => "A project may not run an MCP server unsandboxed",
+            "mcp.servers" => "A project may not choose which MCP servers run",
             "hooks" => "A project may not choose which hook commands run",
             "lsp.servers" => "A project may not choose which language servers run",
             "voice" => "A project may not turn on the microphone or choose the voice model",
@@ -162,11 +165,14 @@ impl GuardViolation {
 /// Reverts any guarded key `full` set relative to `without_project` back to
 /// `without_project`'s value, returning what it reverted (plan.md §1.6:
 /// "budget.* may not be raised above user/default, permissions.mode wider
-/// than the user's, permissions.approval looser than the user's, sandbox.mode = \"danger-full-access\" or
-/// tiers.think.confirm = false are ignored from the project file with a warning to stderr").
+/// than the user's, permissions.approval looser than the user's,
+/// sandbox.mode = \"danger-full-access\", sandbox.network = true or
+/// sandbox.writable entries beyond the user's, or tiers.think.confirm = false
+/// are ignored from the project file with a warning to stderr").
 ///
 /// `git_root` is the checkout the project layer came from, the only place
-/// a project-chosen workspace root may point into (T64.2).
+/// a project-chosen workspace root or `memory.dir` may point into (T64.2,
+/// T64.17).
 fn apply_project_guards(
     full: &mut Config,
     without_project: &Config,
@@ -237,6 +243,22 @@ fn apply_project_guards(
         full.core.workspace_roots = user_roots.clone();
     }
 
+    // T64.17: the session reads memory facts from, and writes them to,
+    // `memory.dir`, and the index lands in the model's context, so a project
+    // may only point it inside its own checkout (same test as the roots
+    // above) or keep the user's. Empty means the default location.
+    if full.memory.dir != without_project.memory.dir
+        && !full.memory.dir.is_empty()
+        && !root_inside(Path::new(&full.memory.dir), git_root)
+    {
+        violations.push(GuardViolation {
+            key: "memory.dir",
+            project_value: full.memory.dir.clone(),
+            reverted_to: without_project.memory.dir.clone(),
+        });
+        full.memory.dir = without_project.memory.dir.clone();
+    }
+
     // T64.4: `auto` lets writes run unasked, so only `bypass` being refused
     // left a cloned repository one step short of the same hole. A project
     // may keep or narrow the user's mode, never widen it.
@@ -291,6 +313,43 @@ fn apply_project_guards(
         full.sandbox.mode = without_project.sandbox.mode;
     }
 
+    // T64.5: network access and extra writable roots are what the sandbox
+    // withholds from a command a cloned repository chose, so the project
+    // layer may keep or narrow the user's grant, never extend it. figment
+    // replaces `writable` wholesale, so the user's roots are what a project
+    // entry is compared against and only the ones the user lists survive.
+    if full.sandbox.network && !without_project.sandbox.network {
+        violations.push(GuardViolation {
+            key: "sandbox.network",
+            project_value: "true".to_string(),
+            reverted_to: "false".to_string(),
+        });
+        full.sandbox.network = false;
+    }
+    let user_writable = &without_project.sandbox.writable;
+    let (kept, added): (Vec<PathBuf>, Vec<PathBuf>) = full
+        .sandbox
+        .writable
+        .iter()
+        .cloned()
+        .partition(|path| user_writable.contains(path));
+    if !added.is_empty() {
+        let display = |paths: &[PathBuf]| {
+            rule_list(
+                &paths
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        violations.push(GuardViolation {
+            key: "sandbox.writable",
+            project_value: display(&added),
+            reverted_to: display(&kept),
+        });
+        full.sandbox.writable = kept;
+    }
+
     // T33.6 (PL§1, D14): a repository must not switch plugins back on
     // after the user turned them off; its own plugins still need a grant,
     // but the user's off switch has to hold regardless.
@@ -312,39 +371,39 @@ fn apply_project_guards(
         full.tiers.think.confirm = without_project.tiers.think.confirm;
     }
 
-    // T33.42: the sandbox is exactly what contains a command a cloned
-    // repository chose, so the project layer must never be the reason a
-    // server's effective `sandbox` is `false` — an existing server or one
-    // it adds outright, same difference: only user config (and env/flags,
-    // `without_project`'s other layers) may opt a server out. A server is
-    // reverted unless `without_project` alone already yields `sandbox =
-    // false` for that name, i.e. a non-project layer opted it out on its
-    // own.
-    let weakened: Vec<String> = full
-        .mcp
-        .servers
-        .iter()
-        .filter(|(name, server)| {
-            !server.sandbox
-                && !without_project
-                    .mcp
-                    .servers
-                    .get(name.as_str())
-                    .is_some_and(|s| !s.sandbox)
-        })
-        .map(|(name, _)| name.clone())
-        .collect();
-    if !weakened.is_empty() {
+    // T64.7 (subsumes T33.42): an MCP server is a program cox spawns (or a
+    // URL it contacts, with `${VAR}` expanded from the environment), and the
+    // sandbox is what contains a stdio one, so which servers exist, what
+    // they run and whether they are sandboxed is the user's call alone.
+    // Any project difference reverts the whole map to the layers without
+    // the project, the way `lsp.servers` does. `.mcp.json` is a separate
+    // surface and does not pass through here.
+    if full.mcp.servers != without_project.mcp.servers {
+        let mut changed: Vec<&str> = full
+            .mcp
+            .servers
+            .iter()
+            .filter(|(name, s)| without_project.mcp.servers.get(name.as_str()) != Some(*s))
+            .map(|(name, _)| name.as_str())
+            .collect();
+        changed.sort_unstable();
+        let mut kept: Vec<&str> = without_project
+            .mcp
+            .servers
+            .keys()
+            .map(String::as_str)
+            .collect();
+        kept.sort_unstable();
         violations.push(GuardViolation {
-            key: "mcp.servers.*.sandbox",
-            project_value: format!("false ({})", weakened.join(", ")),
-            reverted_to: "true".to_string(),
+            key: "mcp.servers",
+            project_value: changed.join(", "),
+            reverted_to: if kept.is_empty() {
+                "none".to_string()
+            } else {
+                kept.join(", ")
+            },
         });
-        for name in &weakened {
-            if let Some(server) = full.mcp.servers.get_mut(name) {
-                server.sandbox = true;
-            }
-        }
+        full.mcp.servers = without_project.mcp.servers.clone();
     }
 
     // T41.1: an LSP server is a program cox spawns, so which ones exist
@@ -607,7 +666,8 @@ fn apply_project_guards(
     violations
 }
 
-/// Whether a project-chosen workspace root lies inside `git_root` (T64.2).
+/// Whether a project-chosen workspace root or `memory.dir` lies inside
+/// `git_root` (T64.2, T64.17).
 /// A relative root is refused: `confine` resolves it against the process
 /// cwd, which the repository does not pick. The root must exist so its
 /// canonical path is known: a symlink inside the checkout that points out
@@ -652,7 +712,7 @@ fn rule_list(rules: &[String]) -> String {
 /// table, T64.3) is left out: its keys never reach the effective config,
 /// and listing it would send every project-set provider key to the
 /// pre-project figment.
-const GUARDED_KEYS: [&str; 21] = [
+const GUARDED_KEYS: [&str; 24] = [
     "budget.session_usd",
     "budget.monthly_usd",
     "budget.warn_at",
@@ -663,7 +723,8 @@ const GUARDED_KEYS: [&str; 21] = [
     "external_agents.*.writable",
     "hooks",
     "lsp.servers",
-    "mcp.servers.*.sandbox",
+    "mcp.servers",
+    "memory.dir",
     "permissions.allow",
     "permissions.approval",
     "permissions.mode",
@@ -671,6 +732,8 @@ const GUARDED_KEYS: [&str; 21] = [
     "providers.*.api_key_env",
     "providers.*.base_url",
     "sandbox.mode",
+    "sandbox.network",
+    "sandbox.writable",
     "tiers.think.confirm",
     "tui.status_line.command",
     "voice",
@@ -1328,12 +1391,13 @@ mod tests {
         });
     }
 
-    /// T33.42: a project layer must not be able to flip an existing,
-    /// user-configured server's `sandbox` off — that would silently drop
-    /// the wrap on a server the user already trusted as sandboxed, without
-    /// touching its command, so the change is easy to miss in review.
+    /// T64.7: an MCP server is a program (stdio) or a URL with `${VAR}`
+    /// expansion (http) that cox contacts, so which servers exist and what
+    /// they run is the user's call alone. Any project difference reverts the
+    /// whole map, as `lsp.servers` does; the project may still tune the
+    /// scalars next to it.
     #[test]
-    fn config_project_cannot_disable_an_mcp_server_sandbox() {
+    fn project_config_cannot_set_mcp_servers() {
         let home = tempdir().expect("tempdir");
         let git_root = tempdir().expect("tempdir");
         fs::write(
@@ -1343,45 +1407,89 @@ mod tests {
         .expect("write user config");
         fs::create_dir_all(git_root.path().join(".git")).expect("mkdir .git");
         fs::create_dir_all(git_root.path().join(".cox")).expect("mkdir .cox");
-        // The project layer both disables an existing, user-trusted server
-        // and adds a brand-new one already unsandboxed — the sandbox is
-        // exactly what contains a command a cloned repository chose, so
-        // neither may take effect.
         fs::write(
             git_root.path().join(".cox/config.toml"),
-            "[mcp.servers.gh]\nsandbox = false\n\n[mcp.servers.new]\ncommand = \"x\"\nsandbox = false\n",
+            "[mcp]\ntimeout_s = 7\n\n[mcp.servers.gh]\ncommand = \"evil\"\n\n[mcp.servers.new]\ncommand = \"x\"\n\n[mcp.servers.web]\nurl = \"https://example.com/${HOME}\"\n",
+        )
+        .expect("write project config");
+
+        temp_env(&[("COX_HOME", Some(home.path().to_str().unwrap()))], || {
+            let loaded = load_plain(git_root.path()).expect("load succeeds");
+            let servers = &loaded.config.mcp.servers;
+            assert_eq!(servers["gh"].command.as_deref(), Some("gh-mcp"));
+            assert!(!servers.contains_key("new"), "{servers:?}");
+            assert!(!servers.contains_key("web"), "{servers:?}");
+            assert!(
+                !servers["opt-out"].sandbox,
+                "a user's own opt-out must hold"
+            );
+            assert_eq!(loaded.config.mcp.timeout_s, 7);
+
+            let violations: Vec<_> = loaded
+                .violations
+                .iter()
+                .filter(|v| v.key == "mcp.servers")
+                .collect();
+            assert_eq!(violations.len(), 1, "{:?}", loaded.violations);
+            assert_eq!(violations[0].project_value, "gh, new, web");
+            assert_eq!(violations[0].reverted_to, "gh, opt-out");
+            assert_eq!(loaded.source_of("mcp.servers.gh.command"), "user");
+            assert_eq!(loaded.source_of("mcp.timeout_s"), "project");
+        });
+    }
+
+    /// T33.42, kept under T64.7: a project that flips only `sandbox` on a
+    /// user's server still changes the map, so it is reverted whole.
+    #[test]
+    fn project_sandbox_off_on_a_user_mcp_server_is_reverted() {
+        let home = tempdir().expect("tempdir");
+        let git_root = tempdir().expect("tempdir");
+        fs::write(
+            home.path().join("config.toml"),
+            "[mcp.servers.gh]\ncommand = \"gh-mcp\"\n",
+        )
+        .expect("write user config");
+        fs::create_dir_all(git_root.path().join(".git")).expect("mkdir .git");
+        fs::create_dir_all(git_root.path().join(".cox")).expect("mkdir .cox");
+        fs::write(
+            git_root.path().join(".cox/config.toml"),
+            "[mcp.servers.gh]\nsandbox = false\n",
         )
         .expect("write project config");
 
         temp_env(&[("COX_HOME", Some(home.path().to_str().unwrap()))], || {
             let loaded = load_plain(git_root.path()).expect("load succeeds");
             let gh = &loaded.config.mcp.servers["gh"];
+            assert!(gh.sandbox);
+            assert_eq!(gh.command.as_deref(), Some("gh-mcp"));
             assert!(
-                gh.sandbox,
-                "the opt-out on an existing server must be ignored"
+                loaded.violations.iter().any(|v| v.key == "mcp.servers"),
+                "{:?}",
+                loaded.violations
             );
+        });
+    }
+
+    #[test]
+    fn project_mcp_server_identical_to_user_is_no_violation() {
+        let home = tempdir().expect("tempdir");
+        let git_root = tempdir().expect("tempdir");
+        let server = "[mcp.servers.gh]\ncommand = \"gh-mcp\"\n";
+        fs::write(home.path().join("config.toml"), server).expect("write user config");
+        fs::create_dir_all(git_root.path().join(".git")).expect("mkdir .git");
+        fs::create_dir_all(git_root.path().join(".cox")).expect("mkdir .cox");
+        fs::write(git_root.path().join(".cox/config.toml"), server).expect("write project config");
+
+        temp_env(&[("COX_HOME", Some(home.path().to_str().unwrap()))], || {
+            let loaded = load_plain(git_root.path()).expect("load succeeds");
             assert_eq!(
-                gh.command.as_deref(),
-                Some("gh-mcp"),
-                "the guard must revert only sandbox, not the whole server"
+                loaded.config.mcp.servers["gh"].command.as_deref(),
+                Some("gh-mcp")
             );
             assert!(
-                loaded.config.mcp.servers["new"].sandbox,
-                "a project layer must not be able to add an unsandboxed server either"
-            );
-            // Only user config (and env/flags) may opt a server out: its
-            // own choice for a server it named must hold.
-            assert!(!loaded.config.mcp.servers["opt-out"].sandbox);
-            let violation = loaded
-                .violations
-                .iter()
-                .find(|v| v.key == "mcp.servers.*.sandbox")
-                .expect("both project-caused opt-outs are one violation");
-            assert!(violation.project_value.contains("gh"), "{violation:?}");
-            assert!(violation.project_value.contains("new"), "{violation:?}");
-            assert!(
-                !violation.project_value.contains("opt-out"),
-                "{violation:?}"
+                !loaded.violations.iter().any(|v| v.key == "mcp.servers"),
+                "{:?}",
+                loaded.violations
             );
         });
     }
@@ -1691,6 +1799,68 @@ mod tests {
         }
     }
 
+    /// T64.17: `memory.dir` is where the session reads and writes memory
+    /// facts, so a project may name only a directory inside its own git
+    /// root (or the one the user already set). Anything else (another
+    /// user's tree, a relative path, a symlink out of the repo) reverts to
+    /// the user's value; an empty value means the default and stays allowed.
+    #[cfg(unix)]
+    #[test]
+    fn project_config_cannot_point_memory_dir_outside_the_checkout() {
+        let home = tempdir().expect("tempdir");
+        let git_root = tempdir().expect("tempdir");
+        let outside = tempdir().expect("tempdir");
+        let mine = tempdir().expect("tempdir");
+        let git = fs::canonicalize(git_root.path()).expect("canonical git root");
+        fs::create_dir_all(git.join(".git")).expect("mkdir .git");
+        fs::create_dir_all(git.join(".cox/memory")).expect("mkdir memory");
+        std::os::unix::fs::symlink(outside.path(), git.join("escape")).expect("symlink");
+        let mine = mine.path().display().to_string();
+        fs::write(
+            home.path().join("config.toml"),
+            format!("[memory]\ndir = '{mine}'\n"),
+        )
+        .expect("write user config");
+        let inside = git.join(".cox/memory").display().to_string();
+        let escape = git.join("escape").display().to_string();
+        let up = git.join("..").display().to_string();
+
+        let load_dir = |dir: &str| {
+            fs::write(
+                git.join(".cox/config.toml"),
+                format!("[memory]\ndir = '{dir}'\n"),
+            )
+            .expect("write project config");
+            let mut loaded = None;
+            temp_env(&[("COX_HOME", Some(home.path().to_str().unwrap()))], || {
+                loaded = Some(load_plain(&git).expect("load succeeds"));
+            });
+            loaded.expect("loaded")
+        };
+
+        for kept in [inside.as_str(), mine.as_str(), ""] {
+            let loaded = load_dir(kept);
+            assert_eq!(loaded.config.memory.dir, kept);
+            assert!(violation(&loaded, "memory.dir").is_none());
+        }
+
+        for bad in ["/", "memory", escape.as_str(), up.as_str()] {
+            let loaded = load_dir(bad);
+            assert_eq!(
+                loaded.config.memory.dir, mine,
+                "a memory.dir outside the checkout must revert to the user's"
+            );
+            let v = violation(&loaded, "memory.dir").expect("a memory.dir violation");
+            assert_eq!(v.project_value, bad);
+            assert_eq!(v.reverted_to, mine);
+            assert_eq!(
+                v.reason(),
+                "A project may not choose where your memory files are read and written"
+            );
+            assert_eq!(loaded.source_of("memory.dir"), "user");
+        }
+    }
+
     /// T64.3: a provider's key is resolved for its section and sent to its
     /// `base_url`, so a project may change neither the URL nor the env var
     /// of a section, nor add a section of its own. Other knobs (`timeout_s`,
@@ -1847,6 +2017,92 @@ mod tests {
                     assert!(
                         violation(&loaded, "permissions.approval").is_none(),
                         "{case}"
+                    );
+                },
+            );
+        }
+    }
+
+    /// T64.5: network access lets a command a cloned repository chose reach
+    /// out, so a project may not turn it on unless the user layer already did.
+    #[test]
+    fn project_config_cannot_enable_sandbox_network() {
+        load_with_project(None, "[sandbox]\nnetwork = true\n", |loaded| {
+            assert!(!loaded.config.sandbox.network);
+            let v = violation(&loaded, "sandbox.network").expect("a network violation");
+            assert_eq!(v.project_value, "true");
+            assert_eq!(v.reverted_to, "false");
+            assert_eq!(
+                v.reason(),
+                "A project may not turn on sandbox network access"
+            );
+        });
+    }
+
+    #[test]
+    fn project_config_may_keep_or_turn_off_sandbox_network() {
+        let allowed = [
+            (Some("true"), "true", true),
+            (Some("true"), "false", false),
+            (None, "false", false),
+        ];
+        for (user, project, expected) in allowed {
+            let user_toml = user.map(|n| format!("[sandbox]\nnetwork = {n}\n"));
+            load_with_project(
+                user_toml.as_deref(),
+                &format!("[sandbox]\nnetwork = {project}\n"),
+                |loaded| {
+                    let case = format!("user {user:?}, project {project}");
+                    assert_eq!(loaded.config.sandbox.network, expected, "{case}");
+                    assert!(violation(&loaded, "sandbox.network").is_none(), "{case}");
+                },
+            );
+        }
+    }
+
+    /// T64.5: an extra writable root is a directory outside the workspace a
+    /// command can modify; the project may only name ones the user lists.
+    #[test]
+    fn project_config_cannot_add_writable_paths() {
+        load_with_project(
+            Some("[sandbox]\nwritable = [\"/data/ok\"]\n"),
+            "[sandbox]\nwritable = [\"/data/ok\", \"/etc\", \"/home/me/.ssh\"]\n",
+            |loaded| {
+                assert_eq!(loaded.config.sandbox.writable, [PathBuf::from("/data/ok")]);
+                let v = violation(&loaded, "sandbox.writable").expect("a writable violation");
+                assert_eq!(v.project_value, "/etc, /home/me/.ssh");
+                assert_eq!(v.reverted_to, "/data/ok");
+                assert_eq!(
+                    v.reason(),
+                    "A project may not widen where the sandbox can write"
+                );
+            },
+        );
+        load_with_project(None, "[sandbox]\nwritable = [\"/etc\"]\n", |loaded| {
+            assert!(loaded.config.sandbox.writable.is_empty());
+            let v = violation(&loaded, "sandbox.writable").expect("a writable violation");
+            assert_eq!(v.reverted_to, "none");
+        });
+    }
+
+    #[test]
+    fn project_config_may_keep_or_narrow_writable_paths() {
+        let user = "[sandbox]\nwritable = [\"/data/a\", \"/data/b\"]\n";
+        let cases = [
+            ("[\"/data/a\", \"/data/b\"]", vec!["/data/a", "/data/b"]),
+            ("[\"/data/b\"]", vec!["/data/b"]),
+            ("[]", vec![]),
+        ];
+        for (project, expected) in cases {
+            load_with_project(
+                Some(user),
+                &format!("[sandbox]\nwritable = {project}\n"),
+                |loaded| {
+                    let expected: Vec<PathBuf> = expected.iter().map(PathBuf::from).collect();
+                    assert_eq!(loaded.config.sandbox.writable, expected, "{project}");
+                    assert!(
+                        violation(&loaded, "sandbox.writable").is_none(),
+                        "{project}"
                     );
                 },
             );

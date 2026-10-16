@@ -7,7 +7,8 @@
 //! checked against the workspace roots, and `sandbox`, the front door that
 //! turns a shell command plus the session's `SandboxPolicy` into the
 //! `Command` that confines it on this host (Seatbelt on macOS, bubblewrap
-//! or Landlock+seccomp on Linux).
+//! or Landlock+seccomp on Linux). `open::open_confined` (T64.15) opens a
+//! confined path without following a symlink swapped in after `confine`.
 //!
 //! Separate from `cox-tools` (dependencies (a): `landlock` and
 //! `seccompiler` are Linux-only and platform-gated, and guard (b): both
@@ -21,5 +22,6 @@
 // drop this allow once its public items are documented.
 #![allow(missing_docs)]
 
+pub mod open;
 pub mod path;
 pub mod sandbox;

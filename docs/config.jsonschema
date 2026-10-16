@@ -167,7 +167,10 @@
         "readonly_in_workspace": [
           ".git",
           ".cox",
-          ".claude"
+          ".claude",
+          ".agents",
+          ".codex",
+          ".aws"
         ],
         "linux_backend": "auto"
       }
@@ -1320,12 +1323,12 @@
           "default": "workspace-write"
         },
         "network": {
-          "description": "Whether network access is allowed.",
+          "description": "Whether network access is allowed; project config may not turn it on.",
           "type": "boolean",
           "default": false
         },
         "writable": {
-          "description": "Extra writable roots beyond the workspace.",
+          "description": "Extra writable roots beyond the workspace; project config may only\nkeep roots the user layer already lists.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1341,7 +1344,10 @@
           "default": [
             ".git",
             ".cox",
-            ".claude"
+            ".claude",
+            ".agents",
+            ".codex",
+            ".aws"
           ]
         },
         "linux_backend": {
@@ -1658,7 +1664,7 @@
           "default": true
         },
         "servers": {
-          "description": "`[mcp.servers.<name>]` entries.",
+          "description": "`[mcp.servers.<name>]` entries. User config only: a project config\ncannot add or change a server (T64.7); `.mcp.json` is a separate surface.",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/McpServerConfig"
@@ -2055,7 +2061,7 @@
           "default": false
         },
         "dir": {
-          "description": "Override for `~/.cox/projects/<slug>/memory`; empty means default.",
+          "description": "Override for `~/.cox/projects/<slug>/memory`; empty means default. A project config may only name an existing absolute directory inside its own git root (T64.17).",
           "type": "string",
           "default": ""
         },

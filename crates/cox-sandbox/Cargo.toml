@@ -17,7 +17,11 @@ tempfile = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = { workspace = true }
 seccompiler = { workspace = true }
-nix = { workspace = true }
+
+# T64.15.1: `open::open_confined` needs `O_NOFOLLOW` and, on macOS,
+# `F_GETPATH` on every Unix target, not only Linux.
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true
