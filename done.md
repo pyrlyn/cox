@@ -81,6 +81,107 @@ clean
 ```
 `cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
 
+#### T64.13 Match the OAuth `state` before the loopback accepts a callback
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-mcp/src/auth.rs`, `crates/cox-mcp/Cargo.toml`
+Goal: the MCP login's loopback listener returned the query of the first TCP connection, whatever it was, and `state` was checked only afterwards by rmcp. Any local process that connected first could end the login with a failure, or feed it a code of its choosing.
+What landed:
+- `login` reads the `state` rmcp put in the authorization URL. `callback(listener, state)` now loops: only `GET /callback` with that `state` is accepted (200); other paths or methods get 404, a missing or different `state` gets 400, and the listener keeps waiting. The overall `LOGIN_TIMEOUT` still bounds the wait, and a new 5 s `REQUEST_TIMEOUT` per connection stops a silent connection from stalling the accept loop.
+- `judge` is the pure verdict (`Accept`/`NotFound`/`BadRequest`); `state` is percent-decoded with `url::form_urlencoded` (the `url` crate was already a workspace dependency, now also used by `cox-mcp`; row updated in `toolchain.md`).
+- Tests `callback_ignores_junk_and_waits_for_the_matching_state` (real loopback listener on `127.0.0.1:0`: wrong path, wrong method, wrong state and missing state each get 404/400 and the wait continues; the matching request then returns its code) and `judge_decodes_the_state_before_comparing`.
+Not done: a callback with the right `state` but no `code` (e.g. `error=access_denied`) is still passed on, so rmcp reports it as a failed login, as before. The `plan.md` findings row for T64.13 is marked `done`.
+Check:
+- Mutation: with the `state` comparison forced true, `callback_ignores_junk_and_waits_for_the_matching_state` failed (the wrong-state request got 200). Restored.
+- `cargo nextest run -p cox-mcp`: 45 run, 45 passed.
+- `cargo clippy -p cox-mcp --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean.
+
+#### T64.4 Revert a project `permissions.mode` wider than the user layer
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-permission/src/lib.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot make the session run more tool calls unasked than the user's own config does. Only `bypass` was reverted, so `permissions.mode = "auto"` (writes allowed without asking) passed.
+What landed:
+- `apply_project_guards` compares `PermissionMode::breadth()` of the project-merged mode with the mode without the project layer and, when the project's is wider, reverts it and reports one `permissions.mode` violation naming the project value and the kept mode. Keeping or narrowing the mode (`plan` < `default` < `auto` < `bypass`) is not a violation.
+- `PermissionMode::breadth()` in `cox-protocol` is the one definition of that order. `cox-permission`'s `narrower` now reads it instead of its private match, and `cox-config` may not depend on `cox-permission` (`crates/cox/tests/deps.rs`), so the guard reads it from the shared crate.
+- The violation reason, the `PermissionsConfig.mode` doc comment, `docs/config.jsonschema` and plan §1.6 say "wider than the user's mode" instead of "bypass".
+- Tests `project_config_cannot_widen_the_permission_mode` (six user/project pairs, including `auto` with no user mode, which failed before the fix) and `project_config_may_keep_or_narrow_the_permission_mode`.
+Not done: `permissions.approval` (T64.6), sandbox keys (T64.5) and `mcp.servers` (T64.7) stay open.
+Check:
+- Before the fix: `cargo nextest run -p cox-config permission_mode` failed with `user None, project auto: left: Auto, right: Default`.
+- `cargo nextest run -p cox-config -p cox-permission -p cox-protocol`: 173 run, 173 passed.
+- `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
+#### T64.11 Delete the dead `revert-on-failure` job from `ci.yml`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 1 · Files: `.github/workflows/ci.yml`
+Goal: `ci.yml` carries no job that can never run. `revert-on-failure` only fires on `github.event_name == 'push'` to `refs/heads/main`, but `ci.yml` has had no `push` trigger since `5f8658f7` (`ci: disable workflow on push to main (#23)`, 2026-09-18), so the job was dead code.
+What landed:
+- The job is deleted. Option chosen: delete, not re-add the trigger. Dropping the `push` trigger was deliberate (#23), and re-adding it would run the whole expensive matrix (`rust`, both footprint jobs, `sandbox-landlock`, `plugins`, `plugin-examples`, `docs`) a second time on every merge of an already green pull request. `pipeline.yml` still runs on push to `main` and its shared workflow has its own `main-failure` job (`pyrlyn/ci#56`, `issues: write` in `pipeline.yml`), so a red `main` is still reported.
+- Two comments that named the job (the top-level `permissions` note and the `windows` job note) no longer mention it. No other file claims that `main` failures are reverted automatically; the older `done.md` and `plan.md` A22 lines describe the job as it was and stay as history.
+Not done: no Rust test, because this is a workflow-only change with no Rust code behind it. No automatic revert of a red `main` exists (the job had not run since 2026-09-18, so behavior is unchanged). PR #242 (`release-ci-alert.yml`, a new file) does not touch it. The `plan.md` findings row for T64.11 is marked `done`, as T64.1 is.
+Check:
+- `actionlint -shellcheck= .github/workflows/ci.yml` (1.7.12): one finding, the intentional `if: false` on the `windows` job (creator, 2026-09-29), present before this change; nothing new. The `shellcheck` shim is not installed here, so shellcheck was skipped.
+- YAML parses (ruby `YAML.load_file`): 17 jobs, every `needs:` entry names an existing job.
+- `grep -rn revert-on-failure .github` and `grep -n revert .github/workflows/ci.yml`: no matches.
+
+#### T64.22 One keyring on/off switch and service name for the provider lookup and the MCP store
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-provider-http/src/http.rs`, `crates/cox-mcp/src/auth.rs`
+Goal: `cox-provider-http` (provider key lookup) and `cox-mcp` (OAuth store) read `COX_KEYRING` and name the `cox` keyring service in one place, so they cannot disagree on what "off" means.
+What landed:
+- `cox_protocol::config::keyring_enabled_in_env()` reads `KEYRING_ENV` and applies `keyring_enabled`; `cox_protocol::config::KEYRING_SERVICE` (`"cox"`) replaces the string literal in `http.rs` and `auth.rs`'s private `SERVICE`. Three copies of the env-read-then-`keyring_enabled` lines (`platform_keyring`, `entry`, `read`) and the `tests_run_with_the_keyring_switched_off` test now call the helper. Old public paths and the injection seams (`resolve_key_with`, `Memory`) are unchanged; behaviour is identical.
+- Home: `cox-protocol`, because `crates/cox/tests/deps.rs` lets `cox-mcp` depend on `cox-protocol` only, and `cox-protocol` already owned `KEYRING_ENV` and `keyring_enabled`. It stays free of the `keyring` crate and of I/O beyond reading one env var.
+- Test `keyring_enabled_in_env_follows_the_live_variable`: `off` and ` False ` disable, `on` and an unset variable enable. It reads only the switch.
+Not done: each site still calls `keyring::Entry::new(KEYRING_SERVICE, account)` itself (one line each). A single constructor would need `keyring` in `cox-protocol` (which has no I/O), `cox-mcp` depending on `cox-provider-http` (a `deps.rs` rule change that also pulls reqwest 0.12 in) or a new `secret-store` crate; the plan row defers that crate until a third consumer appears. `deps.rs` was not run locally (no Cargo.toml edge changed).
+Check:
+- `cargo nextest run -p cox-protocol -p cox-provider-http -p cox-mcp`: 179 tests run, 179 passed.
+- `cargo clippy -p cox-protocol -p cox-provider-http -p cox-mcp --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean.
+
+#### T64.21 Move `report.html` under `docs/`
+
+Model: Claude Code / haiku-4.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 1 · Files: `report.html` → `docs/report.html`, `AGENTS.md` (`CLAUDE.md` is a symlink to it)
+Goal: the finding asked to gitignore `report.html` if a script generates it, or move it under `docs/` and update `AGENTS.md` if it is hand-kept. It is hand-kept, so it moves, and every reference names its new path.
+What landed:
+- Evidence: no script generates the file. The only live reference in the repository is `AGENTS.md:7`. No file under `scripts/`, `evals/`, `.github/` or the `justfile` names or writes it, and `.gitignore` has no HTML rule. It was added in `29293bef docs: plan v2, research, report, agent instructions`, next to `research.md`, and later touched by `5ff63e07 T2: add context assembly and budgets`.
+- `git mv report.html docs/report.html` (a pure rename, 0 lines changed). Its `href` and `src` attributes are external URLs or `#` anchors, so the move breaks no relative link.
+- `AGENTS.md:7` names `docs/report.html`. `CLAUDE.md` is a symlink to `AGENTS.md` and follows it.
+- `plan.md` findings row T64.21 is marked `done`.
+- `.github/workflows/sync-docs.yml` mirrors only `docs/**/*.md` into the site, so the move does not change what is published.
+Not done: no `.gitignore` entry, since the file is not generated. The HTML content itself was not re-checked for staleness; this task only moves it. There is no test: this is a file move and a doc reference change with no code. The check is the grep below.
+- `git grep -nE '(^|[^/])report\.html' -- ':!done.md' ':!plan.md'`: no output, exit 1 (no stale root-path reference outside the history lines). The `done.md` and `plan.md` matches left are history and the findings row.
+- `git ls-files report.html docs/report.html`: `docs/report.html` only.
+
+#### T64.6 Revert a project `permissions.approval` looser than the user layer
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot make confined `Exec` run unasked when the user's own config asks. `permissions.approval = "on-failure"` was not guarded, so a cloned project could set it.
+What landed:
+- `apply_project_guards` compares `ApprovalPolicy::looseness()` of the project-merged policy with the policy without the project layer and, when the project's is looser, reverts it and reports one `permissions.approval` violation naming the project value and the kept policy. Keeping or tightening it (`never` < `untrusted` < `on-request` < `on-failure`) is not a violation.
+- `ApprovalPolicy::looseness()` in `cox-protocol` is the one definition of that order (an exhaustive match); `name()` gives the kebab-case config name for the violation. `cox-permission` has no private ordering of the enum (it matches single variants in `policy.rs` and `lib.rs`), so there was nothing to make delegate. `permissions.approval` joins `GUARDED_KEYS` with its own reason.
+- The `PermissionsConfig.approval` doc comment, `docs/config.jsonschema` and plan §1.6 now name the guard.
+- Tests `project_config_cannot_loosen_the_approval_policy` (five user/project pairs, including `on-failure` with no user policy, which failed before the fix) and `project_config_may_keep_or_tighten_the_approval_policy`; `every_guarded_key_has_its_own_reason` covers the new key.
+Not done: sandbox keys (T64.5) and `mcp.servers` (T64.7) stay open.
+Check:
+- Before the fix: `cargo test -p cox-config approval_policy` failed with `user None, project on-failure: left: OnFailure, right: OnRequest`.
+- `cargo nextest run -p cox-config -p cox-permission -p cox-protocol`: 175 run, 175 passed.
+- `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
+#### T64.16 Resolve relative bash tokens for the read-deny
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-permission/src/lib.rs`, `plan.md`, `done.md`
+Goal: a `Read(...)` deny also stops a read-only bash command that names the file relatively. The comment on `token_path` said relatives cannot match, but the command runs in the session cwd, so `cat id_rsa` inside `~/.ssh` read a denied key.
+What landed:
+- `Engine` keeps the cwd it was compiled with (the same cwd the bash tool runs in) and `token_path` resolves a relative token against it, lexically (`normalize` folds `.` and `..`, no filesystem access). `cat ../.ssh/id_rsa` from a sibling directory and `cat ./x/../../.ssh/id_rsa` fold to the same absolute path the rule globs match. Absolute and `~/` tokens are folded the same way. Flags and empty tokens are skipped.
+- The misleading comment is replaced by one saying why relatives are resolved and why a bare word may resolve too (fail closed; only a path inside a denied tree can match).
+- Tests `bash_read_deny_matches_relative_token_inside_denied_dir` (six cwd/command pairs) and `bash_read_deny_allows_relative_token_outside_denied_tree` (five pairs that stay allowed).
+Not done: a glob token (`cat *` inside `~/.ssh`) is still trimmed to nothing and not matched; a shell `cd` inside the command line is not tracked, so only the session cwd is used; a symlink inside the cwd is not followed (lexical resolution only).
+Check:
+- Before the fix: `cargo nextest run -p cox-permission` ran 16, 15 passed, 1 failed: `cat id_rsa in /home/alice/.ssh must be denied, got Allow { by: Policy }`.
+- `cargo nextest run -p cox-permission`: 16 run, 16 passed. `cargo nextest run -p cox-core --test permission --test policy_matrix`: 98 run, 98 passed.
+- `cargo clippy -p cox-permission --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`

@@ -414,6 +414,21 @@ pub enum PermissionMode {
     Bypass,
 }
 
+impl PermissionMode {
+    /// How much the mode lets through without asking: `Plan < Default <
+    /// Auto < Bypass`. The one definition of that order, shared by the
+    /// engine's `narrower` and the project-config guard (T64.4); an
+    /// exhaustive match, so a new mode cannot join either unranked.
+    pub fn breadth(self) -> u8 {
+        match self {
+            PermissionMode::Plan => 0,
+            PermissionMode::Default => 1,
+            PermissionMode::Auto => 2,
+            PermissionMode::Bypass => 3,
+        }
+    }
+}
+
 /// `core.mode` / `--mode` / `/mode` (P42, A73): a named preset over the
 /// permission mode and the main tier only. It never filters tools, so the
 /// cache prefix stays byte-stable, and it only narrows `permissions.mode`.
@@ -439,6 +454,33 @@ pub enum ApprovalPolicy {
     OnFailure,
     /// Any `Ask` becomes `Deny` (headless default).
     Never,
+}
+
+impl ApprovalPolicy {
+    /// How much the policy lets run without asking: `Never < Untrusted <
+    /// OnRequest < OnFailure`. `Never` turns every ask into a deny and
+    /// `Untrusted` asks for anything not read-only, while `OnFailure` is the
+    /// only one that runs `Exec` unasked. The one definition of that order,
+    /// used by the project-config guard (T64.6); an exhaustive match, so a
+    /// new policy cannot join it unranked.
+    pub fn looseness(self) -> u8 {
+        match self {
+            ApprovalPolicy::Never => 0,
+            ApprovalPolicy::Untrusted => 1,
+            ApprovalPolicy::OnRequest => 2,
+            ApprovalPolicy::OnFailure => 3,
+        }
+    }
+
+    /// The name `permissions.approval` takes in a config file.
+    pub fn name(self) -> &'static str {
+        match self {
+            ApprovalPolicy::Never => "never",
+            ApprovalPolicy::Untrusted => "untrusted",
+            ApprovalPolicy::OnRequest => "on-request",
+            ApprovalPolicy::OnFailure => "on-failure",
+        }
+    }
 }
 
 /// Why `Event::Compacted` happened (plan.md §1.10, T28.3).

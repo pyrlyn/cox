@@ -1228,12 +1228,12 @@
       "type": "object",
       "properties": {
         "mode": {
-          "description": "`permissions.mode`; project config may not set this to `bypass`.",
+          "description": "`permissions.mode`; project config may not widen it beyond the user's mode.",
           "$ref": "#/$defs/PermissionMode",
           "default": "default"
         },
         "approval": {
-          "description": "`permissions.approval`.",
+          "description": "`permissions.approval`; project config may not loosen it beyond the user's policy.",
           "$ref": "#/$defs/ApprovalPolicy",
           "default": "on-request"
         },

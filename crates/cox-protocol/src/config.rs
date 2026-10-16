@@ -155,6 +155,19 @@ pub fn keyring_enabled(value: Option<&str>) -> bool {
     )
 }
 
+/// [`keyring_enabled`] applied to the live [`KEYRING_ENV`] value. The one
+/// place the env var is read, so the provider key lookup and the MCP OAuth
+/// store cannot drift apart on what "off" means (T64.22); they live in
+/// crates that may not depend on each other, so the shared policy sits in
+/// the contract crate both already depend on.
+pub fn keyring_enabled_in_env() -> bool {
+    keyring_enabled(std::env::var(KEYRING_ENV).ok().as_deref())
+}
+
+/// Keyring service every cox credential is filed under: entries are
+/// `cox/<account>` (`cox/anthropic`, `cox/mcp/<server>`, ...).
+pub const KEYRING_SERVICE: &str = "cox";
+
 /// `[core]` (plan.md §1.6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -864,9 +877,9 @@ pub enum CompactionStrategy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct PermissionsConfig {
-    /// `permissions.mode`; project config may not set this to `bypass`.
+    /// `permissions.mode`; project config may not widen it beyond the user's mode.
     pub mode: PermissionMode,
-    /// `permissions.approval`.
+    /// `permissions.approval`; project config may not loosen it beyond the user's policy.
     pub approval: ApprovalPolicy,
     /// `allow` rule strings (plan.md §1.8 grammar).
     pub allow: Vec<String>,
@@ -2384,6 +2397,25 @@ mod tests {
         for on in [None, Some(""), Some("on"), Some("1"), Some("of")] {
             assert!(keyring_enabled(on), "{on:?} keeps it");
         }
+    }
+
+    /// The provider lookup and the MCP store both call this instead of
+    /// reading the env var themselves (T64.22), so the live variable must map
+    /// through `keyring_enabled` exactly. Only the switch is read; no keychain
+    /// is touched.
+    #[test]
+    // why: env::set_var/remove_var are unsafe in edition 2024; one test owns
+    // this variable and nextest runs each test in its own process.
+    #[allow(unsafe_code)]
+    fn keyring_enabled_in_env_follows_the_live_variable() {
+        unsafe { std::env::set_var(KEYRING_ENV, "off") };
+        assert!(!keyring_enabled_in_env());
+        unsafe { std::env::set_var(KEYRING_ENV, " False ") };
+        assert!(!keyring_enabled_in_env());
+        unsafe { std::env::set_var(KEYRING_ENV, "on") };
+        assert!(keyring_enabled_in_env());
+        unsafe { std::env::remove_var(KEYRING_ENV) };
+        assert!(keyring_enabled_in_env());
     }
 
     #[test]

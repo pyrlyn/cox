@@ -54,6 +54,9 @@ pub struct Engine {
     /// The home the rules were compiled with, to expand `~` in the paths a
     /// read-only command names (the same expansion `Rule::parse` does).
     home: Option<std::path::PathBuf>,
+    /// The session cwd the rules were compiled with: the directory a bash
+    /// command runs in, which relative tokens resolve against.
+    cwd: std::path::PathBuf,
 }
 
 impl Engine {
@@ -79,6 +82,7 @@ impl Engine {
             allow: compile("allow", &cfg.allow)?,
             ask: compile("ask", &cfg.ask)?,
             home: home.map(Path::to_path_buf),
+            cwd: cwd.to_path_buf(),
         })
     }
 
@@ -321,7 +325,7 @@ impl Engine {
         }
         for line in lines {
             for token in line.split_whitespace() {
-                let Some(path) = token_path(token, self.home.as_deref()) else {
+                let Some(path) = token_path(token, self.home.as_deref(), &self.cwd) else {
                     continue;
                 };
                 if let Some(rule) = self
@@ -337,21 +341,48 @@ impl Engine {
     }
 }
 
-/// The absolute path a command token names, `~` expanded, with surrounding
-/// shell punctuation and quotes trimmed; `None` when the token cannot name
-/// a file (a flag, a bare word, a relative path — read rules anchor
-/// absolutely, so relatives cannot match one anyway).
-fn token_path(token: &str, home: Option<&Path>) -> Option<String> {
+/// The absolute path a command token names, `~` expanded and a relative
+/// token resolved against `cwd`, with surrounding shell punctuation and
+/// quotes trimmed; `None` when the token cannot name a file (a flag, an
+/// operator). Resolution is lexical (no filesystem access, `..` folded) so
+/// `cat id_rsa` inside `~/.ssh` and `cat ../.ssh/id_rsa` from a sibling
+/// directory both reach the same absolute rule globs as `cat ~/.ssh/id_rsa`.
+/// A bare word such as `echo`'s argument resolves too: the guard fails
+/// closed, and only a path inside a denied tree can match.
+fn token_path(token: &str, home: Option<&Path>, cwd: &Path) -> Option<String> {
     let trimmed = token.trim_matches(|c: char| {
         !(c.is_ascii_alphanumeric() || matches!(c, '/' | '~' | '.' | '-' | '_' | '='))
     });
-    if let Some(rest) = trimmed.strip_prefix("~/") {
-        return home.map(|h| h.join(rest).to_string_lossy().into_owned());
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return None;
     }
-    if trimmed.starts_with('/') && trimmed.len() > 1 {
-        return Some(trimmed.to_string());
+    let path = if let Some(rest) = trimmed.strip_prefix("~/") {
+        home?.join(rest)
+    } else if trimmed.starts_with('/') {
+        Path::new(trimmed).to_path_buf()
+    } else {
+        cwd.join(trimmed)
+    };
+    // A relative cwd would yield a relative path that no absolute rule glob
+    // can match, so there is nothing to compare.
+    path.is_absolute()
+        .then(|| normalize(&path).to_string_lossy().into_owned())
+}
+
+/// Folds `.` and `..` components without touching the filesystem.
+fn normalize(path: &Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
     }
-    None
+    out
 }
 
 /// Step 6: an `AllowForSession` grant. Grants are recorded per command by
@@ -434,15 +465,9 @@ pub fn narrower(a: PermissionMode, b: PermissionMode) -> PermissionMode {
     if rank(a) <= rank(b) { a } else { b }
 }
 
-/// How much a mode lets through without asking: `Plan < Default < Auto <
-/// Bypass`. The one definition of that order, so `narrower` cannot drift.
+/// `PermissionMode::breadth`, named for the comparisons in this file.
 fn rank(mode: PermissionMode) -> u8 {
-    match mode {
-        PermissionMode::Plan => 0,
-        PermissionMode::Default => 1,
-        PermissionMode::Auto => 2,
-        PermissionMode::Bypass => 3,
-    }
+    mode.breadth()
 }
 
 #[cfg(test)]
@@ -527,6 +552,61 @@ mod tests {
             assert!(
                 matches!(outcome, Outcome::Allow { .. }),
                 "{line} must stay allowed, got {outcome:?}"
+            );
+        }
+    }
+
+    fn decide_bash_in(cwd: &str, line: &str) -> Outcome {
+        let engine = Engine::compile(
+            &PermissionsConfig::default(),
+            Some(Path::new("/home/alice")),
+            Path::new(cwd),
+        )
+        .expect("default config compiles");
+        engine.decide(
+            &bash_call(line, &[line], false),
+            PermissionMode::Default,
+            ApprovalPolicy::OnRequest,
+            SandboxMode::WorkspaceWrite,
+            &[],
+        )
+    }
+
+    /// A relative token names a file under the session cwd, so the same read
+    /// deny must catch it: `cat id_rsa` inside `~/.ssh` reads the key.
+    #[test]
+    fn bash_read_deny_matches_relative_token_inside_denied_dir() {
+        for (cwd, line) in [
+            ("/home/alice/.ssh", "cat id_rsa"),
+            ("/home/alice/.ssh", "cat ./id_rsa"),
+            ("/home/alice/.ssh", "echo hi && head -n 1 config"),
+            ("/home/alice", "cat .ssh/id_rsa"),
+            ("/home/alice/project", "cat ../.ssh/id_rsa"),
+            ("/home/alice/project", "cat ./x/../../.ssh/id_rsa"),
+        ] {
+            let outcome = decide_bash_in(cwd, line);
+            assert!(
+                matches!(outcome, Outcome::Deny { .. }),
+                "{line} in {cwd} must be denied, got {outcome:?}"
+            );
+        }
+    }
+
+    /// Resolving relative tokens must not turn every relative path into a
+    /// hit: only those that land inside a denied tree.
+    #[test]
+    fn bash_read_deny_allows_relative_token_outside_denied_tree() {
+        for (cwd, line) in [
+            ("/repo", "cat README.md"),
+            ("/repo", "grep foo src/main.rs"),
+            ("/home/alice/project", "cat ../notes.txt"),
+            ("/home/alice/project", "cat ../project/a.rs"),
+            ("/repo", "cat ../../repo/../repo/a.rs"),
+        ] {
+            let outcome = decide_bash_in(cwd, line);
+            assert!(
+                matches!(outcome, Outcome::Allow { .. }),
+                "{line} in {cwd} must stay allowed, got {outcome:?}"
             );
         }
     }

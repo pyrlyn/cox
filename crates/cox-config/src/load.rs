@@ -24,7 +24,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use cox_protocol::config::DEFAULT_CONFIG_TOML;
-use cox_protocol::{Config, CoreError, PermissionMode, SandboxMode};
+use cox_protocol::{Config, CoreError, SandboxMode};
 use figment::providers::{Env, Format, Serialized, Toml};
 use figment::value::{Dict, Map as FigMap};
 use figment::{Figment, Metadata, Profile, Provider};
@@ -138,7 +138,8 @@ impl GuardViolation {
             "providers.*.base_url" => "A project may not choose where your API keys are sent",
             "providers.*.api_key_env" => "A project may not choose which API key a provider sends",
             "providers" => "A project may not add a model provider",
-            "permissions.mode" => "A project may not turn on bypass mode",
+            "permissions.mode" => "A project may not widen the permission mode beyond yours",
+            "permissions.approval" => "A project may not loosen the approval policy beyond yours",
             "permissions.allow" => "A project may not allow a tool call",
             "sandbox.mode" => "A project may not turn the sandbox off",
             "plugins.enabled" => "A project may not turn plugins back on",
@@ -162,9 +163,9 @@ impl GuardViolation {
 
 /// Reverts any guarded key `full` set relative to `without_project` back to
 /// `without_project`'s value, returning what it reverted (plan.md §1.6:
-/// "budget.* may not be raised above user/default, permissions.mode =
-/// \"bypass\", sandbox.mode = \"danger-full-access\" or tiers.think.confirm
-/// = false are ignored from the project file with a warning to stderr").
+/// "budget.* may not be raised above user/default, permissions.mode wider
+/// than the user's, permissions.approval looser than the user's, sandbox.mode = \"danger-full-access\" or
+/// tiers.think.confirm = false are ignored from the project file with a warning to stderr").
 ///
 /// `git_root` is the checkout the project layer came from, the only place
 /// a project-chosen workspace root may point into (T64.2).
@@ -238,15 +239,27 @@ fn apply_project_guards(
         full.core.workspace_roots = user_roots.clone();
     }
 
-    if full.permissions.mode == PermissionMode::Bypass
-        && without_project.permissions.mode != PermissionMode::Bypass
-    {
+    // T64.4: `auto` lets writes run unasked, so only `bypass` being refused
+    // left a cloned repository one step short of the same hole. A project
+    // may keep or narrow the user's mode, never widen it.
+    if full.permissions.mode.breadth() > without_project.permissions.mode.breadth() {
         violations.push(GuardViolation {
             key: "permissions.mode",
-            project_value: "bypass".to_string(),
+            project_value: format!("{:?}", full.permissions.mode).to_lowercase(),
             reverted_to: format!("{:?}", without_project.permissions.mode).to_lowercase(),
         });
         full.permissions.mode = without_project.permissions.mode;
+    }
+
+    // T64.6: `on-failure` runs confined `Exec` unasked, so a project may keep
+    // or tighten the user's approval policy, never loosen it.
+    if full.permissions.approval.looseness() > without_project.permissions.approval.looseness() {
+        violations.push(GuardViolation {
+            key: "permissions.approval",
+            project_value: full.permissions.approval.name().to_owned(),
+            reverted_to: without_project.permissions.approval.name().to_owned(),
+        });
+        full.permissions.approval = without_project.permissions.approval;
     }
 
     // T22.10 (A122): a project may only tighten the rule lists. figment
@@ -668,7 +681,7 @@ fn rule_list(rules: &[String]) -> String {
 /// table, T64.3) is left out: its keys never reach the effective config,
 /// and listing it would send every project-set provider key to the
 /// pre-project figment.
-const GUARDED_KEYS: [&str; 22] = [
+const GUARDED_KEYS: [&str; 23] = [
     "budget.session_usd",
     "budget.monthly_usd",
     "budget.warn_at",
@@ -682,6 +695,7 @@ const GUARDED_KEYS: [&str; 22] = [
     "lsp.servers",
     "mcp.servers.*.sandbox",
     "permissions.allow",
+    "permissions.approval",
     "permissions.mode",
     "plugins.enabled",
     "providers.*.api_key_env",
@@ -976,6 +990,7 @@ pub fn temp_env(vars: &[(&str, Option<&str>)], f: impl FnOnce()) {
 mod tests {
     use std::fs;
 
+    use cox_protocol::{ApprovalPolicy, PermissionMode};
     use tempfile::tempdir;
 
     use super::*;
@@ -1826,6 +1841,119 @@ mod tests {
                 "A project may not choose which program launches a session"
             );
         });
+    }
+
+    /// T64.4: `permissions.mode` decides what runs unasked, so a project
+    /// may keep or narrow the user's mode but never widen it: `auto` (writes
+    /// without asking) is as much a cloned-repo risk as `bypass`.
+    #[test]
+    fn project_config_cannot_widen_the_permission_mode() {
+        let widened = [
+            (None, "auto", PermissionMode::Default),
+            (None, "bypass", PermissionMode::Default),
+            (Some("plan"), "default", PermissionMode::Plan),
+            (Some("plan"), "auto", PermissionMode::Plan),
+            (Some("default"), "auto", PermissionMode::Default),
+            (Some("auto"), "bypass", PermissionMode::Auto),
+        ];
+        for (user, project, kept) in widened {
+            let user_toml = user.map(|m| format!("[permissions]\nmode = \"{m}\"\n"));
+            load_with_project(
+                user_toml.as_deref(),
+                &format!("[permissions]\nmode = \"{project}\"\n"),
+                |loaded| {
+                    let case = format!("user {user:?}, project {project}");
+                    assert_eq!(loaded.config.permissions.mode, kept, "{case}");
+                    let v = violation(&loaded, "permissions.mode").expect(&case);
+                    assert_eq!(v.project_value, project, "{case}");
+                    assert_eq!(v.reverted_to, format!("{kept:?}").to_lowercase(), "{case}");
+                    assert_eq!(
+                        v.reason(),
+                        "A project may not widen the permission mode beyond yours"
+                    );
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn project_config_may_keep_or_narrow_the_permission_mode() {
+        let allowed = [
+            (Some("auto"), "auto", PermissionMode::Auto),
+            (Some("auto"), "default", PermissionMode::Default),
+            (Some("auto"), "plan", PermissionMode::Plan),
+            (Some("bypass"), "auto", PermissionMode::Auto),
+            (None, "plan", PermissionMode::Plan),
+        ];
+        for (user, project, expected) in allowed {
+            let user_toml = user.map(|m| format!("[permissions]\nmode = \"{m}\"\n"));
+            load_with_project(
+                user_toml.as_deref(),
+                &format!("[permissions]\nmode = \"{project}\"\n"),
+                |loaded| {
+                    let case = format!("user {user:?}, project {project}");
+                    assert_eq!(loaded.config.permissions.mode, expected, "{case}");
+                    assert!(violation(&loaded, "permissions.mode").is_none(), "{case}");
+                },
+            );
+        }
+    }
+
+    /// T64.6: `on-failure` runs confined `Exec` unasked, so a project may
+    /// keep or tighten the user's approval policy but never loosen it.
+    #[test]
+    fn project_config_cannot_loosen_the_approval_policy() {
+        let loosened = [
+            (None, "on-failure", ApprovalPolicy::OnRequest),
+            (Some("untrusted"), "on-request", ApprovalPolicy::Untrusted),
+            (Some("untrusted"), "on-failure", ApprovalPolicy::Untrusted),
+            (Some("never"), "untrusted", ApprovalPolicy::Never),
+            (Some("never"), "on-failure", ApprovalPolicy::Never),
+        ];
+        for (user, project, kept) in loosened {
+            let user_toml = user.map(|a| format!("[permissions]\napproval = \"{a}\"\n"));
+            load_with_project(
+                user_toml.as_deref(),
+                &format!("[permissions]\napproval = \"{project}\"\n"),
+                |loaded| {
+                    let case = format!("user {user:?}, project {project}");
+                    assert_eq!(loaded.config.permissions.approval, kept, "{case}");
+                    let v = violation(&loaded, "permissions.approval").expect(&case);
+                    assert_eq!(v.project_value, project, "{case}");
+                    assert_eq!(v.reverted_to, user.unwrap_or("on-request"), "{case}");
+                    assert_eq!(
+                        v.reason(),
+                        "A project may not loosen the approval policy beyond yours"
+                    );
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn project_config_may_keep_or_tighten_the_approval_policy() {
+        let allowed = [
+            (Some("on-failure"), "on-failure", ApprovalPolicy::OnFailure),
+            (Some("on-failure"), "on-request", ApprovalPolicy::OnRequest),
+            (Some("on-failure"), "never", ApprovalPolicy::Never),
+            (None, "untrusted", ApprovalPolicy::Untrusted),
+            (None, "never", ApprovalPolicy::Never),
+        ];
+        for (user, project, expected) in allowed {
+            let user_toml = user.map(|a| format!("[permissions]\napproval = \"{a}\"\n"));
+            load_with_project(
+                user_toml.as_deref(),
+                &format!("[permissions]\napproval = \"{project}\"\n"),
+                |loaded| {
+                    let case = format!("user {user:?}, project {project}");
+                    assert_eq!(loaded.config.permissions.approval, expected, "{case}");
+                    assert!(
+                        violation(&loaded, "permissions.approval").is_none(),
+                        "{case}"
+                    );
+                },
+            );
+        }
     }
 
     #[test]
