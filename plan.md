@@ -150,7 +150,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T69.2 | todo | P1 | 2 | 0% | |
 | T69.3 | todo | P2 | 1 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
-| T69.7 | todo | P3 | 3 | 0% | |
 
 ## Reference
 
@@ -3097,6 +3096,22 @@ Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not co
 Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/tasks.rs` (read only), `crates/cox-core/tests/compact.rs`
 
 Done when a running shell task id is in the summary and absent from the dropped turns, an idle session adds no block, and size stays ≤ 2048. Check: `mise exec -- cargo nextest run -p cox-core compact`.
+
+#### T69.8 Integer compact threshold
+
+Model: - · Status: open · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1
+
+Goal: `needs_compaction` compares in integers (`last * 10_000 >= scaled_compact_at * max_context`, saturating, false for a zero window) instead of `f64`.
+
+Why: `compact.rs` L113–140 uses `f64`; a threshold like 0.95 on a window above 2^53 rounds. Do not take their bytes/4 estimator.
+
+Source: [grok-build `xai-token-estimation/src/lib.rs` L70–80 `exceeds_threshold`](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-token-estimation/src/lib.rs#L70-L80)
+
+Licence: Apache-2.0, may be copied with attribution. **Implement similar:** the comparison is one line; nothing to copy.
+
+Files: `crates/cox-core/src/compact.rs`
+
+Done when the 750/1000 test stays green and a window above 2^53 is exact. Check: `mise exec -- cargo nextest run -p cox-core compact_trigger`.
 
 #### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
 

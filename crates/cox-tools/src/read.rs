@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use similar::TextDiff;
 
+use crate::anchor;
 use crate::outline::{self, Def};
 use crate::path::confine;
 
@@ -49,6 +50,9 @@ struct ReadInput {
     /// Name of one definition to read, e.g. `"Foo::bar"` or `"parse"` (`.` also separates). Returns just that definition's lines; overrides `lines` and `mode`. Needs a .rs/.ts/.tsx/.py/.go file.
     #[serde(default)]
     symbol: Option<String>,
+    /// Prefix each text line with a content-hash anchor `N:abc→` that `edit` accepts in `ops`, instead of `N<TAB>`.
+    #[serde(default)]
+    anchors: Option<bool>,
 }
 
 #[async_trait]
@@ -71,8 +75,9 @@ impl Tool for ReadTool {
                 function, method, type or class name; a bare `bar` also finds methods) to get \
                 just that definition's lines; several matches are listed with their line ranges \
                 instead. A PNG, JPEG, GIF or WebP file (up to 3.75 MB) comes back as the \
-                image itself, which you can see; `lines` and `mode` do not apply to it. Refuses \
-                other binary files."
+                image itself, which you can see; `lines` and `mode` do not apply to it. Pass \
+                `anchors: true` to prefix each text line with `N:abc→` instead of `N<TAB>`; \
+                `edit` takes those anchors in `ops`. Refuses other binary files."
                 .to_string(),
             input_schema,
             deferred: false,
@@ -126,16 +131,17 @@ impl Tool for ReadTool {
         };
 
         let mode = input.mode.as_deref().unwrap_or("text");
+        let anchors = input.anchors.unwrap_or(false);
         let text = if let Some(symbol) = input.symbol.as_deref() {
             // The resolved span goes through the ordinary ranged read, so
             // the cap and the footer are the same as for `lines=`.
             let range = resolve_symbol(&path, &content, symbol)?;
-            render_text(&content, total_lines, Some(&range))
+            render_text(&content, total_lines, Some(&range), anchors)
         } else if mode == "outline" {
             let body = outline::outline(&path, &content);
             cap(format!("{body}\n\n[outline of {total_lines} lines total]"))
         } else {
-            render_text(&content, total_lines, input.lines.as_deref())
+            render_text(&content, total_lines, input.lines.as_deref(), anchors)
         };
 
         // The file's line count as data (DT G3): a summary says "120
@@ -246,7 +252,12 @@ fn human_size(bytes: usize) -> String {
 /// Renders `content` as `n\tline` text for the requested range (or the
 /// whole file), always reporting the total line count (plan.md T3.2 step
 /// 1: "`read` reports total lines"), then applies the visible-byte cap.
-fn render_text(content: &str, total_lines: usize, lines_spec: Option<&str>) -> String {
+fn render_text(
+    content: &str,
+    total_lines: usize,
+    lines_spec: Option<&str>,
+    anchors: bool,
+) -> String {
     if total_lines == 0 {
         return "(empty file, 0 lines)".to_string();
     }
@@ -260,7 +271,13 @@ fn render_text(content: &str, total_lines: usize, lines_spec: Option<&str>) -> S
         .enumerate()
         .skip(start - 1)
         .take(end - start + 1)
-        .map(|(idx, line)| format!("{}\t{line}", idx + 1))
+        .map(|(idx, line)| {
+            if anchors {
+                anchor::render(idx + 1, line)
+            } else {
+                format!("{}\t{line}", idx + 1)
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
