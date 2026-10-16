@@ -218,6 +218,18 @@ pub enum CoreError {
         /// The agent's own error text, already sanitized by the caller.
         message: String,
     },
+    /// An external agent declined the turn before it made any request
+    /// (T56.11): a cloud driver without an allow rule, on a non-GitHub
+    /// origin or in plan mode. Shown like [`CoreError::ExternalAgent`], but
+    /// the core writes no ledger row for it, since a row means a request
+    /// was made.
+    #[error("external agent {agent} failed: {message}")]
+    ExternalAgentRefused {
+        /// The external agent's name (its plugin/preset id).
+        agent: String,
+        /// Why the agent declined, already sanitized by the caller.
+        message: String,
+    },
 }
 
 /// Failures from `cox-store`.

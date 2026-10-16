@@ -1664,19 +1664,20 @@ impl Session {
                 }
             }
         }
-        // A driver that fails has no usage to report, and a row means a
-        // request was made (§0 ledger rule): a refused cloud run made none,
-        // and one that failed after it started is settled by its resume.
+        // A row means a request was made (§0 ledger rule): only a driver that
+        // refused before making one (T56.11) leaves none. Any other failure
+        // keeps its row with whatever usage and latency is known.
         let (ran, reported) = match run.await {
             Ok(Ok(reported)) => (true, reported),
             Ok(Err(error)) => {
+                let refused = matches!(error, CoreError::ExternalAgentRefused { .. });
                 self.emit(Event::Error {
                     error,
                     fatal: false,
                 })
                 .await?;
                 stop = Some(StopReason::Error);
-                (false, None)
+                (!refused, None)
             }
             Err(_) => {
                 stop = Some(StopReason::Interrupted);

@@ -1,10 +1,10 @@
 #### T56.11 No usage row for a cloud run that never started
 
-Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T56.8 · Size: ~40 · Priority: P3 · Complexity: 2 · Files: `crates/cox-core/src/session.rs` (`external_turn`), `crates/cox-core/src/subagent.rs`, `crates/cox/tests/cloud_agents.rs`
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T56.8 · Size: ~40 · Priority: P3 · Complexity: 2 · Files: `crates/cox-core/src/session.rs` (`external_turn`), `crates/cox-core/src/subagent.rs`, `crates/cox-protocol/src/errors.rs`, `crates/cox-session/src/cloud_agents.rs`, `crates/cox/tests/cloud_agents.rs`
 Goal: when the driver refuses a cloud run before any request (no `CloudAgent(<repo>)` allow rule, a non-GitHub origin, plan mode), the ledger gets no row for it. A row means a request was made (§0 ledger rule); a run that started and reported usage still writes exactly one row (T56.7), and an external agent that ran but reported no usage keeps its row so its latency is not lost.
-Plan (Claude Code / sonnet-5.5): (1) tighten `cloud_agent_without_an_allow_rule_makes_no_request` to assert no `External` row and watch it fail; (2) in `external_turn`, a driver `Err` writes no row and emits no `Event::Usage`; (3) `cox-core` tests for a refusing driver (no row) and a driver that ran with no usage (one row).
-What landed: `external_turn` writes the row and the `Usage` event only when the driver did not return an error (`Ok(Some)` and `Ok(None)` keep exactly one row, as before). `cloud_agent_without_an_allow_rule_makes_no_request` now asserts zero `External` rows; `refused_external_agent_turn_writes_no_usage_row` and `external_agent_that_ran_without_usage_keeps_its_latency_row` cover the core.
-Not done: the rule is the driver's `Err`, for every external agent, not only the cloud one. A CLI agent that fails mid-run therefore leaves no latency row either; it never reported tokens in that case, so only the latency is lost. A cloud run that failed after it started also writes no row from the turn: its usage stays unclaimed and the resume settles it (T56.7). A panicked or aborted driver task (`JoinError`) keeps today's row.
+Plan (Claude Code / sonnet-5.5): (1) tighten `cloud_agent_without_an_allow_rule_makes_no_request` to assert no `External` row and watch it fail; (2) make "refused before any request" distinguishable from every other driver error and skip the row only for it; (3) `cox-core` tests: a refusing driver writes no row, a driver that fails after starting still does, a driver that ran without usage keeps its row.
+What landed: a new `CoreError::ExternalAgentRefused` (same display text as `ExternalAgent`; nothing existing fit, so this is the narrowest addition; `docs/protocol.jsonschema` regenerated). `CloudDriver::run` splits into `admit` (task, `origin`, GitHub remote, HEAD, `Engine` verdict: everything before a request, so no allow rule, a non-GitHub origin and plan mode) whose `Err` becomes `ExternalAgentRefused`, and the part after it, whose `Err` stays `ExternalAgent`. `external_turn` skips the usage row and the `Usage` event only for `ExternalAgentRefused`; every other outcome (`Ok(Some)`, `Ok(None)`, any other `Err`, an aborted driver task) writes the single row as before. Tests: `cloud_agent_without_an_allow_rule_makes_no_request` asserts zero External rows; `refused_external_agent_turn_writes_no_usage_row`, `external_agent_that_fails_after_starting_still_writes_its_row` (fails if a blanket "any Err skips the row" returns) and `external_agent_that_ran_without_usage_keeps_its_latency_row` in `subagent.rs`.
+Not done: a `create_agent` request that fails counts as a request made, so it keeps its row (zero tokens, latency only). A cloud run that fails after it started still gets its row from the turn; its tokens are claimed by the resume (T56.7). ACP and CLI external drivers never return `ExternalAgentRefused` yet, so they keep today's behaviour.
 Check: the tightened test failed before the fix and passes after.
 ```text
 $ mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_no_request   (before the fix)
@@ -14,9 +14,9 @@ $ mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_
 $ mise exec -- cargo nextest run -p cox cloud_agent   (after)
         PASS cloud_agent_without_an_allow_rule_makes_no_request, cloud_agent_requests_carry_no_git_identity, cloud_agent_headless_run_end_to_end
      Summary 3 tests run: 3 passed
-$ mise exec -- cargo nextest run -p cox-core -p cox-session
-     Summary 509 tests run: 509 passed, 1 skipped   (incl. external_agent_turn_writes_a_billed_externally_usage_row, cloud_agent_usage_row_is_written_once)
-$ mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings   clean
+$ mise exec -- cargo nextest run --no-fail-fast -p cox-protocol -p cox-core -p cox-session
+     Summary 630 tests run: 630 passed, 1 skipped   (incl. external_agent_turn_writes_a_billed_externally_usage_row, cloud_agent_usage_row_is_written_once)
+$ mise exec -- cargo clippy -p cox-protocol -p cox-core -p cox-session -p cox --all-targets -- -D warnings   clean
 $ mise exec -- cargo fmt --check   clean
 ```
 

@@ -2511,6 +2511,8 @@ text = "it was 42"
         /// Refuses before doing any work, as a cloud driver does without an
         /// allow rule (T56.11).
         refuses: bool,
+        /// Fails after it started its work, as a CLI agent that crashes does.
+        fails_midway: bool,
     }
 
     #[async_trait]
@@ -2526,7 +2528,7 @@ text = "it was 42"
             _cancel: CancellationToken,
         ) -> Result<Option<Usage>, CoreError> {
             if self.refuses {
-                return Err(CoreError::ExternalAgent {
+                return Err(CoreError::ExternalAgentRefused {
                     agent: "cursor".into(),
                     message: "refused".into(),
                 });
@@ -2559,6 +2561,12 @@ text = "it was 42"
             let kind = cox_protocol::types::ItemKind::AssistantMessage { text };
             let _ = events.send(Event::ItemStarted { item, kind }).await;
             let _ = events.send(Event::ItemDone { item }).await;
+            if self.fails_midway {
+                return Err(CoreError::ExternalAgent {
+                    agent: "cursor".into(),
+                    message: "crashed".into(),
+                });
+            }
             let stop = cox_protocol::types::StopReason::EndTurn;
             let _ = events.send(Event::TurnDone { turn, stop }).await;
             Ok(self.reported)
@@ -2594,17 +2602,29 @@ text = "it was 42"
             poke,
             reported,
             refuses: false,
+            fails_midway: false,
         })
     }
 
     fn refusing() -> Arc<FakeAgent> {
         Arc::new(FakeAgent {
-            prompts: StdMutex::new(Vec::new()),
-            parent: OnceLock::new(),
-            poke: false,
-            reported: None,
             refuses: true,
+            ..take(fake(false, None))
         })
+    }
+
+    fn failing_midway() -> Arc<FakeAgent> {
+        Arc::new(FakeAgent {
+            fails_midway: true,
+            ..take(fake(false, None))
+        })
+    }
+
+    fn take(agent: Arc<FakeAgent>) -> FakeAgent {
+        match Arc::try_unwrap(agent) {
+            Ok(agent) => agent,
+            Err(_) => panic!("a fresh fake has one owner"),
+        }
     }
 
     fn tool_results(events: &[Event]) -> Vec<String> {
@@ -2702,6 +2722,20 @@ text = "done"
             external.count(),
             1,
             "a run that happened is a row: {rows:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn external_agent_that_fails_after_starting_still_writes_its_row() {
+        let (parent, store, mut rx) = external_parent(DISPATCH, failing_midway()).await;
+        parent_turn(&parent, &mut rx).await;
+
+        let rows = store.usage_rows();
+        let external = rows.iter().filter(|r| r.provider == ProviderId::External);
+        assert_eq!(
+            external.count(),
+            1,
+            "work that ran is a row even when it failed: {rows:?}"
         );
     }
 
