@@ -153,7 +153,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T69.5 | todo | P1 | 3 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
 | T69.7 | todo | P3 | 3 | 0% | |
-| T69.8 | todo | P3 | 1 | 0% | |
 
 ## Reference
 
@@ -3047,7 +3046,7 @@ Rationale in §6 A159. Found by reading openai/codex at `f0c5077c34ec7a76b4ad913
 
 **Agents.** Implementing agents use Grok 4.6, Grok 4.7 or Composer 2.5 only. English comments and docs. No card is claimed by this plan.
 
-**Order.** Independent. T69.5 before T69.6 and T69.8 (same file). T69.1 before T69.2 (T69.2 refuses opaque segments).
+**Order.** Independent. T69.5 before T69.6 (same file). T69.1 before T69.2 (T69.2 refuses opaque segments).
 
 **Not taken (codex and grok-build already behind cox):** codex middle truncation and "N tokens truncated" markers (lossy; `truncate.rs` keeps an `expand` id), the network MITM proxy, Starlark exec policy, compaction prompts, `process-hardening`; grok-build bytes/4 estimator, tool-pair snapping, two-pass prefire, TUI, config overlay.
 
@@ -3164,22 +3163,6 @@ Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not co
 Files: new `crates/cox-tools/src/anchor.rs`, `read`, `edit`
 
 Done when an indent-only change still matches, a content change is `Stale` and names the new anchor, two ops apply bottom-up, and a path outside the workspace is confined. Check: `mise exec -- cargo nextest run -p cox-tools edit`.
-
-#### T69.8 Integer compact threshold
-
-Model: - · Status: open · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1
-
-Goal: `needs_compaction` compares in integers (`last * 10_000 >= scaled_compact_at * max_context`, saturating, false for a zero window) instead of `f64`.
-
-Why: `compact.rs` L113–140 uses `f64`; a threshold like 0.95 on a window above 2^53 rounds. Do not take their bytes/4 estimator.
-
-Source: [grok-build `xai-token-estimation/src/lib.rs` L70–80 `exceeds_threshold`](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-token-estimation/src/lib.rs#L70-L80)
-
-Licence: Apache-2.0, may be copied with attribution. **Implement similar:** the comparison is one line; nothing to copy.
-
-Files: `crates/cox-core/src/compact.rs`
-
-Done when the 750/1000 test stays green and a window above 2^53 is exact. Check: `mise exec -- cargo nextest run -p cox-core compact_trigger`.
 
 ---
 
