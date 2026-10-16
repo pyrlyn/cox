@@ -197,6 +197,22 @@ Check:
 - `cargo clippy -p cox-permission --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T69.1 PowerShell and cmd readers hit existing `Read` denies
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 3 · Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-core/tests/permission.rs`, `plan.md`, `done.md`
+Goal: `Get-Content`, `gc`, `type` and `more` on one plain command are read-only with the path on the segment, so `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa` instead of only asking; writers keep their path; pipelines, chains, variables and attached `-Path:` values stay `Exec`. The bash grammar parses these lines, but `Get-Content` was an unknown command (`Exec`), and the read-path guard in `Engine::decide` runs only for `ReadOnly` calls. `type` and `more` were already in `READ_ONLY`.
+Licence: Apache-2.0 sources (codex `powershell_parser.rs`, grok-build `shell_access.rs`) read for the idea only; nothing copied, so no per-file header or `NOTICE` is needed.
+What landed:
+- `classify.rs`: `is_ps_reader` (`Get-Content`, `gc`, case-insensitive, as PowerShell is) and `plain_ps_args`; `command_risk` rates such a reader `ReadOnly` only when no argument holds `$`, a backtick, brackets or braces and no flag carries an attached value (`-Path:~/.ssh/id_rsa`, which the guard would skip because it ignores tokens starting with `-`). `walk` makes a reader whose parent is not the line's top level (a pipeline, `&&` list, redirect) `Exec` with opaque segments.
+- No PowerShell parser child process; no change to `cox-permission` (it builds on the cwd resolution from T64.16).
+- Tests `unparsed_powershell_readers_are_read_only_with_their_path`, `unparsed_powershell_writers_and_composites_are_not_read_only` (eleven composite lines, writers keep their segment), and in `cox-core/tests/permission.rs` `read_deny_stops_a_windows_reader` (five lines) and `windows_reader_guard_leaves_other_lines_alone`.
+Not done: Windows path forms (`~\.ssh\id_rsa`, `C:\Users\...`) are not resolved by `token_path`, so a backslash path still reaches the guard unmatched; other cmdlets (`Select-String`, `Import-Csv`) and the full-name alias `Microsoft.PowerShell.Management\Get-Content` stay `Exec` and are asked.
+Check:
+- Before the fix: `cargo nextest run -p cox-tools -E 'test(unparsed_powershell)'` failed 2 of 3 (`Get-Content ~/.ssh/id_rsa` classified `Exec`, left `Exec` right `ReadOnly`; the pipeline line was not opaque). `cargo nextest run -p cox-core --test permission -E 'test(windows_reader)'` failed 4 of 8 (`gc ~/.ssh/id_rsa`: left `Ask`, right `Deny`; `Get-Content README.md`: left `Ask`, right `Allow`).
+- `cargo nextest run -p cox-tools -p cox-core -p cox-permission`: 659 run, 659 passed, 2 skipped.
+- `cargo clippy -p cox-tools -p cox-core --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
