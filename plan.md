@@ -22,16 +22,16 @@ New bugs, dead code and moves from a read-only Cursor cloud review of clean `mai
 | T64.10 | P1 | bug | confirmed | `cox-session/src/mcp.rs:122-130`, `:158-165`; `cox-session/src/sandbox.rs:89-97` | An MCP stdio server that cannot be wrapped under Landlock runs with host privileges plus a notice. Refuse or quarantine it. |
 | T64.11 | P1 | bug | done | `.github/workflows/ci.yml:3-11`, `:470-481` | `revert-on-failure` needs a push to `main`, but `ci.yml` has no `push` trigger, so the job never runs. Add the trigger or delete the job. |
 | T64.12 | P2 | bug | done | `cox-web/src/lib.rs:48-66` | The `web_fetch` client fallback drops `.timeout(TIMEOUT)`. Fail closed, or set the timeout on the fallback. |
-| T64.13 | P2 | bug | confirmed | `cox-mcp/src/auth.rs:228-256` | The OAuth loopback forwards the first TCP connection's query; `state` is checked only later. Accept only `GET /callback` and keep listening until `state` matches. |
+| T64.13 | P2 | bug | done | `cox-mcp/src/auth.rs:228-256` | The OAuth loopback forwards the first TCP connection's query; `state` is checked only later. Accept only `GET /callback` and keep listening until `state` matches. |
 | T64.14 | P2 | bug | confirmed | `cox-store/src/lock.rs:100-105` | An unreadable or corrupt session lock file becomes `Holder::default()` (pid 0). Treat it as busy with an unknown holder. |
 | T64.15 | P2 | bug | suspected | `cox-sandbox/src/path.rs:41-76`; `cox-tools/src/read.rs:89-96` | `confine` then `std::fs::read`/`write` leaves a symlink-swap window. Open with `O_NOFOLLOW`/`openat`, or serialize readers and writers per path. |
-| T64.16 | P2 | bug | suspected (a comment says it is intentional) | `cox-permission/src/lib.rs:256-268` | The Bash read-deny skips relative tokens: `deny Read(~/.ssh/**)` misses `cat id_rsa` run inside `~/.ssh`. Resolve relative tokens against the session cwd. |
+| T64.16 | P2 | bug | done | `cox-permission/src/lib.rs:256-268` | The Bash read-deny skips relative tokens: `deny Read(~/.ssh/**)` misses `cat id_rsa` run inside `~/.ssh`. Resolve relative tokens against the session cwd. |
 | T64.17 | P2 | bug | confirmed | `cox-protocol/src/config.rs:1416-1417`; `cox-session/src/lib.rs:552-559` | A project may point `memory.dir` anywhere. Guard it like the other path keys. |
 | T64.18 | P2 | dead code | done | `cox-core/src/session.rs:53-55` (`#[allow(dead_code)]`); set at `compact.rs:413` | `State::Compacting` is written but never matched. Match it in the UI/status, or drop it and its allow. |
 | T64.19 | P2 | dead code | confirmed | `crates/cox/Cargo.toml:106-107` | `crates/cox` depends on `keyring`, but `cox/src` has no `keyring::` (unused since T37.31). Remove the dependency. |
 | T64.20 | P2 | dead code | confirmed | `cox-protocol/src/agent.rs:57` | `AgentDef::restrict` has only test callers. Call it where `cox-core`/`cox-session` open a child, or make it `pub(crate)`. |
 | T64.21 | P2 | dead code | done | `report.html` (39,581 bytes, tracked, not ignored); `AGENTS.md:7` | Gitignore it if it is generated, or move it under `docs/` and update `AGENTS.md`. |
-| T64.22 | P2 | move | confirmed | `cox-provider-http/src/http.rs:84-88` and `cox-mcp/src/auth.rs:69-100` → one keyring helper | Share `keyring_enabled` and the `Entry::new("cox", …)` policy (~20 lines). Extract a `secret-store` crate only when a third consumer appears. |
+| T64.22 | P2 | move | done | `cox-provider-http/src/http.rs:84-88` and `cox-mcp/src/auth.rs:69-100` → one keyring helper | Share `keyring_enabled` and the `Entry::new("cox", …)` policy (~20 lines). Extract a `secret-store` crate only when a third consumer appears. |
 | T64.23 | P2 | move | confirmed | `brand/build.mjs:1-18` → `@pyrlyn/brand` | Upstream only the generic merge/table code. `tokens.json` and the logos stay here. |
 
 Already tracked here, not added again: `cox-cursor-cloud` with no workspace dependents and `Store::cloud_run_*` used only in `cloud_runs.rs` (dead code D2/D3, move M7) are P56 work (T56.x).
@@ -57,10 +57,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
-| T33.45.4 | todo | P2 | 3 | 0% | |
 | T33.45.7 | todo | P2 | 4 | 0% | |
 | T33.45.9 | todo | P2 | 3 | 0% | |
-| T33.45.8 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
@@ -69,11 +67,9 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T37.32.2 | todo | P1 | 3 | 0% | |
 | T37.32.3 | in progress | P1 | 2 | 90% | Claude Code / opus-5.5 |
 | T37.33 | todo | P1 | 3 | 0% | |
-| T37.50 | todo | P2 | 2 | 0% | |
 | T37.51 | todo | P2 | 2 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
-| T52.24 | todo | P2 | 4 | 0% | |
 | T52.25 | todo | P2 | 2 | 0% | |
 | T52.26 | todo | P2 | 3 | 0% | |
 | T53.5 | todo | P3 | 3 | 0% | |
@@ -1113,12 +1109,6 @@ Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and a
 
 
 Plan (Claude Code / opus-5.5): (1) `plugin_ui.rs`: `PluginSlots` tracks the selected inspector tab and its area in cells; `Slot::DesktopInspector` is visible only while its plugin's tab is selected, so it renders only then; `select_tab` and `open_inspector` (for `CommandOut::OpenInspector`). `PluginUi::declare` takes `InitOut.desktop` in place of the keys: the tab and actions are sanitized, a symbol outside `is_symbol_name` becomes `puzzlepiece.extension`, the toolbar is capped at `MAX_TOOLBAR_ACTIONS`, and an action whose command is not among the plugin's granted commands is dropped with a notice; `action(id)` asks `cox_command` for `plugin:<id>:<command>`. The keys, `PluginKey` and `key` go. (2) `palette.rs`: `PaletteItem.symbol` (optional, serde and UniFFI default, so existing callers keep compiling). (3) `live.rs`: `plugin_tabs`, `plugin_toolbar`, `select_plugin_tab`, `plugin_action`; plugin palette actions join `palette`; `OpenInspector` selects the tab; declare notices are emitted once the session is open; `plugin_keys`/`plugin_key` removed (and their `cox-ffi` forwards, which no Swift view calls). Verify with `cargo nextest run -p cox-app -p cox-ffi`, clippy and fmt.
-#### T33.45.4 TUI: links, image `alt`, surfaces in listings
-
-Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
-
-Check: insta snapshots of a linked span with and without OSC 8 and of an image's `alt`; `cox plugin list --json` shows `surfaces`.
-
 #### T33.45.7 FFI and Swift: the desktop contributions
 
 Depends: T33.45.6 · Files: `crates/cox-ffi/src/{session,types}.rs`, `desktop/macos/Packages/CoxUI/…` (Inspector, SessionToolbar, CommandPalette, PluginWidgetView), `desktop/design/DESIGN.md` §6 rows · Design: `docs/design/plugins.md` §15, A134
@@ -1130,12 +1120,6 @@ Check: `forward_only` passes; a snapshot per new view in light and dark; an unkn
 Depends: T33.45.1, T33.45.2 · Files: `docs/plugins.md` (or `docs/plugins/api.md`), its generator and drift test · Design: `docs/design/plugins.md` §15, A134
 
 Check: every field of `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` appears under its part (shared, terminal-only, desktop-only), checked by test.
-#### T33.45.8 SDK and the surfaces example
-
-Depends: T33.45.3 · Files: `plugins/sdk/src/lib.rs`, `plugins/examples/surfaces/` (new), `crates/cox-plugin-fixtures/build.rs` · Design: `docs/design/plugins.md` §15, A134
-
-Check: a `cox-plugin` test loads the example (a command and a status segment, a leader key, an inspector tab and a notification) in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice or `NotOnThisSurface` on the other.
-
 #### T33.45.10 Docs: Russian and Ukrainian translations
 
 Depends: T33.45.9 · Files: `docs/ru/plugins.md`, `docs/uk/plugins.md` (new directories) · Design: `docs/design/plugins.md` §15, A134
@@ -1478,12 +1462,6 @@ On hold by the creator (A107). Depends: T37.23 · Size: ~120 · Files: `justfile
 Goal: `just desktop-bench` measures cold start, first frame of a 2 000-block session, stream frame time and memory against DT§1 budgets; results go into `research.md`.
 Check: the suite runs locally and in the nightly job; every budget has a measured row.
 
-#### T37.50 Pointer rule in Rust, shared by every client
-
-Depends: — · Size: ~120 · Files: `crates/cox-render/src/pointer.rs` (new), `crates/cox-app/src/lib.rs` (re-export), `crates/cox-ffi/src/types.rs` and `lib.rs` (export)
-Goal: one rule decides the pointer for every surface (A148), so the TUI, the macOS app and the Windows client cannot drift. `cox_render::pointer` holds `Interaction { clickable, selectable, pressed, blocked }` (`blocked` = disabled or locked), `Pointer { Default, Action, Text, NotAllowed, Resize(Edge) }` and `pointer(Interaction) -> Pointer` with this order: blocked → `NotAllowed`; pressed (the selected row, the active segment or tab, a button whose action is running) → `Default`; clickable → `Action`; selectable (text that can be selected and copied) → `Text`; otherwise `Default`. `Pointer::css_name()` gives the CSS cursor name (`pointer`, `text`, `default`, `not-allowed`, `ns-resize`/`ew-resize`) that OSC 22 uses (T5.9). It sits in `cox-render` because both `cox-tui` and `cox-app` already depend on it, and it builds without the `ratatui` feature. `cox-app` re-exports it; `cox-ffi` exports the types as `#[uniffi::remote]` and `pointer` as a one-expression forward (D11). Each client maps `Pointer` to its own API and keeps no rule of its own.
-Check: `mise exec -- cargo nextest run -p cox-render pointer`: blocked wins over pressed and clickable, pressed wins over clickable, clickable wins over selectable, nothing set gives `Default`, every `Pointer` has a CSS name; `cox-ffi`'s `tests/forward_only.rs` passes; the regenerated Swift bindings contain `Pointer` and `pointer`.
-
 #### T37.51 macOS app: pointer from the shared rule
 
 Depends: T37.50 · Size: ~120 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Foundations/…` (new pointer modifier), the catalogue atoms and molecules that apply it, `desktop/macos/.swiftlint.yml`, `desktop/design/DESIGN.md` (DS§6.1, DS§8)
@@ -1512,13 +1490,6 @@ Every card keeps the P51 rules, and:
 - an external agent's usage is its own billing: no `usage` row is invented for it, and the cost pill shows "—" as the mockup does;
 - a remote session never sends API keys or the Keychain's secrets over the wire and never forwards the ssh agent;
 - plugin widgets reach the screen only through `cox_sanitize::sanitize` and PL§8's limits, as in the TUI.
-
-#### T52.24 `cox-app` merges chosen best-of candidates with a chosen model or agent
-
-Depends: — (T52.9–T52.12 are done) · Size: ~200 · Files: `crates/cox-app/src/best_of.rs`, `crates/cox-app/src/app.rs`, `crates/cox-app/src/workspace.rs`
-Goal: after a best-of-n run, the person can merge two or more results into one (A149). `App::best_of_merge(BestOfMerge { id, from: Vec<u32>, by: Candidate })` takes the candidates the person chose and who does the merge: `Candidate::Cox { model }` (provider and model, from the same list the composer offers) or `Candidate::Agent { name }` (an external ACP agent, the same list the best-of control offers) — the existing enum, so no second list of mergers. It refuses before anything starts when fewer than two candidates are chosen, when a chosen one is not `Done`, or when the group was already picked. It cuts a new worktree from the group's base commit (A75's consent: the person pressed Merge), opens a session for the merger there the way `best_of` opens a candidate (cox on the chosen model, or the external agent under T35.2's sandbox), and sends one prompt built in Rust: the original prompt, then for each chosen candidate its label, its final answer and its diff against the base (the same diff model Review and `compare` use), each fenced as data, asking for one change set that keeps the best of each. The merge joins the group as a new candidate: a `Launched` row for the merger with a new `merged_from: Option<Vec<u32>>` field, so `compare` and `pick` handle it unchanged and its sidebar row sits in the group. A cox merger's usage is its own ledger rows and counts in the group total; an agent's is its own billing, with no row invented (P52's rule). A failed merge is a `Failed` candidate and leaves the others as they were (fail open). `mergeable(id) -> Vec<u32>` lists the candidates that may be chosen (`Done`, not pruned), so no client decides that on its own.
-Check: `mise exec -- cargo nextest run -p cox-app best_of_merge_refuses_fewer_than_two best_of_merge_refuses_a_candidate_not_done best_of_merge_refuses_after_a_pick best_of_merge_prompt_holds_each_chosen_diff_and_only_those best_of_merge_runs_on_the_chosen_model best_of_merge_runs_on_the_chosen_agent best_of_merge_is_a_candidate_compare_and_pick_see best_of_merge_usage_is_its_own_ledger_rows best_of_merge_by_an_agent_writes_no_usage_row best_of_mergeable_lists_only_done_candidates` (fake `Worktrees`, scripted provider, fake ACP agent).
-Out of scope: merging by git (`git merge` of the branches) instead of a model.
 
 #### T52.25 `cox-ffi` and CoxModel carry the merge
 
