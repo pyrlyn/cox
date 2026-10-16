@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use cox_protocol::config::CompactionStrategy;
-use cox_protocol::errors::CoreError;
+use cox_protocol::errors::{CoreError, ProviderError};
 use cox_protocol::ids::{ArchiveId, CallId, ItemId};
 use cox_protocol::types::{
     ArchiveRef, CompactReason, Content, Event, HookEvent, HookOutcome, ItemKind, Job, Level,
@@ -31,6 +31,12 @@ use crate::subagent::first_line;
 const PROMPT: &str = include_str!("prompts/compact.md");
 /// §1.10 step 3: the summary itself is capped.
 const MAX_SUMMARY_TOKENS: u32 = 2048;
+/// A model reply shorter than this is not a summary: replacing history with
+/// it would drop the session's memory for nothing. Matches the 500 the prompt
+/// names so the model is told the same number it is held to.
+const MIN_SUMMARY_CHARS: usize = 500;
+/// The ladder's second rung keeps this much from each end of a tool result.
+const CUT_RESULT_BYTES: usize = 200;
 /// How `compact` opens the summary message; a later compaction finds the
 /// earlier state block by it.
 const SUMMARY_HEAD: &str = "[Compacted summary of ";
@@ -148,6 +154,32 @@ fn near(estimate: u32, limit: f64) -> bool {
 
 /// The summariser's input: one line per block, archived results as pointers.
 pub(crate) fn transcript(messages: &[Message]) -> String {
+    render_transcript(messages, usize::MAX)
+}
+
+/// The ladder's second rung: `transcript` with every tool result cut to its
+/// head and tail, since results are what blow a summariser's own window.
+fn transcript_cut(messages: &[Message]) -> String {
+    render_transcript(messages, CUT_RESULT_BYTES)
+}
+
+/// `text` with the middle dropped when it is longer than `2 × keep` bytes,
+/// cutting on char boundaries and saying how much went.
+fn clip(text: &str, keep: usize) -> String {
+    if text.len() <= keep.saturating_mul(2) {
+        return text.to_string();
+    }
+    let head = text.floor_char_boundary(keep);
+    let tail = text.ceil_char_boundary(text.len() - keep);
+    format!(
+        "{}\n[… {} bytes omitted …]\n{}",
+        &text[..head],
+        tail - head,
+        &text[tail..]
+    )
+}
+
+fn render_transcript(messages: &[Message], keep: usize) -> String {
     let mut out = String::new();
     for m in messages {
         let role = match m.role {
@@ -168,7 +200,7 @@ pub(crate) fn transcript(messages: &[Message]) -> String {
                     } else {
                         "tool_result"
                     };
-                    out.push_str(&format!("{tag}: {content}\n"));
+                    out.push_str(&format!("{tag}: {}\n", clip(content, keep)));
                 }
                 Content::Pointer { summary, archive } => {
                     out.push_str(&format!(
@@ -497,6 +529,22 @@ pub(crate) fn notice_text(handles: &SurvivingHandles) -> String {
     out
 }
 
+/// Why `summarise` produced no summary.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SummaryFailure {
+    /// The provider failed, or there was no route for the job.
+    Failed,
+    /// The model answered, but under the minimum length.
+    TooShort,
+    /// Every rung of the ladder was rejected as too long for the summariser.
+    TooLong,
+}
+
+/// Whether the model's own text is long enough to stand in for history.
+pub(crate) fn summary_is_usable(text: &str, min_chars: usize) -> bool {
+    text.trim().chars().count() >= min_chars
+}
+
 impl Session {
     /// §1.10 steps 1–5. `Ok(true)` when history changed; every failure is a
     /// notice and `Ok(false)`, since a session that cannot compact still runs.
@@ -505,6 +553,9 @@ impl Session {
         trigger: Trigger,
         focus: Option<String>,
     ) -> Result<bool, CoreError> {
+        if self.compaction_paused(trigger).await {
+            return Ok(false);
+        }
         let payload = json!({ "trigger": trigger.name(), "focus": focus });
         if let HookOutcome::Block { reason } =
             hooks::fire(self, HookEvent::PreCompact, payload.clone()).await
@@ -535,12 +586,34 @@ impl Session {
         // while the summary is written; compaction builds the next request's
         // context, which is what `Assembling` names.
         self.set_state(State::Assembling).await;
-        let summary = self.summarise(&history[..cut], focus.as_deref()).await;
+        let summary = self
+            .summarise(&history[..cut], focus.as_deref(), MIN_SUMMARY_CHARS)
+            .await;
         // Back to where it was: a pre-call compaction runs mid-turn, and an
         // `Idle` there would let `/rewind` in before the turn's next call.
         self.set_state(state).await;
-        let Some(summary) = summary else {
-            return self.compaction_notice("summariser returned nothing").await;
+        let summary = match summary {
+            Ok(summary) => summary,
+            Err(SummaryFailure::Failed) => {
+                return self.compaction_notice("summariser returned nothing").await;
+            }
+            Err(failure) => {
+                // History stays as it was, so the same trigger would fire
+                // and fail again on every turn; wait for `/compact` instead.
+                let at = self.inner.lock().await.last_context_tokens;
+                self.inner.lock().await.compact_suppressed_at = Some(at);
+                let why = match failure {
+                    SummaryFailure::TooShort => {
+                        format!("summary too short (under {MIN_SUMMARY_CHARS} characters)")
+                    }
+                    _ => "transcript too long for the summariser".to_string(),
+                };
+                return self
+                    .compaction_notice(&format!(
+                        "failed: {why}; history kept, auto-compaction paused until /compact"
+                    ))
+                    .await;
+            }
         };
         let item = ItemId::new();
         // Last under both strategies: the model's own text can end anywhere.
@@ -613,6 +686,21 @@ impl Session {
         Ok(true)
     }
 
+    /// Whether an automatic trigger must stay quiet because the last attempt
+    /// failed at this context size. `/compact` always runs and lifts the
+    /// pause; a context that shrank below the failing size lifts it too.
+    async fn compaction_paused(&self, trigger: Trigger) -> bool {
+        let mut inner = self.inner.lock().await;
+        let Some(at) = inner.compact_suppressed_at else {
+            return false;
+        };
+        if trigger == Trigger::Manual || inner.last_context_tokens < at {
+            inner.compact_suppressed_at = None;
+            return false;
+        }
+        matches!(trigger, Trigger::Auto | Trigger::PreCall)
+    }
+
     /// T28.3, §1.10 pre-call: keeps a request under `compact_at ×
     /// max_context` before it is sent. Microcompaction first (every archived
     /// result outside `keep_turns` → pointer, request-only), then one full
@@ -679,8 +767,11 @@ impl Session {
     /// history is left untouched — the summary seeds a new child session.
     pub async fn handoff_summary(&self, objective: &str) -> Option<String> {
         let history = self.inner.lock().await.history.clone();
-        self.summarise(&history, Some(&format!("hand off: {objective}")))
+        // One character: a handoff seeds a child that has no history to lose,
+        // so only an empty answer is rejected.
+        self.summarise(&history, Some(&format!("hand off: {objective}")), 1)
             .await
+            .ok()
     }
 
     async fn compaction_notice(&self, why: &str) -> Result<bool, CoreError> {
@@ -692,55 +783,92 @@ impl Session {
         Ok(false)
     }
 
-    /// One request on the `compact` job, recorded in the ledger like any
-    /// other (D6g); `None` when the provider fails or answers nothing.
-    async fn summarise(&self, messages: &[Message], focus: Option<&str>) -> Option<String> {
+    /// The `compact` job, recorded in the ledger like any other (D6g). A
+    /// request the provider rejects as too long is retried with a smaller
+    /// input: the full transcript, then tool results cut to head and tail,
+    /// then only the working state. A reply under `min_chars` is rejected.
+    async fn summarise(
+        &self,
+        messages: &[Message],
+        focus: Option<&str>,
+        min_chars: usize,
+    ) -> Result<String, SummaryFailure> {
         // T9.1: the summary routes like any other job, so a `/model` switch
         // of the cheap tier applies here too.
-        let route = self.route_for(Job::Compact, true).await.ok()?;
+        let route = self
+            .route_for(Job::Compact, true)
+            .await
+            .map_err(|_| SummaryFailure::Failed)?;
         let model = route.model.clone();
-        let state = (self.config.compaction.strategy == CompactionStrategy::StateLlm)
-            .then(|| working_state(messages).render());
+        let state = working_state(messages).render();
+        let with_state = self.config.compaction.strategy == CompactionStrategy::StateLlm;
         let (base, note) = PROMPT.split_once("\n---\n").unwrap_or((PROMPT, ""));
         let mut system = format!("{base}\n");
-        if state.is_some() {
+        if with_state {
             system.push_str(note);
         }
         if let Some(focus) = focus {
             system.push_str(&format!("\nFocus on: {focus}\n"));
         }
-        let req = Request {
-            tier: route.tier,
-            job: Job::Compact,
-            model: model.clone(),
-            system: vec![SystemBlock {
-                text: system,
-                cache: false,
-            }],
-            tools: vec![],
-            messages: vec![Message {
-                role: Role::User,
-                content: vec![Content::Text {
-                    text: transcript(messages),
-                }],
-            }],
-            effort: route.effort,
-            max_tokens: MAX_SUMMARY_TOKENS.min(route.max_tokens),
-            thinking: route.thinking,
-            cache_breakpoints: vec![],
-            stop_sequences: vec![],
-        };
-        let (tx, mut rx) = mpsc::channel(64);
-        let provider = self.provider.clone();
-        let cancel = self.cancel_token();
-        let join = tokio::spawn(async move { provider.stream(req, tx, cancel).await });
+        let mut last = usize::MAX;
+        let mut too_long = false;
         let mut out = String::new();
-        while let Some(ev) = rx.recv().await {
-            if let ProviderEvent::TextDelta { text } = ev {
-                out.push_str(&text);
+        let mut usage = None;
+        for input in [
+            transcript(messages),
+            transcript_cut(messages),
+            state.clone(),
+        ] {
+            // A rung that is not smaller would be rejected the same way.
+            if input.is_empty() || input.len() >= last {
+                continue;
+            }
+            last = input.len();
+            let req = Request {
+                tier: route.tier,
+                job: Job::Compact,
+                model: model.clone(),
+                system: vec![SystemBlock {
+                    text: system.clone(),
+                    cache: false,
+                }],
+                tools: vec![],
+                messages: vec![Message {
+                    role: Role::User,
+                    content: vec![Content::Text { text: input }],
+                }],
+                effort: route.effort,
+                max_tokens: MAX_SUMMARY_TOKENS.min(route.max_tokens),
+                thinking: route.thinking,
+                cache_breakpoints: vec![],
+                stop_sequences: vec![],
+            };
+            let (tx, mut rx) = mpsc::channel(64);
+            let provider = self.provider.clone();
+            let cancel = self.cancel_token();
+            let join = tokio::spawn(async move { provider.stream(req, tx, cancel).await });
+            out.clear();
+            while let Some(ev) = rx.recv().await {
+                if let ProviderEvent::TextDelta { text } = ev {
+                    out.push_str(&text);
+                }
+            }
+            match join.await.map_err(|_| SummaryFailure::Failed)? {
+                Ok(u) => {
+                    usage = Some(u);
+                    break;
+                }
+                Err(ProviderError::ContextTooLong { .. }) => too_long = true,
+                Err(_) => return Err(SummaryFailure::Failed),
             }
         }
-        let usage = join.await.ok()?.ok()?;
+        let Some(usage) = usage else {
+            return Err(if too_long {
+                SummaryFailure::TooLong
+            } else {
+                SummaryFailure::Failed
+            });
+        };
         self.store
             .usage_insert(&cox_protocol::UsageRow {
                 session_id: self.id,
@@ -752,17 +880,21 @@ impl Session {
                 effort: Some(route.effort),
                 usage,
             })
-            .ok()?;
+            .map_err(|_| SummaryFailure::Failed)?;
         if budget::counts(route.tier, self.config.budget.cheap_counts) {
             self.add_spend(usage.cost_usd).await;
         }
         let out = out.trim();
         if out.is_empty() {
-            return None;
+            return Err(SummaryFailure::Failed);
         }
-        Some(match state {
-            Some(state) => format!("{state}\n{out}"),
-            None => out.to_string(),
+        if !summary_is_usable(out, min_chars) {
+            return Err(SummaryFailure::TooShort);
+        }
+        Ok(if with_state {
+            format!("{state}\n{out}")
+        } else {
+            out.to_string()
         })
     }
 }
@@ -1080,5 +1212,36 @@ mod tests {
         assert!(near(900, 1000.0) && near(1100, 1000.0));
         assert!(!near(899, 1000.0) && !near(1101, 1000.0));
         assert_eq!(threshold(0, 0.75), None);
+    }
+
+    #[test]
+    fn summary_is_usable_counts_characters_not_bytes() {
+        assert!(summary_is_usable(
+            &"é".repeat(MIN_SUMMARY_CHARS),
+            MIN_SUMMARY_CHARS
+        ));
+        assert!(!summary_is_usable(
+            &"é".repeat(MIN_SUMMARY_CHARS - 1),
+            MIN_SUMMARY_CHARS
+        ));
+        assert!(
+            !summary_is_usable("  \n ", 1),
+            "whitespace is not a summary"
+        );
+        assert!(
+            summary_is_usable("x", 1),
+            "handoff keeps its one-character floor"
+        );
+    }
+
+    #[test]
+    fn clip_keeps_head_and_tail_on_char_boundaries_and_counts_the_cut() {
+        assert_eq!(clip("short", 10), "short");
+        // 2-byte chars with an odd keep, so both cuts land inside one.
+        let text = "é".repeat(100);
+        let out = clip(&text, 5);
+        assert!(out.starts_with("éé") && out.ends_with("éé"), "{out}");
+        assert!(out.contains("bytes omitted"), "{out}");
+        assert!(out.len() < text.len());
     }
 }

@@ -151,7 +151,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T69.1 | todo | P1 | 3 | 0% | |
 | T69.2 | todo | P1 | 2 | 0% | |
 | T69.4 | todo | P3 | 1 | 0% | |
-| T69.5 | todo | P1 | 3 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
 | T69.7 | todo | P3 | 3 | 0% | |
 | T69.8 | todo | P3 | 1 | 0% | |
@@ -3052,7 +3051,7 @@ Rationale in §6 A159. Found by reading openai/codex at `f0c5077c34ec7a76b4ad913
 
 **Agents.** Implementing agents use Grok 4.6, Grok 4.7 or Composer 2.5 only. English comments and docs. No card is claimed by this plan.
 
-**Order.** Independent. T69.5 before T69.6 and T69.8 (same file). T69.1 before T69.2 (T69.2 refuses opaque segments).
+**Order.** Independent. T69.1 before T69.2 (T69.2 refuses opaque segments).
 
 **Not taken (codex and grok-build already behind cox):** codex middle truncation and "N tokens truncated" markers (lossy; `truncate.rs` keeps an `expand` id), the network MITM proxy, Starlark exec policy, compaction prompts, `process-hardening`; grok-build bytes/4 estimator, tool-pair snapping, two-pass prefire, TUI, config overlay.
 
@@ -3105,22 +3104,6 @@ Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not co
 Files: `crates/cox-store/src/lib.rs` (and its tests)
 
 Done when a new database opens and a forced short deadline still opens. Check: `mise exec -- cargo nextest run -p cox-store`.
-
-#### T69.5 Compaction rejects a tiny summary and survives a context overflow
-
-Model: - · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
-
-Goal: `summary_is_usable` requires ≥ 500 trimmed characters (a shorter body is a failed attempt, not a replacement for history). A context-window error retries down a ladder (full pointer transcript → tool results cut to the head/tail pointer → `working_state` alone plus the last user request), one retry per step. After the ladder fails on size, auto-compact is suppressed until a later call reports a smaller `last_context_tokens` or the user runs `/compact`.
-
-Why: a failed compact leaves `last_context_tokens` unchanged and the next turn calls `compact` again (`session.rs` ~L1473–1482); `summarise` (`compact.rs` L694–763) accepts any non-empty string.
-
-Source: [grok-build `xai-grok-compaction/src/code_compaction/config.rs` L15–20](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/config.rs#L15-L20), [`summary.rs` L120–125](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/summary.rs#L120-L125), [`sample.rs` L81–120](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/sample.rs#L81-L120), [`failure.rs` L9–23](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/failure.rs#L9-L23), [`xai-grok-shell/src/session/compaction.rs` L405–479](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/compaction.rs#L405-L479)
-
-Licence: Apache-2.0, Copyright 2023-2026 SpaceXAI, implement similar, not copy (header, Apache text, `THIRD-PARTY-NOTICES`, change notice §4(b)). **Implement similar, do not copy:** bound to their `ConversationItem` types, and a paste adds Apache's patent clause to cox's tri-license.
-
-Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/prompts/compact.md`, `crates/cox-core/tests/compact.rs`
-
-Done when a 40-character summary does not replace history, a context-length error is followed by a smaller second request, a second size error sets the suppress flag, the next turn skips the compact job, and `/compact` still runs. Check: `mise exec -- cargo nextest run -p cox-core compact`.
 
 #### T69.6 After compaction, reattach live tasks, todos and subagents
 

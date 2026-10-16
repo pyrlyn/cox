@@ -126,6 +126,9 @@ pub(crate) struct Inner {
     pub(crate) renamed: bool,
     /// Context size of the last main call, for the §1.10 auto trigger.
     pub(crate) last_context_tokens: u32,
+    /// The context size at which the last compaction failed on the summary,
+    /// so the auto triggers stay quiet until `/compact` or a smaller context.
+    pub(crate) compact_suppressed_at: Option<u32>,
     /// The last main call's usage: `ContextBreakdown.cached` (A98).
     last_usage: Option<cox_protocol::types::Usage>,
     /// The model catalog `ContextBreakdown.window` is read from (A98),
@@ -607,6 +610,7 @@ impl Session {
                 detach: HashMap::new(),
                 extracted: Vec::new(),
                 last_context_tokens: 0,
+                compact_suppressed_at: None,
                 last_usage: None,
                 catalog: None,
                 retried_after_too_long: false,
