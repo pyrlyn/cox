@@ -14,8 +14,8 @@ use cox_protocol::agent::AgentDef;
 use cox_protocol::errors::{CoreError, ProviderError, StoreError, ToolError};
 use cox_protocol::ids::{ArchiveId, CallId, ItemId, SessionId, TaskId, TurnId};
 use cox_protocol::traits::{
-    Advisor, Archive, ArchivePut, Checkpointer, EventTap, ExternalAgent, Hook, HunkReverter,
-    Provider, RepoMapper, Store, Tool, Worktrees,
+    Advisor, AllowRuleStore, Archive, ArchivePut, Checkpointer, EventTap, ExternalAgent, Hook,
+    HunkReverter, Provider, RepoMapper, Store, Tool, Worktrees,
 };
 use cox_protocol::types::{
     ArchiveRef, Attachment, Content, ContextBreakdown, Decision, Event, HookEvent, HookOutcome,
@@ -215,6 +215,10 @@ pub struct Session {
     /// What puts one of Review's hunks back (T51.19); installed by the
     /// surface like the checkpointer, since it is cox-render's.
     hunks: Arc<OnceLock<Arc<dyn HunkReverter>>>,
+    /// Where a persisted `AllowForSession` rule is written (T69.2); installed
+    /// by the surface and shared with children, whose approvals reach the
+    /// same user. Absent in tests and in `cox mcp`, which then persist nothing.
+    allow_rules: Arc<OnceLock<Arc<dyn AllowRuleStore>>>,
     /// Roots mutation may target. Empty until a worktree-isolated surface
     /// narrows it; ordinary sessions write anywhere they can read.
     writable_roots: Arc<OnceLock<Vec<PathBuf>>>,
@@ -425,6 +429,7 @@ impl Session {
         child.hook = self.hook.clone();
         child.checkpointer = self.checkpointer.clone();
         child.hunks = self.hunks.clone();
+        child.allow_rules = self.allow_rules.clone();
         child.worktrees = self.worktrees.clone();
         child.instructions = self.instructions.clone();
         child.memory_index = self.memory_index.clone();
@@ -558,6 +563,7 @@ impl Session {
             hook: Arc::new(OnceLock::new()),
             checkpointer: Arc::new(OnceLock::new()),
             hunks: Arc::new(OnceLock::new()),
+            allow_rules: Arc::new(OnceLock::new()),
             writable_roots: Arc::new(OnceLock::new()),
             worktrees: Arc::new(OnceLock::new()),
             repo_mapper: Arc::new(OnceLock::new()),
@@ -852,6 +858,12 @@ impl Session {
     /// (T51.19); a second call is ignored, as for the checkpointer.
     pub fn set_hunk_reverter(&self, hunks: Arc<dyn HunkReverter>) {
         let _ = self.hunks.set(hunks);
+    }
+
+    /// Installs where `permissions.allow_for_session_persists` writes; a
+    /// second call is ignored, as for the checkpointer.
+    pub fn set_allow_rule_store(&self, store: Arc<dyn AllowRuleStore>) {
+        let _ = self.allow_rules.set(store);
     }
 
     pub(crate) fn hunk_reverter(&self) -> Option<Arc<dyn HunkReverter>> {
@@ -1236,6 +1248,43 @@ impl Session {
     /// Records an `AllowForSession` grant.
     pub(crate) async fn grant(&self, tool: String, subject: String) {
         self.inner.lock().await.grants.push((tool, subject));
+    }
+
+    /// Saves what an `AllowForSession` answer to `call` may keep past the
+    /// session (T69.2), when `permissions.allow_for_session_persists` is on:
+    /// the engine's `persistable_allow_rules`, appended to the user config.
+    /// A failed write is a warning, never an error: the session grant already
+    /// covers this run, and the approval must not fail because a file is
+    /// read-only.
+    pub(crate) async fn persist_grant(&self, call: &ToolCall) {
+        if !self.config.permissions.allow_for_session_persists {
+            return;
+        }
+        let Some(store) = self.allow_rules.get().cloned() else {
+            return;
+        };
+        let rules = self.engine.persistable_allow_rules(call);
+        if rules.is_empty() {
+            return;
+        }
+        let saved = tokio::task::spawn_blocking(move || {
+            rules
+                .iter()
+                .map(|rule| store.append_allow(rule))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .await;
+        let failure = match saved {
+            Ok(Ok(_)) => return,
+            Ok(Err(e)) => e.to_string(),
+            Err(e) => e.to_string(),
+        };
+        let _ = self
+            .emit(Event::Notice {
+                level: Level::Warn,
+                text: format!("could not save the approval to permissions.allow: {failure}"),
+            })
+            .await;
     }
 
     /// The `AllowForSession` grants in force, as `(tool, subject prefix)`,
