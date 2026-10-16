@@ -70,7 +70,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T37.33 | todo | P1 | 3 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
-| T52.26 | todo | P2 | 3 | 0% | |
+| T52.26 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T53.5 | todo | P3 | 3 | 0% | |
 | T53.6 | todo | P3 | 2 | 0% | |
 | T53.7 | todo | P3 | 2 | 0% | |
@@ -1475,6 +1475,7 @@ Every card keeps the P51 rules, and:
 
 Depends: T52.25 · Size: ~180 · Files: CoxUI `BestOfCompare` screen, the merge sheet (new molecule), `desktop/macos/App` wiring
 Goal: the compare view shows a **Merge** button when more than one candidate is in `mergeable`. It opens a sheet with one checkbox per mergeable candidate (all checked at first; label, diffstat, cost), a merger picker with the composer's providers and models and the external agents the best-of control offers, and Merge, which stays blocked until two or more are checked (the not-allowed pointer, T37.50). The merge then appears as one more column, labelled with what it merged and by which model or agent, and can be opened in Review or kept like any other candidate.
+Execution plan: (1) `BestOfCompare` takes the store's `mergeable`/`chosen`/`merger`/`merge` as plain values and closures and shows Merge when `mergeable.count > 1`; (2) new molecule `BestOfMergeSheet` (checkbox rows with label, diffstat, cost; merger picker over the composer's models and the external agents; Merge blocked with the not-allowed pointer under two checked); (3) the merge column label reads "Merged <labels> by <merger>" from `merged_from`; (4) `PreviewState+BestOf` fixtures and `BestOfTests` snapshot tests (references come from the CI artifact); (5) `App/BestOf.swift` wiring; (6) DT§3.3.4 note. Verify: `swift test --filter BestOf` in CoxUI, swiftlint strict, swift-format lint.
 Check: CoxUI snapshots: compare view with one result (no Merge button) and with three (button shown); the sheet with two checked, with one checked (Merge blocked), with the merger menu open on a model and on an agent; a merge column running and done; swiftlint strict and swift-format clean.
 
 ### P53 — Plugin distribution (goal: a plugin installs from git or a URL through the same validation and per-digest grant as a local folder, and the plugin API, the Rust SDK and the Go SDK are ready to publish once `api = 1` is frozen)
