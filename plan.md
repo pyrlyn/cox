@@ -42,7 +42,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T33.14.2 | todo | P2 | 3 | 0% | |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.4 | todo | P2 | 4 | 0% | |
@@ -873,13 +872,6 @@ Every card in this phase:
 - runs the three standard commands.
 
 Host unit tests use inline WAT (R§4.3.5 P15); no `.wasm` is ever committed. **Blockers** (everything after them depends on them): T33.1, T33.2, T33.3, T33.5, T33.6.
-
-#### T33.14.2 Filesystem preopens
-
-Split from T33.14 by the creator 2026-10-03 because the preopens wait on T33.43; the `cox_http` half is T33.14.1.
-Depends: T33.9, T33.43 (preopens stay off until wasmtime ≥ 48, A55) · Size: ~120 · Files: `crates/cox-plugin/src/fs.rs`
-Goal: WASI preopens come only from `fs` and pass `confine`; reads mount `ro:`; `.git` and `.cox` are never writable. WASI is on only when `wasi = true` or `fs` is set.
-Check: `fs_write_to_dot_git_is_refused`, `wasi_ctx_has_no_env`.
 
 #### T33.34 Go: SDK wrapper, template, example
 
