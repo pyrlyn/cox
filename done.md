@@ -1,3 +1,47 @@
+#### T33.34 Go: SDK wrapper, template, example
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T33.29, T33.43 · Size: ~400 code (SDK ~330, `plugin_new.rs` ~40) plus tests, example and template · Priority: P2 · Complexity: 4 · Files: `plugins/sdk-go/*`, `plugins/examples/go/*`, `plugins/templates/go/*.tmpl`, `plugins/mise.toml`, `crates/cox/src/plugin_new.rs`, `crates/cox/src/cli.rs`, `crates/cox-tui/src/picker.rs`, `crates/cox/tests/plugin_example_go.rs`, `justfile`, `.github/workflows/ci.yml`, `docs/plugins.md`, `docs/design/plugins.md`, `toolchain.md`, `plan.md` §1
+Goal: a thin Go package over `github.com/extism/go-pdk` (v1.1.3) for the PL§4 exports and host functions (`//go:wasmimport` in `cox:host/v1`). The same example is built with TinyGo `-target wasip1 -buildmode=c-shared` (`wasi = true`). `cox plugin new --lang go`.
+Plan (Claude Code / opus-5.5): (1) `plugins/mise.toml` pins go and tinygo (latest pair TinyGo supports). (2) `plugins/sdk-go` (module `github.com/pyrlyn/cox/plugins/sdk-go`): the pure wire in `cox.go`, host-testable with `go test`; a `//go:build wasip1` file over go-pdk memory with one wrapper per `cox:host/v1` function and `cox_desktop_notify`; the PL§4 payload types the example and template use. (3) `plugins/examples/go`: id `example-go`, `wasi = true`, the PL§13 example. (4) `plugins/templates/go/*.tmpl` with `cox:with` blocks; `Lang::Go` in `plugin_new.rs`, `PLUGIN_LANGS`. (5) `just plugin-examples go`, the `plugin-examples` CI steps, `crates/cox/tests/plugin_example_go.rs`. (6) docs, `toolchain.md`, §1.
+What landed:
+- `plugins/mise.toml` pins Go 1.27.2 and TinyGo 0.43.0 (TinyGo 0.43 accepts Go 1.25 to 1.27). Both come only through mise; the global toolchain is untouched.
+- `plugins/sdk-go` (package `cox`). `cox.go` is the pure wire: `Export[I, O]` runs a handler (empty input is `null`; a bad input or a handler error becomes the extism error), `decodeReply` reads `{"Ok"}`/`{"Err"}` into the value or a typed `*HostError`, and there is one wrapper per `cox:host/v1` function plus `DesktopNotify` and `SurfaceOf`. `types.go` types the common PL§4 payloads; list fields are `omitempty`, because the host refuses `null` for a list. `CommandOut` and `Widget` come with constructors. `wasm.go` (`wasip1`) holds the `//go:wasmimport` declarations and the go-pdk memory calls. Each import is wrapped in a plain function, because TinyGo cannot take an import as a value; a plugin therefore links only the imports it calls (the example has no `cox:desktop/v1` import). `host.go` (`!wasip1`) makes every host call return `ErrNotWasm`, so `go test` runs on the host. go-pdk itself does not build there.
+- Bug found by the e2e run: `return out, decodeReply(reply, &out)` leaves the evaluation order unspecified, and TinyGo read `out` before the call. Every typed host reply came back empty, for example `KVGet` in a second process. `decodeAs` now takes the error first. The example's `stored` had the same pattern and is fixed too. `TestTypedReplyCarriesTheDecodedValue` fails under `tinygo test` without the fix. The recipe and CI now run the SDK tests under both `go test` and `tinygo test`.
+- `plugins/examples/go`: `example-go` (`wasi = true`) is the PL§13 example, the same as Rust's. It counts turns from `turn_started`, counts failed tools in `PostToolUse`/`PostToolUseFailure` with a notice, keeps a `status.right` segment and offers `/example-go:reset`. Both counters live in kv. Its decisions are plain functions covered by `go test`.
+- `plugins/templates/go`: `go.mod`, `plugin.toml` (`wasi = true`), `main.go` with one export per `--with` block, `smoke_test.go`, `justfile` (`tinygo build -target wasip1 -buildmode=c-shared`), `README.md` and `.gitignore`. `initPlugin` sets fields one at a time, so every `--with` combination comes out gofmt-clean (checked for each single capability, for none and for all). `plugin_new.rs`: Rust and Go share `scaffold_blocks`; `--lang go` is scaffolded and Kotlin stays `UnsupportedLang`. The picker offers rust/go/dart.
+- `crates/cox/tests/plugin_example_go.rs` has three tests, `#[ignore]`d with the card's reason:
+  - `plugin_example_go` is T33.28's two-process rollout check ("failed tool calls: 1", then ": 2") plus the declared capabilities.
+  - `plugin_example_go_counts_turns_in_its_status_and_resets_them` drives `cox_on_event`, `cox_render` and `cox_command` through `LivePlugins` with the host's own types, and checks that a second instance reads the count back from kv.
+  - `plugin_example_go_template` scaffolds `cox plugin new demo-go --lang go --with status,panel,command,key,renderer,hook,event,tool` and points it at the in-repo SDK with `go mod edit`. It then runs `go mod tidy` and `go vet`, requires `gofmt -l` to be empty, builds with TinyGo, installs the plugin and checks that the host loads it.
+- `just plugin-examples go` runs the SDK and example tests, builds `example_go.wasm` and runs the three tests. It hands its `PATH` to the tests in `PLUGIN_TOOLS_PATH`, because the `mise exec` that starts nextest from the repository root puts Homebrew's `go` ahead of mise's `GOROOT`; the name has no `COX_` prefix, which cox would read as config. The `plugin-examples` CI job installs go and tinygo with `jdx/mise-action` (pinned v5.0.1, `working_directory: plugins`), builds and tests, then runs `plugin_example_go`. A missing toolchain fails the job.
+- Docs: a "Go" section in `docs/plugins.md`, whose WASI row now names `wasi = true`; the PL§13 Go row; rows for go, tinygo and go-pdk in `toolchain.md`; the `plugins/sdk-go` row in `plan.md` §1.
+Not done:
+- The SDK module already uses its repository path in `go.mod`, but its README, `doc.go` and the `plugins/sdk-go/v0.1.0` tag are T53.8. Until that tag exists, a scaffolded plugin's `go.mod` resolves the SDK only through `go mod tidy` with a `replace` (the template's `go.mod` comment says so). The template's `smoke` recipe (`go test` with `cox` on `PATH`) was not run on its own; `plugin_example_go_template` covers the same build, install and load.
+- Narrowest reading of "the PL§4 exports and host functions": every host function has a wrapper and every export runs through `Export`. Payloads that the example and template do not use (provider streams, render items, desktop contributions, tool schemas, model calls) are `json.RawMessage` or `any`, not typed Go structs.
+- `.editorconfig` asks for spaces, while gofmt writes tabs. The shared file was left as it is.
+- The task touches more files than the project's 3-file rule allows, as the card's own file list already did.
+- `cox::plain plain_transcript_snapshot` fails in this worktree (status line `ctx 1%` becomes `2%`), and it fails the same way with HEAD's `cli.rs`, `plugin_new.rs` and `picker.rs`. It is unrelated to this task and was left alone.
+Check:
+```text
+$ CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 just plugin-examples go
+ok  	github.com/pyrlyn/cox/plugins/sdk-go	(go test)
+ok  	github.com/pyrlyn/cox/plugins/sdk-go	0.095s   (tinygo test)
+ok  	github.com/pyrlyn/cox/plugins/examples/go
+        PASS [   0.322s] (1/3) cox::plugin_example_go plugin_example_go_counts_turns_in_its_status_and_resets_them
+        PASS [   3.661s] (2/3) cox::plugin_example_go plugin_example_go
+        PASS [  10.002s] (3/3) cox::plugin_example_go plugin_example_go_template
+     Summary [  10.003s] 3 tests run: 3 passed, 204 skipped
+$ tinygo test .   (plugins/sdk-go, with `return out, decodeReply(reply, &out)` restored)
+--- FAIL: TestTypedReplyCarriesTheDecodedValue (0.00s)
+$ CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 mise exec -- cargo nextest run -p cox -p cox-tui --no-fail-fast
+     Summary [  17.728s] 500 tests run: 499 passed, 1 failed, 5 skipped
+        FAIL cox::plain plain_transcript_snapshot   (pre-existing, see Not done)
+$ CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 mise exec -- cargo clippy -p cox -p cox-tui --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 46.41s
+$ mise exec -- cargo fmt --check
+(clean)
+```
+
 #### T69.8 Integer compact threshold
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-16 · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1 · Files: `crates/cox-core/src/compact.rs`
