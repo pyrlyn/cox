@@ -10374,6 +10374,26 @@ mise exec -- cargo clippy -p cox-app -p cox-tools --all-targets -- -D warnings: 
 mise exec -- cargo fmt --check: clean
 ```
 
+#### T52.25 `cox-ffi` and CoxModel carry the merge
+
+Depends: T52.24 · Size: ~80 · Files: `crates/cox-ffi/src/lib.rs`, `crates/cox-ffi/src/types.rs`, CoxModel `BestOfStore`
+Goal: `App.best_of_merge` and `mergeable` forwarded as one-expression bodies (D11, A90), `BestOfMerge` and `Launched.merged_from` in the `#[uniffi::remote]` types; `BestOfStore` holds the chosen candidates and the chosen merger, and refreshes the comparison when the merge candidate appears.
+Check: `cox-ffi`'s `tests/forward_only.rs`; `just desktop-xcframework`; `swift test --package-path desktop/macos/Packages/CoxModel --filter BestOf`.
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16
+What landed: `types.rs` declares `BestOfMerge` with `#[uniffi::remote(Record)]` (`Launched.merged_from` was already declared by T52.24). `lib.rs` exports `App.best_of_merge(merge, theme) -> BestOfLaunch` (async, through `on_runtime`) and `App.mergeable(id) -> [u32]`, each one forwarding expression. Swift: `CoxClient` gains `BestOfMerge`, `BestOfMergeError`, and `merge`/`mergeable` on `BestOfClient`; `FixtureBestOf` applies the core's three refusals and adds the merger as a running candidate; `CoxCore/BestOfConvert.swift` forwards both calls to the generated bindings. `BestOfStore` keeps `mergeable` (read with the comparison), `chosen` (`toggle`, trimmed to `mergeable` on every read), `merger`, `mergeRequest` (two or more chosen and a merger, `from` ascending) and `merge(theme:)`, which reads the comparison again so the merge candidate shows at once, clears the choice when the merge started and keeps it, with the refusal as `failure`, when the core refused. DT§3.3.4 records the contract for Windows and Linux clients.
+
+Not done: `just desktop-xcframework` and the Swift packages that link `CoxFFIBindings` (`CoxCore`, the app target) were not built locally; the new Swift conversions were checked against the bindings `uniffi-bindgen` generates from the debug build (`bestOfMerge(merge:theme:) async throws -> BestOfLaunch`, `mergeable(id:) throws -> [UInt32]`, `BestOfMerge(id:from:by:)`) and CI's desktop-macos job builds them. The UI (Merge button, sheet) is T52.26.
+
+Check:
+```
+mise exec -- cargo nextest run -p cox-ffi: 18 tests run: 18 passed (forward_only::every_ffi_body_is_one_forward_expression, deps ffi_depends_only_on_app_and_protocol, app::best_of_merge_and_mergeable_cross_and_refuse_an_unknown_group)
+swift test --filter BestOf (desktop/macos/Packages/CoxModel): 11 tests passed, 4 new: bestOfMergeStoreHoldsTheChosenCandidatesAndBuildsTheRequest, bestOfMergeAddsTheMergeCandidateAndClearsTheChoice, bestOfMergeOfAPickedGroupIsOfferedNothingAndRefused, bestOfMergeFailureIsShownAfterTheComparisonIsRead (before the change the test target did not compile: no BestOfMerge, mergeable, merge or chosen)
+mise exec -- cargo clippy -p cox-ffi --all-targets -- -D warnings: clean
+mise exec -- cargo fmt --check: clean
+swiftlint --strict (CoxModel/Sources, CoxCore/Sources) and swift-format lint --strict --recursive (CoxModel, CoxCore): clean
+```
+
 #### T59.1 Deterministic working state pre-fills compaction
 
 Model: opus + grok-4.7 · Status: done 2026-10-07 · Depends: — · Size: ~180 · Priority: P1 · Complexity: 4

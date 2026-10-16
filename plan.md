@@ -70,7 +70,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T37.51 | todo | P2 | 2 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
-| T52.25 | todo | P2 | 2 | 0% | |
 | T52.26 | todo | P2 | 3 | 0% | |
 | T53.5 | todo | P3 | 3 | 0% | |
 | T53.6 | todo | P3 | 2 | 0% | |
@@ -1490,12 +1489,6 @@ Every card keeps the P51 rules, and:
 - an external agent's usage is its own billing: no `usage` row is invented for it, and the cost pill shows "—" as the mockup does;
 - a remote session never sends API keys or the Keychain's secrets over the wire and never forwards the ssh agent;
 - plugin widgets reach the screen only through `cox_sanitize::sanitize` and PL§8's limits, as in the TUI.
-
-#### T52.25 `cox-ffi` and CoxModel carry the merge
-
-Depends: T52.24 · Size: ~80 · Files: `crates/cox-ffi/src/lib.rs`, `crates/cox-ffi/src/types.rs`, CoxModel `BestOfStore`
-Goal: `App.best_of_merge` and `mergeable` forwarded as one-expression bodies (D11, A90), `BestOfMerge` and `Launched.merged_from` in the `#[uniffi::remote]` types; `BestOfStore` holds the chosen candidates and the chosen merger, and refreshes the comparison when the merge candidate appears.
-Check: `cox-ffi`'s `tests/forward_only.rs`; `just desktop-xcframework`; `swift test --package-path desktop/macos/Packages/CoxModel --filter BestOf`.
 
 #### T52.26 CoxUI: Merge in the best-of compare view
 
