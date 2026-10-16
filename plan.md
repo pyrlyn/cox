@@ -146,7 +146,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | todo | P2 | 3 | 0% |  |
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | todo | P2 | 1 | 0% |  |
-| T69.2 | in progress | P1 | 2 | 0% | Claude Code / sonnet-5.5 |
 | T69.4 | todo | P3 | 1 | 0% | |
 | T69.5 | todo | P1 | 3 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
@@ -3050,24 +3049,6 @@ Rationale in §6 A159. Found by reading openai/codex at `f0c5077c34ec7a76b4ad913
 **Not taken (codex and grok-build already behind cox):** codex middle truncation and "N tokens truncated" markers (lossy; `truncate.rs` keeps an `expand` id), the network MITM proxy, Starlark exec policy, compaction prompts, `process-hardening`; grok-build bytes/4 estimator, tool-pair snapping, two-pass prefire, TUI, config overlay.
 
 **rtok follow-ups (outside cox; for pyrlyn/rtok `plan.md`, not claimed here).** Lossless tool-schema shrink on the proxy ([codex `codex-rs/tools/src/json_schema/compaction.rs` L14–153](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/tools/src/json_schema/compaction.rs#L14-L153), Apache-2.0, implement similar: archive the original, add an `expand` id); MCP results fit after JSON escaping ([codex `codex-rs/utils/output-truncation/src/lib.rs` L43–87](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/utils/output-truncation/src/lib.rs#L43-L87), Apache-2.0, implement similar); `rtok doctor` budgeted `quick_check` (codex `state/src/sqlite/validation.rs`, doctor only, never the hook path); do not deny a native `Read` of `AGENTS.md`, `CLAUDE.md` or `SKILL.md` ([grok-build `read_file/mod.rs` L244–278](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build/read_file/mod.rs#L244-L278), Apache-2.0, implement similar; D6 forbids copying into a plugin).
-
-#### T69.2 Honor `permissions.allow_for_session_persists`
-
-Model: Claude Code / sonnet-5.5 · Status: in progress · Depends: T69.1 · Size: ~180 · Priority: P1 · Complexity: 3
-
-Goal: When the user answers `AllowForSession` and the flag is true, append one prefix rule (for example `Bash(git status:*)`, never a bare `Bash`) to the user config's `permissions.allow` with `toml_edit`, under an advisory lock, via temp file and rename; skip duplicates; never persist for opaque segments, when a deny rule matches, or for `cloud_agent`.
-
-Why: the flag is read and ignored (`cox-protocol/src/config.rs` L875–892, `docs/compat.md` L74). Do not add the `starlark` crate: codex's own `deny.toml` carries unmaintained transitive advisories from it.
-
-Source: [codex `codex-rs/execpolicy/src/amend.rs` `blocking_append_allow_prefix_rule` L63–81](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/execpolicy/src/amend.rs#L63-L81)
-
-Licence: Apache-2.0, implement similar, not copy (header and `NOTICE` needed). **Implement similar, do not copy:** codex writes Starlark `prefix_rule(...)`, cox rules are strings.
-
-Files: `crates/cox-core/src/session.rs`, `crates/cox-permission/src/lib.rs` (the `grants_for` pair), `docs/compat.md`, `docs/config.md`
-
-Plan: (1) `AllowRuleStore` trait in `cox-protocol` (the core does no file I/O), installed by the surface like the checkpointer; (2) `cox-config::cmd::append_allow_rule_in`: `toml_edit`, advisory lock on a sibling file, temp file and rename, duplicate skipped; (3) `Engine::persistable_allow_rules` next to `grants_for`: `Bash(<command>:*)` per command, empty for an opaque or unsplit line, a deny match, or another tool; (4) `Session::persist_grant` behind the flag, called after the grant; `cox-session` installs a `cox-config` backed store; (5) `config/default.toml` comment (regenerates `docs/config.md`), delete the `docs/compat.md` row. Verify: the Check below plus `-p cox-config -p cox-permission -p cox-session`.
-
-Done when tests prove: flag off writes nothing; flag on appends one line and a second approval does not duplicate; an opaque PowerShell line and a deny match are not persisted; the `docs/compat.md` row is deleted. Check: `mise exec -- cargo nextest run -p cox-core -E 'test(allow_for_session)'`, `bash scripts/leftovers.sh`.
 
 #### T69.4 Budgeted `quick_check` when the store opens
 

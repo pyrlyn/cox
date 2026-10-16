@@ -213,6 +213,25 @@ Check:
 - `cargo clippy -p cox-tools -p cox-core --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T69.2 Honor `permissions.allow_for_session_persists`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Depends: T69.1 · Priority: P1 · Complexity: 3 · Files: `crates/cox-protocol/src/traits.rs`, `crates/cox-config/src/cmd.rs`, `crates/cox-permission/src/lib.rs`, `crates/cox-core/src/session.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-session/src/allow_rules.rs`, `config/default.toml`, `docs/compat.md`, `docs/config.md`
+Goal: When the user answers `AllowForSession` and the flag is true, append one prefix rule (for example `Bash(git status:*)`, never a bare `Bash`) to the user config's `permissions.allow` with `toml_edit`, under an advisory lock, via temp file and rename; skip duplicates; never persist for opaque segments, when a deny rule matches, or for `cloud_agent`. No `starlark` crate.
+Licence: Apache-2.0 source (codex `execpolicy/src/amend.rs`) read for the idea only; nothing copied (codex writes Starlark, cox rules are strings), so no per-file header or `NOTICE` is needed.
+What landed:
+- `AllowRuleStore` (`cox-protocol`): the one-method trait the core calls, because `cox-core` does no file I/O and may not depend on `cox-config`. `Session::set_allow_rule_store` installs it like the checkpointer; children share it. `cox-session` installs `allow_rules::UserConfigRules`, which forwards to `cox-config`.
+- `cox_config::cmd::append_allow_rule_in`: `toml_edit` edit (comments kept, an inline array stays inline, a new list is one rule per line), `check_user_toml` before writing, an advisory lock (`File::lock`) on a sibling `.config.toml.lock`, a temp file and `rename`, a symlinked `config.toml` edited at its target, a duplicate skipped (`Ok(false)`). A non-array `allow` is `ConfigError::NotAnArray` and leaves the file as it was.
+- `Engine::persistable_allow_rules` (`cox-permission`, next to `grants_for`): one `Bash(<command>:*)` per command of a split line, all or nothing, each checked to read back as a prefix that matches its command. Empty for another tool (so `cloud_agent`, `edit`, `web_fetch` stay session-only), an opaque or unsplit line, a deny rule on the line, a read-path deny, or a command with control characters.
+- `Session::persist_grant`, called from `turn.rs` after the session grant, behind the flag. A failed write is a `Notice(Warn)`, never a failed approval.
+- `config/default.toml` comment (regenerates `docs/config.md`); the `docs/compat.md` T2.2 row is deleted.
+Left alone: the live engine is not recompiled with the new rule (the session grant already covers this run; the next session loads it); `AllowForSession` on a file or URL tool is still session-only; a project config is never written.
+Check:
+- `cargo nextest run -p cox-core -E 'test(allow_for_session)'`: 7 run, 7 passed (flag off writes nothing; flag on saves `Bash(cargo test:*)` and `Bash(git status:*)` once, a second session adds nothing; a plain allow, an opaque PowerShell pipeline and a denied line save nothing; a failing store warns and the call still runs).
+- `cargo nextest run -p cox-config -E 'test(allow_rule_append)'`: 4 passed (new file, duplicate and comments, non-array, eight threads lose nothing). `-p cox-session -E 'test(allow_for_session)'`: 2 passed (real file written once; unwritable target is an error). `-p cox-permission`: 19 passed.
+- `cargo nextest run -p cox-protocol -p cox-config -p cox-permission -p cox-core -p cox-session`: 547 passed, 1 skipped, plus `cox-protocol` 121 passed.
+- `cargo clippy -p cox-protocol -p cox-config -p cox-permission -p cox-core -p cox-session --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean.
+- `bash scripts/leftovers.sh` exits 1 on `main` already (516 lines for done entries with no closing task or compat row); this change removes one line (the T2.2 row) and adds none.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`

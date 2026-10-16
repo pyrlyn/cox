@@ -39,8 +39,8 @@ pub use errors::{
 };
 pub use ids::{ArchiveId, CallId, ItemId, SessionId, TaskId, TurnId};
 pub use traits::{
-    Archive, ArchivePut, Before, Change, CheckpointRow, Checkpointer, GrantScope, Hook,
-    HunkReverter, MemoryHit, PluginGrant, PluginStore, PreImage, Provider, Relay, SessionRow,
+    AllowRuleStore, Archive, ArchivePut, Before, Change, CheckpointRow, Checkpointer, GrantScope,
+    Hook, HunkReverter, MemoryHit, PluginGrant, PluginStore, PreImage, Provider, Relay, SessionRow,
     Snapshot, Store, Tool, ToolCx, UsageRow,
 };
 pub use types::ArchiveRef;

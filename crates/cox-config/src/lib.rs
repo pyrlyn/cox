@@ -48,6 +48,10 @@ pub enum ConfigError {
     /// A dotted key walks through a value that is not a table.
     #[error("`{part}` in `{key}` is not a table")]
     NotATable { part: String, key: String },
+    /// `permissions.allow` exists in the file but is not an array, so there
+    /// is nothing to append to without discarding what the user wrote.
+    #[error("`{key}` is not an array")]
+    NotAnArray { key: String },
     /// A value that has no TOML form a config key takes (`null`, an object).
     #[error("`{key}` cannot be set to {value}")]
     UnsupportedValue { key: String, value: String },

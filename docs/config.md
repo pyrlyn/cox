@@ -164,7 +164,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `ask` = `[]` — a project config adds rules to this list, never replaces it
 - `deny` = `["Read(~/.ssh/**)", "Read(~/.aws/**)", "Bash(rm -rf /*)"]` — a project config adds rules to this list, never replaces it
 - `import_claude_settings` = `true`
-- `allow_for_session_persists` = `false`
+- `allow_for_session_persists` = `false` — T69.2: true also appends a Bash(<command>:*) prefix rule per approved shell command to allow in the user config, once; never for an opaque line, a denied line or another tool
 ## `[sandbox]`
 
 - `mode` = `"workspace-write"` — read-only | workspace-write | danger-full-access
