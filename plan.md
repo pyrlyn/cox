@@ -78,7 +78,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T53.9 | todo | P3 | 1 | 0% | |
 | T56.9 | todo | P3 | 1 | 0% | |
 | T56.10 | todo | P3 | 2 | 0% | |
-| T56.12 | todo | P3 | 2 | 0% | |
+| T56.12 | in progress | P3 | 2 | 10% | Claude Code / sonnet-5.5 |
 | T57.1 | todo | P1 | 2 | 90% | |
 | T57.4 | todo | P1 | 4 | 0% | |
 | T57.5 | todo | P1 | 4 | 0% | |
@@ -1570,6 +1570,7 @@ Goal: when the driver refuses a cloud run (no `CloudAgent(<repo>)` allow rule, a
 Check: `mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_no_request` asserts the `task_completed` event and the task result carry the refusal text naming `CloudAgent(acme/widgets)` and not "produced no answer" (fails before the fix); `mise exec -- cargo nextest run -p cox-core subagent` still passes.
 Done when: the tests pass.
 Out of scope: an approval prompt from a background task (needs core work: a background task has no way to show one yet, T56.6).
+Plan: (1) extend `cloud_agent_without_an_allow_rule_makes_no_request` and watch it fail; (2) carry the refusal text from `external_turn` (sanitized) into the task close in `subagent.rs`, as an error result; (3) run the cox and cox-core tests, clippy, fmt.
 
 ### P57 — Windows build of the core (goal: the workspace builds and its tests run on Windows, and `cox` runs there under D7's rule — no sandbox, a loud warning, `on-request` forced)
 
