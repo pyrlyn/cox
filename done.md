@@ -96,6 +96,19 @@ Check:
 - `cargo clippy -p cox-core --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T64.11 Delete the dead `revert-on-failure` job from `ci.yml`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 1 · Files: `.github/workflows/ci.yml`
+Goal: `ci.yml` carries no job that can never run. `revert-on-failure` only fires on `github.event_name == 'push'` to `refs/heads/main`, but `ci.yml` has had no `push` trigger since `5f8658f7` (`ci: disable workflow on push to main (#23)`, 2026-09-18), so the job was dead code.
+What landed:
+- The job is deleted. Option chosen: delete, not re-add the trigger. Dropping the `push` trigger was deliberate (#23), and re-adding it would run the whole expensive matrix (`rust`, both footprint jobs, `sandbox-landlock`, `plugins`, `plugin-examples`, `docs`) a second time on every merge of an already green pull request. `pipeline.yml` still runs on push to `main` and its shared workflow has its own `main-failure` job (`pyrlyn/ci#56`, `issues: write` in `pipeline.yml`), so a red `main` is still reported.
+- Two comments that named the job (the top-level `permissions` note and the `windows` job note) no longer mention it. No other file claims that `main` failures are reverted automatically; the older `done.md` and `plan.md` A22 lines describe the job as it was and stay as history.
+Not done: no Rust test, because this is a workflow-only change with no Rust code behind it. No automatic revert of a red `main` exists (the job had not run since 2026-09-18, so behavior is unchanged). PR #242 (`release-ci-alert.yml`, a new file) does not touch it. The `plan.md` findings row for T64.11 is marked `done`, as T64.1 is.
+Check:
+- `actionlint -shellcheck= .github/workflows/ci.yml` (1.7.12): one finding, the intentional `if: false` on the `windows` job (creator, 2026-09-29), present before this change; nothing new. The `shellcheck` shim is not installed here, so shellcheck was skipped.
+- YAML parses (ruby `YAML.load_file`): 17 jobs, every `needs:` entry names an existing job.
+- `grep -rn revert-on-failure .github` and `grep -n revert .github/workflows/ci.yml`: no matches.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
