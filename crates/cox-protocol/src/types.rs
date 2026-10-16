@@ -456,6 +456,33 @@ pub enum ApprovalPolicy {
     Never,
 }
 
+impl ApprovalPolicy {
+    /// How much the policy lets run without asking: `Never < Untrusted <
+    /// OnRequest < OnFailure`. `Never` turns every ask into a deny and
+    /// `Untrusted` asks for anything not read-only, while `OnFailure` is the
+    /// only one that runs `Exec` unasked. The one definition of that order,
+    /// used by the project-config guard (T64.6); an exhaustive match, so a
+    /// new policy cannot join it unranked.
+    pub fn looseness(self) -> u8 {
+        match self {
+            ApprovalPolicy::Never => 0,
+            ApprovalPolicy::Untrusted => 1,
+            ApprovalPolicy::OnRequest => 2,
+            ApprovalPolicy::OnFailure => 3,
+        }
+    }
+
+    /// The name `permissions.approval` takes in a config file.
+    pub fn name(self) -> &'static str {
+        match self {
+            ApprovalPolicy::Never => "never",
+            ApprovalPolicy::Untrusted => "untrusted",
+            ApprovalPolicy::OnRequest => "on-request",
+            ApprovalPolicy::OnFailure => "on-failure",
+        }
+    }
+}
+
 /// Why `Event::Compacted` happened (plan.md §1.10, T28.3).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
