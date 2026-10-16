@@ -38,6 +38,7 @@ public struct TaskOutputSheet: View {
           .textStyle(.monoTerminal)
           .foregroundStyle(Color(.textTerminal))
           .textSelection(.enabled)
+          .coxPointer(.selectableText)
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.horizontal, Space.ml)
           .padding(.vertical, Space.m)

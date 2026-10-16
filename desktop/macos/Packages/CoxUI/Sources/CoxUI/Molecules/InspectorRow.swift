@@ -117,7 +117,7 @@ private struct RowActionButton: View {
     Button(action: action.perform) {
       Image(systemName: action.symbol).symbolStyle(.footnote)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
     .foregroundStyle(Color(.textSecondary))
     .help(action.title)
     .accessibilityHidden(true)

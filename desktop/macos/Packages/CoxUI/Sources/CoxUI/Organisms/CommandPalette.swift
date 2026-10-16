@@ -174,7 +174,7 @@ private struct PaletteRow: View {
       .background { if isSelected { shape.fill(Color(.accent)) } }
       .contentShape(shape)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
     .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
 
