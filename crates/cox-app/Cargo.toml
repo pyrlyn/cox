@@ -61,6 +61,9 @@ schemars = { workspace = true }
 # T37.49: the welcome hero reads `Cargo.toml`'s `[workspace] members`;
 # already in the tree through cox-config.
 toml_edit = { workspace = true }
+# T68.1: the launch command and launcher lookup for a run target; `ssh` is
+# the first kind the remote link uses.
+cox-target = { path = "../cox-target", version = "0.1.2" }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
