@@ -1,3 +1,25 @@
+#### T69.8 Integer compact threshold
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-16 · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1 · Files: `crates/cox-core/src/compact.rs`
+Goal: `needs_compaction` compares in integers (`last * 10_000 >= scaled_compact_at * max_context`, saturating, false for a zero window) instead of `f64`.
+Plan (Claude Code / haiku-5.5): (1) claim-named tests in `compact.rs` first: the 0.07/100 boundary, a saturating huge threshold, a zero window, and a NaN threshold; run them against the f64 code. (2) Replace the float comparison in `needs_compaction` with `u64` math on `compact_at` scaled to parts per 10 000 (`round`, then `saturating_mul`), with an explicit `max_context == 0 || compact_at.is_nan()` guard. (3) Run `cox-core` nextest, clippy and fmt.
+What landed: the integer comparison in `needs_compaction` only. The signature, the `compact_at` config field and its default (0.75) are unchanged. `threshold` and `near` stay as they are: they serve the pre-call fit check (§1.10). NaN keeps the old never-fires answer, since a bare float-to-int cast would read NaN as 0 and compact every turn.
+Not done: "a window above 2^53 is exact" cannot be reached through this function: it takes `u32` token counts (`session.rs` passes `u32`), so the largest window is about 4.3e9, and the u64 math is exact for every input the signature admits. The 4-decimal scale is a precision limit: a `compact_at` with more than four decimals is rounded to the nearest 0.0001, where the f64 path kept the full value. The new tests do not cover that rounding.
+Check: the boundary test is the one that fails on the f64 code. The other new tests (saturation, zero window, NaN) pass on f64 as well; they guard the integer version against the naive mistakes (overflow, a zero window that compacts every turn, NaN firing every turn).
+```text
+$ mise exec -- cargo nextest run -p cox-core compact_trigger   (f64 code, new tests added)
+FAIL compact::tests::compact_trigger_boundary_is_exact_where_f64_rounds_up: assertion failed: needs_compaction(7, 100, 0.07)
+PASS compact_trigger_is_a_fraction_of_max_context, compact_trigger_saturates_on_huge_threshold, compact_trigger_zero_window_never_fires
+$ mise exec -- cargo nextest run -p cox-core compact_trigger   (integer code)
+5 tests run: 5 passed (adds compact_trigger_nan_threshold_never_fires)
+$ mise exec -- cargo nextest run -p cox-core
+394 tests run: 394 passed, 1 skipped
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check -p cox-core
+clean
+```
+
 #### T67.2 Run prompt and http hooks, failing open
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-15 · Depends: T67.1 · Size: ~180 (landed larger; see Not done) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/hooks.rs`, `crates/cox-ext/src/hooks.rs`, `crates/cox-web/src/lib.rs`, `crates/cox-core/Cargo.toml`, `crates/cox-ext/Cargo.toml`, `crates/cox/tests/deps.rs`

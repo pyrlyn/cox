@@ -121,7 +121,16 @@ pub(crate) fn needs_compaction(
     max_context: u32,
     compact_at: f64,
 ) -> bool {
-    threshold(max_context, compact_at).is_some_and(|limit| f64::from(last_context_tokens) >= limit)
+    // A NaN `compact_at` must keep the old never-fires answer; the float-to-int
+    // cast below would read it as 0 and fire on every turn.
+    if max_context == 0 || compact_at.is_nan() {
+        return false;
+    }
+    // Parts per 10 000 keep the boundary exact: a float product like
+    // 0.07 * 100 can land just above an integer token count.
+    let scaled_compact_at = (compact_at * 10_000.0).round() as u64;
+    u64::from(last_context_tokens) * 10_000
+        >= scaled_compact_at.saturating_mul(u64::from(max_context))
 }
 
 /// ⌈bytes/4⌉ of the serialised messages: the same heuristic `truncate` and
@@ -927,6 +936,31 @@ mod tests {
         assert!(needs_compaction(750, 1000, 0.75));
         assert!(!needs_compaction(749, 1000, 0.75));
         assert!(!needs_compaction(1, 0, 0.75));
+    }
+
+    #[test]
+    fn compact_trigger_boundary_is_exact_where_f64_rounds_up() {
+        // 0.07 * 100 is 7.000000000000001 in f64, so a float comparison
+        // would keep a session at exactly 7 tokens under the threshold.
+        assert!(needs_compaction(7, 100, 0.07));
+        assert!(!needs_compaction(6, 100, 0.07));
+    }
+
+    #[test]
+    fn compact_trigger_saturates_on_huge_threshold() {
+        assert!(!needs_compaction(u32::MAX, u32::MAX, f64::MAX));
+        assert!(!needs_compaction(u32::MAX, u32::MAX, f64::INFINITY));
+    }
+
+    #[test]
+    fn compact_trigger_zero_window_never_fires() {
+        assert!(!needs_compaction(u32::MAX, 0, 0.0));
+        assert!(!needs_compaction(0, 0, 0.0));
+    }
+
+    #[test]
+    fn compact_trigger_nan_threshold_never_fires() {
+        assert!(!needs_compaction(u32::MAX, u32::MAX, f64::NAN));
     }
 
     fn user(text: &str) -> Message {
