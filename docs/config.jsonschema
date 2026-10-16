@@ -2061,7 +2061,7 @@
           "default": false
         },
         "dir": {
-          "description": "Override for `~/.cox/projects/<slug>/memory`; empty means default.",
+          "description": "Override for `~/.cox/projects/<slug>/memory`; empty means default. A project config may only name an existing absolute directory inside its own git root (T64.17).",
           "type": "string",
           "default": ""
         },

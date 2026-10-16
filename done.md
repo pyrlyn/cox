@@ -187,6 +187,19 @@ Check:
 - YAML parses (ruby `YAML.load_file`): 17 jobs, every `needs:` entry names an existing job.
 - `grep -rn revert-on-failure .github` and `grep -n revert .github/workflows/ci.yml`: no matches.
 
+#### T64.17 Guard project `memory.dir`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
+Goal: a project `.cox/config.toml` can no longer point `memory.dir` anywhere. `cox-session` reads the memory index into the model's context and writes extracted facts to that directory, so an unguarded value let a cloned repository read or write files outside its checkout.
+What landed:
+- `apply_project_guards` reverts a project `memory.dir` to the value without the project layer (with a `GuardViolation`) unless it is empty (the default location), equals the user's value, or passes `root_inside`, the same test the `core.workspace_roots` guard uses: absolute, existing, and canonically inside the git root. A relative path, `..` and a symlink out of the checkout all fail it.
+- `memory.dir` is in `GUARDED_KEYS` with its own reason, so `source_of("memory.dir")` reports the user's layer after a revert. The field doc, `docs/config.jsonschema` and `plan.md` §1.6 say what a project may set.
+- Test `project_config_cannot_point_memory_dir_outside_the_checkout`: an existing directory inside the checkout, the user's own value and an empty value stay; `/`, a relative path, a symlink out and `<root>/..` revert, with the violation, its reason and the provenance checked. It failed before the fix (`memory.dir` stayed `/`).
+Not done: a project `memory.dir` that does not exist yet is reverted, because `root_inside` needs the path to exist to resolve symlinks; create the directory first. The user, env and flag layers are not guarded.
+Check:
+- `cargo nextest run -p cox-config -p cox-protocol`: 160 run, 160 passed (includes `every_guarded_key_has_its_own_reason` and `config_jsonschema_matches_committed_file`).
+- `cargo clippy -p cox-config -p cox-protocol --all-targets -- -D warnings`: clean.
+
 #### T64.20 Enforce a subagent definition's tool allowlist; drop the unused `AgentDef::restrict`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-core/src/subagent.rs`, `crates/cox-protocol/src/agent.rs`

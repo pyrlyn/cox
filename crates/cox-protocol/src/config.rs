@@ -1457,7 +1457,7 @@ pub struct MemoryConfig {
     pub enabled: bool,
     /// Whether end-of-session extraction runs (on the `memory` job's tier).
     pub extract: bool,
-    /// Override for `~/.cox/projects/<slug>/memory`; empty means default.
+    /// Override for `~/.cox/projects/<slug>/memory`; empty means default. A project config may only name an existing absolute directory inside its own git root (T64.17).
     pub dir: String,
     /// The bar a `salience` `Score` must clear to keep an extracted item
     /// (T33.21.1); fixed here, never moved by the plugin's answer.
