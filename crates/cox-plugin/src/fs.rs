@@ -132,14 +132,19 @@ fn resolve(
     };
     let target = format!("{}{rest}", base.display());
     // A preopen needs a directory to exist; only the plugin's own data
-    // directory is ours to create.
+    // directory is ours to create. Its base must exist for `confine` to
+    // resolve against, but the declared sub-path is created only after
+    // `confine` accepts it, so a root that escapes leaves nothing behind.
     if is_data {
-        std::fs::create_dir_all(&target).map_err(|_| FsError::Mount(decl.to_string()))?;
+        std::fs::create_dir_all(&data).map_err(|_| FsError::Mount(decl.to_string()))?;
     }
     let host = (roots.confine)(base, &target).map_err(|why| FsError::Confined {
         root: decl.to_string(),
         why,
     })?;
+    if is_data {
+        std::fs::create_dir_all(&host).map_err(|_| FsError::Mount(decl.to_string()))?;
+    }
     if writable && !is_data {
         let workspace = (roots.confine)(base, &base.display().to_string())
             .map_err(|_| FsError::Protected(decl.to_string()))?;
@@ -196,10 +201,22 @@ fn reaches_protected(root: &Path, workspace: &Path) -> bool {
 mod tests {
     use super::*;
 
+    /// Like the real `confine`: a path that does not exist yet is resolved
+    /// through its deepest existing ancestor, and a tail that climbs is refused.
     fn confine_in(root: &Path, input: &str) -> Result<PathBuf, String> {
         let real = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
-        let path = PathBuf::from(input);
-        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let mut existing = PathBuf::from(input);
+        let mut tail = Vec::new();
+        while !existing.exists() {
+            let name = existing.file_name().ok_or("no existing ancestor")?;
+            tail.push(name.to_owned());
+            existing.pop();
+        }
+        if tail.iter().any(|c| c == "..") {
+            return Err("climbs out".into());
+        }
+        let mut path = std::fs::canonicalize(&existing).map_err(|e| e.to_string())?;
+        path.extend(tail.iter().rev());
         if path.starts_with(&real) {
             Ok(path)
         } else {
@@ -252,6 +269,24 @@ mod tests {
             Some(&f.roots),
         );
         assert!(ok.is_ok(), "{ok:?}");
+    }
+
+    /// The guard holds when called alone: a `$PLUGIN_DATA` root that climbs
+    /// out (manifest validation normally stops it first) is refused by
+    /// `confine` before any directory is created.
+    #[test]
+    fn escaping_data_root_creates_nothing_outside() {
+        let f = fixture();
+        let roots = f.roots.clone();
+        let err = mounts(
+            "p",
+            false,
+            &caps(&[], &["$PLUGIN_DATA/../../escape"]),
+            Some(&roots),
+        );
+        assert!(matches!(err, Err(FsError::Confined { .. })), "{err:?}");
+        let outside = roots.data_base.parent().unwrap().join("escape");
+        assert!(!outside.exists(), "created {outside:?} before confine ran");
     }
 
     #[test]
