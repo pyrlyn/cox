@@ -24,6 +24,8 @@
 //! holding the 1-based line numbers, matching plan.md §1.11's "ambiguity is
 //! an error listing match lines".
 
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use cox_protocol::{
     ArchivePut, Concurrency, Diff, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolSpec,
@@ -31,6 +33,7 @@ use cox_protocol::{
 use serde_json::{Value, json};
 use similar::TextDiff;
 
+use crate::open::read_confined;
 use crate::path::confine;
 use crate::write::{atomic_write, str_field};
 
@@ -104,57 +107,69 @@ impl Tool for EditTool {
 
         let path = confine(&cx.writable_roots, &cx.cwd, &path_arg)?;
 
-        let raw = std::fs::read(&path).map_err(|_| ToolError::NotFound)?;
-        if raw.contains(&0) {
-            return Err(ToolError::Binary);
-        }
-        let original = String::from_utf8(raw).map_err(|_| ToolError::Binary)?;
-
-        // Normalise to `\n` for matching/splicing, then restore CRLF (if the
-        // file had it) and let the untouched-region splice carry the
-        // trailing-newline state through unchanged.
-        let crlf = original.contains("\r\n");
-        let work = if crlf {
-            original.replace("\r\n", "\n")
-        } else {
-            original.clone()
-        };
-
-        let new_work = apply_replace(&work, &old, &new, replace_all)?;
-        let result = if crlf {
-            new_work.replace('\n', "\r\n")
-        } else {
-            new_work
-        };
-
-        cx.archive
-            .put(ArchivePut {
-                session: cx.session,
-                call: cx.call,
-                tool: "edit".to_string(),
-                subject: Some(path.display().to_string()),
-                bytes: original.clone().into_bytes(),
-            })
-            .await
-            .map_err(|_| ToolError::Io)?;
-
-        atomic_write(&path, result.as_bytes())?;
-
-        let label = path.display().to_string();
-        let text_diff = TextDiff::from_lines(&original, &result);
-        let mut unified = text_diff.unified_diff();
-        unified.context_radius(3).header(&label, &label);
-
-        Ok(ToolOutput {
-            text: format!("edited {label}"),
-            is_error: false,
-            diff: Some(Diff {
-                path,
-                unified: unified.to_string(),
-            }),
-            structured: None,
-        })
+        edit_at(path, &old, &new, replace_all, cx).await
     }
+}
+
+/// Everything after `confine`: its own function so a test can swap the path
+/// for a symlink between the two, the window T64.15 closes.
+async fn edit_at(
+    path: PathBuf,
+    old: &str,
+    new: &str,
+    replace_all: bool,
+    cx: &ToolCx,
+) -> Result<ToolOutput, ToolError> {
+    let raw = read_confined(&cx.writable_roots, &path)?;
+    if raw.contains(&0) {
+        return Err(ToolError::Binary);
+    }
+    let original = String::from_utf8(raw).map_err(|_| ToolError::Binary)?;
+
+    // Normalise to `\n` for matching/splicing, then restore CRLF (if the
+    // file had it) and let the untouched-region splice carry the
+    // trailing-newline state through unchanged.
+    let crlf = original.contains("\r\n");
+    let work = if crlf {
+        original.replace("\r\n", "\n")
+    } else {
+        original.clone()
+    };
+
+    let new_work = apply_replace(&work, old, new, replace_all)?;
+    let result = if crlf {
+        new_work.replace('\n', "\r\n")
+    } else {
+        new_work
+    };
+
+    cx.archive
+        .put(ArchivePut {
+            session: cx.session,
+            call: cx.call,
+            tool: "edit".to_string(),
+            subject: Some(path.display().to_string()),
+            bytes: original.clone().into_bytes(),
+        })
+        .await
+        .map_err(|_| ToolError::Io)?;
+
+    atomic_write(&path, result.as_bytes())?;
+
+    let label = path.display().to_string();
+    let text_diff = TextDiff::from_lines(&original, &result);
+    let mut unified = text_diff.unified_diff();
+    unified.context_radius(3).header(&label, &label);
+
+    Ok(ToolOutput {
+        text: format!("edited {label}"),
+        is_error: false,
+        diff: Some(Diff {
+            path,
+            unified: unified.to_string(),
+        }),
+        structured: None,
+    })
 }
 
 /// Applies `old` -> `new` to `content` (already CRLF-normalised to `\n`),
@@ -395,5 +410,26 @@ mod tests {
             }
             other => panic!("expected Denied, got {other:?}"),
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn edit_refuses_a_path_swapped_to_a_symlink_after_confine() {
+        let swap = crate::swap_fixture::Swap::new();
+        swap.file("secret.txt", "mine");
+        swap.file("sub/secret.txt", "mine");
+        let cx = cx(&swap.root);
+        let leaf = confine(&cx.writable_roots, &swap.root, "secret.txt").expect("confine");
+        let nested = confine(&cx.writable_roots, &swap.root, "sub/secret.txt").expect("confine");
+        swap.swap_leaf("secret.txt");
+        swap.swap_parent("sub");
+
+        for path in [leaf, nested] {
+            let err = edit_at(path, "secret", "changed", false, &cx)
+                .await
+                .expect_err("must refuse");
+            assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
+        }
+        assert_eq!(swap.outside_secret(), crate::swap_fixture::SECRET);
     }
 }

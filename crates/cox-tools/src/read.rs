@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use similar::TextDiff;
 
+use crate::open::read_confined;
 use crate::outline::{self, Def};
 use crate::path::confine;
 
@@ -94,59 +95,62 @@ impl Tool for ReadTool {
             why: format!("invalid input: {e}"),
         })?;
         let path = confine(&cx.roots, &cx.cwd, &input.path)?;
-
-        // ponytail: the whole file is loaded before the binary sniff below;
-        // fine for source-sized files (this tool's use case), a real
-        // ceiling only for very large binaries — upgrade to a bounded
-        // `File::open` + `take(BINARY_SNIFF_BYTES)` pre-read if that shows
-        // up in practice.
-        let bytes = std::fs::read(&path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                ToolError::NotFound
-            } else {
-                ToolError::Io
-            }
-        })?;
-
-        // Before the NUL sniff: every accepted image format carries NUL bytes.
-        if let Some(media_type) = image::sniff(&bytes) {
-            return read_image(media_type, &bytes, &input);
-        }
-
-        let sniff_len = bytes.len().min(BINARY_SNIFF_BYTES);
-        if bytes[..sniff_len].contains(&0) {
-            return Err(ToolError::Binary);
-        }
-
-        let content = String::from_utf8_lossy(&bytes);
-        let total_lines = if content.is_empty() {
-            0
-        } else {
-            content.lines().count()
-        };
-
-        let mode = input.mode.as_deref().unwrap_or("text");
-        let text = if let Some(symbol) = input.symbol.as_deref() {
-            // The resolved span goes through the ordinary ranged read, so
-            // the cap and the footer are the same as for `lines=`.
-            let range = resolve_symbol(&path, &content, symbol)?;
-            render_text(&content, total_lines, Some(&range))
-        } else if mode == "outline" {
-            let body = outline::outline(&path, &content);
-            cap(format!("{body}\n\n[outline of {total_lines} lines total]"))
-        } else {
-            render_text(&content, total_lines, input.lines.as_deref())
-        };
-
-        // The file's line count as data (DT G3): a summary says "120
-        // lines" without parsing the footer.
-        Ok(ToolOutput {
-            text,
-            is_error: false,
-            diff: None,
-            structured: Some(serde_json::json!({ "lines": total_lines })),
-        })
+        read_at(&cx.roots, &path, &input)
     }
+}
+
+/// Everything after `confine`: its own function so a test can swap the path
+/// for a symlink between the two, the window T64.15 closes.
+fn read_at(
+    roots: &[std::path::PathBuf],
+    path: &std::path::Path,
+    input: &ReadInput,
+) -> Result<ToolOutput, ToolError> {
+    // ponytail: the whole file is loaded before the binary sniff below;
+    // fine for source-sized files (this tool's use case), a real
+    // ceiling only for very large binaries — upgrade to a bounded
+    // `File::open` + `take(BINARY_SNIFF_BYTES)` pre-read if that shows
+    // up in practice.
+    let bytes = read_confined(roots, path)?;
+
+    // Before the NUL sniff: every accepted image format carries NUL bytes.
+    if let Some(media_type) = image::sniff(&bytes) {
+        return read_image(media_type, &bytes, input);
+    }
+
+    let sniff_len = bytes.len().min(BINARY_SNIFF_BYTES);
+    if bytes[..sniff_len].contains(&0) {
+        return Err(ToolError::Binary);
+    }
+
+    let content = String::from_utf8_lossy(&bytes);
+    let total_lines = if content.is_empty() {
+        0
+    } else {
+        content.lines().count()
+    };
+
+    let mode = input.mode.as_deref().unwrap_or("text");
+    let text = if let Some(symbol) = input.symbol.as_deref() {
+        // The resolved span goes through the ordinary ranged read, so
+        // the cap and the footer are the same as for `lines=`.
+        let range = resolve_symbol(path, &content, symbol)?;
+        render_text(&content, total_lines, Some(&range))
+    } else if mode == "outline" {
+        let body = outline::outline(path, &content);
+        cap(format!("{body}\n\n[outline of {total_lines} lines total]"))
+    } else {
+        render_text(&content, total_lines, input.lines.as_deref())
+    };
+
+    // The file's line count as data (DT G3): a summary says "120
+    // lines" without parsing the footer.
+    Ok(ToolOutput {
+        text,
+        is_error: false,
+        diff: None,
+        structured: Some(serde_json::json!({ "lines": total_lines })),
+    })
 }
 
 /// The `"a-b"` line range of the one definition `symbol` names. Several or
@@ -627,5 +631,25 @@ mod tests {
             && !end.is_empty()
             && start.bytes().all(|b| b.is_ascii_digit())
             && end.bytes().all(|b| b.is_ascii_digit())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_refuses_a_path_swapped_to_a_symlink_after_confine() {
+        let swap = crate::swap_fixture::Swap::new();
+        swap.file("secret.txt", "mine");
+        swap.file("sub/secret.txt", "mine");
+        let roots = vec![swap.root.clone()];
+        let leaf = confine(&roots, &swap.root, "secret.txt").expect("confine");
+        let nested = confine(&roots, &swap.root, "sub/secret.txt").expect("confine");
+        swap.swap_leaf("secret.txt");
+        swap.swap_parent("sub");
+
+        let input: ReadInput =
+            serde_json::from_value(serde_json::json!({"path": "x"})).expect("input");
+        for path in [&leaf, &nested] {
+            let err = read_at(&roots, path, &input).expect_err("must refuse");
+            assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
+        }
     }
 }
