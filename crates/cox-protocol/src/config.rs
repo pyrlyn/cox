@@ -901,9 +901,10 @@ impl Default for PermissionsConfig {
 pub struct SandboxConfig {
     /// `sandbox.mode`; project config may not set this to `danger-full-access`.
     pub mode: SandboxMode,
-    /// Whether network access is allowed.
+    /// Whether network access is allowed; project config may not turn it on.
     pub network: bool,
-    /// Extra writable roots beyond the workspace.
+    /// Extra writable roots beyond the workspace; project config may only
+    /// keep roots the user layer already lists.
     pub writable: Vec<PathBuf>,
     /// Paths inside the workspace that stay read-only even in `workspace-write`.
     pub readonly_in_workspace: Vec<PathBuf>,
