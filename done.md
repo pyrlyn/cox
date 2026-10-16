@@ -140,6 +140,21 @@ Check:
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T64.15.1 Open a confined path without following a swapped symlink
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 3 · Files: `crates/cox-sandbox/src/open.rs`, `crates/cox-sandbox/src/path.rs`, `crates/cox-sandbox/src/lib.rs`, `crates/cox-sandbox/Cargo.toml`, `crates/cox-tools/src/lib.rs`, `plan.md`
+Goal: a path `confine` approved cannot be redirected outside the roots by a symlink swapped in before the open. T64.15 was split on claim: this is part A, the helper; T64.15.2 (read-side call sites) and T64.15.3 (write side through a parent-directory descriptor) stay open.
+What landed:
+- `cox_sandbox::open::open_confined(roots, path, &OpenOptions) -> Result<File, ToolError>`: on Unix it opens with `O_NOFOLLOW` (a symlink leaf fails with `ELOOP` and maps to `Confined`), then reads the descriptor's real path (Linux `/proc/self/fd/N`, macOS `fcntl(F_GETPATH)` through `nix`, no `unsafe`) and requires it under the canonical roots, or closes the file and returns `Confined`. An unreadable real path fails closed. Non-Unix targets do a plain open; the doc comment records the remaining window there and that `truncate`/`create` act before the check (T64.15.3).
+- `path::canonical_roots` is extracted from `confine` so both checks use the same roots and the same `path_starts_with`.
+- `nix` (feature `fs`) moves from a Linux-only to a `cfg(unix)` dependency of `cox-sandbox`; `cargo hakari generate --diff` reports no `workspace-hack` change. `cox-tools` re-exports the module as `cox_tools::open`.
+Not done: no call site uses it yet (T64.15.2, T64.15.3). The Linux `/proc` path and the Windows build were not compiled or run locally (macOS host; cross builds need a C toolchain); CI covers them.
+Check:
+- Before the fix: the leaf-swap and parent-swap tests assert that `std::fs::read` of the confined path returns the outside file's contents, which is the bug.
+- `cargo nextest run -p cox-sandbox`: 31 run, 31 passed (6 new in `open::tests`).
+- `cargo clippy -p cox-sandbox -p cox-tools --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
