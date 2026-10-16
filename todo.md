@@ -2,7 +2,6 @@
 
 - T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
-- T33.40.4. Jev plugin as a provider, end to end and offline
 - T33.40.5. Parity: the `typesafe` table configures the plugin's section
 - T33.40.6. `risk` advisor: raise only
 - T33.40.7. Eval E1: risk escalation against the classifier alone
