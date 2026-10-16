@@ -152,7 +152,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T69.4 | todo | P3 | 1 | 0% | |
 | T69.5 | todo | P1 | 3 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
-| T69.7 | in progress | P3 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T69.8 | todo | P3 | 1 | 0% | |
 
 ## Reference
@@ -3148,24 +3147,6 @@ Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not co
 Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/tasks.rs` (read only), `crates/cox-core/tests/compact.rs`
 
 Done when a running shell task id is in the summary and absent from the dropped turns, an idle session adds no block, and size stays ≤ 2048. Check: `mise exec -- cargo nextest run -p cox-core compact`.
-
-#### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
-
-Model: Claude Code / sonnet-5.5 · Status: in progress · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
-
-Plan (Claude Code / sonnet-5.5): (1) Failing tests first in `crates/cox-tools/tests/edit.rs` (`read` with `anchors` into `edit` with `ops`: indent-only change, stale batch, bottom-up, CRLF, confinement). (2) New `anchor.rs`: whitespace-collapsed SHA-256 to a 3-letter code, `render`, `apply` with all-or-nothing validation. (3) `read.rs` gains `anchors`; `edit.rs` gains `ops` beside `old`/`new`, still through `confine`. (4) Run `cargo nextest run -p cox-tools`, clippy, fmt.
-
-Goal: `read` gains an anchors mode that renders `N:abc→line` (3 letters from a whitespace-normalized hash you write); `edit` accepts `{op: replace|insert_after, anchor, content}` besides `old_string`. One stale anchor rejects the whole batch with the fresh anchor and three neighbours; ops apply bottom-up; default `read` output is unchanged.
-
-Why: a stale `old_string` costs a full re-read (`edit.rs` L160–198). Larger than the others: split further when claimed.
-
-Source: [grok-build `grok_build_hashline/scheme.rs` L1–56](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/scheme.rs#L1-L56), [`util/hash.rs` L1–52](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/util/hash.rs#L1-L52), [`read_file.rs` L21–67](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/read_file.rs#L21-L67), [`edit/mod.rs` L50–63](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/edit/mod.rs#L50-L63)
-
-Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy** (`scheme.rs`, `hash.rs`, `edit/apply.rs`). Not the `implementations/codex/` (OpenAI, needs its `NOTICE`) or `implementations/opencode/` (MIT) trees.
-
-Files: new `crates/cox-tools/src/anchor.rs`, `read`, `edit`
-
-Done when an indent-only change still matches, a content change is `Stale` and names the new anchor, two ops apply bottom-up, and a path outside the workspace is confined. Check: `mise exec -- cargo nextest run -p cox-tools edit`.
 
 #### T69.8 Integer compact threshold
 

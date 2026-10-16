@@ -10350,6 +10350,32 @@ Check: `cargo test -p cox-tools --test bash` — 11 passed (table updated: `carg
 `crates/cox-tools/src/edit.rs` `apply_replace` spliced every fallback window against the original byte offsets, right-to-left; two windows that overlap (lines that normalize identically) with a shorter `new` made the left window's `end_byte` run past the shrunken string — `replace_range` panicked with "range end index out of range", against the project's no-panic rule, and the code's own comment admitted it. Found by the 2026-10-07 audit. Fix: `replace_all` keeps only non-overlapping windows (a dropped window's lines sit inside the one already replaced); the single-match path is unchanged. The regression test seeds three lines that normalize identically and asserts the exact output; verified it panics on the pre-fix code.
 Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/edit.rs`, `crates/cox-tools/tests/edit.rs`
 Check: `cargo test -p cox-tools --test edit` — 6 passed (new: `edit_replace_all_overlapping_fallback_windows_do_not_panic`).
+#### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
+
+Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Plan (Claude Code / sonnet-5.5): (1) Failing tests first in `crates/cox-tools/tests/edit.rs` (`read` with `anchors` into `edit` with `ops`: indent-only change, stale batch, bottom-up, CRLF, confinement). (2) New `anchor.rs`: whitespace-collapsed SHA-256 to a 3-letter code, `render`, `apply` with all-or-nothing validation. (3) `read.rs` gains `anchors`; `edit.rs` gains `ops` beside `old`/`new`, still through `confine`. (4) Run `cargo nextest run -p cox-tools`, clippy, fmt.
+
+Goal: `read` gains an anchors mode that renders `N:abc→line` (3 letters from a whitespace-normalized hash you write); `edit` accepts `{op: replace|insert_after, anchor, content}` besides `old_string`. One stale anchor rejects the whole batch with the fresh anchor and three neighbours; ops apply bottom-up; default `read` output is unchanged.
+
+Why: a stale `old_string` costs a full re-read (`edit.rs` L160–198). Larger than the others: split further when claimed.
+
+Source: [grok-build `grok_build_hashline/scheme.rs` L1–56](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/scheme.rs#L1-L56), [`util/hash.rs` L1–52](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/util/hash.rs#L1-L52), [`read_file.rs` L21–67](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/read_file.rs#L21-L67), [`edit/mod.rs` L50–63](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/edit/mod.rs#L50-L63)
+
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy** (`scheme.rs`, `hash.rs`, `edit/apply.rs`). Not the `implementations/codex/` (OpenAI, needs its `NOTICE`) or `implementations/opencode/` (MIT) trees.
+
+Files: new `crates/cox-tools/src/anchor.rs`, `read`, `edit`
+
+Done when an indent-only change still matches, a content change is `Stale` and names the new anchor, two ops apply bottom-up, and a path outside the workspace is confined. Check: `mise exec -- cargo nextest run -p cox-tools edit`.
+
+Status: done 2026-10-16 · Commit "feat(tools): T69.7 content-hash anchors for read and edit" on branch `t69.7-edit-anchors`.
+
+What landed: `anchor.rs` (3-letter code from a whitespace-collapsed SHA-256, `render`, `apply`); `read` takes `anchors: true` and prints `N:abc→line`, default output unchanged; `edit` takes `ops: [{op: replace|insert_after, anchor, content}]` instead of `old`/`new` (both together are `Denied`). Every anchor is checked against the original lines first; any stale one rejects the whole batch and names the fresh anchor of its line plus one line before and two after; otherwise the ops apply bottom-up against the numbers the model read. The path still goes through `confine` at the existing call site, CRLF and a missing final newline are kept, and the pre-image is archived as before. `edit`'s `required` list shrank from `path, old, new` to `path` so `ops` can stand alone, which changes the tool schema once, deliberately; no schema snapshot exists in the repo for it.
+
+Not done: no `Stale` variant on `cox_protocol::ToolError` (it stays `Denied` with the message, as the other `edit` failures); a hash collision (1 in 17 576) lets a changed line through, as documented in `anchor.rs`; no `insert_before` or range ops.
+
+Check output: before the code, the seven `anchors::` tests in `crates/cox-tools/tests/edit.rs` failed (the `ops` field was unknown to `edit`); after it `mise exec -- cargo nextest run -p cox-tools` — 257 passed, 1 skipped; `cargo clippy -p cox-tools --all-targets -- -D warnings` and `cargo fmt --check -p cox-tools` clean.
+
 #### T62.5 web_fetch refuses private, loopback and link-local addresses
 
 `web_fetch` is `Risk::ReadOnly` with a scheme check only, and `cox-web::fetch` followed five redirects with no address filtering: the model could read `169.254.169.254`, an internal `localhost` service or an RFC1918 host without any approval and see the body. Found by the 2026-10-07 audit. Fix, three layers: every connection resolves through a `PublicOnly` resolver (getaddrinfo on the blocking pool) that refuses loopback, link-local, RFC1918-private, unspecified and broadcast addresses, mapped IPv4 included, and strips refused addresses when the name has public ones; a custom redirect policy re-checks IP-literal redirect targets (literals skip DNS) and carries the old five-hop limit; and `WebFetchTool` checks the first URL's literal host (`refused_literal`), because the first request meets neither the resolver nor the policy. `fetch_error` surfaces the guard's words from reqwest's source chain. The tool spec now tells the model the refusal exists.
