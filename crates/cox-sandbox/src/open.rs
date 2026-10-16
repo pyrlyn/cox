@@ -12,6 +12,7 @@
 //! up to canonicalisation, while this owns descriptors and per-OS calls.
 
 use std::fs::{File, OpenOptions};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use cox_protocol::ToolError;
@@ -63,6 +64,19 @@ pub fn open_confined(
         }
     }
     Ok(file)
+}
+
+/// Reads the whole of `path` — the result of `confine` — through
+/// [`open_confined`], so a symlink swapped in since `confine` is `Confined`
+/// instead of being read. The read-side counterpart of `std::fs::read` for
+/// every tool that opens a path after confining it (T64.15.2).
+pub fn read_confined(roots: &[PathBuf], path: &Path) -> Result<Vec<u8>, ToolError> {
+    let mut opts = OpenOptions::new();
+    opts.read(true);
+    let mut file = open_confined(roots, path, &opts)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|_| ToolError::Io)?;
+    Ok(bytes)
 }
 
 #[cfg(unix)]
@@ -233,5 +247,27 @@ mod tests {
 
         let err = open_confined(&roots, &path, &read_opts()).expect_err("missing");
         assert!(matches!(err, ToolError::NotFound), "{err:?}");
+    }
+
+    #[test]
+    fn read_confined_refuses_a_swapped_leaf_and_a_swapped_parent() {
+        let f = fixture();
+        let roots = [f.root.clone()];
+        std::fs::create_dir(f.root.join("sub")).expect("mkdir sub");
+        std::fs::write(f.root.join("sub/secret.txt"), b"mine").expect("write");
+        std::fs::write(f.root.join("a.txt"), b"mine").expect("write");
+        let leaf = confine(&roots, &f.root, "a.txt").expect("confine");
+        let nested = confine(&roots, &f.root, "sub/secret.txt").expect("confine");
+        assert_eq!(read_confined(&roots, &leaf).expect("plain"), b"mine");
+
+        std::fs::remove_file(&leaf).expect("rm");
+        symlink(f.outside.join("secret.txt"), &leaf).expect("symlink");
+        std::fs::rename(f.root.join("sub"), f.root.join("moved")).expect("rename");
+        symlink(&f.outside, f.root.join("sub")).expect("symlink");
+
+        for path in [&leaf, &nested] {
+            let err = read_confined(&roots, path).expect_err("must refuse");
+            assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
+        }
     }
 }

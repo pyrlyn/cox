@@ -43,6 +43,9 @@ pub mod v4a;
 pub mod web_fetch;
 pub mod write;
 
+#[cfg(all(test, unix))]
+mod swap_fixture;
+
 /// T32.3: `path::confine` and `sandbox` moved to their own crate (dependency
 /// (a): `landlock`/`seccompiler` are Linux-only, and guard (b) —
 /// `docs/design/crates.md`); re-exported here at the old paths so

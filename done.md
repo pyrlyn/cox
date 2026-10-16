@@ -294,6 +294,7 @@ Check:
 - `cargo nextest run -p cox-sandbox`: 31 run, 31 passed (6 new in `open::tests`).
 - `cargo clippy -p cox-sandbox -p cox-tools --all-targets -- -D warnings`: clean.
 
+
 #### T64.7 Revert a project-added or changed `mcp.servers`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `crates/cox-mcp/src/trust.rs`, `crates/cox-app/src/settings.rs`, `desktop/macos/Packages/CoxModel/Sources/CoxClient/Dropped.swift`, `docs/config.md`, `docs/config.jsonschema`, `plan.md`
@@ -352,6 +353,21 @@ Check:
 - `cargo nextest run -p cox-permission`: 16 run, 16 passed. `cargo nextest run -p cox-core --test permission --test policy_matrix`: 98 run, 98 passed.
 - `cargo clippy -p cox-permission --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
+
+#### T64.15.2 Open the read side of `read`, `edit`, `write` and `apply_patch` through `open_confined`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-sandbox/src/open.rs`, `crates/cox-tools/src/read.rs`, `crates/cox-tools/src/edit.rs`, `crates/cox-tools/src/write.rs`, `crates/cox-tools/src/v4a/tool.rs`, `crates/cox-tools/src/swap_fixture.rs`, `crates/cox-tools/src/lib.rs`, `plan.md`
+Goal: part B of T64.15. A path `confine` approved and a tool then re-read with `std::fs::read` could be redirected outside the roots by a leaf or parent swapped to a symlink in between. Stacked on T64.15.1 (PR #271); `confine` stays the path guard and `open_confined` is the open step after it.
+What landed:
+- `cox_sandbox::open::read_confined(roots, path) -> Result<Vec<u8>, ToolError>`: `open_confined` with read access, then the whole file. Re-exported as `cox_tools::open::read_confined`.
+- `read` (roots), `edit` (writable roots), `write`'s prior-content read and `apply_patch`'s hunk reads now go through it. `write` still treats a missing or unreadable prior file as a new file but propagates `Confined`; `apply_patch` keeps the first `Confined` aside, because `stage` only sees a read as present or absent, and returns it ahead of `stage`'s own error.
+- Each tool's post-`confine` work is its own function (`read_at`, `edit_at`, `write_at`, `apply_at`) so a test can swap the path between the two steps. `swap_fixture.rs` (test-only, Unix) holds the shared root/outside setup and the leaf and parent swaps.
+- One test per call site swaps a file and its parent directory to symlinks pointing outside after `confine` and asserts `Confined` (and that the outside file is unchanged); `read_confined` has the same test in `cox-sandbox`. With `read_confined` temporarily replaced by `std::fs::read` all five failed.
+- Behaviour change: `edit` on an unreadable path (a directory, a permission error) now reports `io error` instead of `not found`; `not found` stays for a missing file.
+Not done: the `lsp`, `repomap` and checkpoint reads (deferred in the finding); the write side (`create_dir_all`, the temp file and the rename through a swapped parent) is T64.15.3; non-Unix targets keep the plain open.
+Check:
+- `cargo nextest run -p cox-tools -p cox-sandbox`: 279 run, 279 passed, 1 skipped.
+- `cargo clippy -p cox-tools -p cox-sandbox --all-targets -- -D warnings`: clean.
 
 #### T69.1 PowerShell and cmd readers hit existing `Read` denies
 
