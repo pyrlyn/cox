@@ -149,7 +149,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T69.1 | todo | P1 | 3 | 0% | |
 | T69.2 | todo | P1 | 2 | 0% | |
 | T69.3 | todo | P2 | 1 | 0% | |
-| T69.4 | todo | P3 | 1 | 0% | |
 | T69.5 | todo | P1 | 3 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
 | T69.7 | todo | P3 | 3 | 0% | |
@@ -3100,22 +3099,6 @@ Licence: Apache-2.0, implement similar, not copy; the four-name constant is too 
 Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, the seatbelt and bwrap argument snapshots
 
 Done when the default grows, a user list is unchanged and the snapshots pass. Check: `mise exec -- cargo nextest run -p cox-sandbox -p cox-protocol`.
-
-#### T69.4 Budgeted `quick_check` when the store opens
-
-Model: - · Status: open · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1
-
-Goal: After WAL is on, `Store::open` runs `PRAGMA quick_check(1)` with a ~200 ms budget: `ok` continues; a finding is a `StoreError` the session prints and refuses; a timeout logs and opens anyway. Not repeated per query.
-
-Why: `enable_wal` (`cox-store/src/lib.rs` ~L271) has no integrity check, so a corrupt database fails later and obscurely.
-
-Source: [codex `codex-rs/state/src/sqlite/validation.rs` L16–66](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/state/src/sqlite/validation.rs#L16-L66)
-
-Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy:** codex uses sqlx and a progress handler; cox is on Diesel.
-
-Files: `crates/cox-store/src/lib.rs` (and its tests)
-
-Done when a new database opens and a forced short deadline still opens. Check: `mise exec -- cargo nextest run -p cox-store`.
 
 #### T69.5 Compaction rejects a tiny summary and survives a context overflow
 
