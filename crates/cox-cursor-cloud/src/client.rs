@@ -83,6 +83,10 @@ fn id(s: &str) -> Result<&str, CloudError> {
         .ok_or_else(|| CloudError::InvalidId(s.chars().take(40).collect()))
 }
 
+fn is_loopback(url: &reqwest::Url) -> bool {
+    matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+}
+
 impl Client {
     pub fn new(key: impl Into<String>) -> Result<Self, CloudError> {
         let key = key.into();
@@ -105,14 +109,27 @@ impl Client {
     pub fn with_base_url(mut self, base: &str) -> Result<Self, CloudError> {
         let url = reqwest::Url::parse(base)
             .map_err(|_| CloudError::InsecureBase("an unparsable url".into()))?;
-        let loopback = matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
-        if url.scheme() != "https" && !loopback {
+        if url.scheme() != "https" && !is_loopback(&url) {
             return Err(CloudError::InsecureBase(
                 url.host_str().unwrap_or("").into(),
             ));
         }
         self.base = base.trim_end_matches('/').to_owned();
         Ok(self)
+    }
+
+    /// [`Client::with_base_url`] for a base that must be this machine: the
+    /// one a test-only override may use, so a variable in the environment can
+    /// never send the key to another host, even over https.
+    pub fn with_loopback_base_url(self, base: &str) -> Result<Self, CloudError> {
+        let url = reqwest::Url::parse(base)
+            .map_err(|_| CloudError::InsecureBase("an unparsable url".into()))?;
+        if !is_loopback(&url) {
+            return Err(CloudError::InsecureBase(
+                url.host_str().unwrap_or("").into(),
+            ));
+        }
+        self.with_base_url(base)
     }
 
     pub fn with_policy(mut self, policy: Policy) -> Self {
@@ -552,5 +569,24 @@ mod tests {
                 .is_err()
         );
         assert!(client.with_base_url("http://127.0.0.1:9").is_ok());
+    }
+
+    /// T56.8: the test-only base override takes this machine and nothing else,
+    /// https included, so the key cannot follow it to a look-alike host.
+    #[test]
+    fn client_loopback_override_refuses_every_other_host() {
+        let client = Client::new(KEY).expect("client");
+        for base in [
+            "https://api.cursor.com",
+            "https://example.com",
+            "http://localhost.evil.com",
+            "not a url",
+        ] {
+            assert!(
+                client.clone().with_loopback_base_url(base).is_err(),
+                "{base}"
+            );
+        }
+        assert!(client.with_loopback_base_url("http://127.0.0.1:9").is_ok());
     }
 }
