@@ -81,6 +81,20 @@ clean
 ```
 `cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
 
+#### T64.13 Match the OAuth `state` before the loopback accepts a callback
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-mcp/src/auth.rs`, `crates/cox-mcp/Cargo.toml`
+Goal: the MCP login's loopback listener returned the query of the first TCP connection, whatever it was, and `state` was checked only afterwards by rmcp. Any local process that connected first could end the login with a failure, or feed it a code of its choosing.
+What landed:
+- `login` reads the `state` rmcp put in the authorization URL. `callback(listener, state)` now loops: only `GET /callback` with that `state` is accepted (200); other paths or methods get 404, a missing or different `state` gets 400, and the listener keeps waiting. The overall `LOGIN_TIMEOUT` still bounds the wait, and a new 5 s `REQUEST_TIMEOUT` per connection stops a silent connection from stalling the accept loop.
+- `judge` is the pure verdict (`Accept`/`NotFound`/`BadRequest`); `state` is percent-decoded with `url::form_urlencoded` (the `url` crate was already a workspace dependency, now also used by `cox-mcp`; row updated in `toolchain.md`).
+- Tests `callback_ignores_junk_and_waits_for_the_matching_state` (real loopback listener on `127.0.0.1:0`: wrong path, wrong method, wrong state and missing state each get 404/400 and the wait continues; the matching request then returns its code) and `judge_decodes_the_state_before_comparing`.
+Not done: a callback with the right `state` but no `code` (e.g. `error=access_denied`) is still passed on, so rmcp reports it as a failed login, as before. The `plan.md` findings row for T64.13 is marked `done`.
+Check:
+- Mutation: with the `state` comparison forced true, `callback_ignores_junk_and_waits_for_the_matching_state` failed (the wrong-state request got 200). Restored.
+- `cargo nextest run -p cox-mcp`: 45 run, 45 passed.
+- `cargo clippy -p cox-mcp --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean.
+
 #### T64.4 Revert a project `permissions.mode` wider than the user layer
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-permission/src/lib.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
