@@ -110,6 +110,19 @@ Check:
 - YAML parses (ruby `YAML.load_file`): 17 jobs, every `needs:` entry names an existing job.
 - `grep -rn revert-on-failure .github` and `grep -n revert .github/workflows/ci.yml`: no matches.
 
+#### T64.22 One keyring on/off switch and service name for the provider lookup and the MCP store
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-provider-http/src/http.rs`, `crates/cox-mcp/src/auth.rs`
+Goal: `cox-provider-http` (provider key lookup) and `cox-mcp` (OAuth store) read `COX_KEYRING` and name the `cox` keyring service in one place, so they cannot disagree on what "off" means.
+What landed:
+- `cox_protocol::config::keyring_enabled_in_env()` reads `KEYRING_ENV` and applies `keyring_enabled`; `cox_protocol::config::KEYRING_SERVICE` (`"cox"`) replaces the string literal in `http.rs` and `auth.rs`'s private `SERVICE`. Three copies of the env-read-then-`keyring_enabled` lines (`platform_keyring`, `entry`, `read`) and the `tests_run_with_the_keyring_switched_off` test now call the helper. Old public paths and the injection seams (`resolve_key_with`, `Memory`) are unchanged; behaviour is identical.
+- Home: `cox-protocol`, because `crates/cox/tests/deps.rs` lets `cox-mcp` depend on `cox-protocol` only, and `cox-protocol` already owned `KEYRING_ENV` and `keyring_enabled`. It stays free of the `keyring` crate and of I/O beyond reading one env var.
+- Test `keyring_enabled_in_env_follows_the_live_variable`: `off` and ` False ` disable, `on` and an unset variable enable. It reads only the switch.
+Not done: each site still calls `keyring::Entry::new(KEYRING_SERVICE, account)` itself (one line each). A single constructor would need `keyring` in `cox-protocol` (which has no I/O), `cox-mcp` depending on `cox-provider-http` (a `deps.rs` rule change that also pulls reqwest 0.12 in) or a new `secret-store` crate; the plan row defers that crate until a third consumer appears. `deps.rs` was not run locally (no Cargo.toml edge changed).
+Check:
+- `cargo nextest run -p cox-protocol -p cox-provider-http -p cox-mcp`: 179 tests run, 179 passed.
+- `cargo clippy -p cox-protocol -p cox-provider-http -p cox-mcp --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
