@@ -32,7 +32,6 @@
 - T37.51. macOS app: pointer from the shared rule
 - T39.7. Optional: live check against the real Gemini endpoint (needs the creator's key)
 - T43.6. Bench the map on and off
-- T52.25. `cox-ffi` and CoxModel carry the merge
 - T52.26. CoxUI: Merge in the best-of compare view
 - T53.5. Freeze ABI `api = 1`
 - T53.6. `cox-plugin-api` ready for crates.io
