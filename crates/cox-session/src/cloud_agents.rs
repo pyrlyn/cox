@@ -48,6 +48,20 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+/// Names a loopback address that replaces `api.cursor.com`, for the offline
+/// end-to-end test (T56.8) only. It lives in the environment, never in a
+/// manifest or the config, so a plugin or a repository cannot set it, and the
+/// client takes loopback alone, so even a stray value cannot move the key.
+const TEST_URL_ENV: &str = "COX_CURSOR_CLOUD_URL";
+
+fn client_for(secret: String) -> Result<Client, cox_cursor_cloud::client::CloudError> {
+    let client = Client::new(secret)?;
+    match std::env::var(TEST_URL_ENV) {
+        Ok(base) if !base.is_empty() => client.with_loopback_base_url(&base),
+        _ => Ok(client),
+    }
+}
+
 /// One driver per entry whose key resolves, plus one warning per entry left
 /// out. `key` is `cox_provider::http::resolve_key` (a test passes its own,
 /// never the OS keychain), called with the entry's `key_env` and the
@@ -75,7 +89,7 @@ pub(crate) fn drivers(
     for decl in decls {
         let client = key(&decl.key_env, decl.backend.name())
             .map_err(|_| format!("{} is not set", decl.key_env))
-            .and_then(|secret| Client::new(secret).map_err(|e| e.to_string()));
+            .and_then(|secret| client_for(secret).map_err(|e| e.to_string()));
         match client {
             Ok(client) => out.push(Arc::new(CloudDriver {
                 name: decl.name,

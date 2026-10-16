@@ -28,6 +28,7 @@ use crate::PluginError;
 use crate::advisor::PluginAdvisor;
 use crate::context::Context;
 use crate::events::{PluginTap, Redraw, subscriptions};
+use crate::fs::{self, FsRoots};
 use crate::grant;
 use crate::hooks::PluginHooks;
 use crate::host::PluginHost;
@@ -239,12 +240,20 @@ pub struct LivePlugins {
     invoker: Arc<Late<dyn ToolInvoker>>,
     plugins: Vec<Live>,
     surface: Option<Surface>,
+    fs: Option<FsRoots>,
 }
 
 impl LivePlugins {
     /// Fixed by session assembly before any plugin is loaded.
     pub fn set_surface(&mut self, surface: Surface) {
         self.surface = Some(surface);
+    }
+
+    /// Fixed by session assembly before any plugin is loaded: the workspace
+    /// and the `confine` guard `capabilities.fs` resolves against (T33.14.2).
+    /// Unset, a plugin that asks for `fs` is not loaded.
+    pub fn set_fs(&mut self, roots: FsRoots) {
+        self.fs = Some(roots);
     }
 
     fn surface(&self) -> Surface {
@@ -296,7 +305,14 @@ impl LivePlugins {
                 .with_tool_invoker(self.invoker.clone(), runtime);
         }
         let env = Arc::new(env);
-        let host = PluginHost::load_with(wasm, &manifest.limits, env.clone())?;
+        let mounts = fs::mounts(
+            manifest.id.as_str(),
+            manifest.wasi,
+            &manifest.capabilities.fs,
+            self.fs.as_ref(),
+        )
+        .map_err(|e| PluginError::Load(e.to_string()))?;
+        let host = PluginHost::load_with_fs(wasm, &manifest.limits, env.clone(), &mounts)?;
         self.plugins.push(Live {
             manifest: manifest.clone(),
             host: Arc::new(host),

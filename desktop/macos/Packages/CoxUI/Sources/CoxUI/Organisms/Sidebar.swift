@@ -186,7 +186,7 @@ private struct SidebarGroup: View {
         .padding(.bottom, Space.xxs)
         .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.coxPlain)
       .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
       if isExpanded { rows }
     case .host(let isConnected):
@@ -211,7 +211,7 @@ private struct SidebarGroup: View {
       } label: {
         row
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.coxPlain(isChosen: session.opens == selection))
       .contextMenu {
         // A session's own row; an inbox row's text is the item's, not the session's title.
         if session.session == nil { Button("Rename…") { rename(session) } }

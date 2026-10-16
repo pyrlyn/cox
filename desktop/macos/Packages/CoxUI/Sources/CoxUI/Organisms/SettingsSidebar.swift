@@ -116,7 +116,7 @@ struct SettingsSidebar: View {
                 }
                 .rowSelection(page == selection, fill: .accent)
               }
-              .buttonStyle(.plain)
+              .buttonStyle(.coxPlain(isChosen: page == selection))
             }
           }
           .padding(.horizontal, Space.m)

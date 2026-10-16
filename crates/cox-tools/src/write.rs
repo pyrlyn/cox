@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use cox_protocol::{ArchivePut, Concurrency, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolSpec};
 use serde_json::{Value, json};
 
+use crate::open::read_confined;
 use crate::path::confine;
 
 /// A file over this many lines is not a `write` target — plan.md §1.11:
@@ -188,40 +189,48 @@ impl Tool for WriteTool {
         let content = str_field(&input, "content")?;
         let path = confine(&cx.writable_roots, &cx.cwd, &path_arg)?;
 
-        let previous = match std::fs::read(&path) {
-            Ok(bytes) => {
-                let text = String::from_utf8(bytes).map_err(|_| ToolError::Binary)?;
-                let lines = text.lines().count();
-                if lines > MAX_REWRITE_LINES {
-                    return Err(ToolError::Denied {
-                        why: format!("file has {lines} lines; use edit or apply_patch"),
-                    });
-                }
-                text.into_bytes()
-            }
-            Err(_) => Vec::new(),
-        };
-
-        cx.archive
-            .put(ArchivePut {
-                session: cx.session,
-                call: cx.call,
-                tool: "write".to_string(),
-                subject: Some(path.display().to_string()),
-                bytes: previous,
-            })
-            .await
-            .map_err(|_| ToolError::Io)?;
-
-        atomic_write(&path, content.as_bytes())?;
-
-        Ok(ToolOutput {
-            text: format!("wrote {} ({} bytes)", path.display(), content.len()),
-            is_error: false,
-            diff: None,
-            structured: None,
-        })
+        write_at(path, &content, cx).await
     }
+}
+
+/// Everything after `confine`: its own function so a test can swap the path
+/// for a symlink between the two, the window T64.15 closes.
+async fn write_at(path: PathBuf, content: &str, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+    let previous = match read_confined(&cx.writable_roots, &path) {
+        Ok(bytes) => {
+            let text = String::from_utf8(bytes).map_err(|_| ToolError::Binary)?;
+            let lines = text.lines().count();
+            if lines > MAX_REWRITE_LINES {
+                return Err(ToolError::Denied {
+                    why: format!("file has {lines} lines; use edit or apply_patch"),
+                });
+            }
+            text.into_bytes()
+        }
+        // A new file has no prior content; a swapped path is not new.
+        Err(e @ ToolError::Confined { .. }) => return Err(e),
+        Err(_) => Vec::new(),
+    };
+
+    cx.archive
+        .put(ArchivePut {
+            session: cx.session,
+            call: cx.call,
+            tool: "write".to_string(),
+            subject: Some(path.display().to_string()),
+            bytes: previous,
+        })
+        .await
+        .map_err(|_| ToolError::Io)?;
+
+    atomic_write(&path, content.as_bytes())?;
+
+    Ok(ToolOutput {
+        text: format!("wrote {} ({} bytes)", path.display(), content.len()),
+        is_error: false,
+        diff: None,
+        structured: None,
+    })
 }
 
 #[cfg(test)]
@@ -398,5 +407,26 @@ mod tests {
             .filter(|n| n.contains("cox-tmp"))
             .collect();
         assert!(left.is_empty(), "temp files left: {left:?}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_refuses_a_path_swapped_to_a_symlink_after_confine() {
+        let swap = crate::swap_fixture::Swap::new();
+        swap.file("secret.txt", "mine");
+        swap.file("sub/secret.txt", "mine");
+        let cx = cx(&swap.root);
+        let leaf = confine(&cx.writable_roots, &swap.root, "secret.txt").expect("confine");
+        let nested = confine(&cx.writable_roots, &swap.root, "sub/secret.txt").expect("confine");
+        swap.swap_leaf("secret.txt");
+        swap.swap_parent("sub");
+
+        for path in [leaf, nested] {
+            let err = write_at(path, "changed", &cx)
+                .await
+                .expect_err("must refuse");
+            assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
+        }
+        assert_eq!(swap.outside_secret(), crate::swap_fixture::SECRET);
     }
 }

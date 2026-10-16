@@ -51,6 +51,7 @@ struct SettingPopUp<Option: Hashable>: View {
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
+    .coxControlPointer()
     .menuIndicator(.hidden)
     .fixedSize()
     .accessibilityLabel(Text(label))

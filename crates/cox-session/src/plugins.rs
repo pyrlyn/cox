@@ -125,6 +125,15 @@ pub fn load_plugins_for_surface(
     };
     let mut out = Plugins::default();
     out.live.set_surface(surface);
+    // T33.14.2: `$WORKSPACE` is the session's cwd, and every fs root goes
+    // through the one `confine` guard (cox-plugin may not depend on it).
+    out.live.set_fs(cox_plugin::fs::FsRoots {
+        workspace: cwd.to_path_buf(),
+        data_base: home.join("plugin-data"),
+        confine: Arc::new(|root, input| {
+            cox_tools::path::confine(&[root.to_path_buf()], root, input).map_err(|e| e.to_string())
+        }),
+    });
     if !config.plugins.enabled {
         return out;
     }
