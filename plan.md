@@ -3092,7 +3092,7 @@ Why: `classify.rs` lines 526–538 make every line the bash grammar cannot parse
 
 Source: [codex `codex-rs/shell-command/src/command_safety/powershell_parser.rs` L19–44](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/shell-command/src/command_safety/powershell_parser.rs#L19-L44); [grok-build `crates/codegen/xai-grok-permission-rules/src/shell_access.rs` L2371–2392](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-permission-rules/src/shell_access.rs#L2371-L2392)
 
-Licence: Apache-2.0 (both), may be copied with attribution (per-file header and a root `NOTICE` needed). **Implement similar, do not copy:** the codex parser is a `.ps1` child process and grok's file is thousands of lines bound to its own types.
+Licence: Apache-2.0 (both), implement similar, not copy (per-file header and a root `NOTICE` needed). **Implement similar, do not copy:** the codex parser is a `.ps1` child process and grok's file is thousands of lines bound to its own types.
 
 Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-core/tests/permission.rs`
 
@@ -3108,7 +3108,7 @@ Why: the flag is read and ignored (`cox-protocol/src/config.rs` L875–892, `doc
 
 Source: [codex `codex-rs/execpolicy/src/amend.rs` `blocking_append_allow_prefix_rule` L63–81](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/execpolicy/src/amend.rs#L63-L81)
 
-Licence: Apache-2.0, may be copied with attribution (header and `NOTICE` needed). **Implement similar, do not copy:** codex writes Starlark `prefix_rule(...)`, cox rules are strings.
+Licence: Apache-2.0, implement similar, not copy (header and `NOTICE` needed). **Implement similar, do not copy:** codex writes Starlark `prefix_rule(...)`, cox rules are strings.
 
 Files: `crates/cox-core/src/session.rs`, `crates/cox-permission/src/lib.rs` (the `grants_for` pair), `docs/compat.md`, `docs/config.md`
 
@@ -3124,7 +3124,7 @@ Why: home-directory `Read(~/.aws/**)` does not cover a repo-local `.aws`.
 
 Source: [codex `codex-rs/protocol/src/permissions.rs` L40–51](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/protocol/src/permissions.rs#L40-L51)
 
-Licence: Apache-2.0, may be copied with attribution; the four-name constant is too small to need a `NOTICE`. **Implement similar:** a config default with a one-line comment naming the codex commit and path. Do not copy `seatbelt.rs`.
+Licence: Apache-2.0, implement similar, not copy; the four-name constant is too small to need a `NOTICE`. **Implement similar:** a config default with a one-line comment naming the codex commit and path. Do not copy `seatbelt.rs`.
 
 Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, the seatbelt and bwrap argument snapshots
 
@@ -3140,7 +3140,7 @@ Why: `enable_wal` (`cox-store/src/lib.rs` ~L271) has no integrity check, so a co
 
 Source: [codex `codex-rs/state/src/sqlite/validation.rs` L16–66](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/state/src/sqlite/validation.rs#L16-L66)
 
-Licence: Apache-2.0, may be copied with attribution. **Implement similar, do not copy:** codex uses sqlx and a progress handler; cox is on Diesel.
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy:** codex uses sqlx and a progress handler; cox is on Diesel.
 
 Files: `crates/cox-store/src/lib.rs` (and its tests)
 
@@ -3156,7 +3156,7 @@ Why: a failed compact leaves `last_context_tokens` unchanged and the next turn c
 
 Source: [grok-build `xai-grok-compaction/src/code_compaction/config.rs` L15–20](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/config.rs#L15-L20), [`summary.rs` L120–125](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/summary.rs#L120-L125), [`sample.rs` L81–120](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/sample.rs#L81-L120), [`failure.rs` L9–23](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/failure.rs#L9-L23), [`xai-grok-shell/src/session/compaction.rs` L405–479](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/compaction.rs#L405-L479)
 
-Licence: Apache-2.0, Copyright 2023-2026 SpaceXAI, may be copied with attribution (header, Apache text, `THIRD-PARTY-NOTICES`, change notice §4(b)). **Implement similar, do not copy:** bound to their `ConversationItem` types, and a paste adds Apache's patent clause to cox's tri-license.
+Licence: Apache-2.0, Copyright 2023-2026 SpaceXAI, implement similar, not copy (header, Apache text, `THIRD-PARTY-NOTICES`, change notice §4(b)). **Implement similar, do not copy:** bound to their `ConversationItem` types, and a paste adds Apache's patent clause to cox's tri-license.
 
 Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/prompts/compact.md`, `crates/cox-core/tests/compact.rs`
 
@@ -3172,7 +3172,7 @@ Why: `working_state` (`compact.rs` L347–387) reads only the transcript, so a r
 
 Source: [grok-build `xai-grok-compaction/src/reminder.rs` L117–167](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/reminder.rs#L117-L167)
 
-Licence: Apache-2.0, may be copied with attribution. **Implement similar, do not copy:** the reminder prose is a compatibility surface downstream; use cox's own sentences.
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy:** the reminder prose is a compatibility surface downstream; use cox's own sentences.
 
 Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/tasks.rs` (read only), `crates/cox-core/tests/compact.rs`
 
@@ -3188,7 +3188,7 @@ Why: a stale `old_string` costs a full re-read (`edit.rs` L160–198). Larger th
 
 Source: [grok-build `grok_build_hashline/scheme.rs` L1–56](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/scheme.rs#L1-L56), [`util/hash.rs` L1–52](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/util/hash.rs#L1-L52), [`read_file.rs` L21–67](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/read_file.rs#L21-L67), [`edit/mod.rs` L50–63](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/edit/mod.rs#L50-L63)
 
-Licence: Apache-2.0, may be copied with attribution. **Implement similar, do not copy** (`scheme.rs`, `hash.rs`, `edit/apply.rs`). Not the `implementations/codex/` (OpenAI, needs its `NOTICE`) or `implementations/opencode/` (MIT) trees.
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy** (`scheme.rs`, `hash.rs`, `edit/apply.rs`). Not the `implementations/codex/` (OpenAI, needs its `NOTICE`) or `implementations/opencode/` (MIT) trees.
 
 Files: new `crates/cox-tools/src/anchor.rs`, `read`, `edit`
 
