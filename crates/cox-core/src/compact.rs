@@ -531,7 +531,10 @@ impl Session {
                 ))
                 .await;
         };
-        self.set_state(State::Compacting).await;
+        // Any non-`Idle` state keeps `/rewind`, `/mode` and user shells out
+        // while the summary is written; compaction builds the next request's
+        // context, which is what `Assembling` names.
+        self.set_state(State::Assembling).await;
         let summary = self.summarise(&history[..cut], focus.as_deref()).await;
         // Back to where it was: a pre-call compaction runs mid-turn, and an
         // `Idle` there would let `/rewind` in before the turn's next call.
