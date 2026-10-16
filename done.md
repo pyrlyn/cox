@@ -81,6 +81,22 @@ clean
 ```
 `cargo nextest` is not installed in this environment; the checks above used `cargo test`. `cox-voice` was left out of clippy: its whisper.cpp build does not compile here.
 
+#### T64.4 Revert a project `permissions.mode` wider than the user layer
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-permission/src/lib.rs`, `crates/cox-protocol/src/config.rs`, `docs/config.jsonschema`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot make the session run more tool calls unasked than the user's own config does. Only `bypass` was reverted, so `permissions.mode = "auto"` (writes allowed without asking) passed.
+What landed:
+- `apply_project_guards` compares `PermissionMode::breadth()` of the project-merged mode with the mode without the project layer and, when the project's is wider, reverts it and reports one `permissions.mode` violation naming the project value and the kept mode. Keeping or narrowing the mode (`plan` < `default` < `auto` < `bypass`) is not a violation.
+- `PermissionMode::breadth()` in `cox-protocol` is the one definition of that order. `cox-permission`'s `narrower` now reads it instead of its private match, and `cox-config` may not depend on `cox-permission` (`crates/cox/tests/deps.rs`), so the guard reads it from the shared crate.
+- The violation reason, the `PermissionsConfig.mode` doc comment, `docs/config.jsonschema` and plan §1.6 say "wider than the user's mode" instead of "bypass".
+- Tests `project_config_cannot_widen_the_permission_mode` (six user/project pairs, including `auto` with no user mode, which failed before the fix) and `project_config_may_keep_or_narrow_the_permission_mode`.
+Not done: `permissions.approval` (T64.6), sandbox keys (T64.5) and `mcp.servers` (T64.7) stay open.
+Check:
+- Before the fix: `cargo nextest run -p cox-config permission_mode` failed with `user None, project auto: left: Auto, right: Default`.
+- `cargo nextest run -p cox-config -p cox-permission -p cox-protocol`: 173 run, 173 passed.
+- `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.11 Delete the dead `revert-on-failure` job from `ci.yml`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 1 · Files: `.github/workflows/ci.yml`

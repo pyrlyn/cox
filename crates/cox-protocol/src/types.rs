@@ -414,6 +414,21 @@ pub enum PermissionMode {
     Bypass,
 }
 
+impl PermissionMode {
+    /// How much the mode lets through without asking: `Plan < Default <
+    /// Auto < Bypass`. The one definition of that order, shared by the
+    /// engine's `narrower` and the project-config guard (T64.4); an
+    /// exhaustive match, so a new mode cannot join either unranked.
+    pub fn breadth(self) -> u8 {
+        match self {
+            PermissionMode::Plan => 0,
+            PermissionMode::Default => 1,
+            PermissionMode::Auto => 2,
+            PermissionMode::Bypass => 3,
+        }
+    }
+}
+
 /// `core.mode` / `--mode` / `/mode` (P42, A73): a named preset over the
 /// permission mode and the main tier only. It never filters tools, so the
 /// cache prefix stays byte-stable, and it only narrows `permissions.mode`.
