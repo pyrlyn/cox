@@ -94,6 +94,20 @@ Check:
 - YAML parses (ruby `YAML.load_file`): 17 jobs, every `needs:` entry names an existing job.
 - `grep -rn revert-on-failure .github` and `grep -n revert .github/workflows/ci.yml`: no matches.
 
+#### T64.21 Move `report.html` under `docs/`
+
+Model: Claude Code / haiku-4.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 1 · Files: `report.html` → `docs/report.html`, `AGENTS.md` (`CLAUDE.md` is a symlink to it)
+Goal: the finding asked to gitignore `report.html` if a script generates it, or move it under `docs/` and update `AGENTS.md` if it is hand-kept. It is hand-kept, so it moves, and every reference names its new path.
+What landed:
+- Evidence: no script generates the file. The only live reference in the repository is `AGENTS.md:7`. No file under `scripts/`, `evals/`, `.github/` or the `justfile` names or writes it, and `.gitignore` has no HTML rule. It was added in `29293bef docs: plan v2, research, report, agent instructions`, next to `research.md`, and later touched by `5ff63e07 T2: add context assembly and budgets`.
+- `git mv report.html docs/report.html` (a pure rename, 0 lines changed). Its `href` and `src` attributes are external URLs or `#` anchors, so the move breaks no relative link.
+- `AGENTS.md:7` names `docs/report.html`. `CLAUDE.md` is a symlink to `AGENTS.md` and follows it.
+- `plan.md` findings row T64.21 is marked `done`.
+- `.github/workflows/sync-docs.yml` mirrors only `docs/**/*.md` into the site, so the move does not change what is published.
+Not done: no `.gitignore` entry, since the file is not generated. The HTML content itself was not re-checked for staleness; this task only moves it. There is no test: this is a file move and a doc reference change with no code. The check is the grep below.
+- `git grep -nE '(^|[^/])report\.html' -- ':!done.md' ':!plan.md'`: no output, exit 1 (no stale root-path reference outside the history lines). The `done.md` and `plan.md` matches left are history and the findings row.
+- `git ls-files report.html docs/report.html`: `docs/report.html` only.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
