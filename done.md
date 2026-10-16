@@ -140,6 +140,21 @@ Check:
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T64.16 Resolve relative bash tokens for the read-deny
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-permission/src/lib.rs`, `plan.md`, `done.md`
+Goal: a `Read(...)` deny also stops a read-only bash command that names the file relatively. The comment on `token_path` said relatives cannot match, but the command runs in the session cwd, so `cat id_rsa` inside `~/.ssh` read a denied key.
+What landed:
+- `Engine` keeps the cwd it was compiled with (the same cwd the bash tool runs in) and `token_path` resolves a relative token against it, lexically (`normalize` folds `.` and `..`, no filesystem access). `cat ../.ssh/id_rsa` from a sibling directory and `cat ./x/../../.ssh/id_rsa` fold to the same absolute path the rule globs match. Absolute and `~/` tokens are folded the same way. Flags and empty tokens are skipped.
+- The misleading comment is replaced by one saying why relatives are resolved and why a bare word may resolve too (fail closed; only a path inside a denied tree can match).
+- Tests `bash_read_deny_matches_relative_token_inside_denied_dir` (six cwd/command pairs) and `bash_read_deny_allows_relative_token_outside_denied_tree` (five pairs that stay allowed).
+Not done: a glob token (`cat *` inside `~/.ssh`) is still trimmed to nothing and not matched; a shell `cd` inside the command line is not tracked, so only the session cwd is used; a symlink inside the cwd is not followed (lexical resolution only).
+Check:
+- Before the fix: `cargo nextest run -p cox-permission` ran 16, 15 passed, 1 failed: `cat id_rsa in /home/alice/.ssh must be denied, got Allow { by: Policy }`.
+- `cargo nextest run -p cox-permission`: 16 run, 16 passed. `cargo nextest run -p cox-core --test permission --test policy_matrix`: 98 run, 98 passed.
+- `cargo clippy -p cox-permission --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
