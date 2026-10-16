@@ -697,6 +697,14 @@ Default window 1 440 × 900, minimum 900 × 600. A three-column
     stops it rendering. A plugin command's `OpenInspector` switches to the tab
     and shows the inspector. The strip scrolls sideways when the tabs outgrow
     the inspector's width.
+- **Plugin canvas** (⌘⇧D, plugin-canvas §3, T33.47.8): a plugin that declares
+  a canvas draws HTML frames into a pane beside the column, in the inspector's
+  or the browser pane's place, since with two the panes outgrow the window.
+  A bar holds the plugin's symbol and title, a picker when several plugins
+  declare one, and the zoom; the frames sit side by side at each one's
+  width and its content's height. A click on an element that carries the
+  plugin's selection attribute asks the plugin for an attachment, which
+  lands in the composer as one chip per canvas, replaced by the next click.
 
 ### 5.2 Transcript blocks
 
@@ -904,7 +912,9 @@ within each group and at most five of each, with the matched characters for the
 row to draw bold; commands and files join only once something is typed. A
 plugin's palette action (PL§15.4) is an action row with id
 `plugin:<id>:<command>` and the plugin's symbol in its well; ⏎ hands it to
-`plugin_action` (T33.45.7). ⏎ runs the selected row: an action runs, a session shows in the window, a command or
+`plugin_action` (T33.45.7). A declared canvas adds a "Show <title>" row,
+`canvas:<plugin>`, which opens the canvas pane on that plugin's canvas, or
+"Hide <title>" while it shows; a plugin cannot open the pane itself. ⏎ runs the selected row: an action runs, a session shows in the window, a command or
 file lands at the end of the composer's draft. Esc or a click on the scrim
 closes it. The whole app is keyboard-drivable:
 
@@ -922,9 +932,10 @@ closes it. The whole app is keyboard-drivable:
 | ⌘⌥A | Appearance popover |
 | ⌃` | Terminal pane under the transcript: show / hide; the first show opens the session's shell (T51.6) |
 | ⌘⇧B | Browser pane beside the transcript: show / hide; the page the agent's `browser_*` tools drive (T51.10) |
+| ⌘⇧D | Plugin canvas pane beside the transcript: show / hide (plugin-canvas §3, T33.47.8) |
 | ⌘⇧F | Search all sessions |
 | ⌘[ / ⌘] | Previous / next turn in the transcript |
-| ⌘+ / ⌘− | Text size |
+| ⌘+ / ⌘− | Text size; the canvas's zoom while the canvas pane has focus |
 
 ### 5.6 Notifications, Dock, menu bar
 
@@ -1108,7 +1119,12 @@ only answers the question the engine asked. Paths still go through
 `cox_sandbox::path::confine`; shell commands still run under
 `cox_sandbox::sandbox::Policy` — the desktop adds no "run in the app's own
 context" path. The M2 browser pane is a separate `WebPage` with no
-JavaScript bridge to the app.
+JavaScript bridge to the app. A plugin canvas's frames are untrusted HTML in a
+`CanvasPage` each (plugin-canvas §4): page script off, every load but the
+frame's own `cox-canvas:` document blocked by a content rule list, a
+`default-src 'none'` CSP on that document, no navigation, a non-persistent
+store, and the only message handler in the host's own content world; a
+click's value is checked in Rust before the plugin sees it.
 
 ## 11. Open questions for the creator
 

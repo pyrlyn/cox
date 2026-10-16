@@ -8,7 +8,8 @@
 // out itself, so these items take the system sidebar group's place and toggle the focused
 // window's panes through the actions it publishes. Show/Hide Terminal on ⌃` folds the session's
 // terminal pane under the column (DT§5.5, T51.6); Show/Hide Browser on ⌘⇧B puts the browser pane
-// beside it (DT§5.5, T51.10). The Window menu's Open in New Window and Open in New Tab pop the
+// beside it (DT§5.5, T51.10), and Show/Hide Canvas on ⌘⇧D a plugin's canvas in its place
+// (plugin-canvas §3, T33.47.8.6). The Window menu's Open in New Window and Open in New Tab pop the
 // shown session out (T51.11). File › Connect to Host… opens the focused window's sheet for an ssh
 // host alias (T52.21). File › New Session (⌘N) opens a session in the focused window, New Window
 // a main window of its own, Command Palette… (⌘K) the palette over it and Review Changes (⌘⇧R)
@@ -23,10 +24,13 @@ struct ShellActions {
   var isInspectorVisible: Bool
   var isTerminalVisible: Bool
   var isBrowserVisible: Bool
+  var isCanvasVisible: Bool
   var toggleSidebar: () -> Void
   var toggleInspector: () -> Void
   var toggleTerminal: () -> Void
   var toggleBrowser: () -> Void
+  /// `nil` while the shown session's plugins declare no canvas.
+  var toggleCanvas: (() -> Void)?
   /// Opens the shown session in a new window, or a tab when `true`; `nil` with none shown.
   var popOut: ((Bool) -> Void)?
   /// Shows the Connect to Host sheet; `nil` for a launch that cannot connect (a fixture).
@@ -87,6 +91,11 @@ struct ShellCommands: Commands {
       }
       .keyboardShortcut(ShellShortcut.browser.key)
       .disabled(shell == nil)
+      Button(shell?.isCanvasVisible == true ? "Hide Canvas" : "Show Canvas") {
+        shell?.toggleCanvas?()
+      }
+      .keyboardShortcut(ShellShortcut.canvas.key)
+      .disabled(shell?.toggleCanvas == nil)
     }
     CommandGroup(after: .windowArrangement) {
       Button("Open in New Window") { shell?.popOut?(false) }

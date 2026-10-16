@@ -375,11 +375,11 @@ public final class FixtureSession: SessionClient {
   public var isClosed: Bool { state.withLock { $0.closed } }
 
   public func close() {
-    let resume = state.withLock { state in
+    state.withLock { state in
       state.closed = true
       return state.parked.take()
-    }
-    resume?.resume()
+    }?.resume()
+    plugins.canvases.close()  // As a live session's close ends its canvas pull (T33.47.10).
   }
 
   private func untilAnswered() async {

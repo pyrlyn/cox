@@ -140,3 +140,27 @@ final class RemoteSession: SessionClient {
     Task { try? await handle.close() }
   }
 }
+
+// In this file because `handle` is private to it. Each reply was checked again on this side of
+// the wire (cox-app's `RemoteSession`), since the wire is a trust boundary too.
+extension RemoteSession: CanvasClient {
+  func pluginCanvases() async throws -> [CoxClient.PluginCanvas] {
+    try await handle.pluginCanvases().map { .init($0) }
+  }
+
+  func showCanvas(_ plugin: String, widthPt: UInt32, heightPt: UInt32) async throws {
+    try await handle.showCanvas(plugin: plugin, widthPt: widthPt, heightPt: heightPt)
+  }
+
+  func hideCanvas(_ plugin: String) async throws { try await handle.hideCanvas(plugin: plugin) }
+
+  func nextCanvas() async -> CoxClient.CanvasUpdate? {
+    await handle.nextCanvas().map { .init($0) }
+  }
+
+  func selectCanvas(
+    _ plugin: String, frame: String, value: String
+  ) async throws -> CoxClient.CanvasAttach? {
+    try await handle.selectCanvas(plugin: plugin, frame: frame, value: value).map { .init($0) }
+  }
+}

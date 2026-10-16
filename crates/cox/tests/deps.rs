@@ -274,6 +274,14 @@ fn no_crate_below_cox_depends_on_core() {
         deps["cox-sanitize"]
     );
 
+    // cox-target (T68.1) is the launch-argv trust guard shared by the desktop
+    // link, `--on` and agent presets: pure, no workspace-crate dependencies.
+    assert!(
+        deps["cox-target"].is_empty(),
+        "cox-target must not depend on any other workspace crate, found {:?}",
+        deps["cox-target"]
+    );
+
     // cox-sandbox (T32.3) is a trust guard that depends only on
     // cox-protocol among workspace crates (SandboxPolicy, SandboxMode,
     // LinuxBackend, ToolError).
@@ -526,10 +534,13 @@ fn no_crate_below_cox_depends_on_core() {
     // mcp/store/ext depend only on cox-protocol: this is the rule the test
     // is named for — none of them may reach cox-core. cox-ext also takes
     // the leaf cox-sanitize (T44.2: presence text names another session's
-    // worktree to the model through the one guard).
+    // worktree to the model through the one guard) and cox-web (T67.2: an
+    // http hook POSTs where reqwest already lives).
     for crate_name in ["cox-mcp", "cox-store", "cox-ext"] {
         let leaf_allowed: HashSet<&str> = match crate_name {
-            "cox-ext" => ["cox-protocol", "cox-sanitize"].into_iter().collect(),
+            "cox-ext" => ["cox-protocol", "cox-sanitize", "cox-web"]
+                .into_iter()
+                .collect(),
             _ => ["cox-protocol"].into_iter().collect(),
         };
         let d = &deps[crate_name];

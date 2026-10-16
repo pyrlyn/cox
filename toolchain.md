@@ -134,7 +134,7 @@ Programs the project uses and the direct packages from its manifests.
 | unic-langid | local | https://crates.io/crates/unic-langid | cox-i18n: BCP 47 language identifiers for locale negotiation |
 | unicode-width | local | https://crates.io/crates/unicode-width | Rust dependency |
 | vt100 | local | https://crates.io/crates/vt100 | Rust dependency |
-| wasmtime | local (`anyhow` feature only) | https://github.com/bytecodealliance/wasmtime | cox-plugin: the runtime under extism; declared only to enable the `anyhow` feature extism 1.30.0 needs with its default features off (T33.3) |
+| wasmtime | local (`anyhow` feature only) | https://github.com/bytecodealliance/wasmtime | cox-plugin: the runtime under extism; declared only to enable the `anyhow` feature extism 1.41.0 needs with its default features off (T33.3) |
 | whisper-rs | local (`tracing_backend`) | https://codeberg.org/tazz4843/whisper-rs | cox-voice: local push-to-talk transcription through whisper.cpp (MIT, built with cmake), behind `crates/cox`'s `voice` feature, off by default (T54.2, A123) |
 | wiremock | local | https://crates.io/crates/wiremock | Rust dependency |
 | trycmd | local | https://github.com/assert-rs/trycmd | dev-dep: `cox run -p` output fixtures (P48) |

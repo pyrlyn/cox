@@ -23,29 +23,23 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cox_protocol::ids::{ArchiveId, SessionId};
+use cox_protocol::plugin::CanvasAttach;
 use cox_protocol::types::TodoItem;
+use cox_target::{Kind, Target, Tty};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::{Notify, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot};
 
 use crate::app::{App, Host};
 use crate::coalesce;
-use crate::plugin_ui::{LinkClick, LinkTarget, link_target};
+use crate::plugin_ui::{self, CanvasUpdate, LinkClick, LinkTarget, PluginCanvas, link_target};
 use crate::wire::{self, Call, Line, Outcome, Reply, Request, ServerEvent, WireError};
 use crate::{Block, Changes, Completion, Intent, Project, SearchHit, SessionEntry, TimelinePatch};
-
-/// The system ssh; a fixed path, never one found through `PATH`.
-pub const SSH: &str = "/usr/bin/ssh";
-
-/// What ssh may still see of this process's environment: enough to find
-/// the person's ssh config (`HOME`), name them and reach their local agent
-/// for authentication. `ForwardAgent=no` keeps that agent off the remote.
-const KEPT_ENV: [&str; 5] = ["HOME", "USER", "LOGNAME", "PATH", "SSH_AUTH_SOCK"];
 
 /// What a remote call can fail with.
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteError {
-    #[error("{0:?} is not an ssh host name")]
-    BadHost(String),
+    #[error(transparent)]
+    Target(#[from] cox_target::TargetError),
     #[error("could not start ssh: {0}")]
     Spawn(#[from] std::io::Error),
     #[error("the connection to {0} dropped; reconnect to go on")]
@@ -57,39 +51,6 @@ pub enum RemoteError {
     Unexpected,
     #[error(transparent)]
     Wire(#[from] WireError),
-}
-
-/// Refuses a host ssh could take for an option (`-oProxyCommand=…`) or
-/// split into several words.
-pub fn check_host(host: &str) -> Result<(), RemoteError> {
-    let bad = host.is_empty()
-        || host.starts_with('-')
-        || host.chars().any(|c| c.is_whitespace() || c.is_control());
-    if bad {
-        return Err(RemoteError::BadHost(host.to_owned()));
-    }
-    Ok(())
-}
-
-/// The ssh invocation for `host`, not yet started.
-pub fn ssh_command(ssh: &Path, host: &str) -> Result<tokio::process::Command, RemoteError> {
-    check_host(host)?;
-    let mut command = tokio::process::Command::new(ssh);
-    command
-        .args(["-T", "-o", "BatchMode=yes", "-o", "ForwardAgent=no"])
-        .args(["-o", "ClearAllForwardings=yes", "--", host])
-        .args(["cox", "app-server", "--stdio"])
-        .env_clear()
-        .envs(
-            KEPT_ENV
-                .iter()
-                .filter_map(|k| Some((*k, std::env::var_os(*k)?))),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    Ok(command)
 }
 
 /// A session's patches, created by whichever comes first: the reader
@@ -116,6 +77,9 @@ struct Link {
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, oneshot::Sender<Outcome>>>,
     streams: Mutex<HashMap<SessionId, Arc<Stream>>>,
+    /// Each session's canvas updates, for its first handle only, as a
+    /// stream is.
+    canvases: Mutex<HashMap<SessionId, mpsc::Sender<CanvasUpdate>>>,
     connected: AtomicBool,
     /// Killed when the link goes (`kill_on_drop`).
     _child: Mutex<Option<tokio::process::Child>>,
@@ -142,6 +106,7 @@ impl Link {
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             streams: Mutex::new(HashMap::new()),
+            canvases: Mutex::new(HashMap::new()),
             connected: AtomicBool::new(true),
             _child: Mutex::new(child),
         });
@@ -210,6 +175,16 @@ impl Link {
         if let Some(stream) = lock(&self.streams).remove(&session) {
             stream.close();
         }
+        lock(&self.canvases).remove(&session);
+    }
+
+    /// Capped again here, since the remote's plugin drew it. The read loop
+    /// must not wait, so a full queue drops the update; showing the pane
+    /// again sends every frame.
+    fn canvas(&self, session: SessionId, update: CanvasUpdate) {
+        if let Some(tx) = lock(&self.canvases).get(&session) {
+            let _ = tx.try_send(update.capped());
+        }
     }
 
     /// The connection is gone: every waiting call fails and every stream
@@ -220,6 +195,7 @@ impl Link {
         for (_, stream) in lock(&self.streams).drain() {
             stream.close();
         }
+        lock(&self.canvases).clear();
     }
 }
 
@@ -295,6 +271,7 @@ async fn read(link: Arc<Link>, reader: impl AsyncRead + Unpin, local: Arc<dyn Ho
                     // Nothing else shows it: the remote left it to this host.
                     local.plugin_notice(*alert);
                 }
+                ServerEvent::PluginCanvas { session, update } => link.canvas(session, *update),
                 ServerEvent::OpenUrl { url } => {
                     if let Some(url) = web_link(&url) {
                         local.confirm_open_url(&link.host, &url);
@@ -327,7 +304,8 @@ pub struct RemoteWorkspace {
 impl RemoteWorkspace {
     /// Connects to `host` with the system ssh.
     pub async fn connect(host: &str, local: Arc<dyn Host>) -> Result<Arc<Self>, RemoteError> {
-        Self::connect_with(Path::new(SSH), host, local).await
+        let ssh = cox_target::launcher(Kind::Ssh)?;
+        Self::connect_with(&ssh, host, local).await
     }
 
     /// Connects through `ssh`: the system one, or a test's fake.
@@ -411,7 +389,16 @@ impl RemoteWorkspace {
 }
 
 fn spawn(ssh: &Path, host: &str, local: Arc<dyn Host>) -> Result<Arc<Link>, RemoteError> {
-    let mut child = ssh_command(ssh, host)?.spawn()?;
+    let target = Target::Ssh {
+        host: host.to_owned(),
+    };
+    let command = cox_target::command(&target, ssh, &["cox", "app-server", "--stdio"], Tty::No)?;
+    let mut child = tokio::process::Command::from(command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
     let missing = || std::io::Error::other("ssh started without its pipes");
     let stdin = child.stdin.take().ok_or_else(missing)?;
     let stdout = child.stdout.take().ok_or_else(missing)?;
@@ -426,17 +413,22 @@ pub struct RemoteSession {
     opened: Vec<Block>,
     warnings: Vec<String>,
     patches: Arc<Stream>,
+    canvas: tokio::sync::Mutex<mpsc::Receiver<CanvasUpdate>>,
 }
 
 impl RemoteSession {
     fn new(link: Arc<Link>, id: SessionId, opened: Vec<Block>, warnings: Vec<String>) -> Arc<Self> {
         let patches = link.take_stream(id);
+        // A second handle's sender is dropped here, so its canvas is closed.
+        let (tx, canvas) = mpsc::channel(plugin_ui::CANVAS_QUEUE);
+        lock(&link.canvases).entry(id).or_insert(tx);
         Arc::new(Self {
             id,
             link,
             opened,
             warnings,
             patches,
+            canvas: tokio::sync::Mutex::new(canvas),
         })
     }
 
@@ -560,6 +552,75 @@ impl RemoteSession {
         }
     }
 
+    /// The canvases the remote session's plugins declared, sanitized here.
+    pub async fn canvases(&self) -> Result<Vec<PluginCanvas>, RemoteError> {
+        match self.call(Call::Canvases { session: self.id }).await? {
+            Reply::Canvases(all) => Ok(all.into_iter().filter_map(PluginCanvas::checked).collect()),
+            _ => Err(RemoteError::Unexpected),
+        }
+    }
+
+    /// The pane shows `plugin`'s canvas at this size; its frames arrive
+    /// through [`Self::next_canvas`].
+    pub async fn show_canvas(
+        &self,
+        plugin: &str,
+        width_pt: u32,
+        height_pt: u32,
+    ) -> Result<(), RemoteError> {
+        let call = Call::ShowCanvas {
+            session: self.id,
+            plugin: plugin.to_owned(),
+            width_pt,
+            height_pt,
+        };
+        self.shown(call).await
+    }
+
+    /// The pane hid `plugin`'s canvas.
+    pub async fn hide_canvas(&self, plugin: &str) -> Result<(), RemoteError> {
+        let call = Call::HideCanvas {
+            session: self.id,
+            plugin: plugin.to_owned(),
+        };
+        self.shown(call).await
+    }
+
+    async fn shown(&self, call: Call) -> Result<(), RemoteError> {
+        match self.call(call).await? {
+            Reply::Shown => Ok(()),
+            _ => Err(RemoteError::Unexpected),
+        }
+    }
+
+    /// The next canvas update, capped on arrival; `None` once closed or
+    /// disconnected.
+    pub async fn next_canvas(&self) -> Option<CanvasUpdate> {
+        self.canvas.lock().await.recv().await
+    }
+
+    /// A click on a frame: the attachment for the composer, capped and
+    /// sanitized again here.
+    pub async fn select_canvas(
+        &self,
+        plugin: &str,
+        frame: &str,
+        value: &str,
+    ) -> Result<Option<CanvasAttach>, RemoteError> {
+        let call = Call::CanvasSelect {
+            session: self.id,
+            plugin: plugin.to_owned(),
+            frame: frame.to_owned(),
+            value: value.to_owned(),
+        };
+        match self.call(call).await? {
+            Reply::CanvasAttach(attach) => {
+                Ok(attach.and_then(|a| a.capped().ok()).map(plugin_ui::chip))
+            }
+            _ => Err(RemoteError::Unexpected),
+        }
+    }
+
     /// Stops the stream; the remote session keeps running.
     pub async fn close(&self) -> Result<(), RemoteError> {
         match self.call(Call::Close { session: self.id }).await? {
@@ -584,27 +645,6 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn remote_host_with_leading_dash_is_refused() {
-        for host in [
-            "-oProxyCommand=touch /tmp/x",
-            "-p22",
-            "",
-            "dev box",
-            "dev\nbox",
-            "a\u{7}",
-        ] {
-            assert!(
-                matches!(check_host(host), Err(RemoteError::BadHost(_))),
-                "{host:?} was accepted"
-            );
-            assert!(ssh_command(Path::new(SSH), host).is_err());
-        }
-        for host in ["devbox", "me@devbox.local", "devbox:2222", "[::1]"] {
-            assert!(check_host(host).is_ok(), "{host:?} was refused");
-        }
-    }
 
     /// Remembers every link it was asked to open, and how.
     #[derive(Default)]
@@ -783,43 +823,126 @@ mod tests {
         assert_eq!(second.next().await, None);
         assert_eq!(first.next().await, Some(vec![append("a", "1")]));
     }
-
-    #[test]
-    // why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
-    #[allow(unsafe_code)]
-    fn remote_spawn_forwards_no_agent_and_no_env() {
-        // SAFETY: nextest runs each test in its own process.
-        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "sk-must-not-leave") };
-        let command = ssh_command(Path::new(SSH), "devbox").expect("a valid host");
-        let std = command.as_std();
-        assert_eq!(std.get_program(), SSH);
-        let args: Vec<_> = std
-            .get_args()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            args,
-            [
-                "-T",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ForwardAgent=no",
-                "-o",
-                "ClearAllForwardings=yes",
-                "--",
-                "devbox",
-                "cox",
-                "app-server",
-                "--stdio",
-            ]
-        );
-        // `env_clear` leaves only what is set explicitly, and that is the
-        // allow-list.
-        for (key, _) in std.get_envs() {
-            let key = key.to_string_lossy();
-            assert!(KEPT_ENV.contains(&&*key), "{key} reaches ssh");
+    fn frame(id: &str, title: &str) -> cox_protocol::plugin::Frame {
+        cox_protocol::plugin::Frame {
+            id: id.into(),
+            title: title.into(),
+            width_pt: 90_000,
+            html: "<p>page</p>".into(),
         }
-        assert!(std.get_envs().all(|(k, _)| k != "ANTHROPIC_API_KEY"));
+    }
+
+    /// plugin-canvas §7: the client caps a server's canvas update again.
+    #[tokio::test]
+    async fn an_over_size_remote_canvas_is_capped_by_the_client() {
+        let (client, mut server) = tokio::io::duplex(1 << 16);
+        let (reader, writer) = tokio::io::split(client);
+        let local = Arc::new(Links::default()) as Arc<dyn Host>;
+        let link = Link::start("devbox", reader, writer, None, local);
+        let id = SessionId::new();
+        let session = RemoteSession::new(Arc::clone(&link), id, Vec::new(), Vec::new());
+        let mut frames: Vec<_> = (0..14).map(|n| frame(&format!("f{n}"), "Page")).collect();
+        frames[0].title = "Home\u{1b}[2J".into();
+        frames.push(frame("Bad!", "x"));
+        let mut order: Vec<String> = frames.iter().map(|f| f.id.clone()).collect();
+        order.push("f0".into());
+        let update = CanvasUpdate {
+            plugin: "weft\u{7}".into(),
+            order,
+            frames,
+            stopped: false,
+        };
+        for session in [id, SessionId::new()] {
+            let line = Line::Notification(wire::Notification {
+                v: wire::VERSION,
+                event: ServerEvent::PluginCanvas {
+                    session,
+                    update: Box::new(update.clone()),
+                },
+            });
+            let text = wire::encode(&line).expect("encodes");
+            server.write_all(text.as_bytes()).await.expect("write");
+        }
+        drop(server);
+        until_dropped(&link).await;
+        let got = session.next_canvas().await.expect("the session's update");
+        assert_eq!(got.plugin, "weft");
+        assert_eq!(got.frames.len(), cox_protocol::plugin::MAX_CANVAS_FRAMES);
+        assert_eq!(got.frames[0].title, "Home");
+        assert_eq!(got.frames[0].width_pt, 2560, "the width is clamped");
+        assert_eq!(got.order.len(), cox_protocol::plugin::MAX_CANVAS_FRAMES);
+        assert!(!got.order.iter().any(|id| id == "Bad!"));
+        assert_eq!(
+            session.next_canvas().await,
+            None,
+            "another session's update is not ours"
+        );
+    }
+
+    /// §5, §7: a remote canvas declaration and attachment are checked again.
+    #[tokio::test]
+    async fn remote_canvas_replies_are_checked_again() {
+        let (client, server) = tokio::io::duplex(1 << 16);
+        let (reader, writer) = tokio::io::split(client);
+        let local = Arc::new(Links::default()) as Arc<dyn Host>;
+        let link = Link::start("devbox", reader, writer, None, local);
+        let session = RemoteSession::new(link, SessionId::new(), Vec::new(), Vec::new());
+        let canvas = |select_attr: &str| PluginCanvas {
+            plugin: "weft".into(),
+            title: "Screens".into(),
+            symbol: "rectangle.on.rectangle".into(),
+            select_attr: select_attr.into(),
+        };
+        let declared = vec![canvas("data-weft-path"), canvas("onclick")];
+        let mut attaches = vec![
+            CanvasAttach {
+                name: "too big".into(),
+                text: "x".repeat(cox_protocol::plugin::MAX_ATTACH_TEXT + 1),
+            },
+            CanvasAttach {
+                name: "hero\u{1b}[31m".into(),
+                text: "node hero".into(),
+            },
+        ];
+        tokio::spawn(async move {
+            let (read, mut write) = tokio::io::split(server);
+            let mut lines = BufReader::new(read).lines();
+            while let Ok(Some(text)) = lines.next_line().await {
+                let Ok(Line::Request(request)) = wire::decode(&text) else {
+                    continue;
+                };
+                let reply = match request.call {
+                    Call::Canvases { .. } => Reply::Canvases(declared.clone()),
+                    _ => Reply::CanvasAttach(attaches.pop()),
+                };
+                let line = Line::Response(wire::Response {
+                    v: wire::VERSION,
+                    id: request.id,
+                    outcome: Outcome::Ok(reply),
+                });
+                let text = wire::encode(&line).expect("encodes");
+                write.write_all(text.as_bytes()).await.expect("write");
+            }
+        });
+        let shown = session.canvases().await.expect("canvases");
+        assert_eq!(
+            shown,
+            [canvas("data-weft-path")],
+            "a bad attribute is dropped"
+        );
+        let chip = session.select_canvas("weft", "home", "hero").await;
+        assert_eq!(
+            chip.expect("a reply"),
+            Some(CanvasAttach {
+                name: "hero".into(),
+                text: "node hero".into(),
+            })
+        );
+        let big = session.select_canvas("weft", "home", "hero").await;
+        assert_eq!(
+            big.expect("a reply"),
+            None,
+            "an over-size attachment is dropped"
+        );
     }
 }

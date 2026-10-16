@@ -4,11 +4,11 @@
 
 // The app's registry of open sessions (DT§4.5, DT§4.6, T51.11): every window that shows one
 // session — the main window, a popped-out window or a native tab — shares its one
-// `SessionStore`, its `ComposerStore` and its one patch pull. The registry keeps them while any
-// window holds the session and lets them go with the last one. Letting go stops the pull and
-// the session's shells and closes the client. That is the core's own close, which leaves a
-// running turn running, so closing a window never stops a turn. Separate from the windows
-// because no single window owns a session any more.
+// `SessionStore`, its `ComposerStore`, its `CanvasStore` and its one pull of patches and draws.
+// The registry keeps them while any window holds the session and lets them go with the last
+// one. Letting go stops the pull and the session's shells and closes the client. That is the
+// core's own close, which leaves a running turn running, so closing a window never stops a turn.
+// Separate from the windows because no single window owns a session any more.
 
 import CoxClient
 import Foundation
@@ -19,6 +19,9 @@ public final class AppStore {
   public struct Shared {
     public let store: SessionStore
     public let composer: ComposerStore
+    /// The session's plugin canvases; `nil` for a session that has none, such as an external
+    /// agent's. Shared, so a popped-out window shows the same canvas instead of drawing it again.
+    public let canvas: CanvasStore?
   }
 
   private struct Entry {
@@ -49,11 +52,9 @@ public final class AppStore {
       client.close()
       return shared
     }
-    let store = SessionStore(session: client)
-    let shared = Shared(store: store, composer: ComposerStore(session: store))
-    entries[client.id] = Entry(
-      shared: shared, pull: Task { await store.run() }, windows: [window])
-    return shared
+    let entry = Self.entry(client, draft: nil, windows: [window])
+    entries[client.id] = entry
+    return entry.shared
   }
 
   /// Puts the reopened `client` in place of the session it replaces (`Intent.switchProvider`,
@@ -66,14 +67,29 @@ public final class AppStore {
     old.pull.cancel()
     old.shared.store.closeTerminals()
     old.shared.store.session.close()
+    // Typed before the first turn, so the draft is what the switch must not lose (DT§5.3).
+    let entry = Self.entry(client, draft: old.shared.composer, windows: old.windows)
+    entries[session] = entry
+    return entry.shared
+  }
+
+  /// Fresh stores for `client` and the one task that pulls both its patches and its canvas's
+  /// draws; cancelling it, or closing the client, ends both.
+  private static func entry(
+    _ client: any SessionClient, draft old: ComposerStore?, windows: Set<UUID>
+  ) -> Entry {
     let store = SessionStore(session: client)
     let composer = ComposerStore(session: store)
-    // Typed before the first turn, so the draft is what the switch must not lose (DT§5.3).
-    composer.carryDraft(from: old.shared.composer)
-    let shared = Shared(store: store, composer: composer)
-    entries[session] = Entry(
-      shared: shared, pull: Task { await store.run() }, windows: old.windows)
-    return shared
+    if let old { composer.carryDraft(from: old) }
+    let canvas = CanvasStore(composer: composer)
+    let pull = Task {
+      async let patches: Void = store.run()
+      await canvas?.pump()
+      await patches
+    }
+    return Entry(
+      shared: Shared(store: store, composer: composer, canvas: canvas), pull: pull,
+      windows: windows)
   }
 
   /// Sends `intent` to `store`'s session. A provider switch hands back the session the core

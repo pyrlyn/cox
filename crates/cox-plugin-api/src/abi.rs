@@ -99,6 +99,9 @@ pub struct DesktopOut {
     pub toolbar: Vec<ActionDecl>,
     /// Command-palette actions.
     pub palette: Vec<ActionDecl>,
+    /// The canvas pane, filled by `cox_canvas`
+    /// (`docs/design/plugin-canvas.md`).
+    pub canvas: Option<CanvasDecl>,
 }
 
 /// The inspector tab a plugin adds.
@@ -130,6 +133,228 @@ pub fn is_symbol_name(name: &str) -> bool {
         && name
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.')
+}
+
+/// At most this many frames on one canvas.
+pub const MAX_CANVAS_FRAMES: usize = 12;
+/// At most this many bytes of HTML in one frame.
+pub const MAX_FRAME_HTML: usize = 1024 * 1024;
+/// At most this many bytes of HTML in one `CanvasOut`.
+pub const MAX_CANVAS_HTML: usize = 4 * 1024 * 1024;
+/// The widths a frame is drawn at, in points; others are clamped.
+pub const FRAME_WIDTHS: std::ops::RangeInclusive<u32> = 200..=2560;
+/// At most this many bytes of text in a selection's attachment.
+pub const MAX_ATTACH_TEXT: usize = 8 * 1024;
+
+/// The canvas pane a plugin adds. Its pages are static HTML the app shows
+/// with page script, loads and navigation off; only the app's own script
+/// reports a click (`docs/design/plugin-canvas.md` §4).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CanvasDecl {
+    /// The pane's title, 1–64 characters.
+    pub title: String,
+    /// An SF Symbol name; see [`is_symbol_name`].
+    pub symbol: String,
+    /// The attribute a click reports, from the nearest element carrying it:
+    /// `data-` and 1–48 of `[a-z0-9-]`.
+    pub select_attr: String,
+}
+
+/// `cox_canvas` input: the pane's size, in points.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CanvasIn {
+    /// The pane's width.
+    pub width_pt: u32,
+    /// The pane's height.
+    pub height_pt: u32,
+}
+
+/// `cox_canvas` output: the frames, in the order the pane shows them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct CanvasOut {
+    /// At most [`MAX_CANVAS_FRAMES`].
+    pub frames: Vec<Frame>,
+}
+
+/// One page on the canvas.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Frame {
+    /// Unique on the canvas: 1–64 of `[a-z0-9_.-]`.
+    pub id: String,
+    /// Shown above the frame; cut to 80 characters.
+    pub title: String,
+    /// The frame's width; see [`FRAME_WIDTHS`].
+    pub width_pt: u32,
+    /// The page. Untrusted: the app isolates it, so it is not filtered.
+    pub html: String,
+}
+
+/// `cox_canvas_select` input: a click on a frame. The output is an
+/// `Option<CanvasAttach>`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CanvasSelect {
+    /// The frame's id.
+    pub frame: String,
+    /// The `select_attr` value of the clicked element or its nearest
+    /// ancestor: 1–256 characters, no control characters.
+    pub value: String,
+}
+
+/// What a selection adds to the composer: a `text/plain` attachment the
+/// person sends with their next turn or removes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CanvasAttach {
+    /// The chip's label; cut to 80 characters.
+    pub name: String,
+    /// At most [`MAX_ATTACH_TEXT`] bytes.
+    pub text: String,
+}
+
+/// Why a canvas part was dropped; the host shows each as a notice.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum CanvasError {
+    /// The pane's title is empty or too long.
+    #[error("canvas title must be 1-64 characters")]
+    Title,
+    /// The symbol fails [`is_symbol_name`].
+    #[error("canvas symbol {0:?} is not a symbol name")]
+    Symbol(String),
+    /// The selection attribute is not a short `data-` name.
+    #[error("canvas select_attr {0:?} is not data- and 1-48 of [a-z0-9-]")]
+    SelectAttr(String),
+    /// Frames past [`MAX_CANVAS_FRAMES`].
+    #[error("canvas has more than {MAX_CANVAS_FRAMES} frames; the rest are dropped")]
+    TooManyFrames,
+    /// A frame id outside its form.
+    #[error("frame id {0:?} is not 1-64 of [a-z0-9_.-]")]
+    FrameId(String),
+    /// A second frame with an id already shown.
+    #[error("frame id {0:?} is used twice")]
+    DuplicateFrame(String),
+    /// A frame over [`MAX_FRAME_HTML`].
+    #[error("frame {0:?} is over 1 MiB of HTML")]
+    FrameTooLarge(String),
+    /// A frame past [`MAX_CANVAS_HTML`] in all.
+    #[error("frame {0:?} would take the canvas over 4 MiB of HTML")]
+    CanvasTooLarge(String),
+    /// A click whose frame or value is outside its form.
+    #[error("selection is not a frame id and a value of 1-256 characters")]
+    Selection,
+    /// An attachment over [`MAX_ATTACH_TEXT`].
+    #[error("canvas attachment is over 8 KiB")]
+    AttachTooLarge,
+}
+
+impl CanvasDecl {
+    /// Whether the app may show this pane. Forms only: the strings are
+    /// sanitized where they are shown, as widget text is.
+    pub fn check(&self) -> Result<(), CanvasError> {
+        if !(1..=64).contains(&self.title.chars().count()) {
+            return Err(CanvasError::Title);
+        }
+        if !is_symbol_name(&self.symbol) {
+            return Err(CanvasError::Symbol(self.symbol.clone()));
+        }
+        let name = self.select_attr.strip_prefix("data-").unwrap_or("");
+        let valid = (1..=48).contains(&name.len())
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !valid {
+            return Err(CanvasError::SelectAttr(self.select_attr.clone()));
+        }
+        Ok(())
+    }
+}
+
+/// Whether `id` names a frame: 1–64 of `[a-z0-9_.-]`.
+fn is_frame_id(id: &str) -> bool {
+    (1..=64).contains(&id.len())
+        && id.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'.' | b'-')
+        })
+}
+
+/// The first `max` characters of `text`.
+fn cut(text: String, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        Some((end, _)) => text[..end].to_owned(),
+        None => text,
+    }
+}
+
+impl CanvasOut {
+    /// The frames the app may show, in order, and why each other one was
+    /// dropped. Both the host and an app-server client call it, since the
+    /// wire is a boundary too.
+    pub fn capped(self) -> (Self, Vec<CanvasError>) {
+        let mut kept: Vec<Frame> = Vec::new();
+        let mut dropped = Vec::new();
+        let mut total = 0;
+        for frame in self.frames {
+            let reason = if kept.len() == MAX_CANVAS_FRAMES {
+                Some(CanvasError::TooManyFrames)
+            } else if !is_frame_id(&frame.id) {
+                Some(CanvasError::FrameId(frame.id.clone()))
+            } else if kept.iter().any(|k| k.id == frame.id) {
+                Some(CanvasError::DuplicateFrame(frame.id.clone()))
+            } else if frame.html.len() > MAX_FRAME_HTML {
+                Some(CanvasError::FrameTooLarge(frame.id.clone()))
+            } else if total + frame.html.len() > MAX_CANVAS_HTML {
+                Some(CanvasError::CanvasTooLarge(frame.id.clone()))
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                // One notice for the whole overflow, not one per frame.
+                if reason != CanvasError::TooManyFrames || !dropped.contains(&reason) {
+                    dropped.push(reason);
+                }
+                continue;
+            }
+            total += frame.html.len();
+            kept.push(Frame {
+                title: cut(frame.title, 80),
+                width_pt: frame
+                    .width_pt
+                    .clamp(*FRAME_WIDTHS.start(), *FRAME_WIDTHS.end()),
+                ..frame
+            });
+        }
+        (Self { frames: kept }, dropped)
+    }
+}
+
+impl CanvasSelect {
+    /// Whether the click may reach the plugin. A page's DOM can hold any
+    /// value in the attribute, so this runs before the plugin sees it.
+    pub fn check(&self) -> Result<(), CanvasError> {
+        let length = self.value.chars().count();
+        if is_frame_id(&self.frame)
+            && (1..=256).contains(&length)
+            && !self.value.chars().any(char::is_control)
+        {
+            Ok(())
+        } else {
+            Err(CanvasError::Selection)
+        }
+    }
+}
+
+impl CanvasAttach {
+    /// The attachment the composer may take: the name cut to 80
+    /// characters; text over [`MAX_ATTACH_TEXT`] is refused, since a cut
+    /// note could say something the plugin did not mean.
+    pub fn capped(self) -> Result<Self, CanvasError> {
+        if self.text.len() > MAX_ATTACH_TEXT {
+            return Err(CanvasError::AttachTooLarge);
+        }
+        Ok(Self {
+            name: cut(self.name, 80),
+            text: self.text,
+        })
+    }
 }
 
 /// `cox_desktop_notify` input (`cox:desktop/v1`, PL§15.4): a notification
@@ -869,9 +1094,25 @@ mod tests {
                 }),
                 toolbar: vec![action.clone()],
                 palette: vec![action],
+                canvas: Some(canvas_decl()),
             },
             ..InitOut::default()
         });
+        round_trip(&CanvasIn {
+            width_pt: 900,
+            height_pt: 700,
+        });
+        round_trip(&CanvasOut {
+            frames: vec![frame("home", 10)],
+        });
+        round_trip(&CanvasSelect {
+            frame: "home".into(),
+            value: "screen#home/button#save".into(),
+        });
+        round_trip(&Some(CanvasAttach {
+            name: "home: button#save".into(),
+            text: "<button id=\"save\">".into(),
+        }));
         round_trip(&DesktopNotice {
             level: NoticeLevel::Info,
             title: "Done".into(),
@@ -911,5 +1152,143 @@ mod tests {
         for bad in ["", "Eye", "a b", "a/b", "é", &"a".repeat(65)] {
             assert!(!is_symbol_name(bad), "{bad}");
         }
+    }
+
+    fn canvas_decl() -> CanvasDecl {
+        CanvasDecl {
+            title: "Weft".into(),
+            symbol: "rectangle.on.rectangle".into(),
+            select_attr: "data-weft-path".into(),
+        }
+    }
+
+    fn frame(id: &str, html: usize) -> Frame {
+        Frame {
+            id: id.into(),
+            title: id.into(),
+            width_pt: 390,
+            html: "x".repeat(html),
+        }
+    }
+
+    #[test]
+    fn canvas_decl_checks_title_symbol_and_attribute() {
+        assert_eq!(canvas_decl().check(), Ok(()));
+        let with = |f: fn(&mut CanvasDecl)| {
+            let mut d = canvas_decl();
+            f(&mut d);
+            d.check()
+        };
+        assert_eq!(with(|d| d.title.clear()), Err(CanvasError::Title));
+        assert_eq!(with(|d| d.title = "é".repeat(64)), Ok(()));
+        assert_eq!(with(|d| d.title = "a".repeat(65)), Err(CanvasError::Title));
+        assert!(matches!(
+            with(|d| d.symbol = "A".into()),
+            Err(CanvasError::Symbol(_))
+        ));
+        for bad in ["weft-path", "data-", "data-Weft", "data-a b", "onclick"] {
+            let mut d = canvas_decl();
+            d.select_attr = bad.into();
+            assert!(
+                matches!(d.check(), Err(CanvasError::SelectAttr(_))),
+                "{bad}"
+            );
+        }
+        let mut d = canvas_decl();
+        d.select_attr = format!("data-{}", "a".repeat(48));
+        assert_eq!(d.check(), Ok(()));
+        d.select_attr.push('a');
+        assert!(d.check().is_err());
+    }
+
+    #[test]
+    fn canvas_out_keeps_valid_frames_within_the_limits() {
+        let mut long = frame("long", 1);
+        long.title = "t".repeat(100);
+        long.width_pt = 5000;
+        let mut narrow = frame("narrow", 1);
+        narrow.width_pt = 10;
+        let out = CanvasOut {
+            frames: vec![
+                long,
+                narrow,
+                frame("Bad", 1),
+                frame("long", 1),
+                frame("big", MAX_FRAME_HTML + 1),
+            ],
+        };
+        let (kept, dropped) = out.capped();
+        let ids: Vec<_> = kept.frames.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, ["long", "narrow"]);
+        assert_eq!(kept.frames[0].title.chars().count(), 80);
+        assert_eq!(kept.frames[0].width_pt, 2560);
+        assert_eq!(kept.frames[1].width_pt, 200);
+        assert_eq!(
+            dropped,
+            [
+                CanvasError::FrameId("Bad".into()),
+                CanvasError::DuplicateFrame("long".into()),
+                CanvasError::FrameTooLarge("big".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn canvas_out_caps_the_frame_count_and_the_total_size() {
+        let many = CanvasOut {
+            frames: (0..MAX_CANVAS_FRAMES + 3)
+                .map(|i| frame(&format!("f{i}"), 1))
+                .collect(),
+        };
+        let (kept, dropped) = many.capped();
+        assert_eq!(kept.frames.len(), MAX_CANVAS_FRAMES);
+        assert_eq!(dropped, [CanvasError::TooManyFrames]);
+
+        let heavy = CanvasOut {
+            frames: (0..5)
+                .map(|i| frame(&format!("f{i}"), MAX_FRAME_HTML))
+                .collect(),
+        };
+        let (kept, dropped) = heavy.capped();
+        assert_eq!(kept.frames.len(), 4);
+        assert_eq!(dropped, [CanvasError::CanvasTooLarge("f4".into())]);
+    }
+
+    #[test]
+    fn canvas_selection_needs_a_frame_id_and_a_plain_bounded_value() {
+        let select = |frame: &str, value: &str| {
+            CanvasSelect {
+                frame: frame.into(),
+                value: value.into(),
+            }
+            .check()
+        };
+        assert_eq!(select("home", "screen#home/button#save"), Ok(()));
+        assert_eq!(select("home", &"é".repeat(256)), Ok(()));
+        for (frame, value) in [
+            ("home", ""),
+            ("home", &"a".repeat(257)),
+            ("home", "a\u{1b}[31m"),
+            ("home", "line\nbreak"),
+            ("../home", "a"),
+        ] {
+            assert_eq!(select(frame, value), Err(CanvasError::Selection), "{value}");
+        }
+    }
+
+    #[test]
+    fn canvas_attachment_cuts_the_name_and_refuses_long_text() {
+        let attach = CanvasAttach {
+            name: "n".repeat(100),
+            text: "t".repeat(MAX_ATTACH_TEXT),
+        }
+        .capped()
+        .expect("8 KiB fits");
+        assert_eq!(attach.name.len(), 80);
+        let over = CanvasAttach {
+            name: "n".into(),
+            text: "t".repeat(MAX_ATTACH_TEXT + 1),
+        };
+        assert_eq!(over.capped(), Err(CanvasError::AttachTooLarge));
     }
 }

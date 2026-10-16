@@ -242,6 +242,8 @@ where
 /// | `command` / `key` | `cox_command` / `cox_key` | `CommandIn` → `CommandOut` |
 /// | `render` | `cox_render` | `RenderIn` → `Widget` |
 /// | `render_item` | `cox_render_item` | `RenderItemIn` → `Option<Widget>` |
+/// | `canvas` | `cox_canvas` | `CanvasIn` → `CanvasOut` |
+/// | `canvas_select` | `cox_canvas_select` | `CanvasSelect` → `Option<CanvasAttach>` |
 /// | `shutdown` | `cox_shutdown` | `()` → `()` |
 #[macro_export]
 macro_rules! register {
@@ -270,6 +272,10 @@ macro_rules! __export_fn {
     (render, $f:path) => { $crate::__export_fn!(@ cox_render, $crate::RenderIn, $crate::Widget, $f); };
     (render_item, $f:path) => {
         $crate::__export_fn!(@ cox_render_item, $crate::RenderItemIn, Option<$crate::Widget>, $f);
+    };
+    (canvas, $f:path) => { $crate::__export_fn!(@ cox_canvas, $crate::CanvasIn, $crate::CanvasOut, $f); };
+    (canvas_select, $f:path) => {
+        $crate::__export_fn!(@ cox_canvas_select, $crate::CanvasSelect, Option<$crate::CanvasAttach>, $f);
     };
     (shutdown, $f:path) => { $crate::__export_fn!(@ cox_shutdown, (), (), $f); };
     (@ $name:ident, $in:ty, $out:ty, $f:path) => {
@@ -423,6 +429,12 @@ mod tests {
         fn render_item(_: RenderItemIn) -> R<Option<Widget>> {
             Ok(None)
         }
+        fn canvas(_: CanvasIn) -> R<CanvasOut> {
+            Ok(CanvasOut::default())
+        }
+        fn canvas_select(_: CanvasSelect) -> R<Option<CanvasAttach>> {
+            Ok(None)
+        }
         fn shutdown(_: ()) -> R<()> {
             Ok(())
         }
@@ -440,6 +452,8 @@ mod tests {
             key => command,
             render => render,
             render_item => render_item,
+            canvas => canvas,
+            canvas_select => canvas_select,
             shutdown => shutdown,
         );
     }

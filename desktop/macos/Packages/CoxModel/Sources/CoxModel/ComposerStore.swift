@@ -48,6 +48,9 @@ public final class ComposerStore {
   /// The session's earlier prompts, newest first, and which one the draft shows, while ↑ ↓ walk
   /// them; `nil` once the draft is typed, sent or walked back to empty.
   private var recalled: (prompts: [String], index: Int)?
+  /// The chip each plugin's canvas added last, so its next selection replaces it rather than
+  /// piling stray clicks up (plugin-canvas §5).
+  private var canvasChips: [String: Attachment] = [:]
 
   /// Rows asked for at a time: more than the list shows scrolls nothing into view.
   static let rowLimit: UInt32 = 8
@@ -67,6 +70,7 @@ public final class ComposerStore {
       old.mentions, old.attachments, old.selectedRange, old.think
     )
     readiness = old.readiness
+    canvasChips = old.canvasChips
   }
 
   /// Something to send, and a provider that can answer it when it is a turn: a shell line or a
@@ -198,6 +202,20 @@ public final class ComposerStore {
       Attachment(
         name: name, mediaType: type?.preferredMIMEType ?? "application/octet-stream",
         dataB64: data.base64EncodedString()))
+  }
+
+  /// A canvas selection as a `text/plain` chip, in place of the one `plugin`'s canvas added
+  /// before; added anew when the person removed or sent that one.
+  public func attachSelection(_ attach: CanvasAttach, from plugin: String) {
+    let chip = Attachment(
+      name: attach.name, mediaType: "text/plain",
+      dataB64: Data(attach.text.utf8).base64EncodedString())
+    if let old = canvasChips[plugin], let index = attachments.firstIndex(of: old) {
+      attachments[index] = chip
+    } else {
+      attachments.append(chip)
+    }
+    canvasChips[plugin] = chip
   }
 
   public func removeAttachment(at index: Int) {

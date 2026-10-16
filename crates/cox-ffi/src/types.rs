@@ -28,6 +28,7 @@ use cox_app::intent::{DraftIntent, DraftKind, SendWhen};
 use cox_app::onboarding::{CheckId, CheckRow, CheckStatus};
 use cox_app::patch::TaskState;
 use cox_app::patch::{Block, BlockId, BlockKind, Status, TimelinePatch, ToolState};
+use cox_app::plugin_ui::{CanvasUpdate, PluginCanvas};
 use cox_app::pointer::{Edge, Interaction, Pointer};
 use cox_app::review::LineComment;
 use cox_app::workspace::{SidebarKind, SidebarRow, SidebarSection, SidebarStatus, SubtitlePart};
@@ -47,8 +48,8 @@ use cox_app::{MenuModel, ModelSection, Readiness};
 use cox_app::{SettingControl, SettingInput, SettingOption};
 use cox_app::{Suggestion, Welcome};
 use cox_protocol::ids::{ArchiveId, CallId, SessionId, TaskId, TurnId};
-use cox_protocol::plugin::Slot;
 use cox_protocol::plugin::ui::StyleToken;
+use cox_protocol::plugin::{CanvasAttach, Frame, Slot};
 use cox_protocol::traits::{FileStat, Worktree, WorktreeInfo};
 use cox_protocol::types::{
     ApprovalPolicy, ArchiveRef, Attachment, CompactReason, DecidedBy, Decision, Effort, Level,
@@ -365,6 +366,41 @@ pub struct PluginAction {
     pub plugin: String,
     pub title: String,
     pub symbol: String,
+}
+
+/// plugin-canvas §3: what heads the pane; `select_attr` is the one
+/// attribute its host script reads on a click.
+#[uniffi::remote(Record)]
+pub struct PluginCanvas {
+    pub plugin: String,
+    pub title: String,
+    pub symbol: String,
+    pub select_attr: String,
+}
+
+/// One canvas frame; `html` is the plugin's page, for `CanvasPage` only.
+#[uniffi::remote(Record)]
+pub struct Frame {
+    pub id: String,
+    pub title: String,
+    pub width_pt: u32,
+    pub html: String,
+}
+
+/// §6: every frame id in order, and only the frames whose page changed.
+#[uniffi::remote(Record)]
+pub struct CanvasUpdate {
+    pub plugin: String,
+    pub order: Vec<String>,
+    pub frames: Vec<Frame>,
+    pub stopped: bool,
+}
+
+/// §5: the composer's `text/plain` attachment from a click.
+#[uniffi::remote(Record)]
+pub struct CanvasAttach {
+    pub name: String,
+    pub text: String,
 }
 
 #[uniffi::remote(Enum)]

@@ -138,6 +138,29 @@ final class LiveSession: SessionClient {
   func openLink(_ link: String) -> CoxClient.LinkClick { .init(handle.openLink(link: link)) }
 }
 
+// In this file because `handle` is private to it.
+extension LiveSession: CanvasClient {
+  func pluginCanvases() async throws -> [CoxClient.PluginCanvas] {
+    handle.pluginCanvases().map { .init($0) }
+  }
+
+  func showCanvas(_ plugin: String, widthPt: UInt32, heightPt: UInt32) async throws {
+    try await handle.showCanvas(plugin: plugin, widthPt: widthPt, heightPt: heightPt)
+  }
+
+  func hideCanvas(_ plugin: String) async throws { handle.hideCanvas(plugin: plugin) }
+
+  func nextCanvas() async -> CoxClient.CanvasUpdate? {
+    await handle.nextCanvas().map { .init($0) }
+  }
+
+  func selectCanvas(
+    _ plugin: String, frame: String, value: String
+  ) async throws -> CoxClient.CanvasAttach? {
+    await handle.selectCanvas(plugin: plugin, frame: frame, value: value).map { .init($0) }
+  }
+}
+
 // A local and a remote session build the one review prompt the same way (T52.21).
 extension CoxFFIBindings.LineComment {
   init(_ value: CoxClient.LineComment) {
