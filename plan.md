@@ -42,7 +42,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T33.34 | todo | P2 | 4 | 0% | |
+| T33.34 | in progress | P2 | 4 | 5% | Claude Code / opus-5.5 |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.4 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
@@ -873,6 +873,7 @@ Host unit tests use inline WAT (R§4.3.5 P15); no `.wasm` is ever committed. **B
 Depends: T33.29, T33.43 (go-pdk v1.1.3 needs `wasip1`, and the host keeps WASI off until then, A55) · Size: ~200 · Files: `plugins/sdk-go/cox.go`, `plugins/examples/go/main.go`, `plugins/templates/go/*.tmpl`; `plugins/mise.toml` gets go and tinygo; CI job `plugin-examples`
 Goal: a thin Go package over `github.com/extism/go-pdk` (v1.1.3) for the PL§4 exports and host functions (`//go:wasmimport` in `cox:host/v1`). The same example is built with TinyGo `-target wasip1 -buildmode=c-shared` (`wasi = true`). `cox plugin new --lang go`.
 Check: `plugin_example_go` is `#[ignore = "needs go and tinygo: run just plugin-examples go"]` locally and runs in the `plugin-examples` CI job, where a missing toolchain fails the job; it asserts the same rollout effect as T33.28.
+Plan (Claude Code / opus-5.5): (1) `plugins/mise.toml` pins go and tinygo (latest pair TinyGo supports). (2) `plugins/sdk-go` (module `github.com/pyrlyn/cox/plugins/sdk-go`): `cox.go` — the pure wire (export runner, `{"Ok"|"Err"}` reply decode, typed `HostError`) host-testable with `go test`; a `//go:build wasip1` file over go-pdk v1.1.3 memory with one wrapper per `cox:host/v1` function and `cox_desktop_notify` from `cox:desktop/v1`; the PL§4 payload types the example and template use. (3) `plugins/examples/go`: id `example-go`, `wasi = true`, the PL§13 example, built with `tinygo build -target wasip1 -buildmode=c-shared`. (4) `plugins/templates/go/*.tmpl` with `cox:with` blocks; `Lang::Go` in `plugin_new.rs`, `PLUGIN_LANGS`. (5) `just plugin-examples go`, the `plugin-examples` CI steps, `crates/cox/tests/plugin_example_go.rs` (ignored with the card's reason) asserting T33.28's two-turn notices. (6) docs (`docs/plugins.md`, PL§13 row), `toolchain.md`, §1. Verify: `go test` in sdk-go, `just plugin-examples go` for real, `cargo nextest run -p cox` + clippy + fmt.
 
 #### T33.36 Kotlin: thin PDK, template, example
 
