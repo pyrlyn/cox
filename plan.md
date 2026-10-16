@@ -76,7 +76,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T53.7 | todo | P3 | 2 | 0% | |
 | T53.8 | todo | P3 | 2 | 0% | |
 | T53.9 | todo | P3 | 1 | 0% | |
-| T56.9 | todo | P3 | 1 | 0% | |
+| T56.9 | in progress | P3 | 1 | 0% | Claude Code / haiku-4.5 |
 | T56.10 | todo | P3 | 2 | 0% | |
 | T56.11 | todo | P3 | 2 | 0% | |
 | T56.12 | todo | P3 | 2 | 0% | |
@@ -1555,6 +1555,7 @@ Goal: `docs/plugins.md` documents `[[cloud_agents]]`, the grant, the `CloudAgent
 Check: `mise exec -- cargo nextest run -p cox-plugin-api plugin_schema_matches_committed_file` still passes; every relative link in the three docs names a file that exists (`grep -o '](\.\?[^)]*)'` over them, each path tested with `test -e`).
 Done when: the docs are merged with the code.
 Out of scope: marketing copy.
+Plan: (1) read the code the docs describe: `crates/cox-cursor-cloud` (client, wire), `crates/cox-session/src/cloud_agents.rs`, the `cox` flags and `[[cloud_agents]]` parsing, `crates/cox-protocol/default.toml`, the P56 done.md entries; (2) `docs/plugins.md`: a `[[cloud_agents]]` section (fields, grant line, `CloudAgent(<repo>)` rule, what leaves the machine), only what the code does today; (3) `docs/design/external-agents.md`: a cloud-path section next to the local CLI path; (4) `docs/design/v0.3-cursor-cloud.md`: link the shipped cards and record gaps still open (T56.10-T56.12); (5) verify: plugin schema test, every relative link in the three docs exists (`test -e`), and any example covered by `crates/cox/tests/doc_examples.rs` run with nextest; (6) list gaps under Not done, no marketing copy.
 
 #### T56.10 Optional: live check against a real Cursor account (needs the creator's key)
 
