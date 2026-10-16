@@ -1664,8 +1664,11 @@ impl Session {
                 }
             }
         }
-        let reported = match run.await {
-            Ok(Ok(reported)) => reported,
+        // A driver that fails has no usage to report, and a row means a
+        // request was made (§0 ledger rule): a refused cloud run made none,
+        // and one that failed after it started is settled by its resume.
+        let (ran, reported) = match run.await {
+            Ok(Ok(reported)) => (true, reported),
             Ok(Err(error)) => {
                 self.emit(Event::Error {
                     error,
@@ -1673,26 +1676,28 @@ impl Session {
                 })
                 .await?;
                 stop = Some(StopReason::Error);
-                None
+                (false, None)
             }
             Err(_) => {
                 stop = Some(StopReason::Interrupted);
-                None
+                (true, None)
             }
         };
-        let mut usage = reported.unwrap_or(cox_protocol::types::Usage {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            estimated: false,
-            cost_usd: 0.0,
-            latency_ms: 0,
-        });
-        usage.latency_ms = started.elapsed().as_millis() as u64;
-        let usage =
-            self.insert_external_usage(self.job.clone(), tier, &agent.ledger_model(), usage)?;
-        self.emit(Event::Usage { turn, usage }).await?;
+        if ran {
+            let mut usage = reported.unwrap_or(cox_protocol::types::Usage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                estimated: false,
+                cost_usd: 0.0,
+                latency_ms: 0,
+            });
+            usage.latency_ms = started.elapsed().as_millis() as u64;
+            let usage =
+                self.insert_external_usage(self.job.clone(), tier, &agent.ledger_model(), usage)?;
+            self.emit(Event::Usage { turn, usage }).await?;
+        }
         let stop = stop.unwrap_or(if self.cancel_token().is_cancelled() {
             StopReason::Interrupted
         } else {

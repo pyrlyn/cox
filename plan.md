@@ -78,7 +78,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T53.9 | todo | P3 | 1 | 0% | |
 | T56.9 | todo | P3 | 1 | 0% | |
 | T56.10 | todo | P3 | 2 | 0% | |
-| T56.11 | in progress | P3 | 2 | 0% | Claude Code / sonnet-5.5 |
 | T56.12 | todo | P3 | 2 | 0% | |
 | T57.1 | todo | P1 | 2 | 90% | |
 | T57.4 | todo | P1 | 4 | 0% | |
@@ -1563,20 +1562,6 @@ Goal: with an opt-in env var and the creator's `CURSOR_API_KEY`, one real run on
 Check: the recorded fixture replays through T56.8's test unchanged; the script's own test asserts it refuses to run without the opt-in env var.
 Done when: the fixture is committed and the replay passes.
 Out of scope: any automated or scheduled live call.
-
-#### T56.11 No usage row for a cloud run that never started
-
-Depends: T56.8 · Size: ~40 · Files: `crates/cox-core/src/session.rs` (`external_turn`), `crates/cox/tests/cloud_agents.rs`
-Goal: when the driver refuses a cloud run before any request (no `CloudAgent(<repo>)` allow rule, a non-GitHub origin, plan mode), the ledger gets no row for it. Today `external_turn` falls back to an all-zero `Usage` whenever the driver returns an error and writes it through `insert_external_usage`, so every refused task leaves an empty `billed_externally` row (found in T56.8, whose `cloud_agent_without_an_allow_rule_makes_no_request` had to accept zero-token rows). A row means a request was made (§0 ledger rule), so a refused run writes none; a run that started and reported usage still writes exactly one row (T56.7), and an external agent that ran but reported no usage keeps today's row so its latency is not lost.
-Check: `mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_no_request` asserts no `External` row at all (fails before the fix); `mise exec -- cargo nextest run -p cox-core external_agent_turn_writes_a_billed_externally_usage_row` and `-p cox-session cloud_agent_usage_row_is_written_once` still pass.
-Done when: the tests pass.
-Out of scope: showing the refusal text in the stream (T56.12).
-
-Execution plan (Claude Code / sonnet-5.5):
-1. Tighten `cloud_agent_without_an_allow_rule_makes_no_request` to assert no `External` row at all; run it and see it fail.
-2. In `external_turn`, a driver `Err` writes no row and emits no `Event::Usage`; `Ok(None)` and `Ok(Some)` keep their single row.
-3. Add a `cox-core` test that an erroring driver leaves no row; run the Check commands, clippy and fmt.
-
 
 #### T56.12 A refused cloud run tells the user why
 
