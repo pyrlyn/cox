@@ -434,15 +434,9 @@ pub fn narrower(a: PermissionMode, b: PermissionMode) -> PermissionMode {
     if rank(a) <= rank(b) { a } else { b }
 }
 
-/// How much a mode lets through without asking: `Plan < Default < Auto <
-/// Bypass`. The one definition of that order, so `narrower` cannot drift.
+/// `PermissionMode::breadth`, named for the comparisons in this file.
 fn rank(mode: PermissionMode) -> u8 {
-    match mode {
-        PermissionMode::Plan => 0,
-        PermissionMode::Default => 1,
-        PermissionMode::Auto => 2,
-        PermissionMode::Bypass => 3,
-    }
+    mode.breadth()
 }
 
 #[cfg(test)]

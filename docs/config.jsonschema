@@ -1210,7 +1210,7 @@
       "type": "object",
       "properties": {
         "mode": {
-          "description": "`permissions.mode`; project config may not set this to `bypass`.",
+          "description": "`permissions.mode`; project config may not widen it beyond the user's mode.",
           "$ref": "#/$defs/PermissionMode",
           "default": "default"
         },
