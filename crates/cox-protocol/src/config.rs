@@ -1064,16 +1064,33 @@ impl Default for TuiConfig {
     }
 }
 
+/// How a `[[hooks.<Event>]]` entry runs (T67.1). `command` is a shell line;
+/// `prompt` and `http` are stored here and run by T67.2, never as a shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HookKind {
+    /// Run `command` as a shell line. The default, so a config written
+    /// before `kind` existed stays a command hook.
+    #[default]
+    Command,
+    /// `command` is the prompt text a cheap-tier judge answers.
+    Prompt,
+    /// `command` is the URL an HTTP hook POSTs the payload to.
+    Http,
+}
+
 /// One `[[hooks.<Event>]]` entry.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct HookConfig {
     /// Tool/subject matcher (Claude Code hook matcher syntax), if any.
     pub matcher: Option<String>,
-    /// The command to run.
+    /// The shell line, the prompt text, or the URL, depending on `kind`.
     pub command: String,
     /// Per-hook timeout override, in seconds; falls back to `hooks.timeout_s`.
     pub timeout_s: Option<u32>,
+    /// `command` (default), `prompt` or `http`. Absent on an old config.
+    pub kind: HookKind,
 }
 
 /// `[hooks]` (plan.md §1.6/§1.10/D14). The fixed `timeout_s`/`fail_open`
@@ -2263,6 +2280,33 @@ mod tests {
         }"#;
         let cfg: HooksConfig = serde_json::from_str(with_event).expect("flatten captures it");
         assert_eq!(cfg.events["PreToolUse"][0].command, "echo hi");
+        assert_eq!(cfg.events["PreToolUse"][0].kind, HookKind::Command);
+    }
+
+    /// An entry written before `kind` existed is a command hook. A named
+    /// kind round-trips, and an unknown kind is rejected rather than run.
+    #[test]
+    fn old_hook_config_without_kind_parses_as_command() {
+        let old: HookConfig = serde_json::from_str(r#"{"command":"echo hi"}"#).expect("old entry");
+        assert_eq!(old.kind, HookKind::Command);
+        assert_eq!(old.command, "echo hi");
+
+        let prompt: HookConfig =
+            serde_json::from_str(r#"{"command":"is this safe?","kind":"prompt"}"#)
+                .expect("prompt entry");
+        assert_eq!(prompt.kind, HookKind::Prompt);
+        assert_eq!(prompt.command, "is this safe?");
+
+        let http: HookConfig =
+            serde_json::from_str(r#"{"command":"https://hooks.example/pre","kind":"http"}"#)
+                .expect("http entry");
+        assert_eq!(http.kind, HookKind::Http);
+
+        let unknown = serde_json::from_str::<HookConfig>(r#"{"command":"x","kind":"agent"}"#);
+        assert!(
+            unknown.is_err(),
+            "an unknown kind must not parse as a command"
+        );
     }
 
     #[test]

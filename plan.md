@@ -56,7 +56,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.15 | todo | P2 | 3 | 0% | |
 | T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
-| T33.43 | todo | P1 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.45.4 | todo | P2 | 3 | 0% | |
 | T33.45.7 | todo | P2 | 4 | 0% | |
@@ -142,9 +141,23 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
+| T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
+| T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
+| T68.4 | todo | P2 | 3 | 0% |  |
 | T68.5 | in progress | P2 | 3 | 100% | Claude / sonnet-5.5 |
+| T68.6 | todo | P1 | 3 | 0% |  |
+| T68.7 | todo | P2 | 3 | 0% |  |
 | T68.8 | in progress | P2 | 3 | 70% | Claude / sonnet-5.5 |
+| T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | in progress | P2 | 1 | 90% | Claude / haiku-5.5 |
+| T69.1 | todo | P1 | 3 | 0% | |
+| T69.2 | todo | P1 | 2 | 0% | |
+| T69.3 | todo | P2 | 1 | 0% | |
+| T69.4 | todo | P3 | 1 | 0% | |
+| T69.5 | todo | P1 | 3 | 0% | |
+| T69.6 | todo | P2 | 2 | 0% | |
+| T69.7 | todo | P3 | 3 | 0% | |
+| T69.8 | todo | P3 | 1 | 0% | |
 
 ## Reference
 
@@ -1068,12 +1081,6 @@ Goal: replace the hand-built fixtures, which follow the documented shapes, with 
 - It redacts with the rollout scrubber, writes the bodies and records the model version and the date.
 - It runs only with `TYPESAFE_API_KEY` set by the creator. It never reads the keychain.
 Check: the offline pytest (body construction, redaction, no key means a clear exit) is green. With recorded fixtures, T33.40.4 and T33.40.6 stay green unchanged.
-
-#### T33.43 Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
-
-Depends: an extism release after v1.30.0 that pins wasmtime ≥ 48 (extism `main` already pins 48; checked 2026-09-26) · Size: ~30 · Files: `Cargo.toml`, `Cargo.lock`, `deny.toml`
-Goal: move the workspace `extism` and the direct `wasmtime` (declared only for its `anyhow` feature) to that release, then remove the `RUSTSEC-2026-0222`, `RUSTSEC-2026-0269`, `RUSTSEC-2026-0316` and `RUSTSEC-2026-0327` entries (0316 needs wasmtime >= 48.0.3, 0327 needs >= 48.0.4) from `deny.toml` `ignore` (A55, research.md P39). Also check whether the direct `wasmtime` declaration is still needed. The bump was approved in advance by the creator (A55), but only onto a published crates.io release, never a git dependency. It unblocks the WASI preopens in T33.14.2. If no such release exists by 2026-12-31, bring it back to the creator.
-Check: `cargo deny check advisories` passes with no wasmtime ignores; the `cox-plugin` tests and `slim_build_has_no_wasm_runtime` pass; `scripts/footprint.sh` stays within the 20 MiB budget (PL§12).
 
 #### T33.45 Design the plugin API: shared, terminal-only and desktop-only
 
@@ -2811,50 +2818,6 @@ Rationale in §6 A148. Idea-only: the source is the public Claude Code documenta
 
 **Not taken yet:** hooks of type `agent` (a later amendment, after T67.2), and `/security-review` (no card until the creator asks for one).
 
-#### T67.1 Hook kinds in config and in the Claude settings import
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2
-
-Goal: a hook entry carries a `kind` (`command`, the default, `prompt` or `http`). The Claude settings import keeps `prompt` and `http` entries; today `cox-ext/src/claude_settings.rs:103` keeps only `type == "command"` and drops the rest silently. The import now warns about any other type and skips it.
-
-Files:
-- `crates/cox-protocol/src/config.rs`: `HookKind { #[default] Command, Prompt, Http }` (`snake_case`), and `HookConfig.kind` with `#[serde(default)]`. `command` holds the command, the prompt text or the URL, by kind.
-- `crates/cox-ext/src/claude_settings.rs`
-- `docs/config.md` and the regenerated `docs/config.jsonschema` (the schema drift test)
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-protocol -p cox-ext -p cox-config
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `old_hook_config_without_kind_parses_as_command` and `claude_settings_import_keeps_prompt_and_http_hooks` pass, and the schema drift test is green.
-
-#### T67.2 Run prompt and http hooks, failing open
-
-Model: grok-4.7 · Status: open · Depends: T67.1 · Size: ~180 · Priority: P1 · Complexity: 3
-
-Goal: a `prompt` hook sends its prompt and the hook input to the cheap tier through `Session::side_call` and parses `{"ok": bool, "reason": string}`; `ok: false` blocks like a command hook's deny. An `http` hook POSTs the hook input as JSON and reads the same answer shape. Any error, timeout or unparseable answer is a warning and lets the call through (D14).
-
-Files:
-- `crates/cox-core/src/hooks.rs`: the `prompt` branch. The core already holds the provider, so it opens no socket.
-- `crates/cox-ext/src/hooks.rs`: the `http` branch in the runner, with `timeout_s`.
-- `crates/cox-web/src/lib.rs`: a `post_json` beside the existing GET, so `reqwest` stays in the crate that opens the socket (`deps.rs`).
-
-Steps:
-1. The judge sees only the hook input and the prompt, with no tools. Its answer is untrusted: anything but a well-formed `ok: false` allows.
-2. The side call records a `usage` row like every other side call; confirm that `side_call` does, and fix it here if not.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core -p cox-ext -p cox-web
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `prompt_hook_blocks_when_judge_says_not_ok`, `prompt_hook_unparseable_answer_fails_open` and `http_hook_timeout_fails_open` (wiremock) pass.
-
 #### T67.3 Five more hook events
 
 Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P1 · Complexity: 2
@@ -3066,6 +3029,150 @@ Remaining for the Windows host agent: `cox-session`, `cox-app` and `cox` are not
 Model: Claude / haiku-5.5 · Status: in progress · Depends: T68.5, T68.6, T68.7 · Size: ~150 (doc) · Priority: P2 · Complexity: 1
 
 Goal: `docs/targets.md` (each kind, how to put `cox` on it, what the trust rules above mean for a user, the sandbox inside a container), `docs/app-server.md` narrowed to the wire, `docs/config.md`, README links. Done when every target kind has a worked example and `docs/app-server.md` no longer explains ssh setup.
+
+---
+
+### P69 — codex and grok-build comparison (goal: a PowerShell read of a denied file is denied, not asked; an approved session rule can persist; compaction cannot replace history with a stub or loop on an overflow and names what is still running; the store checks itself on open)
+
+Rationale in §6 A159. Found by reading openai/codex at `f0c5077c34ec7a76b4ad9134835925e6ae3d72ec` and xai-org/grok-build at `2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8` (read-only, 2026-10-15). Plan only: no code in this change. Each card names its source file and a licence mark.
+
+**Licences.** openai/codex (`codex-rs`) and xai-org/grok-build first-party code are Apache-2.0 (codex `NOTICE`: Copyright 2025 OpenAI; grok-build: Copyright 2023-2026 SpaceXAI), which GPL-3.0-or-later may include. A verbatim copy is allowed only with the Apache text, the original copyright, a change notice (§4(b)), a per-file header naming the commit and path, and a new root `NOTICE` or `THIRD-PARTY-NOTICES` (neither exists today); the Apache terms stay on that code even when a recipient picks `LicenseRef-cox-Royalty-Free`. Every card below says **implement similar, do not copy**, because the code is bound to the donor's types or is lossy. Never copy: `codex-rs/vendor/bubblewrap/` (LGPL-2.0; cox execs system `bwrap`), codex skill samples (per-sample licences), grok-build `third_party/` (MIT, BSD, Apache and MPL-2.0 crates), grok-build `implementations/codex/` and `implementations/opencode/`, and the Ratatui-adjacent TUI crates.
+
+**Agents.** Implementing agents use Grok 4.6, Grok 4.7 or Composer 2.5 only. English comments and docs. No card is claimed by this plan.
+
+**Order.** Independent. T69.5 before T69.6 and T69.8 (same file). T69.1 before T69.2 (T69.2 refuses opaque segments).
+
+**Not taken (codex and grok-build already behind cox):** codex middle truncation and "N tokens truncated" markers (lossy; `truncate.rs` keeps an `expand` id), the network MITM proxy, Starlark exec policy, compaction prompts, `process-hardening`; grok-build bytes/4 estimator, tool-pair snapping, two-pass prefire, TUI, config overlay.
+
+**rtok follow-ups (outside cox; for pyrlyn/rtok `plan.md`, not claimed here).** Lossless tool-schema shrink on the proxy ([codex `codex-rs/tools/src/json_schema/compaction.rs` L14–153](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/tools/src/json_schema/compaction.rs#L14-L153), Apache-2.0, implement similar: archive the original, add an `expand` id); MCP results fit after JSON escaping ([codex `codex-rs/utils/output-truncation/src/lib.rs` L43–87](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/utils/output-truncation/src/lib.rs#L43-L87), Apache-2.0, implement similar); `rtok doctor` budgeted `quick_check` (codex `state/src/sqlite/validation.rs`, doctor only, never the hook path); do not deny a native `Read` of `AGENTS.md`, `CLAUDE.md` or `SKILL.md` ([grok-build `read_file/mod.rs` L244–278](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build/read_file/mod.rs#L244-L278), Apache-2.0, implement similar; D6 forbids copying into a plugin).
+
+#### T69.1 PowerShell and cmd readers hit existing `Read` denies
+
+Model: - · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
+
+Goal: `Get-Content`, `gc`, `type` and `more` on one plain command are classified read-only with the path on the segment, so `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa` instead of only asking; writers (`Remove-Item`, `Set-Content`, `Out-File`) keep their path; pipelines, `;`, `$(`, variables and unknown aliases stay opaque `Exec`.
+
+Why: `classify.rs` lines 526–538 make every line the bash grammar cannot parse opaque, and `Rule::read_path_rule` (`cox-permission/src/rules.rs` lines 140–145) only sees extracted paths, so a PowerShell read of a denied file is asked, not denied. No long-lived PowerShell parser child (a new attack surface on the approval path).
+
+Source: [codex `codex-rs/shell-command/src/command_safety/powershell_parser.rs` L19–44](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/shell-command/src/command_safety/powershell_parser.rs#L19-L44); [grok-build `crates/codegen/xai-grok-permission-rules/src/shell_access.rs` L2371–2392](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-permission-rules/src/shell_access.rs#L2371-L2392)
+
+Licence: Apache-2.0 (both), implement similar, not copy (per-file header and a root `NOTICE` needed). **Implement similar, do not copy:** the codex parser is a `.ps1` child process and grok's file is thousands of lines bound to its own types.
+
+Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-core/tests/permission.rs`
+
+Done when `unparsed_powershell_command_asks` is extended (four reader lines naming `~/.ssh/id_rsa` are read-only and not opaque; `Remove-Item` is not read-only; a pipeline stays opaque) and `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa`. Check: `mise exec -- cargo nextest run -p cox-tools -E 'test(unparsed_powershell)'`, `mise exec -- cargo nextest run -p cox-core -E 'test(permission)'`.
+
+#### T69.2 Honor `permissions.allow_for_session_persists`
+
+Model: - · Status: open · Depends: T69.1 · Size: ~180 · Priority: P1 · Complexity: 3
+
+Goal: When the user answers `AllowForSession` and the flag is true, append one prefix rule (for example `Bash(git status:*)`, never a bare `Bash`) to the user config's `permissions.allow` with `toml_edit`, under an advisory lock, via temp file and rename; skip duplicates; never persist for opaque segments, when a deny rule matches, or for `cloud_agent`.
+
+Why: the flag is read and ignored (`cox-protocol/src/config.rs` L875–892, `docs/compat.md` L74). Do not add the `starlark` crate: codex's own `deny.toml` carries unmaintained transitive advisories from it.
+
+Source: [codex `codex-rs/execpolicy/src/amend.rs` `blocking_append_allow_prefix_rule` L63–81](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/execpolicy/src/amend.rs#L63-L81)
+
+Licence: Apache-2.0, implement similar, not copy (header and `NOTICE` needed). **Implement similar, do not copy:** codex writes Starlark `prefix_rule(...)`, cox rules are strings.
+
+Files: `crates/cox-core/src/session.rs`, `crates/cox-permission/src/lib.rs` (the `grants_for` pair), `docs/compat.md`, `docs/config.md`
+
+Done when tests prove: flag off writes nothing; flag on appends one line and a second approval does not duplicate; an opaque PowerShell line and a deny match are not persisted; the `docs/compat.md` row is deleted. Check: `mise exec -- cargo nextest run -p cox-core -E 'test(allow_for_session)'`, `bash scripts/leftovers.sh`.
+
+#### T69.3 Default read-only metadata dirs in a writable workspace
+
+Model: - · Status: open · Depends: — · Size: ~60 · Priority: P2 · Complexity: 1
+
+Goal: Add `.agents`, `.codex` and `.aws` to the default `sandbox.readonly_in_workspace` (now `.git`, `.cox`, `.claude`). A user who set the list keeps it.
+
+Why: home-directory `Read(~/.aws/**)` does not cover a repo-local `.aws`.
+
+Source: [codex `codex-rs/protocol/src/permissions.rs` L40–51](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/protocol/src/permissions.rs#L40-L51)
+
+Licence: Apache-2.0, implement similar, not copy; the four-name constant is too small to need a `NOTICE`. **Implement similar:** a config default with a one-line comment naming the codex commit and path. Do not copy `seatbelt.rs`.
+
+Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, the seatbelt and bwrap argument snapshots
+
+Done when the default grows, a user list is unchanged and the snapshots pass. Check: `mise exec -- cargo nextest run -p cox-sandbox -p cox-protocol`.
+
+#### T69.4 Budgeted `quick_check` when the store opens
+
+Model: - · Status: open · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1
+
+Goal: After WAL is on, `Store::open` runs `PRAGMA quick_check(1)` with a ~200 ms budget: `ok` continues; a finding is a `StoreError` the session prints and refuses; a timeout logs and opens anyway. Not repeated per query.
+
+Why: `enable_wal` (`cox-store/src/lib.rs` ~L271) has no integrity check, so a corrupt database fails later and obscurely.
+
+Source: [codex `codex-rs/state/src/sqlite/validation.rs` L16–66](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/state/src/sqlite/validation.rs#L16-L66)
+
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy:** codex uses sqlx and a progress handler; cox is on Diesel.
+
+Files: `crates/cox-store/src/lib.rs` (and its tests)
+
+Done when a new database opens and a forced short deadline still opens. Check: `mise exec -- cargo nextest run -p cox-store`.
+
+#### T69.5 Compaction rejects a tiny summary and survives a context overflow
+
+Model: - · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
+
+Goal: `summary_is_usable` requires ≥ 500 trimmed characters (a shorter body is a failed attempt, not a replacement for history). A context-window error retries down a ladder (full pointer transcript → tool results cut to the head/tail pointer → `working_state` alone plus the last user request), one retry per step. After the ladder fails on size, auto-compact is suppressed until a later call reports a smaller `last_context_tokens` or the user runs `/compact`.
+
+Why: a failed compact leaves `last_context_tokens` unchanged and the next turn calls `compact` again (`session.rs` ~L1473–1482); `summarise` (`compact.rs` L694–763) accepts any non-empty string.
+
+Source: [grok-build `xai-grok-compaction/src/code_compaction/config.rs` L15–20](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/config.rs#L15-L20), [`summary.rs` L120–125](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/summary.rs#L120-L125), [`sample.rs` L81–120](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/sample.rs#L81-L120), [`failure.rs` L9–23](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/code_compaction/failure.rs#L9-L23), [`xai-grok-shell/src/session/compaction.rs` L405–479](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/compaction.rs#L405-L479)
+
+Licence: Apache-2.0, Copyright 2023-2026 SpaceXAI, implement similar, not copy (header, Apache text, `THIRD-PARTY-NOTICES`, change notice §4(b)). **Implement similar, do not copy:** bound to their `ConversationItem` types, and a paste adds Apache's patent clause to cox's tri-license.
+
+Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/prompts/compact.md`, `crates/cox-core/tests/compact.rs`
+
+Done when a 40-character summary does not replace history, a context-length error is followed by a smaller second request, a second size error sets the suppress flag, the next turn skips the compact job, and `/compact` still runs. Check: `mise exec -- cargo nextest run -p cox-core compact`.
+
+#### T69.6 After compaction, reattach live tasks, todos and subagents
+
+Model: - · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
+
+Goal: Append one block (≤ 2048 bytes, own headings such as `## Still running`, `## Open todos`, `## Subagents`) of ids the tools already accept, plus the stored command or description; omit it when nothing is live; a second compact parses its own headings and does not duplicate.
+
+Why: `working_state` (`compact.rs` L347–387) reads only the transcript, so a running task or subagent is named again only if the model happened to write its id.
+
+Source: [grok-build `xai-grok-compaction/src/reminder.rs` L117–167](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/reminder.rs#L117-L167)
+
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy:** the reminder prose is a compatibility surface downstream; use cox's own sentences.
+
+Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/tasks.rs` (read only), `crates/cox-core/tests/compact.rs`
+
+Done when a running shell task id is in the summary and absent from the dropped turns, an idle session adds no block, and size stays ≤ 2048. Check: `mise exec -- cargo nextest run -p cox-core compact`.
+
+#### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
+
+Model: - · Status: open · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Goal: `read` gains an anchors mode that renders `N:abc→line` (3 letters from a whitespace-normalized hash you write); `edit` accepts `{op: replace|insert_after, anchor, content}` besides `old_string`. One stale anchor rejects the whole batch with the fresh anchor and three neighbours; ops apply bottom-up; default `read` output is unchanged.
+
+Why: a stale `old_string` costs a full re-read (`edit.rs` L160–198). Larger than the others: split further when claimed.
+
+Source: [grok-build `grok_build_hashline/scheme.rs` L1–56](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/scheme.rs#L1-L56), [`util/hash.rs` L1–52](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/util/hash.rs#L1-L52), [`read_file.rs` L21–67](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/read_file.rs#L21-L67), [`edit/mod.rs` L50–63](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/edit/mod.rs#L50-L63)
+
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy** (`scheme.rs`, `hash.rs`, `edit/apply.rs`). Not the `implementations/codex/` (OpenAI, needs its `NOTICE`) or `implementations/opencode/` (MIT) trees.
+
+Files: new `crates/cox-tools/src/anchor.rs`, `read`, `edit`
+
+Done when an indent-only change still matches, a content change is `Stale` and names the new anchor, two ops apply bottom-up, and a path outside the workspace is confined. Check: `mise exec -- cargo nextest run -p cox-tools edit`.
+
+#### T69.8 Integer compact threshold
+
+Model: - · Status: open · Depends: — · Size: ~60 · Priority: P3 · Complexity: 1
+
+Goal: `needs_compaction` compares in integers (`last * 10_000 >= scaled_compact_at * max_context`, saturating, false for a zero window) instead of `f64`.
+
+Why: `compact.rs` L113–140 uses `f64`; a threshold like 0.95 on a window above 2^53 rounds. Do not take their bytes/4 estimator.
+
+Source: [grok-build `xai-token-estimation/src/lib.rs` L70–80 `exceeds_threshold`](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-token-estimation/src/lib.rs#L70-L80)
+
+Licence: Apache-2.0, may be copied with attribution. **Implement similar:** the comparison is one line; nothing to copy.
+
+Files: `crates/cox-core/src/compact.rs`
+
+Done when the 750/1000 test stays green and a window above 2^53 is exact. Check: `mise exec -- cargo nextest run -p cox-core compact_trigger`.
 
 ---
 
@@ -3296,6 +3403,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A156 §3 P33 (new T33.47, T33.47.1–T33.47.9), new `docs/design/plugin-canvas.md`; on build docs/design/plugins.md §4, §14, §15.4, §15.5 and docs/design/desktop.md §5.1, §5.5, §10 — by the creator (2026-10-14), through Weft's T106.6 ("a Design tab like Claude Design; if cox does not have it, add it", with the guards: plugin and model content untrusted, sandboxed, no network, no scripts from that content, a new grant line): a desktop-only plugin *canvas*, a pane of static HTML frames a plugin draws, behind `desktop.canvas`. Each frame is a WebKit page with content JavaScript off, every load blocked by a content rule list, every navigation but the first refused, a non-persistent store and no page-world bridge; only a host script in its own content world runs, to report a click. The plugin turns a selection into text the app adds to the composer as a `text/plain` attachment the person sends or removes. Effect: PL§15.4's "plugin-supplied SwiftUI, HTML or web views — never" becomes "SwiftUI or scripted web views — never; static HTML only through the canvas"; SwiftUI and MCP Apps stay closed (A123). Open questions 1–4 of the design go to the creator with recommendations; the build follows the recommendations until answered. Numbered on a branch stacked on A155's; renumber on merge if main has moved. No new dependency.
 - A157 §3 P33 (T33.47.8, new T33.47.10) — split the pane, shortcut and chip card into T33.47.8.1–T33.47.8.10, one layer each (CoxClient seam, CoxModel store, CoxCore calls, CoxUI pane, App wiring, shortcut and DT§ text, one canvas store per session in `AppStore`, a canvas page's content height and zoom in CoxPlatform, the store's pick for the palette, and a redraw that keeps §6's scroll and outline), because the card spans six Swift packages and the app, well over 200 lines and three files. `CanvasClient` is a protocol of its own rather than five more `SessionClient` requirements, so a client without canvases needs no stubs. T33.47.10 fixes a T33.47.4 bug found while wiring the pane: a local `next_canvas` never returned after `close()`, so the FFI pull held the session for ever. Effect: T33.47.8 stays open until the ten cards and its Check pass; no API or design decision changes.
 - A158 §3 (new P68: T68.1–T68.10), by the creator (2026-10-14) — run targets: a whole cox session runs over ssh on Linux, macOS or Windows, in a Docker container, in a Lima instance or in the Colima VM, from the desktop app, the TUI and `cox run` (`--on <target>`) and the `agent` tool. Why: the only remote path is the desktop app's `ssh <host> cox app-server --stdio` with a hard-coded `/usr/bin/ssh` (T52.19–T52.21); containers and VMs are the usual isolation for agents (research.md 9.1.x). Effect: a new pure crate `cox-target` owns target names, launcher lookup (absolute paths only) and launch argv, and `cox-app/src/remote.rs` delegates to it; the app-server wire gains a `hello` handshake; `targets.*` is user config only. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link and nothing typed by the model or the person goes on the remote command line. `cox` must already be on the target; installing it and throwaway `docker run` containers are ideas, not cards. No new dependency; D7 holds on targets without a sandbox backend. No §0 decision changes.
+- A159 §3 (new P69: T69.1–T69.8), by the creator (2026-10-15) — tasks from a comparison of openai/codex at `f0c5077c` and xai-org/grok-build at `2bdd1d6a` with cox: PowerShell readers meet `Read` denies, `allow_for_session_persists` is honored, more default read-only workspace dirs, a store `quick_check`, a compaction that rejects stubs and survives overflow, live tasks reattached after compaction, optional edit anchors, an integer compact threshold. Why: cox already leads on sandboxing, lossless archives and truncation; these are the gaps. Both sources are Apache-2.0; every card says implement similar, not copy, and records the licence. Effect: eight cards; no new dependency, no §0 decision changes.
 
 ## 7. Risk register
 

@@ -1,3 +1,49 @@
+#### T67.2 Run prompt and http hooks, failing open
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-15 · Depends: T67.1 · Size: ~180 (landed larger; see Not done) · Priority: P1 · Complexity: 3 · Files: `crates/cox-core/src/hooks.rs`, `crates/cox-ext/src/hooks.rs`, `crates/cox-web/src/lib.rs`, `crates/cox-core/Cargo.toml`, `crates/cox-ext/Cargo.toml`, `crates/cox/tests/deps.rs`
+Goal: a `prompt` hook sends its prompt and the hook input to the cheap tier through `Session::side_call` and parses `{"ok": bool, "reason": string}`; `ok: false` blocks like a command hook's deny. An `http` hook POSTs the hook input as JSON and reads the same answer shape. Any error, timeout or unparseable answer is a warning and lets the call through (D14).
+What landed:
+- Prompt hooks are judged in `cox-core` before the shell/http runner. The judge is `Session::side_call` with `Job::Hook` (cheap tier), an empty tool list, the prompt plus one JSON-answer line as the system text, and the hook payload as the user text. `{"ok": false}` blocks; a missing or empty reason still blocks with "blocked by hook". Anything else that parses as JSON allows. A missing or unparseable answer is `Failed`.
+- `side_call` already inserts a `usage` row. The block test asserts a `Job::Hook` + `Tier::Cheap` row, so `side.rs` is unchanged.
+- An `http` hook POSTs the payload as JSON through `cox_web::post_json` (per-request timeout, 64 KiB cap, non-2xx is `Denied`). Production uses `cox_web::client()` and refuses a private-address literal. A timeout, transport error or unparseable body is `Failed`. The runner still returns `Continue` for `HookKind::Prompt`, so the prompt text is never `sh -c`'d.
+- Fail-open stays in the core (`settle`): `Failed` becomes a `Notice(Warn)` and `Continue` when `hooks.fail_open` (the default), and a block otherwise. Later hooks still run after a warning.
+Not done: workspace `clippy --workspace --all-targets` was not finished locally. After `libasound2-dev`, `whisper-rs-sys` fails to link (`ld` cannot find `-lstdc++`). The three crates named by the Check are clippy-clean. CI runs the workspace clippy. The card names three source files and ~180 lines; the matcher regex on `cox-core`, the `cox-web` edge on `cox-ext` (and `deps.rs`), and the three named tests take it over 200 lines and three files. `cargo hakari generate --diff` was empty.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-core -p cox-ext -p cox-web
+462 tests run: 462 passed, 1 skipped (including prompt_hook_blocks_when_judge_says_not_ok, prompt_hook_unparseable_answer_fails_open, http_hook_timeout_fails_open, prompt_hook_is_not_run_as_a_shell_command)
+$ mise exec -- cargo nextest run -p cox --test deps -- no_crate_below_cox_depends_on_core
+1 passed
+$ mise exec -- cargo clippy -p cox-core -p cox-ext -p cox-web --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -q -p cox -- doctor
+exit 1: ANTHROPIC_API_KEY is not set (expected here; keyring is off). toolchain, COX_HOME, db, sandbox, git, prices and plugin cache passed.
+```
+
+#### T67.1 Hook kinds in config and in the Claude settings import
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-14 · Depends: — · Size: ~80 · Priority: P1 · Complexity: 2 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-ext/src/claude_settings.rs`, `crates/cox-ext/src/hooks.rs`, `docs/config.md`, `docs/config.jsonschema`
+Goal: a hook entry carries a `kind` (`command`, the default, `prompt` or `http`). The Claude settings import keeps `prompt` and `http` entries; it warns about any other type and skips it.
+What landed:
+- `HookKind { Command, Prompt, Http }` (`snake_case`, default `command`) on `HookConfig`. `command` holds the shell line, the prompt text or the URL. An entry with no `kind` parses as `command`. An unknown kind is rejected.
+- The Claude import keeps `type: command|prompt|http`. Prompt text comes from `prompt` (else `command`); an HTTP URL comes from `url` (else `command`). Any other type, including a missing type and `agent`, is a notice and is skipped.
+- The shell runner skips a non-command entry (`Continue`) so a kept prompt is not `sh -c`'d. T67.2 runs those kinds. `Continue` leaves later command hooks in the same chain running.
+- `default.toml`'s `[hooks]` comment names `kind`, so generated `docs/config.md` does too. `docs/config.jsonschema` gained `HookKind` and `HookConfig.kind` (default `command`).
+Not done: workspace `clippy` and `cargo nextest run --workspace` were not run locally (CI runs them). `prompt` and `http` hooks are stored and not executed (T67.2).
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-protocol -p cox-ext -p cox-config
+223 tests run: 223 passed (including old_hook_config_without_kind_parses_as_command, claude_settings_import_keeps_prompt_and_http_hooks, prompt_hook_is_not_run_as_a_shell_command, config_jsonschema_matches_committed_file, config_docs_config_md_matches_default_toml)
+$ mise exec -- cargo clippy -p cox-protocol -p cox-ext -p cox-config -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -q -p cox -- doctor
+exit 1: ANTHROPIC_API_KEY is not set (expected here; keyring is off). toolchain, COX_HOME, db, sandbox, git, prices and plugin cache passed.
+```
+
 #### T33.18 Providers, ABI form (`PluginProvider`)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-09 · Depends: T33.14.1, T33.17 · Size: ~190 (landed larger; see Not done) · Priority: P2 · Complexity: 5 · Files: `crates/cox-plugin/src/provider.rs`, `crates/cox-plugin/src/net.rs`, `crates/cox-core/src/router.rs`, `crates/cox-protocol/src/types.rs`, `crates/cox-session/src/provider.rs`
@@ -11977,3 +12023,12 @@ Deviations: none.
 
 Check output: `cargo nextest run -p cox-ffi --test app closing_the_session_ends_the_canvas_pull` failed before the fix (the pull did not end in 5 s); after it, `cargo nextest run -p cox-ffi -p cox-app` — 289 passed; clippy `-D warnings` and `cargo fmt --check` clean.
 
+
+
+### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
+
+Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 99,197,840 bytes (+27.5%). The creator approved accepting the security-mandated size increase; updated only the Darwin-arm64 binary-size baseline. Startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. After regenerating the stale workspace-hack, the rebuilt release measured 99,197,840 bytes and the footprint check passed.
+
+### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
+
+Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 99,197,840 bytes (+27.5%). The creator approved accepting the security-mandated size increase; updated only the Darwin-arm64 binary-size baseline. Startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. After regenerating the stale workspace-hack, the rebuilt release measured 99,197,840 bytes and the footprint check passed.

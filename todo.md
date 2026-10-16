@@ -16,7 +16,6 @@
 - T33.40.15. Catalog, prices and vendor script without Jev
 - T33.40.16. Docs and plan sweep after the removal
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
-- T33.43. Bump extism to a release on wasmtime ≥ 48 and drop the advisory ignores
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
 - T33.45.6. App core: notifications, links and images
 - T33.45.7. FFI and Swift: the desktop contributions
@@ -115,8 +114,6 @@
 - T66.12. Design: resident sessions and a supervisor
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
-- T67.1. Hook kinds in config and in the Claude settings import
-- T67.2. Run prompt and http hooks, failing open
 - T67.3. Five more hook events
 - T67.4. `/goal`: a judged stop condition
 - T67.5. `/goal` in the TUI and stream-json
