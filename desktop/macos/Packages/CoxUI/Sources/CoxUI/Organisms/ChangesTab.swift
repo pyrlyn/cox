@@ -63,6 +63,7 @@ public struct ChangesTab: View {
               actions: Self.fileActions(file.path, send: send)
             )
             .onTapGesture { send(.open(path: file.path)) }
+            .coxPointer(.control(isChosen: file.path == state.selection))
             .accessibilityAction { send(.open(path: file.path)) }
           }
         }
@@ -157,7 +158,7 @@ private struct ReviewButton: View {
         KeyCap(ShellShortcut.review.glyphs)
       }
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
     .help(ShellShortcut.review.help("Review changes"))
     .accessibilityLabel("Review changes")
   }

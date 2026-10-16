@@ -52,6 +52,7 @@ public struct DiffLineView: View {
     HStack(spacing: 0) {
       if let comment {
         gutter.contentShape(Rectangle()).onTapGesture(perform: comment)
+          .coxPointer(.control())
       } else {
         gutter
       }

@@ -67,7 +67,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T37.32.2 | todo | P1 | 3 | 0% | |
 | T37.32.3 | in progress | P1 | 2 | 90% | Claude Code / opus-5.5 |
 | T37.33 | todo | P1 | 3 | 0% | |
-| T37.51 | todo | P2 | 2 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
 | T52.25 | todo | P2 | 2 | 0% | |
@@ -1461,13 +1460,6 @@ Out of scope: Hardened Runtime, notarization, Sparkle, the bundled CLI, the app 
 On hold by the creator (A107). Depends: T37.23 · Size: ~120 · Files: `justfile`, `desktop/macos/Benchmarks/…`, `research.md`
 Goal: `just desktop-bench` measures cold start, first frame of a 2 000-block session, stream frame time and memory against DT§1 budgets; results go into `research.md`.
 Check: the suite runs locally and in the nightly job; every budget has a measured row.
-
-#### T37.51 macOS app: pointer from the shared rule
-
-Depends: T37.50 · Size: ~120 · Files: `desktop/macos/Packages/CoxUI/Sources/CoxUI/Foundations/…` (new pointer modifier), the catalogue atoms and molecules that apply it, `desktop/macos/.swiftlint.yml`, `desktop/design/DESIGN.md` (DS§6.1, DS§8)
-Goal: the app shows T37.50's pointer everywhere: a pointing hand (`PointerStyle.link`) over buttons, links, sidebar rows, chips, toolbar items and tool-call headers that expand; an I-beam (`PointerStyle.horizontalText`) over transcript text, code blocks, tool output and the composer; the arrow over an element already pressed and over the rest; the not-allowed pointer (`NSCursor.operationNotAllowed`) over a disabled or locked control. One Foundations modifier, `coxPointer(_:)`, takes the element's `Interaction`, asks Rust's `pointer` and only maps the answer to the platform style; the catalogue's interactive atoms apply it, so a screen gets the right pointer by using the catalogue rather than setting one. The terminal split handle (`desktop/macos/App/SessionTerminal.swift`) moves onto `Pointer::Resize`. DS§6.1 gains the modifier's row and DS§8 the rule, so the Windows client (P58) maps the same `Pointer` to its own cursor API.
-Check: a CoxUI test maps each `Pointer` to its `PointerStyle`; a SwiftLint custom rule rejects `.pointerStyle(` outside `Foundations/`; in the running app, hovering the catalogue gallery shows the hand on every enabled control, the I-beam on transcript text and code, the arrow on the selected row and on empty space, the not-allowed pointer on a disabled or locked button.
-Out of scope: the TUI (T5.9).
 
 ### P51 — Desktop M2 (goal: the rest of the terminal inside the app — a sandboxed terminal pane, a browser pane the agent can read and screenshot, pop-out windows and tabs, a menu-bar extra with a global hotkey, Spotlight and App Intents, and per-hunk revert — plus the dark glass look; DT§3.2)
 

@@ -34,6 +34,7 @@ struct UserBubble: View {
         .textStyle(.transcript)
         .foregroundStyle(Color(.textPrimary))
         .textSelection(.enabled)
+        .coxPointer(.selectableText)
         .frame(maxWidth: .infinity, alignment: .leading)
       if !attachments.isEmpty {
         HStack(spacing: Space.m) {

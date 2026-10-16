@@ -58,7 +58,7 @@ public struct BrowserPaneChrome<Content: View>: View {
       } label: {
         Image(systemName: "chevron.left").symbolStyle(.caption)
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.coxPlain)
       .foregroundStyle(Color(.textSecondary))
       .disabled(!state.canGoBack)
       .accessibilityLabel("Back")
