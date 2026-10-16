@@ -140,6 +140,22 @@ Check:
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T64.7 Revert a project-added or changed `mcp.servers`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `crates/cox-mcp/src/trust.rs`, `crates/cox-app/src/settings.rs`, `desktop/macos/Packages/CoxModel/Sources/CoxClient/Dropped.swift`, `docs/config.md`, `docs/config.jsonschema`, `plan.md`
+Goal: a repository `.cox/config.toml` cannot add or change an MCP server. A stdio server is a program cox spawns and a `url` server is a URL cox contacts with `${VAR}` expanded from the environment, so a cloned project could run a command or leak an environment variable. `lsp.servers` already reverted whole; `mcp.servers` only had the T33.42 sandbox-off check.
+What landed:
+- `apply_project_guards` replaces the T33.42 sandbox-only block with a whole-map revert modelled on `lsp.servers`: when the merged `mcp.servers` differs from the layers without the project, it reports one `mcp.servers` violation (the changed names sorted, then the kept names sorted or `none`) and restores the user map. Stdio and URL servers are covered, and a project `sandbox = false` on a user server is just one more difference. `[mcp] timeout_s`, `deferred` and `enabled` stay project-tunable.
+- `GUARDED_KEYS` swaps `mcp.servers.*.sandbox` for `mcp.servers` (still 21 keys), with the reason "A project may not choose which MCP servers run"; `source_of("mcp.servers.<name>.command")` reports the pre-project layer.
+- The doc text now says the table is user config only: `McpConfig::servers`, `default.toml` (and its copy in `plan.md`), `docs/config.md`, `docs/config.jsonschema`, `trust::user_config_layer`, the `Dropped.key` comments in `cox-app` and the Swift mirror, and plan §1.6.
+- Tests `project_config_cannot_set_mcp_servers`, `project_sandbox_off_on_a_user_mcp_server_is_reverted` and `project_mcp_server_identical_to_user_is_no_violation`; the first replaces `config_project_cannot_disable_an_mcp_server_sandbox`.
+Not done: a project `.mcp.json` bypasses the config loader and stays unguarded (a separate surface; asking before spawning its stdio servers is a follow-up). An unsandboxed stdio server is still T64.10. `cox-mcp` and `cox-app` were comment-only changes and were not built.
+Check:
+- Before the fix: `cargo nextest run -p cox-config` on the three new tests: 3 run, 1 passed, 2 failed (`project_config_cannot_set_mcp_servers`: `left: Some("evil") right: Some("gh-mcp")`; `project_sandbox_off_on_a_user_mcp_server_is_reverted`: the old `mcp.servers.*.sandbox` violation, not `mcp.servers`).
+- `cargo nextest run -p cox-config -p cox-protocol`: 163 run, 163 passed (after regenerating `docs/config.md` and `docs/config.jsonschema`).
+- `cargo clippy -p cox-config -p cox-protocol --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`

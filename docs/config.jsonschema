@@ -1658,7 +1658,7 @@
           "default": true
         },
         "servers": {
-          "description": "`[mcp.servers.<name>]` entries.",
+          "description": "`[mcp.servers.<name>]` entries. User config only: a project config\ncannot add or change a server (T64.7); `.mcp.json` is a separate surface.",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/McpServerConfig"
