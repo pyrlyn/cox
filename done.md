@@ -1,3 +1,18 @@
+#### T33.40.5 Parity: the `typesafe` table configures the plugin's section
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T33.40.4 · Size: ~120 · Files: `crates/cox/src/session.rs`, `crates/cox-plugin/src/provider.rs`, `crates/cox/src/doctor.rs`
+Goal: while both exist, one name serves one client.
+- When the `jev` plugin is loaded, the provider `typesafe` is its `PluginProvider`. The `[providers.typesafe]` table (the built-in default, or the user's) supplies `base_url`, `api_key_env`, `timeout_s`, `max_retries` and `model`, and the user wins, as for declarative sections.
+- Without the plugin, the built-in `JevProvider` runs as today.
+- `cox doctor` says which client serves `typesafe`.
+Check: `typesafe_table_overrides_plugin_transport`, `builtin_jev_used_when_plugin_absent`, and a doctor snapshot for each case (in a scratch `COX_HOME`).
+Done: T33.40.4 already passed `base_url` and `max_retries`; this adds the rest.
+- `cox_plugin::provider::SectionConfig` (the table's `base_url`, `api_key_env`, `timeout_s`, `model`) replaces `backends`' base-URL closure. `api_key_env` picks the variable the host injects the key from (empty means no auth header), `timeout_s` is the section's `cox_http` timeout (`Net::bind_section`) and, plus 30 s, the host-call deadline, and `model` is sent when a request names none (a request's own model wins, as in the built-in client, so Jev's pinned `jev-1.13.0` is not overridden by the table's `jev-latest`).
+- `cox-session`: `provider::abi_section` builds it from `[providers.typesafe]`. Without the plugin the ABI map is empty and the built-in `JevProvider` serves, unchanged.
+- `cox doctor`: a `typesafe client` row says which client serves the section (lowest granted plugin id declaring it, else the built-in one) and lists the table values in use.
+Check: `cox-plugin` and `cox-session` nextest 214 passed, including `builtin_jev_used_when_plugin_absent`, `typesafe_table_supplies_the_plugin_section`, `section_timeout_cuts_a_slow_provider_reply_short`, `request_model_wins_over_the_section_default`, `user_table_replaces_the_manifest_key_variable`. `cox` doctor and Jev e2e 34 passed: `typesafe_table_overrides_plugin_transport` (key from `api_key_env`, `timeout_s = 1` cuts a 4 s reply, `max_retries = 0` leaves one request), `doctor_names_the_plugin_that_serves_typesafe`, and doctor snapshots for the plugin case and the built-in case (a scratch `COX_HOME`). clippy `-D warnings` (also `cox --no-default-features`) and `cargo fmt --check` clean. Whole `-p cox` run: only `plain_transcript_snapshot` fails (ctx 1% vs 2%), and it fails the same without this change.
+
 #### T33.40.4 Jev plugin as a provider, end to end and offline
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T33.40.3, T33.7 · Size: ~180 (landed ~300 lines of code, see Not done) · Priority: P2 · Complexity: 4 · Files: `crates/cox/tests/plugins_jev.rs`, `crates/cox-plugin/src/{provider,advisor}.rs`, `crates/cox-session/src/{lib,provider}.rs`, `crates/cox-provider/src/retried.rs`, `crates/cox-models/src/{catalog,price}.rs`, `crates/cox-plugin-api/src/abi.rs`, `crates/cox/src/plugin_cmd.rs`, `plugins/jev/src/{decide,lib,provider}.rs`, `plugins/sdk/src/lib.rs`

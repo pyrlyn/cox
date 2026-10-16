@@ -44,7 +44,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | --- | --- | --- | --- | --- | --- |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.5 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
@@ -884,16 +883,6 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
-
-#### T33.40.5 Parity: the `typesafe` table configures the plugin's section
-
-Depends: T33.40.4 · Size: ~120 · Files: `crates/cox/src/session.rs`, `crates/cox-plugin/src/provider.rs`, `crates/cox/src/doctor.rs`
-Goal: while both exist, one name serves one client.
-- When the `jev` plugin is loaded, the provider `typesafe` is its `PluginProvider`. The `[providers.typesafe]` table (the built-in default, or the user's) supplies `base_url`, `api_key_env`, `timeout_s`, `max_retries` and `model`, and the user wins, as for declarative sections.
-- Without the plugin, the built-in `JevProvider` runs as today.
-- `cox doctor` says which client serves `typesafe`.
-Check: `typesafe_table_overrides_plugin_transport`, `builtin_jev_used_when_plugin_absent`, and a doctor snapshot for each case (in a scratch `COX_HOME`).
-Plan: T33.40.4 already passes `base_url` and `max_retries`. (1) `cox-plugin`: `provider::SectionConfig` (the table's `base_url`, `api_key_env`, `timeout_s`, `model`) replaces `backends`' `base_url` closure; `api_key_env` picks the injected key variable, `timeout_s` becomes the section's `cox_http` timeout (`net.rs`) and the host-call deadline, `model` is the default when a request names none. (2) `cox-session`: `provider::abi_section` builds it from `[providers.typesafe]`; `builtin_jev_used_when_plugin_absent` there. (3) `crates/cox/src/doctor.rs`: a `typesafe client` row from the same discover-and-grant walk as `check_plugins`, with a snapshot for each case. (4) `crates/cox/tests/plugins_jev.rs`: `typesafe_table_overrides_plugin_transport`. Verify with nextest, clippy and fmt on `cox-plugin`, `cox-session`, `cox`.
 
 #### T33.40.6 `risk` advisor: raise only
 
