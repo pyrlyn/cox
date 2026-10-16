@@ -217,7 +217,7 @@ async fn edit_at(path: PathBuf, mode: &Mode, cx: &ToolCx) -> Result<ToolOutput, 
         .await
         .map_err(|_| ToolError::Io)?;
 
-    atomic_write(&path, result.as_bytes())?;
+    atomic_write(&cx.writable_roots, &path, result.as_bytes())?;
 
     let label = path.display().to_string();
     let text_diff = TextDiff::from_lines(&original, &result);

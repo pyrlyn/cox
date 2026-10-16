@@ -183,7 +183,7 @@ async fn apply_at(
     for c in &changes {
         let target = resolved.get(&c.path).ok_or(ToolError::Io)?;
         match &c.after {
-            Some(after) => atomic_write(target, after.as_bytes())?,
+            Some(after) => atomic_write(&cx.writable_roots, target, after.as_bytes())?,
             None => std::fs::remove_file(target).map_err(|_| ToolError::Io)?,
         }
         // A move is a write to the new path plus a removal of the old.
@@ -238,8 +238,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[tokio::test]
-    async fn apply_patch_refuses_a_path_swapped_to_a_symlink_after_confine() {
+    fn swap_cx(swap: &crate::swap_fixture::Swap) -> ToolCx {
         use std::sync::Arc;
 
         use cox_protocol::{ArchiveId, SandboxMode, SandboxPolicy, SessionId, StoreError};
@@ -256,11 +255,8 @@ mod tests {
             }
         }
 
-        let swap = crate::swap_fixture::Swap::new();
-        swap.file("secret.txt", "mine\n");
-        swap.file("sub/secret.txt", "mine\n");
         let (tx, _rx) = tokio::sync::mpsc::channel(8);
-        let cx = crate::tool_cx(
+        crate::tool_cx(
             vec![swap.root.clone()],
             swap.root.clone(),
             SandboxPolicy {
@@ -275,7 +271,16 @@ mod tests {
             tx,
             SessionId::new(),
             cox_protocol::CallId::new(),
-        );
+        )
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn apply_patch_refuses_a_path_swapped_to_a_symlink_after_confine() {
+        let swap = crate::swap_fixture::Swap::new();
+        swap.file("secret.txt", "mine\n");
+        swap.file("sub/secret.txt", "mine\n");
+        let cx = swap_cx(&swap);
         let mut resolved = BTreeMap::new();
         for rel in ["secret.txt", "sub/secret.txt"] {
             resolved.insert(
@@ -297,5 +302,27 @@ mod tests {
             assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
         }
         assert_eq!(swap.outside_secret(), crate::swap_fixture::SECRET);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn apply_patch_add_file_refuses_a_parent_swapped_to_a_symlink_after_confine() {
+        let swap = crate::swap_fixture::Swap::new();
+        swap.file("sub/keep.txt", "mine\n");
+        let cx = swap_cx(&swap);
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            "sub/new.txt".to_string(),
+            confine(&cx.writable_roots, &cx.cwd, "sub/new.txt").expect("confine"),
+        );
+        swap.swap_parent("sub");
+
+        let patch = parse("*** Begin Patch\n*** Add File: sub/new.txt\n+changed\n*** End Patch")
+            .expect("parse");
+        let err = apply_at(&patch, &resolved, &cx)
+            .await
+            .expect_err("must refuse");
+        assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
+        assert!(!swap.outside.join("new.txt").exists());
     }
 }
