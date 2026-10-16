@@ -59,7 +59,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.45.7 | todo | P2 | 4 | 0% | |
-| T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
@@ -1102,11 +1101,6 @@ Depends: T33.45.6 · Files: `crates/cox-ffi/src/{session,types}.rs`, `desktop/ma
 
 Check: `forward_only` passes; a snapshot per new view in light and dark; an unknown SF Symbol draws `puzzlepiece.extension` (settles §15.4's **unverified** note).
 
-#### T33.45.9 Docs: the three-part plugin API reference
-
-Depends: T33.45.1, T33.45.2 · Files: `docs/plugins.md` (or `docs/plugins/api.md`), its generator and drift test · Design: `docs/design/plugins.md` §15, A134
-
-Check: every field of `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` appears under its part (shared, terminal-only, desktop-only), checked by test.
 #### T33.45.10 Docs: Russian and Ukrainian translations
 
 Depends: T33.45.9 · Files: `docs/ru/plugins.md`, `docs/uk/plugins.md` (new directories) · Design: `docs/design/plugins.md` §15, A134

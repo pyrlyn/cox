@@ -11419,6 +11419,8 @@ Status: done 2026-10-12 · Implemented in #211 (commit "T33.45.9: Document the t
 
 Check output: `mise exec -- cargo nextest run -p cox-plugin-api -E 'test(plugin_api_reference_covers_both_schemas)'` — 1 passed (the drift test runs the generator against `docs/plugin.schema.json` and `docs/plugin-abi.schema.json`).
 
+Note: the row and card stayed in `plan.md` and `todo.md` after this entry was written; removed in a follow-up. Re-verified against the code: `python3 scripts/plugin_api_reference.py` exits 0, and the prose parts (`## Shared`, `## Terminal-only`, `## Desktop-only`) match `crates/cox-plugin-api` (`MAX_IMAGE_BYTES` = 256 KiB) and `crates/cox-plugin/src/hostfn.rs` (`cox:desktop/v1`, `cox_desktop_notify`).
+
 #### T33.45.6 App core: notifications, links and images
 
 Depends: T33.45.5 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/app.rs`, `crates/cox-app/src/wire.rs` · Design: `docs/design/plugins.md` §15, A134
