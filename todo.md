@@ -17,8 +17,6 @@
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
 - T33.45.6. App core: notifications, links and images
-- T33.45.7. FFI and Swift: the desktop contributions
-- T33.45.7. FFI and Swift: the desktop contributions
 - T33.45.10. Docs: Russian and Ukrainian translations
 - T33.47. Plugin canvas: a desktop pane of plugin-drawn pages
 - T33.47.8. The pane, the shortcut and the composer chip

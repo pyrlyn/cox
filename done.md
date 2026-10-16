@@ -11448,6 +11448,8 @@ Status: done 2026-10-13 · `cox-ffi` forwards `plugin_tabs`, `plugin_toolbar`, `
 
 Check output: `mise exec -- cargo nextest run -p cox-ffi` — 15 passed, including `every_ffi_body_is_one_forward_expression` and `the_bridge_hands_a_plugin_notice_to_the_host_and_returns_its_answer`; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. `swift test` passes for CoxModel (162), CoxCore (28) and CoxPlatform (35, including `aPluginAlertPostsItsButtonsAndEachRunsItsAction` and `theSessionInFrontKeepsItsAlertAsANotice`), CoxTranscript's `anImageAndALinkReachTheWidget`, and CoxUI's `anUnknownSymbolDrawsTheExtensionGlyph`, `aLinkSpanCarriesItsLinkUnopenedInThePrivateScheme` and `inspectorTabsFollowTheDesignOrder`. CoxUI's snapshot tests, the new ones in light and dark × Solid and Frosted among them, fail locally against every reference because local macOS 27 is not the runner's macOS 26; their references come from CI. `scripts/desktop/app.sh` builds Cox.app; swift-format and SwiftLint `--strict` are clean on every changed file.
 
+Note: the row and card stayed in `plan.md` and `todo.md` after this entry was written; removed in a follow-up.
+
 #### T33.45.4 TUI: links, image `alt`, surfaces in listings
 
 Depends: T33.45.2, T33.45.3 · Files: `crates/cox-tui/src/plugin_ui.rs`, `crates/cox/src/plugin_cmd.rs` · Design: `docs/design/plugins.md` §15, A134
