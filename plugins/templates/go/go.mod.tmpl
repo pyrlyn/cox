@@ -1,0 +1,8 @@
+module {{id}}
+
+go 1.25
+
+// `just build` runs `go mod tidy`, which adds the cox Go SDK
+// (github.com/pyrlyn/cox/plugins/sdk-go) at its latest version. To build
+// against a cox checkout instead:
+//   go mod edit -replace github.com/pyrlyn/cox/plugins/sdk-go=<cox>/plugins/sdk-go

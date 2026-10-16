@@ -1,0 +1,26 @@
+# The shared example every guest language implements (PL§13), in Go over
+# cox's Go SDK (plugins/sdk-go): a status segment with the turn count, a
+# hook that counts failed tool calls, the `/example-go:reset` command and a
+# `turn_started` subscription. `just plugin-examples go` builds
+# `example_go.wasm` beside this file with TinyGo.
+api = 1
+id = "example-go"
+version = "0.1.0"
+name = "Turn counter (Go)"
+description = "Turns and failed tool calls in the status line; /example-go:reset clears both"
+wasm = "example_go.wasm"
+# TinyGo's wasip1 runtime imports WASI (clocks, random, fd_write); no
+# preopens, since `[capabilities.fs]` is absent.
+wasi = true
+
+[capabilities]
+events = ["turn_started"]
+# A failed call fires `PostToolUseFailure`, a successful one `PostToolUse`;
+# both are listed so the counter reads `tool_response.is_error` whichever
+# the host sends.
+hooks = ["PostToolUse", "PostToolUseFailure"]
+kv = true
+
+[capabilities.ui]
+status = true
+commands = true
