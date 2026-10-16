@@ -110,6 +110,22 @@ Check:
 - YAML parses (ruby `YAML.load_file`): 17 jobs, every `needs:` entry names an existing job.
 - `grep -rn revert-on-failure .github` and `grep -n revert .github/workflows/ci.yml`: no matches.
 
+#### T64.20 Enforce a subagent definition's tool allowlist; drop the unused `AgentDef::restrict`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P2 · Complexity: 2 · Files: `crates/cox-core/src/subagent.rs`, `crates/cox-protocol/src/agent.rs`
+Goal: one place decides which parent tools a child gets, and a discovered definition's `tools:` is a ceiling. The finding said `AgentDef::restrict` had only test callers.
+What landed:
+- Investigation: `AgentDef::restrict` (`cox-protocol/src/agent.rs`) filtered the parent's tools by `def.tools`, but no child is opened through it. `AgentTool::resolve` flattens the def into `Resolved` and `AgentTool::tools_for` applies the allowlist, so `restrict` duplicated that filter. `tools_for` also let the call's own `tools` argument (written by the model) replace the allowlist instead of narrowing it, so `agent {preset: "reviewer", tools: ["bash"]}` gave a `tools: [read, grep]` definition's child `bash`. `docs/design/extensions.md` says definitions "narrow a child's tools ... never widen". That was a real gap, not just dead code.
+- `Resolved.allowlist_is_a_ceiling` is set for a discovered def only; `tools_for` intersects the call's `tools` with the def's list. An empty `tools:` still means every parent tool.
+- `AgentDef::restrict` and its test are deleted, so there is one implementation.
+- Tests (`subagent::tests`): `agent_call_tools_cannot_widen_a_defs_allowlist`, `agent_call_tools_still_narrow_a_defs_allowlist`, `agent_def_without_tools_lets_a_call_pick_any_parent_tool`.
+Not done: a built-in preset's list (`explore`, `shell`) is still replaced by the call's `tools`. Existing scenarios and tests rely on that (`tools = ["echo"]` on `explore`), and `explore` stays read-only through `Risk::ReadOnly`. `shell` can be given a write tool by the model; the child's `cox_permission::Engine` still decides each call. Not changed here; a separate decision. The permission engine is unchanged.
+Check:
+- Mutation: with the def flagged `allowlist_is_a_ceiling: false`, `agent_call_tools_cannot_widen_a_defs_allowlist` failed (2 other new tests passed). Restored.
+- `cargo nextest run -p cox-protocol -p cox-core`: 510 run, 510 passed, 1 skipped (pre-existing).
+- `cargo clippy -p cox-protocol -p cox-core --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.12 Keep the timeout on the `web_fetch` fallback client
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-13 · Priority: P2 · Complexity: 2 · Files: `crates/cox-web/src/lib.rs`
