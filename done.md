@@ -111,6 +111,21 @@ Check:
 - `cargo clippy -p cox-config -p cox-permission -p cox-protocol --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
 
+#### T69.3 Default read-only metadata dirs in a writable workspace
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-16 · Depends: — · Priority: P2 · Complexity: 1 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `docs/config.md`, `docs/config.jsonschema`, `docs/design/sandbox.md`, `plan.md`, `done.md`
+Goal: add `.agents`, `.codex` and `.aws` to the default `sandbox.readonly_in_workspace` (was `.git`, `.cox`, `.claude`). A user who set the list keeps it.
+What landed:
+- `SandboxConfig::default()` and `default.toml` now list `.git`, `.cox`, `.claude`, `.agents`, `.codex`, `.aws`. The hand-written default has a one-line comment naming codex `codex-rs/protocol/src/permissions.rs` L40-51 at f0c5077c; the set is implemented independently, `seatbelt.rs` is not copied.
+- `docs/config.md` and `docs/config.jsonschema` (both `default` arrays) were regenerated through their drift tests (`config_docs_config_md_matches_default_toml`, `config_jsonschema_matches_committed_file`), not hand-edited. `docs/design/sandbox.md` names the six dirs in its claim (2).
+- Tests in `crates/cox-protocol/src/config.rs`: `sandbox_readonly_defaults_cover_metadata_dirs` (default and `default.toml` agree on the six names) and `user_sandbox_readonly_list_is_kept` (a user list of `["vendor"]` stays exactly that).
+Not done: the seatbelt and bwrap argument snapshots did not change, because their tests build their own explicit lists rather than reading the default. The binary was not run against a real `~/.aws` or repo-local `.agents`. Workspace-wide clippy was not run; the touched crates are clippy-clean.
+Check:
+- Before the change: `cargo nextest run -p cox-protocol sandbox_readonly` failed with `left: [".git", ".cox", ".claude"]`, missing `.agents`, `.codex`, `.aws`. The user-list test passed before the change; it is a regression guard.
+- `cargo nextest run --no-fail-fast -p cox-sandbox -p cox-protocol -p cox-config`: 189 run, 189 passed.
+- `cargo clippy -p cox-protocol -p cox-sandbox -p cox-config --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
 #### T64.11 Delete the dead `revert-on-failure` job from `ci.yml`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 1 · Files: `.github/workflows/ci.yml`

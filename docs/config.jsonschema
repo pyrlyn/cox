@@ -167,7 +167,10 @@
         "readonly_in_workspace": [
           ".git",
           ".cox",
-          ".claude"
+          ".claude",
+          ".agents",
+          ".codex",
+          ".aws"
         ],
         "linux_backend": "auto"
       }
@@ -1341,7 +1344,10 @@
           "default": [
             ".git",
             ".cox",
-            ".claude"
+            ".claude",
+            ".agents",
+            ".codex",
+            ".aws"
           ]
         },
         "linux_backend": {
