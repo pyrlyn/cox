@@ -279,8 +279,13 @@ fn cloud_agent_requests_carry_no_git_identity() {
             String::from_utf8_lossy(&request.body)
         )
         .to_lowercase();
-        for secret in [GIT_NAME, GIT_EMAIL, "fixture.person"] {
-            assert!(!wire.contains(&secret.to_lowercase()), "{secret} in {wire}");
+        // The message names the path only: `wire` holds the bearer header.
+        for identity in [GIT_NAME, GIT_EMAIL, "fixture.person"] {
+            assert!(
+                !wire.contains(&identity.to_lowercase()),
+                "{identity} in the request to {}",
+                request.url.path()
+            );
         }
         let agent = request.headers.get("user-agent").expect("User-Agent");
         assert!(
