@@ -149,7 +149,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T69.1 | todo | P1 | 3 | 0% | |
 | T69.2 | todo | P1 | 2 | 0% | |
 | T69.4 | todo | P3 | 1 | 0% | |
-| T69.6 | todo | P2 | 2 | 0% | |
 | T69.7 | todo | P3 | 3 | 0% | |
 | T69.8 | todo | P3 | 1 | 0% | |
 
@@ -3098,22 +3097,6 @@ Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not co
 Files: `crates/cox-store/src/lib.rs` (and its tests)
 
 Done when a new database opens and a forced short deadline still opens. Check: `mise exec -- cargo nextest run -p cox-store`.
-
-#### T69.6 After compaction, reattach live tasks, todos and subagents
-
-Model: - · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
-
-Goal: Append one block (≤ 2048 bytes, own headings such as `## Still running`, `## Open todos`, `## Subagents`) of ids the tools already accept, plus the stored command or description; omit it when nothing is live; a second compact parses its own headings and does not duplicate.
-
-Why: `working_state` (`compact.rs` L347–387) reads only the transcript, so a running task or subagent is named again only if the model happened to write its id.
-
-Source: [grok-build `xai-grok-compaction/src/reminder.rs` L117–167](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/reminder.rs#L117-L167)
-
-Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy:** the reminder prose is a compatibility surface downstream; use cox's own sentences.
-
-Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/tasks.rs` (read only), `crates/cox-core/tests/compact.rs`
-
-Done when a running shell task id is in the summary and absent from the dropped turns, an idle session adds no block, and size stays ≤ 2048. Check: `mise exec -- cargo nextest run -p cox-core compact`.
 
 #### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
 

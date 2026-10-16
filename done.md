@@ -12114,3 +12114,36 @@ clean
 $ mise exec -- cargo fmt --check -p cox-core
 clean
 ```
+
+#### T69.6 After compaction, reattach live tasks, todos and subagents
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
+
+Goal: Append one block (≤ 2048 bytes, own headings such as `## Still running`, `## Open todos`, `## Subagents`) of ids the tools already accept, plus the stored command or description; omit it when nothing is live; a second compact parses its own headings and does not duplicate.
+
+Why: `working_state` (`compact.rs` L347–387) reads only the transcript, so a running task or subagent is named again only if the model happened to write its id.
+
+Source: [grok-build `xai-grok-compaction/src/reminder.rs` L117–167](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/common/xai-grok-compaction/src/reminder.rs#L117-L167)
+
+Licence: Apache-2.0, implement similar, not copy. **Implement similar, do not copy:** the reminder prose is a compatibility surface downstream; use cox's own sentences.
+
+Files: `crates/cox-core/src/compact.rs`, `crates/cox-core/src/tasks.rs` (read only), `crates/cox-core/tests/compact.rs`
+
+Done when a running shell task id is in the summary and absent from the dropped turns, an idle session adds no block, and size stays ≤ 2048. Check: `mise exec -- cargo nextest run -p cox-core compact`.
+
+What landed: `compact.rs` builds a `LiveState` after the summary is written and appends `live_text` after the archive section. `## Still running` lists detached `bash` tasks from the registry (`- task <id> (running): bash: <command>`); `## Subagents` lists running subagents and finished ones a message can still wake, with the `send_message` name when there is one (`- task <id> (explore-2, running): explore: <task>`); `## Open todos` lists the unfinished items of the latest successful `todo` call in the dropped turns (`- [in_progress] <id>: <text>`), skipped when a newer `todo` call is in the kept turns, and carried through a previous summary's own block when the call that wrote them was dropped earlier. Every value is flattened to one line and capped at 160 characters, the block is capped at 2048 bytes with a `… and N more` line, and an idle session adds nothing. `strip_live` removes the model's own copy of the three headings before the fresh block is appended, so a second compaction lists each task once. `tasks.rs` and `subagent.rs` are unchanged.
+Not done: the task ids in the summary stay in the dropped turns' pointer lines too (the test shows the id comes from the registry, since the scripted summary never wrote it); a todo id containing `: ` would not round-trip through a second compaction; `todo.md` has no T69 lines to remove (it was already out of sync with `plan.md`, not touched).
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-core --test compact compact_   (new tests, before the fix)
+FAIL compact_names_a_running_shell_task_the_summary_never_wrote
+FAIL compact_second_pass_lists_a_task_once_and_drops_the_models_copy
+$ mise exec -- cargo nextest run -p cox-core compact
+48 tests run: 48 passed, 359 skipped
+$ mise exec -- cargo nextest run -p cox-core
+406 tests run: 406 passed, 1 skipped
+$ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check -p cox-core
+clean
+```
