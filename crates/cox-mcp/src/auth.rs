@@ -471,18 +471,18 @@ mod tests {
         let server = tokio::spawn(async move { callback(&listener, "good").await });
 
         let wrong_path = request(addr, "GET /other?code=evil&state=good HTTP/1.1\r\n\r\n").await;
-        assert!(wrong_path.starts_with("HTTP/1.1 404"), "{wrong_path}");
+        assert!(wrong_path.starts_with("HTTP/1.1 404"));
         let wrong_method =
             request(addr, "POST /callback?code=evil&state=good HTTP/1.1\r\n\r\n").await;
-        assert!(wrong_method.starts_with("HTTP/1.1 404"), "{wrong_method}");
+        assert!(wrong_method.starts_with("HTTP/1.1 404"));
         let wrong_state = request(addr, "GET /callback?code=evil&state=bad HTTP/1.1\r\n\r\n").await;
-        assert!(wrong_state.starts_with("HTTP/1.1 400"), "{wrong_state}");
+        assert!(wrong_state.starts_with("HTTP/1.1 400"));
         let no_state = request(addr, "GET /callback?code=evil HTTP/1.1\r\n\r\n").await;
-        assert!(no_state.starts_with("HTTP/1.1 400"), "{no_state}");
+        assert!(no_state.starts_with("HTTP/1.1 400"));
         assert!(!server.is_finished(), "junk must not end the wait");
 
         let real = request(addr, "GET /callback?code=real&state=good HTTP/1.1\r\n\r\n").await;
-        assert!(real.starts_with("HTTP/1.1 200"), "{real}");
+        assert!(real.starts_with("HTTP/1.1 200"));
         let query = server.await.expect("join").expect("callback");
         assert_eq!(query_param(&query, "code").as_deref(), Some("real"));
     }
