@@ -148,7 +148,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | todo | P2 | 3 | 0% |  |
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | todo | P2 | 1 | 0% |  |
-| T69.1 | todo | P1 | 3 | 0% | |
 | T69.2 | todo | P1 | 2 | 0% | |
 | T69.4 | todo | P3 | 1 | 0% | |
 | T69.6 | todo | P2 | 2 | 0% | |
@@ -3056,22 +3055,6 @@ Rationale in §6 A159. Found by reading openai/codex at `f0c5077c34ec7a76b4ad913
 **Not taken (codex and grok-build already behind cox):** codex middle truncation and "N tokens truncated" markers (lossy; `truncate.rs` keeps an `expand` id), the network MITM proxy, Starlark exec policy, compaction prompts, `process-hardening`; grok-build bytes/4 estimator, tool-pair snapping, two-pass prefire, TUI, config overlay.
 
 **rtok follow-ups (outside cox; for pyrlyn/rtok `plan.md`, not claimed here).** Lossless tool-schema shrink on the proxy ([codex `codex-rs/tools/src/json_schema/compaction.rs` L14–153](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/tools/src/json_schema/compaction.rs#L14-L153), Apache-2.0, implement similar: archive the original, add an `expand` id); MCP results fit after JSON escaping ([codex `codex-rs/utils/output-truncation/src/lib.rs` L43–87](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/utils/output-truncation/src/lib.rs#L43-L87), Apache-2.0, implement similar); `rtok doctor` budgeted `quick_check` (codex `state/src/sqlite/validation.rs`, doctor only, never the hook path); do not deny a native `Read` of `AGENTS.md`, `CLAUDE.md` or `SKILL.md` ([grok-build `read_file/mod.rs` L244–278](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-tools/src/implementations/grok_build/read_file/mod.rs#L244-L278), Apache-2.0, implement similar; D6 forbids copying into a plugin).
-
-#### T69.1 PowerShell and cmd readers hit existing `Read` denies
-
-Model: - · Status: open · Depends: — · Size: ~180 · Priority: P1 · Complexity: 3
-
-Goal: `Get-Content`, `gc`, `type` and `more` on one plain command are classified read-only with the path on the segment, so `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa` instead of only asking; writers (`Remove-Item`, `Set-Content`, `Out-File`) keep their path; pipelines, `;`, `$(`, variables and unknown aliases stay opaque `Exec`.
-
-Why: `classify.rs` lines 526–538 make every line the bash grammar cannot parse opaque, and `Rule::read_path_rule` (`cox-permission/src/rules.rs` lines 140–145) only sees extracted paths, so a PowerShell read of a denied file is asked, not denied. No long-lived PowerShell parser child (a new attack surface on the approval path).
-
-Source: [codex `codex-rs/shell-command/src/command_safety/powershell_parser.rs` L19–44](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/shell-command/src/command_safety/powershell_parser.rs#L19-L44); [grok-build `crates/codegen/xai-grok-permission-rules/src/shell_access.rs` L2371–2392](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-permission-rules/src/shell_access.rs#L2371-L2392)
-
-Licence: Apache-2.0 (both), implement similar, not copy (per-file header and a root `NOTICE` needed). **Implement similar, do not copy:** the codex parser is a `.ps1` child process and grok's file is thousands of lines bound to its own types.
-
-Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-core/tests/permission.rs`
-
-Done when `unparsed_powershell_command_asks` is extended (four reader lines naming `~/.ssh/id_rsa` are read-only and not opaque; `Remove-Item` is not read-only; a pipeline stays opaque) and `Read(~/.ssh/**)` denies `Get-Content ~/.ssh/id_rsa`. Check: `mise exec -- cargo nextest run -p cox-tools -E 'test(unparsed_powershell)'`, `mise exec -- cargo nextest run -p cox-core -E 'test(permission)'`.
 
 #### T69.2 Honor `permissions.allow_for_session_persists`
 

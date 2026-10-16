@@ -189,6 +189,15 @@ fn walk(node: Node, src: &[u8], scan: &mut Scan) {
             let words: Vec<String> = nodes.iter().map(|n| text(*n, src)).collect();
             bump(risk, command_risk(&words));
             scan.segments.opaque |= runs_code_string(&words);
+            // T69.1: a PowerShell reader is read-only only as the one plain
+            // command of a line. Piped or chained, what receives its output
+            // is not a reader the walk knows, so the line stays opaque `Exec`.
+            if words.first().is_some_and(|n| is_ps_reader(base(n)))
+                && node.parent().is_some_and(|p| p.kind() != "program")
+            {
+                bump(&mut scan.risk, Risk::Exec);
+                scan.segments.opaque = true;
+            }
             // From the name on: a deny rule matches past a leading
             // assignment, which already makes the call opaque to allow rules.
             let from = node.child_by_field_name("name").unwrap_or(node);
@@ -381,8 +390,29 @@ fn command_risk(words: &[String]) -> Risk {
         "find" if has("-delete") || has("-exec") || has("-execdir") || has("-ok") => Risk::Exec,
         "find" => Risk::ReadOnly,
         n if READ_ONLY.contains(&n) => Risk::ReadOnly,
+        n if is_ps_reader(n) && plain_ps_args(args) => Risk::ReadOnly,
         _ => Risk::Exec,
     }
+}
+
+/// PowerShell's file readers (T69.1). `type` and `more` are shared with cmd
+/// and already in `READ_ONLY`; these two are PowerShell-only, and cmdlet
+/// names are case-insensitive there. Without this a read of a `Read`-denied
+/// file classifies `Exec`, which skips the read-path guard and only asks.
+fn is_ps_reader(name: &str) -> bool {
+    name.eq_ignore_ascii_case("get-content") || name.eq_ignore_ascii_case("gc")
+}
+
+/// Whether a PowerShell reader's arguments are all plain words the path
+/// guard can read: no variables or escapes (the guard would see `$HOME`, not
+/// the path), and no `-Path:value` form (the guard skips every token that
+/// starts with `-`, so a path glued to a flag would slip past it).
+fn plain_ps_args(args: &[String]) -> bool {
+    args.iter().all(|a| {
+        !a.contains(['$', '`', '(', ')', '{', '}'])
+            && a.strip_prefix('-')
+                .is_none_or(|flag| flag.chars().all(|c| c.is_ascii_alphabetic()))
+    })
 }
 
 /// The nodes for the command a wrapper prefix (`nohup`, `timeout 5`, `env
@@ -536,5 +566,49 @@ mod tests {
             assert_eq!(classify(line), Risk::Exec, "{line}");
             assert!(segments(line).opaque, "{line}");
         }
+    }
+
+    /// T69.1: the four Windows readers on one plain command are read-only and
+    /// keep their path on the segment, so the `Read` deny guard can see it.
+    #[test]
+    fn unparsed_powershell_readers_are_read_only_with_their_path() {
+        for line in [
+            "Get-Content ~/.ssh/id_rsa",
+            "gc ~/.ssh/id_rsa",
+            "type ~/.ssh/id_rsa",
+            "more ~/.ssh/id_rsa",
+            "Get-Content -Path ~/.ssh/id_rsa -Raw",
+        ] {
+            assert_eq!(classify(line), Risk::ReadOnly, "{line}");
+            let segs = segments(line);
+            assert!(!segs.opaque, "{line}");
+            assert_eq!(segs.commands, vec![line.to_owned()], "{line}");
+        }
+    }
+
+    /// T69.1: writers keep their path but stay out of the read-only class, and
+    /// anything the bash grammar cannot vouch for is not a plain reader.
+    #[test]
+    fn unparsed_powershell_writers_and_composites_are_not_read_only() {
+        for line in [
+            "Remove-Item ~/.ssh/id_rsa",
+            "Set-Content ~/.ssh/id_rsa x",
+            "Out-File ~/.ssh/id_rsa",
+            "Get-Content ~/.ssh/id_rsa | Remove-Item -Force",
+            "Get-Content ~/.ssh/id_rsa | Select-String x",
+            "Get-Content a && Get-Content ~/.ssh/id_rsa",
+            "Get-Content $HOME/.ssh/id_rsa",
+            "Get-Content $(Get-Location)/x",
+            "Get-Content -Path:~/.ssh/id_rsa",
+            "Get-Content `~/.ssh/id_rsa",
+            "Get-Content ~/.ssh/id_rsa > out.txt",
+        ] {
+            assert_ne!(classify(line), Risk::ReadOnly, "{line}");
+        }
+        assert_eq!(
+            segments("Remove-Item ~/.ssh/id_rsa").commands,
+            vec!["Remove-Item ~/.ssh/id_rsa".to_owned()]
+        );
+        assert!(segments("Get-Content a | Select-String x").opaque);
     }
 }

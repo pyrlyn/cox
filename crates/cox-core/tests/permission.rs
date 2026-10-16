@@ -614,3 +614,25 @@ fn project_approval_is_remembered_as_a_bash_grant() {
     assert_eq!(want(&outcome), Want::Allow);
     assert_eq!(judge(&e, "cargo test", &grants), Want::Allow);
 }
+
+#[rstest]
+#[case::get_content("Get-Content ~/.ssh/id_rsa")]
+#[case::gc_alias("gc ~/.ssh/id_rsa")]
+#[case::type_alias("type ~/.ssh/id_rsa")]
+#[case::more("more /home/u/.ssh/id_rsa")]
+#[case::lower_case("get-content ~/.ssh/id_rsa -Raw")]
+fn read_deny_stops_a_windows_reader(#[case] command: &str) {
+    // T69.1: PowerShell and cmd readers used to classify as `Exec`, which
+    // skips the read-path guard, so the denied key was asked about, not denied.
+    let e = engine(&[], &[], &["Read(~/.ssh/**)"]);
+    assert_eq!(judge(&e, command, &[]), Want::Deny, "{command}");
+}
+
+#[rstest]
+#[case::elsewhere("Get-Content README.md", Want::Allow)]
+#[case::writer("Remove-Item ~/.ssh/id_rsa", Want::Ask)]
+#[case::pipeline("Get-Content ~/.ssh/id_rsa | Select-String x", Want::Ask)]
+fn windows_reader_guard_leaves_other_lines_alone(#[case] command: &str, #[case] expect: Want) {
+    let e = engine(&[], &[], &["Read(~/.ssh/**)"]);
+    assert_eq!(judge(&e, command, &[]), expect, "{command}");
+}
