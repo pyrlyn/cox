@@ -42,7 +42,7 @@ use crate::turn::{consume_provider, results_message, run_signed_tools, run_tools
 pub enum State {
     /// No turn in flight.
     Idle,
-    /// Building the next provider request.
+    /// Building the next provider request, or compacting the history it carries.
     Assembling,
     /// A provider stream is open.
     Streaming,
@@ -50,9 +50,6 @@ pub enum State {
     RunningTools,
     /// Waiting on `Submission::Approve`.
     AwaitingApproval,
-    /// Compaction is running (wired in T8.1).
-    #[allow(dead_code)]
-    Compacting,
     /// Emitting `TurnDone` and flushing.
     Finishing,
     /// `Submission::Interrupt` is draining work.

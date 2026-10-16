@@ -135,6 +135,7 @@ impl GuardViolation {
                 "A project may not run more subagents at once than you allow"
             }
             "core.workspace_roots" => "A project may not widen the directories tools can reach",
+            "memory.dir" => "A project may not choose where your memory files are read and written",
             "providers.*.base_url" => "A project may not choose where your API keys are sent",
             "providers.*.api_key_env" => "A project may not choose which API key a provider sends",
             "providers" => "A project may not add a model provider",
@@ -170,7 +171,8 @@ impl GuardViolation {
 /// are ignored from the project file with a warning to stderr").
 ///
 /// `git_root` is the checkout the project layer came from, the only place
-/// a project-chosen workspace root may point into (T64.2).
+/// a project-chosen workspace root or `memory.dir` may point into (T64.2,
+/// T64.17).
 fn apply_project_guards(
     full: &mut Config,
     without_project: &Config,
@@ -239,6 +241,22 @@ fn apply_project_guards(
             reverted_to: rule_list(&kept),
         });
         full.core.workspace_roots = user_roots.clone();
+    }
+
+    // T64.17: the session reads memory facts from, and writes them to,
+    // `memory.dir`, and the index lands in the model's context, so a project
+    // may only point it inside its own checkout (same test as the roots
+    // above) or keep the user's. Empty means the default location.
+    if full.memory.dir != without_project.memory.dir
+        && !full.memory.dir.is_empty()
+        && !root_inside(Path::new(&full.memory.dir), git_root)
+    {
+        violations.push(GuardViolation {
+            key: "memory.dir",
+            project_value: full.memory.dir.clone(),
+            reverted_to: without_project.memory.dir.clone(),
+        });
+        full.memory.dir = without_project.memory.dir.clone();
     }
 
     // T64.4: `auto` lets writes run unasked, so only `bypass` being refused
@@ -648,7 +666,8 @@ fn apply_project_guards(
     violations
 }
 
-/// Whether a project-chosen workspace root lies inside `git_root` (T64.2).
+/// Whether a project-chosen workspace root or `memory.dir` lies inside
+/// `git_root` (T64.2, T64.17).
 /// A relative root is refused: `confine` resolves it against the process
 /// cwd, which the repository does not pick. The root must exist so its
 /// canonical path is known: a symlink inside the checkout that points out
@@ -693,7 +712,7 @@ fn rule_list(rules: &[String]) -> String {
 /// table, T64.3) is left out: its keys never reach the effective config,
 /// and listing it would send every project-set provider key to the
 /// pre-project figment.
-const GUARDED_KEYS: [&str; 23] = [
+const GUARDED_KEYS: [&str; 24] = [
     "budget.session_usd",
     "budget.monthly_usd",
     "budget.warn_at",
@@ -705,6 +724,7 @@ const GUARDED_KEYS: [&str; 23] = [
     "hooks",
     "lsp.servers",
     "mcp.servers.*.sandbox",
+    "memory.dir",
     "permissions.allow",
     "permissions.approval",
     "permissions.mode",
@@ -1728,6 +1748,68 @@ mod tests {
                 "A project may not widen the directories tools can reach"
             );
             assert_eq!(loaded.source_of("core.workspace_roots"), "user");
+        }
+    }
+
+    /// T64.17: `memory.dir` is where the session reads and writes memory
+    /// facts, so a project may name only a directory inside its own git
+    /// root (or the one the user already set). Anything else (another
+    /// user's tree, a relative path, a symlink out of the repo) reverts to
+    /// the user's value; an empty value means the default and stays allowed.
+    #[cfg(unix)]
+    #[test]
+    fn project_config_cannot_point_memory_dir_outside_the_checkout() {
+        let home = tempdir().expect("tempdir");
+        let git_root = tempdir().expect("tempdir");
+        let outside = tempdir().expect("tempdir");
+        let mine = tempdir().expect("tempdir");
+        let git = fs::canonicalize(git_root.path()).expect("canonical git root");
+        fs::create_dir_all(git.join(".git")).expect("mkdir .git");
+        fs::create_dir_all(git.join(".cox/memory")).expect("mkdir memory");
+        std::os::unix::fs::symlink(outside.path(), git.join("escape")).expect("symlink");
+        let mine = mine.path().display().to_string();
+        fs::write(
+            home.path().join("config.toml"),
+            format!("[memory]\ndir = '{mine}'\n"),
+        )
+        .expect("write user config");
+        let inside = git.join(".cox/memory").display().to_string();
+        let escape = git.join("escape").display().to_string();
+        let up = git.join("..").display().to_string();
+
+        let load_dir = |dir: &str| {
+            fs::write(
+                git.join(".cox/config.toml"),
+                format!("[memory]\ndir = '{dir}'\n"),
+            )
+            .expect("write project config");
+            let mut loaded = None;
+            temp_env(&[("COX_HOME", Some(home.path().to_str().unwrap()))], || {
+                loaded = Some(load_plain(&git).expect("load succeeds"));
+            });
+            loaded.expect("loaded")
+        };
+
+        for kept in [inside.as_str(), mine.as_str(), ""] {
+            let loaded = load_dir(kept);
+            assert_eq!(loaded.config.memory.dir, kept);
+            assert!(violation(&loaded, "memory.dir").is_none());
+        }
+
+        for bad in ["/", "memory", escape.as_str(), up.as_str()] {
+            let loaded = load_dir(bad);
+            assert_eq!(
+                loaded.config.memory.dir, mine,
+                "a memory.dir outside the checkout must revert to the user's"
+            );
+            let v = violation(&loaded, "memory.dir").expect("a memory.dir violation");
+            assert_eq!(v.project_value, bad);
+            assert_eq!(v.reverted_to, mine);
+            assert_eq!(
+                v.reason(),
+                "A project may not choose where your memory files are read and written"
+            );
+            assert_eq!(loaded.source_of("memory.dir"), "user");
         }
     }
 

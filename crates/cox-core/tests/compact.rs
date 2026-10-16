@@ -753,3 +753,93 @@ async fn compaction_notice_shows_the_newest_32_of_40_ids() {
     assert_eq!(listed, want, "the newest 32 of 40, ascending: {text}");
     assert!(text.ends_with("\n… and 8 more"), "{text}");
 }
+
+/// `Scripted`, but the summariser's call parks until released, so a test can
+/// act on the session while a compaction is mid-flight.
+struct Gated {
+    inner: Scripted,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait]
+impl Provider for Gated {
+    fn id(&self) -> ProviderId {
+        self.inner.id()
+    }
+    fn capabilities(&self) -> Caps {
+        self.inner.capabilities()
+    }
+    async fn stream(
+        &self,
+        req: Request,
+        sink: mpsc::Sender<ProviderEvent>,
+        cancel: CancellationToken,
+    ) -> Result<Usage, ProviderError> {
+        if req.job == Job::Compact {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        self.inner.stream(req, sink, cancel).await
+    }
+    async fn count_tokens(&self, req: &Request) -> Result<u32, ProviderError> {
+        self.inner.count_tokens(req).await
+    }
+}
+
+/// A manual `/compact` on an idle session keeps the session busy: a rewind
+/// that lands while the summary is being written is refused instead of
+/// cutting the history the compaction already measured its cut against.
+#[tokio::test]
+async fn compact_refuses_a_rewind_while_the_summary_is_written() {
+    let provider = Arc::new(Gated {
+        inner: Scripted::from_toml(THREE_PLUS_SUMMARY, "").expect("scenario"),
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        cox_protocol::Config::default(),
+        provider.clone(),
+        common::tools(),
+        store.clone(),
+        store,
+        PathBuf::from("/tmp/cox-turn"),
+    )
+    .expect("session");
+    let mut rx = session.events().expect("events once");
+    for t in ["t0", "t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    let before = session.history().await;
+
+    let compacting = {
+        let session = session.clone();
+        tokio::spawn(async move { session.submit(Submission::Compact { focus: None }).await })
+    };
+    provider.entered.notified().await;
+    session
+        .submit(Submission::Rewind {
+            to_turn: 1,
+            code: false,
+            conversation: true,
+        })
+        .await
+        .expect("rewind is refused, not failed");
+    assert_eq!(session.history().await, before, "the rewind cut nothing");
+    let refused = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match rx.recv().await.expect("event stream closed") {
+                Event::Notice { text, .. } if text.starts_with("rewind:") => break text,
+                Event::Rewound { .. } => panic!("rewound during compaction"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("refusal notice");
+    assert!(refused.contains("a turn is running"), "got {refused}");
+
+    provider.release.notify_one();
+    compacting.await.expect("join").expect("compact");
+}
