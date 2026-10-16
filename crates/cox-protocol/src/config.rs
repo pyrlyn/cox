@@ -1185,7 +1185,8 @@ pub struct McpConfig {
     pub deferred: bool,
     /// `--no-mcp` sets this to `false`; not a `default.toml` key.
     pub enabled: bool,
-    /// `[mcp.servers.<name>]` entries.
+    /// `[mcp.servers.<name>]` entries. User config only: a project config
+    /// cannot add or change a server (T64.7); `.mcp.json` is a separate surface.
     pub servers: HashMap<String, McpServerConfig>,
 }
 

@@ -147,7 +147,7 @@ impl GuardViolation {
             "sandbox.writable" => "A project may not widen where the sandbox can write",
             "plugins.enabled" => "A project may not turn plugins back on",
             "tiers.think.confirm" => "A project may not skip the think tier's confirmation",
-            "mcp.servers.*.sandbox" => "A project may not run an MCP server unsandboxed",
+            "mcp.servers" => "A project may not choose which MCP servers run",
             "hooks" => "A project may not choose which hook commands run",
             "lsp.servers" => "A project may not choose which language servers run",
             "voice" => "A project may not turn on the microphone or choose the voice model",
@@ -371,39 +371,39 @@ fn apply_project_guards(
         full.tiers.think.confirm = without_project.tiers.think.confirm;
     }
 
-    // T33.42: the sandbox is exactly what contains a command a cloned
-    // repository chose, so the project layer must never be the reason a
-    // server's effective `sandbox` is `false` — an existing server or one
-    // it adds outright, same difference: only user config (and env/flags,
-    // `without_project`'s other layers) may opt a server out. A server is
-    // reverted unless `without_project` alone already yields `sandbox =
-    // false` for that name, i.e. a non-project layer opted it out on its
-    // own.
-    let weakened: Vec<String> = full
-        .mcp
-        .servers
-        .iter()
-        .filter(|(name, server)| {
-            !server.sandbox
-                && !without_project
-                    .mcp
-                    .servers
-                    .get(name.as_str())
-                    .is_some_and(|s| !s.sandbox)
-        })
-        .map(|(name, _)| name.clone())
-        .collect();
-    if !weakened.is_empty() {
+    // T64.7 (subsumes T33.42): an MCP server is a program cox spawns (or a
+    // URL it contacts, with `${VAR}` expanded from the environment), and the
+    // sandbox is what contains a stdio one, so which servers exist, what
+    // they run and whether they are sandboxed is the user's call alone.
+    // Any project difference reverts the whole map to the layers without
+    // the project, the way `lsp.servers` does. `.mcp.json` is a separate
+    // surface and does not pass through here.
+    if full.mcp.servers != without_project.mcp.servers {
+        let mut changed: Vec<&str> = full
+            .mcp
+            .servers
+            .iter()
+            .filter(|(name, s)| without_project.mcp.servers.get(name.as_str()) != Some(*s))
+            .map(|(name, _)| name.as_str())
+            .collect();
+        changed.sort_unstable();
+        let mut kept: Vec<&str> = without_project
+            .mcp
+            .servers
+            .keys()
+            .map(String::as_str)
+            .collect();
+        kept.sort_unstable();
         violations.push(GuardViolation {
-            key: "mcp.servers.*.sandbox",
-            project_value: format!("false ({})", weakened.join(", ")),
-            reverted_to: "true".to_string(),
+            key: "mcp.servers",
+            project_value: changed.join(", "),
+            reverted_to: if kept.is_empty() {
+                "none".to_string()
+            } else {
+                kept.join(", ")
+            },
         });
-        for name in &weakened {
-            if let Some(server) = full.mcp.servers.get_mut(name) {
-                server.sandbox = true;
-            }
-        }
+        full.mcp.servers = without_project.mcp.servers.clone();
     }
 
     // T41.1: an LSP server is a program cox spawns, so which ones exist
@@ -723,7 +723,7 @@ const GUARDED_KEYS: [&str; 24] = [
     "external_agents.*.writable",
     "hooks",
     "lsp.servers",
-    "mcp.servers.*.sandbox",
+    "mcp.servers",
     "memory.dir",
     "permissions.allow",
     "permissions.approval",
@@ -1389,12 +1389,13 @@ mod tests {
         });
     }
 
-    /// T33.42: a project layer must not be able to flip an existing,
-    /// user-configured server's `sandbox` off — that would silently drop
-    /// the wrap on a server the user already trusted as sandboxed, without
-    /// touching its command, so the change is easy to miss in review.
+    /// T64.7: an MCP server is a program (stdio) or a URL with `${VAR}`
+    /// expansion (http) that cox contacts, so which servers exist and what
+    /// they run is the user's call alone. Any project difference reverts the
+    /// whole map, as `lsp.servers` does; the project may still tune the
+    /// scalars next to it.
     #[test]
-    fn config_project_cannot_disable_an_mcp_server_sandbox() {
+    fn project_config_cannot_set_mcp_servers() {
         let home = tempdir().expect("tempdir");
         let git_root = tempdir().expect("tempdir");
         fs::write(
@@ -1404,45 +1405,89 @@ mod tests {
         .expect("write user config");
         fs::create_dir_all(git_root.path().join(".git")).expect("mkdir .git");
         fs::create_dir_all(git_root.path().join(".cox")).expect("mkdir .cox");
-        // The project layer both disables an existing, user-trusted server
-        // and adds a brand-new one already unsandboxed — the sandbox is
-        // exactly what contains a command a cloned repository chose, so
-        // neither may take effect.
         fs::write(
             git_root.path().join(".cox/config.toml"),
-            "[mcp.servers.gh]\nsandbox = false\n\n[mcp.servers.new]\ncommand = \"x\"\nsandbox = false\n",
+            "[mcp]\ntimeout_s = 7\n\n[mcp.servers.gh]\ncommand = \"evil\"\n\n[mcp.servers.new]\ncommand = \"x\"\n\n[mcp.servers.web]\nurl = \"https://example.com/${HOME}\"\n",
+        )
+        .expect("write project config");
+
+        temp_env(&[("COX_HOME", Some(home.path().to_str().unwrap()))], || {
+            let loaded = load_plain(git_root.path()).expect("load succeeds");
+            let servers = &loaded.config.mcp.servers;
+            assert_eq!(servers["gh"].command.as_deref(), Some("gh-mcp"));
+            assert!(!servers.contains_key("new"), "{servers:?}");
+            assert!(!servers.contains_key("web"), "{servers:?}");
+            assert!(
+                !servers["opt-out"].sandbox,
+                "a user's own opt-out must hold"
+            );
+            assert_eq!(loaded.config.mcp.timeout_s, 7);
+
+            let violations: Vec<_> = loaded
+                .violations
+                .iter()
+                .filter(|v| v.key == "mcp.servers")
+                .collect();
+            assert_eq!(violations.len(), 1, "{:?}", loaded.violations);
+            assert_eq!(violations[0].project_value, "gh, new, web");
+            assert_eq!(violations[0].reverted_to, "gh, opt-out");
+            assert_eq!(loaded.source_of("mcp.servers.gh.command"), "user");
+            assert_eq!(loaded.source_of("mcp.timeout_s"), "project");
+        });
+    }
+
+    /// T33.42, kept under T64.7: a project that flips only `sandbox` on a
+    /// user's server still changes the map, so it is reverted whole.
+    #[test]
+    fn project_sandbox_off_on_a_user_mcp_server_is_reverted() {
+        let home = tempdir().expect("tempdir");
+        let git_root = tempdir().expect("tempdir");
+        fs::write(
+            home.path().join("config.toml"),
+            "[mcp.servers.gh]\ncommand = \"gh-mcp\"\n",
+        )
+        .expect("write user config");
+        fs::create_dir_all(git_root.path().join(".git")).expect("mkdir .git");
+        fs::create_dir_all(git_root.path().join(".cox")).expect("mkdir .cox");
+        fs::write(
+            git_root.path().join(".cox/config.toml"),
+            "[mcp.servers.gh]\nsandbox = false\n",
         )
         .expect("write project config");
 
         temp_env(&[("COX_HOME", Some(home.path().to_str().unwrap()))], || {
             let loaded = load_plain(git_root.path()).expect("load succeeds");
             let gh = &loaded.config.mcp.servers["gh"];
+            assert!(gh.sandbox);
+            assert_eq!(gh.command.as_deref(), Some("gh-mcp"));
             assert!(
-                gh.sandbox,
-                "the opt-out on an existing server must be ignored"
+                loaded.violations.iter().any(|v| v.key == "mcp.servers"),
+                "{:?}",
+                loaded.violations
             );
+        });
+    }
+
+    #[test]
+    fn project_mcp_server_identical_to_user_is_no_violation() {
+        let home = tempdir().expect("tempdir");
+        let git_root = tempdir().expect("tempdir");
+        let server = "[mcp.servers.gh]\ncommand = \"gh-mcp\"\n";
+        fs::write(home.path().join("config.toml"), server).expect("write user config");
+        fs::create_dir_all(git_root.path().join(".git")).expect("mkdir .git");
+        fs::create_dir_all(git_root.path().join(".cox")).expect("mkdir .cox");
+        fs::write(git_root.path().join(".cox/config.toml"), server).expect("write project config");
+
+        temp_env(&[("COX_HOME", Some(home.path().to_str().unwrap()))], || {
+            let loaded = load_plain(git_root.path()).expect("load succeeds");
             assert_eq!(
-                gh.command.as_deref(),
-                Some("gh-mcp"),
-                "the guard must revert only sandbox, not the whole server"
+                loaded.config.mcp.servers["gh"].command.as_deref(),
+                Some("gh-mcp")
             );
             assert!(
-                loaded.config.mcp.servers["new"].sandbox,
-                "a project layer must not be able to add an unsandboxed server either"
-            );
-            // Only user config (and env/flags) may opt a server out: its
-            // own choice for a server it named must hold.
-            assert!(!loaded.config.mcp.servers["opt-out"].sandbox);
-            let violation = loaded
-                .violations
-                .iter()
-                .find(|v| v.key == "mcp.servers.*.sandbox")
-                .expect("both project-caused opt-outs are one violation");
-            assert!(violation.project_value.contains("gh"), "{violation:?}");
-            assert!(violation.project_value.contains("new"), "{violation:?}");
-            assert!(
-                !violation.project_value.contains("opt-out"),
-                "{violation:?}"
+                !loaded.violations.iter().any(|v| v.key == "mcp.servers"),
+                "{:?}",
+                loaded.violations
             );
         });
     }
