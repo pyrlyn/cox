@@ -282,6 +282,15 @@ fn no_crate_below_cox_depends_on_core() {
         deps["cox-target"]
     );
 
+    // cox-serve (T66.19) owns process supervision and the socket's trust
+    // boundary, kept out of cox-app and crates/cox; no workspace-crate
+    // dependencies yet.
+    assert!(
+        deps["cox-serve"].is_empty(),
+        "cox-serve must not depend on any other workspace crate, found {:?}",
+        deps["cox-serve"]
+    );
+
     // cox-sandbox (T32.3) is a trust guard that depends only on
     // cox-protocol among workspace crates (SandboxPolicy, SandboxMode,
     // LinuxBackend, ToolError).
