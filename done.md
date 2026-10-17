@@ -1,6 +1,6 @@
-#### T66.16 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
+#### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
 
-Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.15 · Size: ~140 · Priority: P2 · Complexity: 3
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.16 · Size: ~140 · Priority: P2 · Complexity: 3
 
 Goal: a client can detach and reattach to a session the server holds, and one session never gets a second core. `docs/design/serve.md` S2, D1, D2 and F1.
 
@@ -20,7 +20,7 @@ Check: `mise exec -- cargo nextest run -p cox-app server wire` passed, including
 
 Done when these tests pass: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core`, `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`; and the schema drift test is green.
 
-Out of scope: the supervisor, the socket and worker mode (T66.17 and later cards).
+Out of scope: the supervisor, the socket and worker mode (T66.18 and later cards).
 
 #### T66.12 Design: resident sessions and a supervisor
 

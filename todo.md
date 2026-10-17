@@ -94,8 +94,8 @@
 - T66.11. `cox run -p --autonomous`: shell gates and the headless loop
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
-- T66.15. `docs/app-server.md` says what a dropped connection does
-- T66.17. Worker mode in `cox-app`'s server: one session, ended on EOF
+- T66.16. `docs/app-server.md` says what a dropped connection does
+- T66.18. Worker mode in `cox-app`'s server: one session, ended on EOF
 - T67.3. Five more hook events
 - T67.4. `/goal`: a judged stop condition
 - T67.5. `/goal` in the TUI and stream-json
