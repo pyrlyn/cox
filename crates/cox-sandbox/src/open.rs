@@ -32,7 +32,9 @@ use crate::path::{canonical_roots, path_starts_with};
 /// returned. The check runs after the open: do not pass `truncate` (call
 /// `File::set_len(0)` on the result instead), and know that `create` through
 /// a swapped parent can leave an empty file outside the roots before the
-/// refusal — T64.15.3 moves writes to a parent-directory descriptor for that.
+/// refusal. This is the read-side open; writes go through
+/// [`crate::write`], which checks the parent directory before creating
+/// anything (T64.15.3).
 ///
 /// On non-Unix targets this is a plain open: Windows has no `O_NOFOLLOW`
 /// equivalent in `std` and no safe path-from-handle call here, so the swap
@@ -52,18 +54,29 @@ pub fn open_confined(
         }
     })?;
     #[cfg(unix)]
-    {
-        // An unreadable real path fails closed: without it the open cannot
-        // be shown to have stayed inside the roots.
-        let real = opened_path(&file).map_err(|_| ToolError::Io)?;
-        if !canonical_roots(roots)
-            .iter()
-            .any(|r| path_starts_with(&real, r))
-        {
-            return Err(confined(&real, roots));
-        }
-    }
+    check_inside_roots(&file, roots)?;
     Ok(file)
+}
+
+/// Requires the object `fd` refers to — a file or a directory — to lie inside
+/// the canonical roots, by its real path. An unreadable real path fails
+/// closed: without it the descriptor cannot be shown to have stayed inside the
+/// roots. Shared with `write`, which checks the parent directory it then
+/// works relative to.
+#[cfg(unix)]
+pub(crate) fn check_inside_roots(
+    fd: &impl std::os::fd::AsFd,
+    roots: &[PathBuf],
+) -> Result<(), ToolError> {
+    let real = opened_path(fd).map_err(|_| ToolError::Io)?;
+    if canonical_roots(roots)
+        .iter()
+        .any(|r| path_starts_with(&real, r))
+    {
+        Ok(())
+    } else {
+        Err(confined(&real, roots))
+    }
 }
 
 /// Reads the whole of `path` — the result of `confine` — through
@@ -105,15 +118,15 @@ fn is_symlink_refusal(_: &std::io::Error) -> bool {
 
 /// A missing `/proc` (some containers) fails closed through the caller.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn opened_path(file: &File) -> std::io::Result<PathBuf> {
+fn opened_path(fd: &impl std::os::fd::AsFd) -> std::io::Result<PathBuf> {
     use std::os::fd::AsRawFd as _;
-    std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))
+    std::fs::read_link(format!("/proc/self/fd/{}", fd.as_fd().as_raw_fd()))
 }
 
 #[cfg(target_vendor = "apple")]
-fn opened_path(file: &File) -> std::io::Result<PathBuf> {
+fn opened_path(fd: &impl std::os::fd::AsFd) -> std::io::Result<PathBuf> {
     let mut real = PathBuf::new();
-    nix::fcntl::fcntl(file, nix::fcntl::FcntlArg::F_GETPATH(&mut real))?;
+    nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETPATH(&mut real))?;
     Ok(real)
 }
 
@@ -123,7 +136,7 @@ fn opened_path(file: &File) -> std::io::Result<PathBuf> {
     unix,
     not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))
 ))]
-fn opened_path(_: &File) -> std::io::Result<PathBuf> {
+fn opened_path(_: &impl std::os::fd::AsFd) -> std::io::Result<PathBuf> {
     Err(std::io::ErrorKind::Unsupported.into())
 }
 

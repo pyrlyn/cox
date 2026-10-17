@@ -370,6 +370,31 @@ Check:
 - `cargo nextest run -p cox-tools -p cox-sandbox`: 279 run, 279 passed, 1 skipped.
 - `cargo clippy -p cox-tools -p cox-sandbox --all-targets -- -D warnings`: clean.
 
+#### T64.15.3 Write through a checked parent-directory descriptor
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Files: `crates/cox-sandbox/src/write.rs`, `crates/cox-sandbox/src/open.rs`, `crates/cox-sandbox/src/lib.rs`, `crates/cox-tools/src/write.rs`, `crates/cox-tools/src/edit.rs`, `crates/cox-tools/src/v4a/tool.rs`, `crates/cox-tools/src/checkpoint.rs`, `crates/cox-tools/src/docs.rs`, `crates/cox-tools/src/swap_fixture.rs`, `plan.md`
+Goal: part C of T64.15. After `confine` approved a path, a parent directory swapped for a symlink (or planted where a missing one would be created) redirected `create_dir_all`, the temp file and the rename outside the roots. Stacked on T64.15.1 and T64.15.2; `confine` keeps its one call site and `open.rs`'s real-path check is reused.
+Plan: (1) a failing test that swaps the parent of a new file to a symlink after `confine`; (2) `cox_sandbox::write`: open the parent with `O_DIRECTORY|O_NOFOLLOW`, check its real path with the `open.rs` helper, create missing components with `mkdirat` + `openat` from that descriptor, write the temp file with `openat` and replace with `renameat`, all relative to it; (3) route `write`, `edit`, `apply_patch`, `rename_symbol` (`rewrite_all`) and the checkpoint restore through it; (4) the docs cache keeps a plain write, since it is not a workspace path.
+What landed:
+- `cox_sandbox::write::{write_confined, stage_confined, Staged}`. The deepest existing ancestor of the parent is opened without following a symlink at its leaf and its real path must lie in the canonical roots before anything is created; missing components are then made and entered relative to the descriptor in hand, the temp file is created with `O_EXCL|O_NOFOLLOW`, and `commit` is `renameat` on the same descriptor. A parent resolving outside the roots, or a symlink planted at a new directory name, is `Confined` with nothing created or written there. A symlink leaf at the target is replaced by the rename, not followed. Dropping a `Staged` without `commit` removes its temp file.
+- `open::check_inside_roots` is the real-path check `open_confined` already did, extracted so both modules share it; `opened_path` now takes any descriptor. No new `unsafe`, no new dependency (`nix` already had `fs`).
+- `write`, `edit`, `apply_patch`, the checkpoint restore and `rewrite_all` call `atomic_write(roots, path, bytes)`, now a forward to `write_confined`. `rewrite_all` stages every file as a `Staged` and commits them in turn, so an early return drops (and removes) every temp file. The docs cache uses `atomic_write_trusted`, the old plain write, because its path is under the user's cache directory and no tool input names it.
+- Non-Unix targets keep the std create/write/rename in a `portable` module; the swap window remains there, as for `open_confined`. Not compiled for Windows here.
+- Tests: `write_of_a_new_file_refuses_a_parent_swapped_to_a_symlink_after_confine` (a new file under an existing parent swapped to a symlink, and one under a not-yet-created parent with a planted symlink; asserts `Confined` and that the outside directory gained nothing), `apply_patch_add_file_refuses_a_parent_swapped_to_a_symlink_after_confine`, and four in `cox-sandbox::write` (create and replace, swapped parent writes nothing, symlink leaf replaced not followed, dropped `Staged` leaves no temp file). `apply_patch`'s test setup moved into a `swap_cx` helper.
+Not done: only the `write` test was run red before the fix, not the `apply_patch` add-file one; the Linux `/proc` path and Windows were not compiled or run (macOS host, CI covers them); a workspace root that does not exist yet now fails as `Confined`, because its parent is outside the roots, where `create_dir_all` used to create it; `lsp`, `repomap` and other reads stay as T64.15.2 left them.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-tools write_of_a_new_file   (new test, before the fix)
+FAIL write::tests::write_of_a_new_file_refuses_a_parent_swapped_to_a_symlink_after_confine
+must refuse: ToolOutput { text: "wrote /private/var/folders/.../root/sub/new.txt (7 bytes)", is_error: false, .. }
+$ mise exec -- cargo nextest run -p cox-tools -p cox-sandbox
+301 tests run: 301 passed, 1 skipped
+$ mise exec -- cargo clippy -p cox-tools -p cox-sandbox --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
+
 #### T69.1 PowerShell and cmd readers hit existing `Read` denies
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 3 · Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-core/tests/permission.rs`, `plan.md`, `done.md`
