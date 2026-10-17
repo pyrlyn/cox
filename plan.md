@@ -112,7 +112,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T61.1 | todo | P1 | 1 | 0% | |
+| T61.1 | in progress | P1 | 1 | 0% | Claude Code / haiku-5.5 |
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
@@ -1843,9 +1843,11 @@ Timings go to a new `research.md` §4.3.9 "Build times", in the shape of R§4.3.
 
 #### T61.1 Build-time baseline
 
-Model: haiku · Status: open · Depends: — · Size: ~0 (research.md only) · Priority: P1 · Complexity: 1
+Model: haiku · Status: in progress · Depends: — · Size: ~0 (research.md only) · Priority: P1 · Complexity: 1
 
 Goal: `research.md` §4.3.9 holds the numbers P61 is judged by.
+
+Plan (Claude Code / haiku-5.5): (1) claim commit; (2) on the worktree's own target, measure sequentially, one build at a time: clean `cargo build --workspace --timings`, touch `crates/cox-core/src/turn.rs` and rebuild, then the same pair for `cargo nextest run --workspace --no-run`, `cargo build -p cox-ffi --lib --profile dist --target aarch64-apple-darwin`; then `just desktop-xcframework`; (3) `swift build --build-tests --build-system swiftbuild` per package under `desktop/macos/Packages/` clean, then `just desktop-app` clean and after a one-line `CoxUI` change, reverted afterwards and never committed; (4) CI wall times from `gh run list`/`gh run view` on `main`; (5) write the rows, top-five crates and machine line into `research.md` §4.3.9; (6) close the card and PR. Each row is one run, not the median of 5 that the P61 header asks for: five clean builds of every target is not feasible in one session, and each row says so.
 
 Files:
 - `research.md`
