@@ -2496,34 +2496,6 @@ Done when an e2e run against a scratch `COX_HOME` on the scripted provider appli
 
 Out of scope: running refine automatically on a timer.
 
-#### T66.12 Design: resident sessions and a supervisor
-
-Model: opus · Status: open · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
-
-Goal: settle the crate-boundary change before any code. Today the TUI owns `cox_core::Session` (`cox-tui/src/app.rs:18, 94`), and the session lock (`cox-store/src/lock.rs`) ends with the process.
-
-Files:
-- `docs/design/serve.md` (new)
-
-Steps (each question is answered with code references):
-1. Can the attach protocol be the existing app-server protocol (`docs/app-server.md`: `open`, `send`, `snapshot`, `patches`) instead of a second enum in cox-protocol? If not, why not?
-2. Does the TUI consume `cox_app` patches or raw `Event`s?
-3. `cox serve` runs one worker process per session under one supervisor. It restarts a failed worker after 250 ms, doubling up to 30 s, and gives up after 5 consecutive failures; a worker that lives 30 s resets the count (idea: `pa-daemon/src/supervisor.rs`, `supervisor/supervision.rs`).
-4. Where does the socket live under `COX_HOME`, with what mode, and who may attach?
-5. The session lock moves to the worker.
-6. Reattach replays the rollout from cox-store and never a second JSONL dialect.
-7. `docs/app-server.md` says a running turn keeps running on the host, but `cox app-server --stdio` exits when stdin closes (`cox-app/src/server.rs:145, 237-243`). Fix the doc or the behaviour.
-8. Acceptance test for the later cards: on a scratch `COX_HOME`, start serve, run one scripted turn, kill the client, and reattach. The rollout must grow only by that turn's events.
-
-Check:
-```bash
-test -s docs/design/serve.md
-```
-
-Done when the doc ends with the implementation cards (each within the size limit). The creator then approves them in a new §6 amendment, and only then does code start.
-
-Out of scope: any code.
-
 #### T66.13 Heartbeat re-entry for a resident session
 
 Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 3

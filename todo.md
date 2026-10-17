@@ -89,7 +89,6 @@
 - T66.6. Core: a refine proposal from one cheap call, with the base prompt fixed
 - T66.7. Session: apply a refine, record it, and render the digest after the cached prefix
 - T66.8. `/refine` and `cox refine`
-- T66.12. Design: resident sessions and a supervisor
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
 - T67.3. Five more hook events
