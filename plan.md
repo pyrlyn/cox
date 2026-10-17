@@ -126,6 +126,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
+| T66.9 | in progress | P2 | 4 | 0% | Claude Code / opus-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2522,7 +2523,7 @@ Out of scope: running refine automatically on a timer.
 
 #### T66.9 A pure autonomous driver beside the USD cap
 
-Model: opus · Status: open · Depends: — · Size: ~200 · Priority: P2 · Complexity: 4
+Model: Claude Code / opus-5.5 · Status: in progress · Depends: — · Size: ~200 · Priority: P2 · Complexity: 4
 
 Goal: a pure function decides whether a headless run starts another turn. It continues only toward failing gates and stays within its own turn, token and time limits. `budget::decide` stays the USD cap.
 
@@ -2566,6 +2567,12 @@ Done when the tests, run with a fake `GateRunner`, show that:
 - two no-progress continuations stop the run.
 
 Out of scope: config, the shell runner and the run loop (T66.10, T66.11). The TUI does not enter this loop.
+
+Execution plan:
+1. `cox-protocol/src/autonomous.rs`: `AutonomousPolicy` (field names as T66.10's table, `Default` with step 1's values, `validate` rejecting no gates with a thiserror `AutonomousError`), `GateResult`, the async `GateRunner` trait (infallible: a timeout or spawn failure is a failed result) and `AutonomousStop`; serde only, not reachable from `Event`, so `docs/protocol.jsonschema` does not change.
+2. `cox-core/src/autonomous.rs`: `State`, `TurnReport` (stop, tokens, files changed, elapsed — the clock is a value the caller passes), `Next` and `decide`. Order: a never-continue stop, then gates in order (first failure wins, all passing is `GatesPassed`), then the limits, then gate retries, then the no-progress streak.
+3. `cox-core/tests/autonomous.rs`: the six Done-when claims against a scripted `GateRunner`.
+4. Verify with nextest, clippy and fmt on `cox-protocol` and `cox-core`.
 
 #### T66.10 `[autonomous]` config, which a project cannot set
 
