@@ -126,7 +126,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T66.4 | in progress | P2 | 2 | 0% | Claude Code / sonnet-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2354,44 +2353,6 @@ Done when a scripted-provider test shows:
 - `expand` returns the full body.
 
 Out of scope: a separate `task_output` tool; peer messages between children.
-
-#### T66.4 Store: the `refine_events` table
-
-Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
-
-Goal: every refine (proposed, applied, rejected or rolled back) is one Diesel row that a later undo and `cox refine list` can read.
-
-Plan (Claude Code / sonnet-5.5): (1) migration `00000000000010_refine_events` (up creates the table with CHECKs on `scope`, `trigger` and `outcome` plus an index on `(session_id, created_at)`; down drops them); (2) `schema.rs` entry and a `RefineEventDbRow` in `models.rs`; the committed schema snapshot is updated for the new table; (3) `refine.rs` with `RefineEvent`, the `RefineScope`/`RefineTrigger`/`RefineOutcome` enums and `refine_insert`, `refine_get`, `refine_list` over the typed DSL; (4) tests at the bottom of `refine.rs`: round trip, newest first with `limit`, the down migration drops the table; (5) run the Check for `-p cox-store`.
-
-Files:
-- `crates/cox-store/migrations/00000000000010_refine_events/{up,down}.sql`
-- `crates/cox-store/src/schema.rs`
-- `crates/cox-store/src/refine.rs` (new): model and queries, in the same shape as `mcp_trust.rs`
-
-Steps:
-1. Columns:
-   - `id` (TEXT primary key)
-   - `session_id`
-   - `scope` (`local`|`global`)
-   - `trigger` (`manual`|`auto`)
-   - `evidence` (the model's rationale for the whole refine; prime-agent records evidence per refine, not per edit)
-   - `edits` (JSON array of `{action, kind, id, before_sha, after_sha}`)
-   - `outcome` (`applied`|`rejected`|`rolled_back`)
-   - `rollback_of` (nullable)
-   - `fingerprint`
-   - `created_at`
-2. Add `refine_insert`, `refine_get` and `refine_list(session, limit)` through the typed DSL, with no raw SQL outside the migration.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-store refine
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when a row round-trips, the list is newest first, and the down migration drops the table.
-
-Out of scope: writing files, which is T66.5.
 
 #### T66.5 Harness entries on disk: apply, backup, rollback, fingerprint
 
