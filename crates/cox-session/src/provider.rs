@@ -95,9 +95,8 @@ pub(crate) fn assemble(
 }
 
 /// The native `[providers.<name>]` table an ABI section shares its name
-/// with: only `typesafe`, whose client is moving into the Jev plugin
-/// (T33.40). While both exist one name serves one client, so every field
-/// of the table configures the plugin's section (T33.40.4, T33.40.5).
+/// with: only `typesafe`, whose built-in client is gone (T33.40.12). Every
+/// field of the leftover table configures the plugin's section (T33.40.5).
 pub(crate) fn abi_transport(config: &Config, section: &str) -> Option<Transport> {
     legacy_table(config, section).map(|t| t.transport())
 }
