@@ -171,7 +171,10 @@ fn main() -> anyhow::Result<()> {
         #[cfg(feature = "app-server")]
         Some(Command::AppServer(_)) => {
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(cox_app::server::serve_stdio(cli.home.clone()))?;
+            rt.block_on(cox_app::server::serve_stdio(
+                cli.home.clone(),
+                cox_app::server::ServeMode::Client,
+            ))?;
             Ok(())
         }
         Some(Command::Init(args)) => {
