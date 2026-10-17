@@ -17,6 +17,14 @@ Check:
 - Baseline for `desktop-macos` on pull requests with every package run (successful runs 38941648537, 38941652721, 38943380391, 38943832554, 38944038140, 38945470792): 52.6, 53.9, 55.2, 59.7, 63.1, 63.7 min, median 57.5 min. Many later runs were cancelled or queued, so no newer sample.
 - Pending CI on this pull request: the first push runs all six packages and stores a key; a push touching only `crates/cox-tools/src/git.rs` should show five "skipped" and `CoxCore` tested; a push touching only a `CoxUI` source should run `CoxUI` and `CoxTranscript`. Their job times are the "after" column. `research.md` §4.3.9 does not exist on `main` yet (T61.1, #312), so the before/after rows are added there once it lands.
 
+#### T61.1 Build-time baseline
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
+Depends: — · Size: ~0 (research.md only) · Files: `research.md`
+Goal: `research.md` §4.3.9 holds the numbers P61 is judged by.
+Check: `grep -n '4.3.9' research.md`
+Done: §4.3.9 has a row for every measurement (Rust `--timings`, Swift packages, desktop app, CI jobs), the top five crates and the machine line. Single runs on a shared machine; the clean rows use a warm sccache, and a cold clean row was added. Finding: `[profile.dist]` inherits `dev` (`Cargo.toml:238-239`, since ae5ed7bd), not fat LTO, so the P61 premise behind T61.2 needs re-checking.
+
 #### T33.40.5 Parity: the `typesafe` table configures the plugin's section
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
