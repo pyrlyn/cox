@@ -1,3 +1,20 @@
+#### T66.4 Store: the `refine_events` table
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: - · Size: ~120 · Files: `crates/cox-store/migrations/00000000000010_refine_events/{up,down}.sql`, `crates/cox-store/src/{schema,models,refine,lib}.rs`, the schema snapshot
+Goal: every refine (proposed, applied, rejected or rolled back) is one Diesel row that a later undo and `cox refine list` can read.
+- Columns: `id` (TEXT primary key), `session_id`, `scope` (`local`|`global`), `trigger` (`manual`|`auto`), `evidence` (the model's rationale for the whole refine), `edits` (JSON array of `{action, kind, id, before_sha, after_sha}`), `outcome` (`applied`|`rejected`|`rolled_back`), `rollback_of` (nullable), `fingerprint`, `created_at`.
+- `Store::refine_insert`, `refine_get` and `refine_list(session, limit)` through the typed DSL, with no raw SQL outside the migration.
+Check: `refine_event_round_trips_every_field`, `refine_list_is_newest_first_and_honours_limit`, `down_migration_drops_the_refine_events_table`.
+Done: the migration carries CHECKs for the three enums and an index on `(session_id, created_at)`; `refine.rs` holds `RefineScope`, `RefineTrigger`, `RefineOutcome` and `RefineEdit` (`before_sha` is absent on a create, `after_sha` on a removal). `refine_list` orders by `created_at` then `id`, both descending. A repeated id is an error (append-only). `older_binary_refuses_newer_schema` now expects `00000000000010`.
+```text
+$ mise exec -- cargo nextest run -p cox-store
+     Summary [   5.342s] 51 tests run: 51 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-store --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Out of scope: writing files, which is T66.5.
+
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
 Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
