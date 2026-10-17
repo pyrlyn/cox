@@ -73,8 +73,9 @@ impl ShellGateRunner {
     }
 
     /// The model-facing end of `output`. The whole of it is archived first
-    /// (D6a); if the archive fails the tail still returns, saying so, since a
-    /// failed gate must reach the driver either way.
+    /// (D6a). If the archive fails no shortened text is shown, as for a tool
+    /// result in `turn.rs`: a tail with nothing to expand would break the
+    /// lossless rule. The gate's verdict still reaches the driver.
     async fn tail(&self, command: &str, output: &str, dropped: bool) -> String {
         let (tail, cut) = cap(output);
         if !cut && !dropped {
@@ -89,7 +90,7 @@ impl ShellGateRunner {
         };
         match self.archive.put(put).await {
             Ok(id) => format!("[… earlier output archived; expand #{id}]\n{tail}"),
-            Err(_) => format!("[… earlier output dropped; it could not be archived]\n{tail}"),
+            Err(_) => "[gate output could not be archived]".to_owned(),
         }
     }
 }
@@ -191,6 +192,18 @@ mod tests {
     #[derive(Default)]
     struct Recorded(Mutex<Vec<ArchivePut>>);
 
+    struct Broken;
+
+    #[async_trait]
+    impl Archive for Broken {
+        async fn put(&self, _put: ArchivePut) -> Result<ArchiveId, StoreError> {
+            Err(StoreError::Open)
+        }
+        async fn get(&self, _id: &ArchiveId) -> Result<Vec<u8>, StoreError> {
+            Err(StoreError::Open)
+        }
+    }
+
     #[async_trait]
     impl Archive for Recorded {
         async fn put(&self, put: ArchivePut) -> Result<ArchiveId, StoreError> {
@@ -204,7 +217,7 @@ mod tests {
 
     /// `DangerFullAccess` only so the unit tests do not depend on the host's
     /// sandbox backend; the e2e test in `crates/cox` runs the real wrap.
-    fn runner(dir: &std::path::Path, archive: Arc<Recorded>) -> ShellGateRunner {
+    fn runner(dir: &std::path::Path, archive: Arc<dyn Archive>) -> ShellGateRunner {
         let sandbox = SandboxPolicy {
             mode: SandboxMode::DangerFullAccess,
             network: true,
@@ -300,6 +313,16 @@ mod tests {
         let text = String::from_utf8(put.bytes.clone()).expect("utf8");
         assert!(text.starts_with("1\n2\n") && text.ends_with("[exit 1]"));
         assert_eq!(put.subject.as_deref(), Some("seq 1 500; exit 1"));
+    }
+
+    #[tokio::test]
+    async fn long_output_that_cannot_be_archived_shows_no_tail() {
+        let dir = tempfile::tempdir().expect("dir");
+        let result = runner(dir.path(), Arc::new(Broken))
+            .run("seq 1 500; exit 1", SECS)
+            .await;
+        assert!(!result.passed);
+        assert_eq!(result.tail, "[gate output could not be archived]");
     }
 
     #[test]
