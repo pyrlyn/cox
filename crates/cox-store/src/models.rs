@@ -11,7 +11,7 @@ use diesel::prelude::*;
 
 use crate::schema::{
     archive, checkpoints, cloud_runs, mcp_tool_trust, memory, memory_files, plugin_grants,
-    plugin_kv, sessions, usage,
+    plugin_kv, refine_events, sessions, usage,
 };
 
 #[derive(Insertable)]
@@ -182,4 +182,21 @@ pub(crate) struct CloudRunDbRow {
     pub usage_recorded: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Both directions of `refine_events` (T66.4).
+#[derive(Insertable, Queryable, Selectable)]
+#[diesel(table_name = refine_events)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub(crate) struct RefineEventDbRow {
+    pub id: String,
+    pub session_id: String,
+    pub scope: String,
+    pub trigger: String,
+    pub evidence: String,
+    pub edits: String,
+    pub outcome: String,
+    pub rollback_of: Option<String>,
+    pub fingerprint: String,
+    pub created_at: String,
 }

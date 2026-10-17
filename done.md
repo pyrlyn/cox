@@ -1,3 +1,105 @@
+#### T66.7 Session: apply a refine, record it, and render the digest after the cached prefix
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T66.5, T66.6 · Size: ~180 · Files: `crates/cox-session/src/refine.rs` (new), `crates/cox-session/src/lib.rs`, `crates/cox-core/src/session.rs`
+Goal: the session layer, not the core, writes the files and the store row. Prompt notes reach the model as a tail block in the volatile slot, so a refine never moves the cache breakpoint.
+- `Refiner::refine(text, scope)`: builds a one-line-per-entry digest of the scope's entries, calls `Session::propose_refine`, converts the edits and runs `harness::Scope::apply`, then `refine_insert` (`applied`, evidence from the model, `edits` with the before/after hashes, fingerprint after). A proposal the core rejects, or one the disk contradicts (create over an existing entry, update of a missing one), is a `rejected` row with a cox-written reason and no file change. An empty proposal, or one whose edits rewrite entries to the bytes they already have, returns `Unchanged` before any backup or row. If the row cannot be written the edits are rolled back.
+- `Refiner::undo(event_id)`: refuses an unknown event, one that was not `applied`, one already undone, and one whose entries changed after it (current hash differs from the recorded `after_sha`); otherwise `harness::Scope::rollback` and a `rolled_back` row with `rollback_of` and the reversed edits.
+- `prompt_notes` / `Refiner::refresh_notes`: the prompt-note entries of the global scope, then the session's own (`COX_HOME/sessions/<id>/harness`), rendered as one `<harness_notes>` block (16 KiB cap; the closing tag is stripped from file content) and installed with the new `Session::set_harness_notes`, which appends it to `system[3]`, the volatile block after the last cache breakpoint. It is re-rendered only when the scope fingerprints change. `open` installs the notes of earlier refines. Skills and subagents are read once at open, so they take effect in the next session.
+- New dependency `ulid` in `cox-session` (already a workspace dependency): event ids are lowercase ULIDs, which `harness::apply` accepts.
+Check: `refine_writes_a_local_note_records_it_and_keeps_the_cached_prefix` (`system[0..=2]` equal before and after, `system[3]` carries the note and is not cached), `refining_twice_against_the_same_store_changes_no_bytes`, `undo_restores_the_files_and_writes_a_rolled_back_row`, `a_local_note_reaches_its_own_session_and_not_another`, `a_global_note_reaches_every_session`, `a_proposal_aimed_at_the_base_prompt_is_recorded_as_rejected_and_writes_nothing`, `a_disk_conflict_is_a_rejection_not_an_error`; core: `harness_notes_reach_system_3_and_leave_the_prefix_byte_identical`.
+```text
+$ mise exec -- cargo nextest run -p cox-session refine
+     Summary [   0.107s] 7 tests run: 7 passed, 81 skipped
+$ mise exec -- cargo nextest run -p cox-session -p cox-core
+     Summary [   2.228s] 526 tests run: 526 passed, 1 skipped
+$ mise exec -- cargo nextest run -p cox --test deps
+     Summary [   1.500s] 11 tests run: 11 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-session -p cox-core --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Not run: the workspace-wide clippy (only `cox-session` and `cox-core` changed).
+Out of scope: the commands, which are T66.8.
+
+#### T66.5 Harness entries on disk: apply, backup, rollback, fingerprint
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T66.4 · Size: ~200 · Files: `crates/cox-ext/src/harness.rs` (new), `crates/cox-ext/src/lib.rs`, `crates/cox-ext/tests/harness.rs` (new), `crates/cox-ext/Cargo.toml`
+Goal: the four refinable kinds (`prompt-note`, `memory`, `skill` and `subagent`; no factory) are applied with a backup first, undone exactly, and fingerprinted by content.
+- Scope: `Scope::Local { root }` keeps `harness/<kind>/<id>.md` under the session directory; `Scope::Global { home, memory_dir }` writes where cox already reads each kind (memory facts in the memory directory plus `memory::rebuild_index`, `skills/<id>/SKILL.md`, `agents/<id>.md`, `notes/<id>.md`). Ids go through `memory::is_valid_name` (`[a-z0-9-]{1,64}`), so no path built from one leaves the scope root; an entry that is a symlink is refused.
+- `Scope::apply(event_id, edits) -> Applied { event_id, before, after, edits }` checks every edit first (action against existence, content presence, no duplicates), copies each touched file to `<root>/harness-backup/<event id>/` with a manifest, then writes; a failed write rolls back. `before`/`after` are scope fingerprints and each `EditRecord` carries the `before_sha`/`after_sha` that `refine_events` stores. `rollback(event_id)` restores the copies, deletes entries the event created and consumes the backup.
+- `Scope::fingerprint()` is sha256 over the entries sorted by `scope\0kind\0id` with their length-prefixed content. cox-ext now links the workspace `sha2`.
+Check: `rollback_restores_the_bytes_and_deletes_what_the_event_created`, `an_id_with_a_slash_or_dots_is_refused_and_nothing_is_written`, `the_same_store_gives_the_same_fingerprint`, `a_local_edit_is_invisible_to_another_sessions_load` and six more in `crates/cox-ext/tests/harness.rs`.
+```text
+$ mise exec -- cargo nextest run -p cox-ext harness
+     Summary [   0.087s] 10 tests run: 10 passed, 66 skipped
+$ mise exec -- cargo nextest run -p cox-ext
+     Summary [   1.157s] 76 tests run: 76 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-ext --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Out of scope: proposing edits (T66.6) and the session wiring (T66.7).
+
+#### T66.4 Store: the `refine_events` table
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: - · Size: ~120 · Files: `crates/cox-store/migrations/00000000000010_refine_events/{up,down}.sql`, `crates/cox-store/src/{schema,models,refine,lib}.rs`, the schema snapshot
+Goal: every refine (proposed, applied, rejected or rolled back) is one Diesel row that a later undo and `cox refine list` can read.
+- Columns: `id` (TEXT primary key), `session_id`, `scope` (`local`|`global`), `trigger` (`manual`|`auto`), `evidence` (the model's rationale for the whole refine), `edits` (JSON array of `{action, kind, id, before_sha, after_sha}`), `outcome` (`applied`|`rejected`|`rolled_back`), `rollback_of` (nullable), `fingerprint`, `created_at`.
+- `Store::refine_insert`, `refine_get` and `refine_list(session, limit)` through the typed DSL, with no raw SQL outside the migration.
+Check: `refine_event_round_trips_every_field`, `refine_list_is_newest_first_and_honours_limit`, `down_migration_drops_the_refine_events_table`.
+Done: the migration carries CHECKs for the three enums and an index on `(session_id, created_at)`; `refine.rs` holds `RefineScope`, `RefineTrigger`, `RefineOutcome` and `RefineEdit` (`before_sha` is absent on a create, `after_sha` on a removal). `refine_list` orders by `created_at` then `id`, both descending. A repeated id is an error (append-only). `older_binary_refuses_newer_schema` now expects `00000000000010`.
+```text
+$ mise exec -- cargo nextest run -p cox-store
+     Summary [   5.342s] 51 tests run: 51 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-store --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Out of scope: writing files, which is T66.5.
+
+#### T66.6 Core: a refine proposal from one cheap call, with the base prompt fixed
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: the core turns the transcript tail, the digest of current entries and the user's `/refine` text into a validated list of edits. It writes no file, and the base prompt can never be a target.
+
+Files:
+- `crates/cox-core/src/refine.rs` (new)
+- `crates/cox-core/src/prompts/refine.md` (new; written for cox, not Prime's prose)
+- `crates/cox-core/tests/refine.rs`
+
+Steps:
+1. Make one call on the `Job::Memory` routing tier, the same pattern as `memory_extract.rs`. No new `Job` variant is added.
+2. The model returns `{evidence, edits: [{action: create|update|delete, kind, id, content?, reason}]}`. Validation:
+   - at most 5 edits;
+   - `content` of at most 4 KB;
+   - `kind` is one of the four;
+   - `id` matches the pattern;
+   - any id that names the base prompt is refused (idea: `pa-core/src/refinement/planner.rs`, "base system prompt is not editable").
+   An invalid proposal yields no edits and outcome `rejected` with the reason.
+3. `prompt.md` and `prompt_minimal.md` stay `include_str!` constants (`context.rs:28, 32`).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core refine
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when tests show that:
+- an edit aimed at the base prompt is refused;
+- malformed JSON is rejected;
+- a valid proposal parses;
+- after a refine, the base prompt bytes and `system[0..=2]` are byte-identical to before.
+
+Out of scope: applying edits or running a refine in the background automatically.
+
+Done:
+- `crates/cox-core/src/refine.rs`: `Session::propose_refine(text, digest)` sends one `memory`-job request through the shared `side_call` (route, ledger row, spend), with the user's text, the digest (written by the session layer) and the last 24 000 bytes of the transcript cut on a char boundary. It touches neither the history nor the prefix. `refine::parse` reads the answer as a `serde_json::Value` (no new dependency; a surrounding code fence is tolerated) and returns `Proposal { evidence, edits }` or `Rejected { reason }`; the reason is written by cox and never quotes the model. Any failure rejects the whole proposal: more than 5 edits, an unknown kind or action, an id outside `[a-z0-9-]{1,64}` (the existing `memory_extract::is_valid_name`, now `pub(crate)`), a kind or id naming the base prompt (`prompt`, `prompt-minimal`, `base`, `system`, or containing `base-prompt`/`system-prompt`), content missing on create/update, present on delete or over 4096 bytes, or one entry edited twice.
+- `crates/cox-core/src/prompts/refine.md`: the instructions, written for cox; the transcript and digest are framed as evidence, not instructions.
+- `prompt.md` and `prompt_minimal.md` stay `include_str!` constants in `context.rs`; nothing in this task can write them.
+Check: `cargo nextest run -p cox-core refine` 6 passed: `refine_refuses_an_edit_aimed_at_the_base_prompt`, `refine_rejects_malformed_json`, `refine_parses_a_valid_proposal_inside_a_code_fence`, `refine_rejects_a_proposal_out_of_bounds`, `refine_is_one_memory_call_and_leaves_the_cached_prefix_byte_identical` (`system[0..=2]` from `assemble` and the history are byte-identical before and after; one `memory` usage row), `refine_rejects_a_bad_answer_but_still_records_its_cost`. Whole `-p cox-core`: 437 passed. `cargo clippy -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: the workspace-wide clippy (only `cox-core` changed).
+
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
 Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
