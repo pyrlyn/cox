@@ -1,5 +1,5 @@
 ---
-source: crates/cox-core/tests/turn.rs
+source: crates/cox-core/tests/it/turn.rs
 expression: value
 ---
 [

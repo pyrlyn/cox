@@ -110,7 +110,8 @@ jobs:
       - uses: taiki-e/install-action@23d41aa71228a2692ee31bb433f070fd4bdc6661 # nextest
 
       - name: sandbox tests without bwrap
-        run: cargo nextest run -p cox-tools sandbox_ bash_
+        run: |
+          cargo nextest run -p cox-tools sandbox_ bash_ bash::
 
   # P57 (T57.1): `cargo check` and clippy for x64 and ARM64 Windows over the
   # crates that build there, listed once in the justfile (`windows_crates`);
@@ -260,8 +261,11 @@ jobs:
           tinygo build -o example_go.wasm -target wasip1 -buildmode=c-shared .
 
       # Also scaffolds `cox plugin new --lang go` and builds it with TinyGo.
+      # `cargo` here is mise's shim, whose `mise exec` drops the real Go and
+      # TinyGo dirs from PATH, so the template test's TinyGo resolves to a
+      # shim with no version; hand it this step's PATH as `just` does.
       - name: go plugin example e2e
-        run: cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
+        run: PLUGIN_TOOLS_PATH="$PATH" cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
 
   deny:
     needs: config
