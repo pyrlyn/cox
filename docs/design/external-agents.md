@@ -134,7 +134,7 @@ shapes (research.md §4.3.8):
 ## 6. Cost
 
 `cox_model_call`'s rule ("every request has a `usage` row") still holds.
-Cursor's shapes carry no token counts. Write the row at **$0** with
+Cursor's local CLI shapes carry no token counts (the cloud path reports them, §9). Write the row at **$0** with
 `billed_externally: true`, `job = plugin:<id>` (PL§7d), and only use
 reported tokens if a future event ever carries them — never estimate spend
 that lands on the user's own Cursor plan, not cox's ledger.
@@ -157,6 +157,55 @@ provider key, and only `agent -p --output-format stream-json`/`agent acp`.
 Never the desktop session, never a reverse-engineered proxy (research.md
 §4.3.8 catalogs several).
 
+## 9. Cloud path: `[[cloud_agents]]` (P56)
+
+The same `agent(preset)` dispatch can run a background task on Cursor's hosted
+Cloud Agents API instead of a local `agent` process. It is a second host driver
+behind the same `ExternalAgent` trait, not a `Provider` and not a plugin
+capability that guest code calls. Its design gate is `v0.3-cursor-cloud.md`;
+the cards are T56.1–T56.9 in [`done.md`](../../done.md).
+
+- **Manifest and grant.** `[[cloud_agents]]` takes `name`, `backend` (a closed
+  set, `cursor`), `key_env` (default `CURSOR_API_KEY`), and optional `model`
+  and `description`. There is no URL field: a backend's host is fixed in
+  `CloudBackend::host`. The grant line names the host, the key variable, the
+  model and what leaves the machine (T56.3).
+- **Driver.** `crates/cox-session/src/cloud_agents.rs` builds one driver per
+  granted entry whose key resolves, and registers it beside the local external
+  agents at session open. Every driver is `background_only`, so
+  `agent(preset)` runs it in the background whatever `background` says.
+- **Client.** `crates/cox-cursor-cloud` is the only code that opens a socket to
+  `api.cursor.com`. It creates an agent with its first run, gets and cancels a
+  run, reads usage, and follows the SSE stream. Auth is a bearer key. The test
+  override `COX_CURSOR_CLOUD_URL` accepts loopback addresses only.
+- **Guard.** Code leaving the machine is `Engine`'s `CloudAgent(<owner>/<repo>)`
+  decision (T56.4), asked before any request. An exact allow rule in the user's
+  own config is the only lift; a plan-mode or deny match refuses the run.
+  `Ask` cannot be answered from a background task, so it is refused with the
+  approval text and the rule to add. Only a GitHub `origin` is accepted, and
+  the URL sent is rebuilt from owner and repository. The sandbox and
+  `path::confine` do not apply: nothing runs locally.
+- **Request.** The prompt, the clean GitHub URL, the starting ref (the branch,
+  or the commit when detached), the model when set, and the key. The wire
+  types have no field for a name, an e-mail or a git identity (T56.1), and
+  `autoCreatePR` is always false. A local `HEAD` not on the remote is warned
+  about in the answer (T56.6).
+- **Answer.** Assistant text from the stream becomes the task's result; thinking
+  is left out and every string passes `sanitize`. Cancelling the task cancels
+  the run once.
+- **Ledger.** The run's tokens, from the usage endpoint, are one external row
+  at $0 with `billed_externally`, per §6 (T56.7). The spend is on the user's
+  Cursor plan and is not priced.
+- **Persistence.** A run is recorded in `cloud_runs` (T56.5) with its session
+  and task ids. When a session resumes, unfinished runs are followed again or
+  finalized, and a run is never cancelled from the resume path (T56.7).
+
+Not built, and recorded as such: follow-up messages into a run (the client has
+`create_run`, no driver uses it); an approval prompt from a background task
+(T56.6); cancelling a run after a resume (T56.7); showing a refusal reason in
+the finish notice (T56.12); a check against a live account (T56.10). The
+offline end-to-end test (T56.8) runs over hand-written fixtures.
+
 ## Falsifiers
 
 - A Cursor CLI release drops `--output-format stream-json` or `acp` from
@@ -167,6 +216,5 @@ Never the desktop session, never a reverse-engineered proxy (research.md
 - A future `agent-client-protocol` major version drops the client-side
   `AcpAgent`/`Client.builder()` API this doc relies on.
 
-Out of scope: the Cloud Agents API as a background-task backend
-(`ideas.md`, unapproved — a durable server-side run, not a local
-subprocess); a second, agent-specific permission path.
+Out of scope: a second, agent-specific permission path. The Cloud Agents
+API as a background-task backend is §9 (P56), not a local subprocess.

@@ -227,7 +227,7 @@ Every payload is JSON through extism's `Json<T>` conversion. The types sit in `c
 | `cox_decide` | `Question` → `DecideOut { Advice(Option<Advice>) \| Call(ModelCall) }` | §6b; `ModelCall.target = Tier(t) \| OwnProvider { name, model }` (2026-09-26, T33.40.1). On the wire `DecideOut` is untagged: `{"call": ModelCall}` or a bare `Option<Advice>`, so a guest written before the call-out still parses; the target is flattened, so a tier call stays `{"tier", "request"}` and an own-provider call is `{"own_provider": {"name", "model"}, "request"}`. A `Call` must name an `OwnProvider` section bound to this plugin (one whose name it won, §7a); anything else is silence |
 | `cox_decide_resume` (optional) | `DecideResume { question, events }` → `Option<Advice>` | §6b; called after the host runs a `Call`'s `ModelCall` through the plugin's own provider, budget-gated and ledgered (2026-09-26, T33.40.1) |
 | `cox_tool_subject` / `cox_tool_risk` / `cox_tool_call` | the `Tool` trait, serialised (`traits.rs:212-234`) | §7 |
-| `cox_provider_stream` | `ProviderCall { request: Request, model }` → `Vec<ProviderEvent>` | §7a |
+| `cox_provider_stream` | `ProviderCall { request: Request, model, base_url }` → `Vec<ProviderEvent>` (`base_url`: the section as bound, after a user override, T33.40.4) | §7a |
 | `cox_command` / `cox_key` | `CommandIn { name, args }` → `CommandOut` | §8 |
 | `cox_render` | `RenderIn { slot, width, height }` → `Widget` | §8 |
 | `cox_render_item` | `RenderItemIn { target, call, result, width }` → `Option<Widget>` | §8 |
