@@ -6,6 +6,39 @@ Goal: decide by measurement whether `[profile.dev.build-override] opt-level = 3`
 Check: `MISE_SCCACHE_PROBE=1 CARGO_BUILD_JOBS=4 mise exec -- cargo build --workspace --timings`, clean `target/`, on the kept variant (no override). Output: `real 300.23 s, user 1023.86 s, sys 81.67 s`; load 18.95 before, 37.69 at the end (a 1-minute average that includes the build); the report is `target/cargo-timings/cargo-timing.html`. Top build-script run: `aws-lc-sys` 86.4 s. Top proc-macro crate: `diesel_derives` 12.2 s, `typify-impl` 11.4 s, `uniffi_macros` 8.9 s.
 Done: verdict rejected; the override is not kept. Clean builds (`rm -rf target`, A, B, A, B): A 322.37 s and 306.22 s (mean 314.3 s), B 379.04 s and 303.48 s (mean 341.3 s, +8.6 %), inside the 16 to 76 s spread of each variant. Incremental (`touch crates/cox-tui/src/lib.rs`): medians A 5.45 s, B 5.00 s, with the first run after each clean at 10 to 12 s in both. Neither path shows a speedup, and the clean build is not shown to be not slower, so the rule (keep only if both are not slower) rejects it. Rows, loads, commands and the top units are in `research.md` §4.3.9.
 
+#### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
+
+Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
+
+Execution plan (Claude Code / opus-5.5): main already carries cargo-hakari's `workspace-hack` (#212), so measure it as it stands. (1) In an own worktree and `target/`, `CARGO_BUILD_JOBS=4`, build what `just check-all` builds (`cargo nextest run --workspace`, without the swarfr step). (2) For a few one-crate scratch edits, run `just test --changed-since HEAD` and count the non-workspace `compiler-artifact` messages with `fresh: false` (`--cargo-message-format json`); then the reverse direction. (3) Zero → close with the counts in `research.md` §4.3.9 and cargo's unification status for Rust 1.98.1 cited; non-zero → step 2 below. Verify: the Check below.
+
+Goal: switching between `just test` (a `-p` subset) and `just check-all` (`--workspace`) does not rebuild dependencies because their features unify differently, or the card is rejected with the reason.
+
+Files:
+- `Cargo.toml`
+- a workspace-hack crate if chosen (`crates/cox-workspace-hack`)
+- `docs/design/crates.md`
+
+Steps:
+1. Measure the rebuild first: `just check-all`, then `just test --changed-since HEAD~1` and count the dependency crates `cargo` recompiles. Zero → close as not needed.
+2. Compare cargo's own workspace feature unification (check whether it is stable in the pinned Rust; cite the cargo docs) with `cargo-hakari`. hakari makes every member depend on the hack crate: `crates/cox/tests/deps.rs` (`ffi_depends_only_on_app_and_protocol`, `app_has_no_terminal_or_cli`, the "only X depends on Y" rules) must still pass; a hack crate that drags `ratatui` or `clap` into `cox-ffi`'s graph is rejected.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test deps
+```
+
+Done when: §4.3.9 has the rebuild count before and after, or the rejection and its reason.
+
+Out of scope: changing which crates depend on which.
+
+Result: closed as not needed (step 1 measured zero). `just test` always builds `--workspace` and narrows only the tests it runs with nextest's `-E 'rdeps(=…)'`, so cargo resolves the same features as `just check-all`. Counted with `--cargo-message-format json` (`compiler-artifact`, `fresh: false`, non-workspace package), rustc/cargo 1.98.1, after a full `check-all` build (683 dependency units): `just test --changed-since HEAD~1` → 0 dependency units rebuilt (857 fresh); `just test --changed-since HEAD` after one-line edits in `cox-ffi`, `cox-tui`, `cox-plugin-api` → 0, 0, 0; `check-all` again → 0. Hand-typed `-p` builds outside the card rebuild a few dependencies once per `target/` (`-p cox-ffi` 35, `-p cox-plugin-api` 27, `-p cox-tui` 6; 0 on the second run) because of the deliberate `final-excludes`/`traversal-excludes` in `.config/hakari.toml`. Cargo's own `resolver.feature-unification = "workspace"` is still nightly-only in 1.98.1 (https://doc.rust-lang.org/1.98.1/cargo/reference/unstable.html#feature-unification, checked 2026-10-17), so the existing cargo-hakari `workspace-hack` (#212) stays unchanged. Numbers and method: `research.md` §4.3.9. T61.1's baseline was not needed for a count.
+
+Check output (`mise exec -- cargo nextest run -p cox --test deps`):
+```
+     Summary [   1.398s] 11 tests run: 11 passed, 0 skipped
+```
+
 #### T66.12 Design: resident sessions and a supervisor
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4

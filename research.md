@@ -765,6 +765,35 @@ Incremental medians: A 5.45 s, B 5.00 s. Means: A 6.45 s, B 6.57 s. Only the fir
 **Check (T61.8 card, `--timings`, run once on the kept variant A, clean target, load 18.95 before and 37.69 at the end, the latter a 1-minute average that includes the build):** `real 300.23 s`, `user 1023.86 s`, `sys 81.67 s`. Largest build-script run units in `target/cargo-timings/cargo-timing.html`: `aws-lc-sys` 86.4 s, `cox-plugin-fixtures` 17.4 s, `zstd-sys` 14.8 s, `whisper-rs-sys` 11.4 s, `libsqlite3-sys` 9.8 s, `onig_sys` 8.0 s. Largest proc-macro crate compile units: `diesel_derives` 12.2 s, `typify-impl` 11.4 s, `uniffi_macros` 8.9 s, `serde_derive` 6.2 s, `schemars_derive` 5.0 s, `clap_derive` 4.7 s. These unit durations overlap across parallel jobs, so they are shares of work, not wall time.
 
 **Verdict: rejected, `Cargo.toml` unchanged.** The clean build is not shown to be not slower (B's mean is 8.6 % higher, inside the spread), and neither path shows a speedup. The rule is to keep the override only if both are not slower and it speeds the build; it does neither here. The override stays out of `Cargo.toml`. The proc macros and build scripts that dominate the build (`aws-lc-sys`, `diesel_derives`, `typify-impl`) are not sped up by it on this machine at this sample size.
+#### T61.11 Feature-unification rebuilds (repo at ffa246b5, checked 2026-10-17)
+
+Setup: Apple M3 Max, 16 cores, load average 36–74 (other builds running), rustc 1.98.1 (48a229cea 2026-09-01), cargo 1.98.1 (797e8a9bc 2026-08-05), cargo-nextest 0.9.143, cargo-hakari 0.9.39, sccache 0.18.0 as `RUSTC_WRAPPER`, `CARGO_BUILD_JOBS=4`, the worktree's own `target/`. The metric is a count, not a time, so load does not skew it: every `compiler-artifact` message of `cargo nextest run … --no-run --cargo-message-format json` with `"fresh": false` whose package is not a workspace member. `just check-all` was run as its cargo command, `cargo nextest run --workspace`, without the swarfr step.
+
+| Step | Dependency units rebuilt |
+|---|---|
+| `check-all` build from an empty `target/` | 683 (all; 3 min 35 s with a warm sccache) |
+| `just test --changed-since HEAD~1` from the claim commit (resolves to `--workspace -E 'rdeps(=cox-tui)'`; from ffa246b5 itself `HEAD~1` touches `mise.toml`, so it is the plain `--workspace` run) | 0 (857 units fresh) |
+| `just test --changed-since HEAD` after a one-line edit in `cox-ffi` / `cox-tui` / `cox-plugin-api` | 0 / 0 / 0 |
+| `check-all` build again after those | 0 (857 units fresh) |
+
+Why it is zero by construction: `just test` (`scripts/changed_tests.py`, unchanged since P37, before hakari landed in #212) always passes `--workspace` to cargo and narrows only the tests it runs, with nextest's `-E 'rdeps(=…)'` filterset. Cargo therefore resolves the same feature set as `just check-all`, and no dependency is rebuilt in either direction.
+
+A hand-typed `-p` build is a different case, outside T61.11. Measured after the full build, in the same `target/`:
+
+| Command (`--no-run`) | Dependency units rebuilt, first run | Second run |
+|---|---|---|
+| `-p cox --test deps` (the card's Check) | 0 | — |
+| `-p cox-sanitize`, `-p cox-target` | 0 | — |
+| `-p cox-app` | 1 (`insta`) | — |
+| `-p cox-tui` | 6 (`crossterm`, `ratatui`, `ratatui-crossterm`, `tui-textarea-2`, `derive_more`, `derive_more-impl`) | 0 |
+| `-p cox-plugin-api` | 27 (serde, syn, toml, schemars, figment and their deps) | 0 |
+| `-p cox-ffi` | 35 (tokio, hyper, reqwest, rmcp, wasmtime, extism, uniffi and their deps) | 0 |
+
+These come from the deliberate holes in `.config/hakari.toml`: `cox-plugin-api` is a `final-excludes` member (it must stay free of workspace dependencies and wasm32-clean), and `crossterm` and `uniffi` are `traversal-excludes`, so the hack crate does not pull the terminal toolkit or UniFFI into crates whose graphs `crates/cox/tests/deps.rs` keeps clean. Cargo keeps each feature set's artifacts under its own hash, so each variant is built once per `target/` and every later switch is free (second-run column, and the final `check-all` build above).
+
+Cargo's own alternative, `resolver.feature-unification = "workspace"`, is still unstable in 1.98.1: it needs `-Z feature-unification` (tracking issue rust-lang/cargo#14774, RFC 3692), https://doc.rust-lang.org/1.98.1/cargo/reference/unstable.html#feature-unification, checked 2026-10-17. The pinned stable cargo refuses the flag ("the `-Z` flag is only accepted on the nightly channel of Cargo"). So cargo-hakari stays; `cargo hakari verify`, `cargo hakari generate --diff` and `cargo hakari manage-deps --dry-run` report the hack crate current.
+
+Verdict: T61.11 closed as not needed — zero rebuilds between `just test` and `just check-all`; no change to `Cargo.toml`, the hack crate or `.config/hakari.toml`.
 
 ### 4.4 Routing evidence (D5)
 Copilot's auto model selection is praised because it is explicit, priced (10 % discount) and switchable; Claude Code's Haiku delegation is complained about because it is silent. aider's `--weak-model` (commits, summaries) and OpenCode's small model for titles are the same pattern. Jobs that tolerate a small model, by consensus of the surveyed tools: titles, summaries, commit messages, compaction, search/explore, tool-result summarisation, classification. Effect-size numbers from the survey ("4.2× savings", "Codex 3–4× fewer tokens than Claude Code") are unsourced and dropped. [med]
