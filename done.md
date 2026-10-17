@@ -35,6 +35,14 @@ Execution plan:
 Done: `docs/design/serve.md` answers steps 1–8 with `path:line` references and ends with nine proposed implementation cards (S1–S9). Decisions: the attach protocol is the app-server wire plus three additive calls (`attach`, `end`, `inbox`), with no second enum in cox-protocol; serve carries patches only and the TUI stays an in-process `Event` consumer (a TUI attach is a later design); `cox serve` supervises one re-executed worker process per session, each the existing `cox_app::server::serve` loop over pipes, with the 250 ms → 30 s backoff, give-up after 5 failures and reset after 30 s; the socket is `COX_HOME/run/serve.sock` (dir 0700, socket 0600, peer uid check, singleton lock), and remote clients reach it only through `ssh … cox attach --stdio`; the session lock lives in the worker; reattach answers from the live controller's snapshot and writes nothing, and a restart replays the rollout. Findings: `docs/app-server.md:20-21` and `:118-120` are false today (the runtime drop at `crates/cox/src/main.rs:172-176` cancels the turn); `app-server` can build two cores for one session (`open` with `resume` of an id it already holds) and closes rather than ends its sessions on EOF. The proposed cards are not in `plan.md`: they await the creator's approval in a new §6 amendment, after which T66.13 and T66.14 get their files and steps.
 Check: `test -s docs/design/serve.md` passed. No test covers `docs/design/` (`crates/cox/tests/docs.rs` reads only top-level `docs/*.md`), so no cargo run was needed.
 
+#### T61.1 Build-time baseline
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
+Depends: — · Size: ~0 (research.md only) · Files: `research.md`
+Goal: `research.md` §4.3.9 holds the numbers P61 is judged by.
+Check: `grep -n '4.3.9' research.md`
+Done: §4.3.9 has a row for every measurement (Rust `--timings`, Swift packages, desktop app, CI jobs), the top five crates and the machine line. Single runs on a shared machine; the clean rows use a warm sccache, and a cold clean row was added. Finding: `[profile.dist]` inherits `dev` (`Cargo.toml:238-239`, since ae5ed7bd), not fat LTO, so the P61 premise behind T61.2 needs re-checking.
+
 #### T33.40.5 Parity: the `typesafe` table configures the plugin's section
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
