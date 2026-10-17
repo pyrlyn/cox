@@ -47,7 +47,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.9 | todo | P2 | 4 | 0% | |
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
-| T33.40.14 | todo | P2 | 3 | 0% | |
+| T33.40.14 | in progress | P2 | 3 | 5% | Claude Code / sonnet |
 | T33.40.15 | todo | P2 | 3 | 0% | |
 | T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
@@ -955,6 +955,13 @@ Check:
 - `unknown_key_in_typesafe_table_still_rejected`;
 - a doctor snapshot;
 - the config drift test and `every_flag_has_a_config_key` green.
+
+Execution plan (the card's file list is stale: `providers.typesafe` is read in more crates than the card names):
+1. `cox-protocol`: `JevProviderConfig` becomes `LegacyTypesafe`; `ProvidersConfig.typesafe` is `Option<LegacyTypesafe>` (named field, so the table never falls into `custom`); `configured_model_ids` and `models_for` read it when set; the block leaves `default.toml`.
+2. Readers follow the `Option`: `cox-config` project guard (compares against the old defaults when the user has no table, so a project still cannot redirect the plugin's host or key env), `cox-models` catalog layer, `cox-plugin` `refuse_provider_hosts`, `cox-app` section list, `cox-session` `abi_transport`/`abi_section`.
+3. Notice: `legacy_tier` adds one notice when a `[providers.typesafe]` table is set and no plugin serves the section.
+4. Doctor: `cox-session` key check treats a plugin section generically and a moved tier as a warning with the install pointer; `crates/cox` replaces the `typesafe client` row with one `provider <name>` row per granted plugin section (key found or not) plus a warning for a leftover table without the plugin.
+5. Regenerate `docs/config.md` and `docs/config.jsonschema` with their generators; review insta snapshots.
 
 #### T33.40.15 Catalog, prices and vendor script without Jev
 
