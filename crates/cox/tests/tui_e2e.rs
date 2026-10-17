@@ -366,3 +366,126 @@ fn tui_keybindings_toml_rebinds_send_to_ctrl_enter() {
     assert_eq!(text.matches("hello from scripted").count(), 1, "{text}");
     tui.quit();
 }
+
+/// One scripted refine: a main turn so the session has context, then the
+/// cheap tier's proposal for a session-local prompt note.
+const REFINE_SCENARIO: &str = r#"[[turn]]
+text = "hello from scripted"
+[[turn]]
+job = "memory"
+text = '''{"evidence": "seen twice", "edits": [{"action": "create", "kind": "prompt-note", "id": "tests-first", "content": "Test first.", "reason": "r"}]}'''
+"#;
+
+fn cox_cli(home: &Path, work: &Path, args: &[&str]) -> std::process::Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_cox"))
+        .args(["--cwd", work.to_str().unwrap()])
+        .args(args)
+        .env("COX_HOME", home)
+        .env("HOME", home)
+        .output()
+        .unwrap()
+}
+
+/// T66.8: `/refine <text>` shows the diff and writes nothing; `y` applies
+/// it; `cox refine list` and `cox refine undo` then work from another
+/// process against the same store, and undo removes the note again.
+#[test]
+fn tui_refine_reviews_applies_and_the_cli_lists_and_undoes_it() {
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let scenario = home.path().join("scenario.toml");
+    std::fs::write(&scenario, REFINE_SCENARIO).unwrap();
+    let tui = Tui::spawn(home.path(), work.path(), &scenario, &[]);
+    tui.wait_until("status line", |t| t.contains("$0.00"));
+    tui.turn("hello", "hello from scripted");
+
+    tui.command("refine", "always run tests first");
+    tui.wait_until("review overlay", |t| {
+        t.contains("seen twice") && t.contains("Test first.") && t.contains("y applies")
+    });
+    let store = cox_store::Store::open(home.path()).unwrap();
+    let id = store.sessions_tree(10).unwrap()[0].info.id.clone();
+    let note = home
+        .path()
+        .join("sessions")
+        .join(&id)
+        .join("harness/prompt-note/tests-first.md");
+    assert!(!note.exists(), "a proposal under review writes nothing");
+
+    tui.send(b"y");
+    tui.wait_until("applied notice", |t| t.contains("refine applied"));
+    assert_eq!(
+        std::fs::read_to_string(&note).unwrap().trim(),
+        "Test first."
+    );
+    tui.quit();
+
+    let listed = cox_cli(
+        home.path(),
+        work.path(),
+        &["refine", "list", "--session", &id],
+    );
+    let listed = String::from_utf8(listed.stdout).unwrap();
+    assert!(
+        listed.contains("local applied [create prompt-note/tests-first]"),
+        "{listed}"
+    );
+    let event = listed.split_whitespace().next().unwrap().to_string();
+
+    let undone = cox_cli(home.path(), work.path(), &["refine", "undo", &event]);
+    assert!(undone.status.success(), "{undone:?}");
+    assert!(!note.exists(), "undo removes the note");
+}
+
+/// T66.8: a refine event whose scope is global is not undone by the CLI
+/// without `--global`; the refusal names the flag and changes nothing.
+#[test]
+fn cli_refine_undo_of_a_global_event_needs_the_global_flag() {
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let scenario = home.path().join("scenario.toml");
+    let global = REFINE_SCENARIO.replace("seen twice", "seen in two projects");
+    std::fs::write(&scenario, global).unwrap();
+    let tui = Tui::spawn(home.path(), work.path(), &scenario, &[]);
+    tui.wait_until("status line", |t| t.contains("$0.00"));
+    tui.turn("hello", "hello from scripted");
+    tui.command("refine", "--global always run tests first");
+    tui.wait_until("review overlay", |t| t.contains("y applies"));
+    tui.send(b"y");
+    tui.wait_until("applied notice", |t| t.contains("refine applied"));
+    tui.quit();
+
+    let note = home.path().join("notes/tests-first.md");
+    assert!(note.exists(), "the global note is written");
+    let id = cox_store::Store::open(home.path())
+        .unwrap()
+        .sessions_tree(10)
+        .unwrap()[0]
+        .info
+        .id
+        .clone();
+    let listed = cox_cli(
+        home.path(),
+        work.path(),
+        &["refine", "list", "--session", &id],
+    );
+    let event = String::from_utf8(listed.stdout)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let refused = cox_cli(home.path(), work.path(), &["refine", "undo", &event]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--global"));
+    assert!(note.exists(), "a refused undo changes nothing");
+
+    let done = cox_cli(
+        home.path(),
+        work.path(),
+        &["refine", "undo", &event, "--global"],
+    );
+    assert!(done.status.success(), "{done:?}");
+    assert!(!note.exists());
+}

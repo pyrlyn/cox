@@ -1,7 +1,0 @@
----
-source: crates/cox-tui/tests/sessions.rs
-assertion_line: 39
-expression: last_notice(&state)
----
-01BX5ZZKBKACTAV9WEVGEMMVRZ · fix the flaky test · /w · 2h ago · $0.31
-01ARZ3NDEKTSV4RRFFQ69G5FAV · untitled · /w · 3d ago · $0.00

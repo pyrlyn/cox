@@ -1,0 +1,29 @@
+---
+source: crates/cox-tui/tests/it/approval.rs
+expression: "format!(\"{expanded}\\n---\\n{collapsed}\")"
+---
+⚙ edit src/lib.rs · +1 −1 · 1ms
+  ± src/lib.rs  +1 −1
+  --- a/src/lib.rs
+  +++ b/src/lib.rs
+  @@ -1,2 +1,2 @@
+  -fn old() {}
+  +fn new() {}
+   fn keep() {}
+│ ✓ 0B 1ms · /undo
+⚙ edit README.md · +2 −0 · 1ms
+  ± README.md  +2 −0
+  --- a/README.md
+  +++ b/README.md
+  @@ -1 +1,3 @@
+   # cox
+  +
+  +A coxswain.
+│ ✓ 0B 1ms · /undo
+---
+⚙ edit src/lib.rs · +1 −1 · 1ms
+  ± src/lib.rs  +1 −1
+│ ✓ 0B 1ms · /undo
+⚙ edit README.md · +2 −0 · 1ms
+  ± README.md  +2 −0
+│ ✓ 0B 1ms · /undo

@@ -1,0 +1,11 @@
+---
+source: crates/cox-tui/tests/it/question.rs
+expression: "buffer_to_string(&render(&state, 60, 7))"
+---
+
+
+ explore-2 asks: ask_user which environment?
+ 1) staging  2) production
+ > ▏   Enter sends · Esc dismisses
+> Enter choose · Esc close · Up previous · Down next
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [question]

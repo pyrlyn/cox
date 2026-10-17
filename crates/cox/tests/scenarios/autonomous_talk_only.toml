@@ -1,0 +1,9 @@
+# T66.11: three turns that never change a file, for a gate that never passes.
+[[turn]]
+text = "one"
+
+[[turn]]
+text = "two"
+
+[[turn]]
+text = "three"

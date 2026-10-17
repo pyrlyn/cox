@@ -5,9 +5,11 @@
 //! never reaches the paid endpoint itself. Pure, so it tests on the host.
 //!
 //! The one question is a minimal `risk` severity Score (T33.40.4): enough to
-//! drive the provider path end to end. The J5.1 question set, thresholds
-//! and batching are T33.40.6, which also adds `decide = ["risk"]` to the
-//! manifest; until then no session grants this plugin a decision point.
+//! drive the provider path end to end. The core asks once per tool batch
+//! (T33.40.6.1), so the request carries every item and the one Score is
+//! the answer for each of them. The J5.1 question set and thresholds are
+//! T33.40.6, which also adds `decide = ["risk"]` to the manifest; until
+//! then no session grants this plugin a decision point.
 
 use std::collections::BTreeMap;
 
@@ -44,7 +46,7 @@ pub fn decide(asked: &Asked) -> DecideOut {
         .to_vec(),
     };
     let body = SystemOneRequest::new(
-        asked.state.clone(),
+        with_items(asked),
         MODEL,
         BTreeMap::from([(SEVERITY.to_string(), severity)]),
     );
@@ -80,8 +82,26 @@ pub fn decide(asked: &Asked) -> DecideOut {
     }
 }
 
+/// `asked.state` with each item's state under `items`, so a batched question
+/// reaches System One whole; a single question's state as it is.
+fn with_items(asked: &Asked) -> Value {
+    if asked.items.is_empty() {
+        return asked.state.clone();
+    }
+    let items: Vec<Value> = asked.items.iter().map(|i| i.state.clone()).collect();
+    let mut state = asked.state.clone();
+    match state.as_object_mut() {
+        Some(shared) => {
+            shared.insert("items".into(), Value::Array(items));
+            state
+        }
+        None => json!({ "shared": state, "items": items }),
+    }
+}
+
 /// `cox_decide_resume`: the severity Score as advice, or silence when the
-/// reply carries none.
+/// reply carries none. A batched question gets the same Score for each
+/// item, the shape `Question::fits` asks for.
 pub fn resume(resumed: &DecideResume) -> Option<Advice> {
     let body: String = resumed
         .events
@@ -93,7 +113,12 @@ pub fn resume(resumed: &DecideResume) -> Option<Advice> {
         wire::Answer::Score {
             score, confidence, ..
         } => Some(Advice {
-            answer: Answer::Score { value: score },
+            answer: match resumed.question.items.len() {
+                0 => Answer::Score { value: score },
+                n => Answer::Items {
+                    answers: vec![Answer::Score { value: score }; n],
+                },
+            },
             confidence: Some(confidence),
             note: None,
         }),
@@ -103,7 +128,25 @@ pub fn resume(resumed: &DecideResume) -> Option<Advice> {
 
 #[cfg(test)]
 mod tests {
+    use cox_plugin_sdk::QuestionItem;
+
     use super::*;
+
+    /// A `risk` question for one tool batch, the shape the core asks.
+    fn batch(subjects: &[&str]) -> Asked {
+        Asked {
+            point: DecidePoint::Risk,
+            state: json!({ "cwd": "/w" }),
+            options: vec![],
+            items: subjects
+                .iter()
+                .map(|s| QuestionItem {
+                    state: json!({ "tool": "write", "subject": s }),
+                    options: vec![],
+                })
+                .collect(),
+        }
+    }
 
     fn asked(point: DecidePoint) -> Asked {
         Asked {
@@ -164,5 +207,38 @@ mod tests {
             ..resumed
         };
         assert_eq!(resume(&empty), None);
+    }
+
+    #[test]
+    fn batched_risk_question_answers_each_item() {
+        let question = batch(&["a.txt", "b.txt"]);
+        let DecideOut::Call { call } = decide(&question) else {
+            panic!("a call-out");
+        };
+        let text = call.request["messages"][0]["content"][0]["text"]
+            .as_str()
+            .expect("one text block");
+        let body: Value = serde_json::from_str(text).expect("System One JSON");
+        assert_eq!(body["state"]["cwd"], "/w");
+        assert_eq!(body["state"]["items"][1]["subject"], "b.txt");
+        let reply = json!({
+            "answers": { "severity": {
+                "type": "score", "score": 0.4, "confidence": 0.9,
+                "legend": {}, "probabilities": {}
+            }}
+        });
+        let resumed = DecideResume {
+            question: question.clone(),
+            events: vec![json!({ "type": "text_delta", "text": reply.to_string() })],
+        };
+        let advice = resume(&resumed).expect("advice");
+        let score = Answer::Score { value: 0.4 };
+        assert_eq!(
+            advice.answer,
+            Answer::Items {
+                answers: vec![score.clone(), score]
+            }
+        );
+        assert!(question.fits(&advice.answer));
     }
 }

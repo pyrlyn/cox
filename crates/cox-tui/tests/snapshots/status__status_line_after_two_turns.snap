@@ -1,6 +1,0 @@
----
-source: crates/cox-tui/tests/status.rs
-assertion_line: 67
-expression: "cox_tui::status::line(&state).to_string()"
----
-sonnet-5 · ctx ▱▱▱▱▱ 41% · $0.83/5 · workspace-write · 0 tasks · cache 0% · [plan]
