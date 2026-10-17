@@ -43,7 +43,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.6.1 | in progress | P2 | 4 | 80% | Claude Code / opus-5.5 |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
@@ -870,25 +869,6 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
-
-#### T33.40.6.1 Core: one batched `risk` question per tool batch
-
-Depends: T33.21, T33.40.1 · Size: ~120 · Files: `crates/cox-core/src/turn.rs`, `crates/cox-core/src/monotone.rs`, `plugins/jev/src/decide.rs`, `crates/cox/tests/plugins_jev.rs`, `crates/cox-plugin-api/src/abi.rs` (doc comment only)
-The T33.40.4 Jev guest answered the per-call question, so it must answer the batched one too, or its e2e tests break.
-Goal: J§5.1's one request per tool batch, which T33.40.6 needs and the core cannot ask today: `gate` calls `advise_risk` once per call, and it asks a flat question (`items: vec![]`) whose state has no task, cwd or sandbox mode. Every `PreToolUse` hook of a batch now runs before the batch's first approval prompt (A163).
-Steps:
-1. `run_signed_tools` runs `PreToolUse` for every call of the batch first, then asks one `risk` question for the batch. The shared state is the task (clipped), the cwd, the workspace roots and the sandbox mode; each item is `tool`, `subject`, `input` and `classifier_risk`, never tool output.
-2. `Answer::Items` applies per call through `raise_risk`. A flat answer, a missing item or a late answer leaves every call at its classifier risk.
-3. A late `risk` answer stays "no answer" and records a `Notice` naming the point and its deadline; `Event::Advised` keeps its shape.
-4. The core keeps the advice `note` for `risk` as it does for `approve_hint`, so the probabilities a plugin reports reach the rollout.
-Check:
-- `risk_batch_asks_once_with_one_item_per_call`;
-- `risk_items_raise_only_their_own_call`;
-- `late_risk_answer_records_a_notice`;
-- `risk_note_reaches_the_rollout`;
-- still green: `risk_advice_cannot_lower_risk`, `risk_not_asked_when_outcome_would_not_change`, `late_advice_falls_back_to_static_pick`, `late_salience_keeps_every_item`, `batched_question_answers_each_item`.
-
-Plan: in `turn.rs`, split `gate` so `run_signed_tools` first runs `PreToolUse` for every known call (a block fails only that call), then calls `Session::advise_risk` once with the surviving calls, then runs the engine and the approval loop per call as before. In `monotone.rs`, `advise_risk` takes the batch: it keeps the J5.1 "ask only when the outcome could change" filter per call, sends one `Question` with the shared state (task from `compact::working_state`, cwd, workspace roots, sandbox mode) and one item per eligible call, checks `Question::fits`, and applies each `Answer::Items` entry through `raise_risk` to its own call; `ask_point` tells a late answer from silence so `risk` records a `Notice`; the note is sanitized, clipped and kept on an applied `risk` advice as for `approve_hint`. Verify with the four Check tests in `monotone.rs`, all of `cox-core`, `cox --test plugins_jev` and the other decide e2e tests, clippy and fmt.
 
 #### T33.40.6 `risk` advisor: raise only
 
