@@ -1566,6 +1566,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cox-serve"
+version = "0.1.2"
+dependencies = [
+ "workspace-hack",
+]
+
+[[package]]
 name = "cox-session"
 version = "0.1.2"
 dependencies = [
