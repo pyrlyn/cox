@@ -126,6 +126,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
+| T66.3 | in progress | P1 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2325,7 +2326,7 @@ Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeI
 
 #### T66.3 `agent` collect: a status and a capped preview by task id
 
-Model: sonnet · Status: open · Depends: T66.2 · Size: ~150 · Priority: P1 · Complexity: 3
+Model: Claude Code / sonnet-5.5 · Status: in progress · Depends: T66.2 · Size: ~150 · Priority: P1 · Complexity: 3
 
 Goal: the parent fetches a background child's result when it needs it. The spawn result never holds the child's answer.
 
@@ -2338,6 +2339,11 @@ Steps:
 1. A background spawn returns `AgentHandle { task_id, name, status }` as `structured` (`subagent.rs:588-596` already carries the id). The history pointer line written by `publish_task_result` (`tasks.rs:96-106`) ends with `collect <task id>`.
 2. Add a `collect` input to the same `agent` tool: `{"collect": ["<task id>", …], "timeout_ms": n}`. For each task it returns `status`, one of `queued`, `running`, `done`, `error` or `cancelled`. Once a task has settled, it also returns a preview within the preset's `result_cap_tokens` and, when T66.2 archived the answer, `expand <id>`. A timeout returns a snapshot, never an error (idea: `pa-core/src/session_engine/rlm_host.rs` `RlmSubagentHost::collect`; `pa-daemon/src/rlm_child_model.rs` caps its preview at 160 characters).
 3. Delivery stays through the parent (T34.5). Usage rows stay where they are: in the child's session, with cap summaries under `Job::Summarize`. A foreground `agent` call is unchanged, because the parent waits for that answer by design.
+
+Execution plan:
+- `tasks.rs`: `TaskStatus` and a per-session record of each background subagent (status, name, settled answer, archive id) in `Inner`, with `begin_collect`/`mark_running`/`settle_collect` and a bounded `collect_wait` on the existing `tasks_idle` notify. `pointer_line` takes a `collect` flag and ends with `collect <task id>` for subagent tasks only (a detached `bash` has no record to collect).
+- `subagent.rs`: the spawn result is `AgentHandle { task_id, name, status }`; `drive` marks a run `running` and settles it as `done`, `error` or `cancelled` before the notice goes out; `AgentTool::call` takes `collect` (ids, `timeout_ms`, clamped) and returns one entry per task. The input schema drops `required` (a top-level `anyOf` is rejected by providers) and the description says `task` or `collect`.
+- Tests: in-crate (a task id is unknown to a script) for the five statuses, preview within the cap with the `expand` id, timeout snapshot, unknown id; `tests/subagent.rs` for the spawn handle, no answer text, and the pointer line.
 
 Check:
 ```bash
