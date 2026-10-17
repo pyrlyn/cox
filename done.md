@@ -172,6 +172,25 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox-core refine
+#### T66.3 `agent` collect: a status and a capped preview by task id
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.2 · Size: ~150 · Priority: P1 · Complexity: 3
+
+Goal: the parent fetches a background child's result when it needs it. The spawn result never holds the child's answer.
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/src/tasks.rs`
+- the cox-core subagent test file
+
+Steps:
+1. A background spawn returns `AgentHandle { task_id, name, status }` as `structured` (`subagent.rs:588-596` already carries the id). The history pointer line written by `publish_task_result` (`tasks.rs:96-106`) ends with `collect <task id>`.
+2. Add a `collect` input to the same `agent` tool: `{"collect": ["<task id>", …], "timeout_ms": n}`. For each task it returns `status`, one of `queued`, `running`, `done`, `error` or `cancelled`. Once a task has settled, it also returns a preview within the preset's `result_cap_tokens` and, when T66.2 archived the answer, `expand <id>`. A timeout returns a snapshot, never an error (idea: `pa-core/src/session_engine/rlm_host.rs` `RlmSubagentHost::collect`; `pa-daemon/src/rlm_child_model.rs` caps its preview at 160 characters).
+3. Delivery stays through the parent (T34.5). Usage rows stay where they are: in the child's session, with cap summaries under `Job::Summarize`. A foreground `agent` call is unchanged, because the parent waits for that answer by design.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
 mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo fmt --check
 ```
@@ -306,6 +325,16 @@ $ mise exec -- cargo clippy -p cox-core -p cox -p cox-plugin-api --all-targets -
 $ (cd plugins && mise exec -- cargo clippy -p cox-plugin-jev -p cox-plugin-sdk --all-targets --locked -- -D warnings; cargo clippy -p cox-plugin-jev --target wasm32-unknown-unknown --locked -- -D warnings): clean
 $ mise exec -- cargo fmt --check; (cd plugins && mise exec -- cargo fmt --check): clean
 ```
+Done when a scripted-provider test shows:
+- the spawn result holds no answer text;
+- `collect` on a running task returns `running`;
+- after completion, `collect` returns a preview within the cap and the archive id;
+- `expand` returns the full body.
+
+Out of scope: a separate `task_output` tool; peer messages between children.
+
+Result: `tasks.rs` gains `TaskStatus` (`queued`, `running`, `done`, `error`, `cancelled`) and a per-session `Collect` record for each background subagent (name, status, the settled answer, the archive id), with `begin_collect`, `mark_running`, `settle_collect` and `collect_snapshot`, which waits on the existing `tasks_idle` notify up to `timeout_ms` and returns the records as they stand when time or the call's cancel token runs out. The record holds the answer `run_task` already capped (summary or cut, with `full answer: expand <id>` when T66.2 archived it), so `collect` adds no way around `result_cap_tokens`. A background spawn returns `structured` `{task_id, name, status: "queued"}` and no answer. `drive` marks each run `running` and settles it before the notice goes out: `cancelled` when the run was interrupted, `error` for a driver refusal or a failed run, else `done`; a woken finished child goes back to `running`, and a child that cannot resume is settled `error`. `pointer_line` takes a `collect` flag: a subagent's line ends with `| collect <task id>`, a detached `bash` line is unchanged. `agent(collect: [id or name, …], timeout_ms)` is checked before the concurrency slot is reserved; it takes at most 8 tasks and clamps the wait to 120 s, and an unknown id, an empty or non-string list, or `task` together with `collect` is denied. Its risk is `ReadOnly` and its subject `collect`. The input schema drops `required` (a top-level `anyOf` is refused by providers) and the description says `task` or `collect`. Foreground calls are unchanged. `docs/tools.md` names the new input. Tests (in `subagent.rs`, because a task id is unknown to a script): `background_spawn_returns_a_handle_and_no_answer`, `pointer_line_for_a_subagent_ends_with_collect_and_its_id`, `collect_returns_a_done_tasks_preview_by_id_and_by_name`, `collect_reports_queued_running_and_a_timeout_snapshot`, `collect_wakes_when_the_task_settles_before_the_timeout`, `collect_reports_error_for_a_refused_run_and_cancelled_for_an_interrupted_one`, `collect_preview_of_an_over_cap_answer_stays_within_the_cap_and_names_the_archive_row`, `collect_denies_unknown_tasks_mixed_calls_and_oversized_lists`, `collect_is_read_only_whatever_the_preset`; and `background_spawn_hands_out_a_collect_handle_and_the_pointer_names_it` through the loop in `tests/subagent.rs`. Not done: the macOS and TUI summary line for an `agent` call (`cox-app` `summary.rs`) still reads "Delegated to `collect`: " for a collect call, because that file is outside this card.
+Check output: `mise exec -- cargo nextest run -p cox-core` — 440 passed, 1 skipped; `mise exec -- cargo nextest run -p cox -E 'test(agent) or test(subagent)'` — 12 passed; `mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 

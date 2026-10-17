@@ -94,8 +94,16 @@ impl Drop for AgentSlotGuard {
 
 /// History pointer on completion: label, id, detail (cost, or exit code and
 /// archive id) and the output's first line, capped so a multi-kilobyte
-/// answer cannot leak in through it.
-pub fn pointer_line(label: &str, task: TaskId, detail: &str, answer: &str) -> String {
+/// answer cannot leak in through it. A subagent's line ends with how to
+/// fetch the answer (`collect`, T66.3); a detached shell call has no record
+/// to collect from, so its line does not offer one.
+pub fn pointer_line(
+    label: &str,
+    task: TaskId,
+    detail: &str,
+    answer: &str,
+    collect: bool,
+) -> String {
     let first: String = answer
         .lines()
         .next()
@@ -103,7 +111,12 @@ pub fn pointer_line(label: &str, task: TaskId, detail: &str, answer: &str) -> St
         .chars()
         .take(120)
         .collect();
-    format!("background `{label}` finished (task {task}, {detail}): {first}")
+    let line = format!("background `{label}` finished (task {task}, {detail}): {first}");
+    if collect {
+        format!("{line} | collect {task}")
+    } else {
+        line
+    }
 }
 
 /// How much of the answer the completion notice shows the user.
@@ -146,6 +159,46 @@ pub(crate) enum Child {
     Running { queue: VecDeque<Queued>, hop: u32 },
     /// Downgraded from a live handle to what a resume needs.
     Finished(Box<Dormant>),
+}
+
+/// Where a background subagent stands (T66.3). `Queued` is a task that is
+/// registered but whose first run has not begun; a woken finished child goes
+/// back to `Running`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskStatus {
+    Queued,
+    Running,
+    Done,
+    Error,
+    Cancelled,
+}
+
+impl TaskStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Done => "done",
+            Self::Error => "error",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    fn settled(self) -> bool {
+        !matches!(self, Self::Queued | Self::Running)
+    }
+}
+
+/// What `agent(collect)` reads back for one background subagent. The answer
+/// is the capped form `run_task` already built (summary or cut, with the
+/// `expand` trailer when the full text was archived), so holding it adds no
+/// way around the result cap.
+#[derive(Debug, Clone)]
+pub(crate) struct Collect {
+    pub name: String,
+    pub status: TaskStatus,
+    pub answer: Option<String>,
+    pub archive: Option<ArchiveId>,
 }
 
 /// A subagent's detail: what it cost, and the archive id of its full answer
@@ -210,6 +263,80 @@ impl Session {
     pub(crate) async fn complete_task(&self, task: TaskId) {
         self.inner.lock().await.tasks.remove(&task);
         self.tasks_idle.notify_waiters();
+    }
+
+    /// A background subagent exists but has not started running (T66.3).
+    pub(crate) async fn begin_collect(&self, task: TaskId, name: String) {
+        let record = Collect {
+            name,
+            status: TaskStatus::Queued,
+            answer: None,
+            archive: None,
+        };
+        self.inner.lock().await.collects.insert(task, record);
+        self.tasks_idle.notify_waiters();
+    }
+
+    /// A run begins. Upserts, because a finished child a message woke has a
+    /// record only if it ran in the background before.
+    pub(crate) async fn mark_running(&self, task: TaskId, name: &str) {
+        let mut inner = self.inner.lock().await;
+        let record = inner.collects.entry(task).or_insert_with(|| Collect {
+            name: name.to_string(),
+            status: TaskStatus::Queued,
+            answer: None,
+            archive: None,
+        });
+        record.status = TaskStatus::Running;
+        self.tasks_idle.notify_waiters();
+    }
+
+    /// A run ended. Updates a record only, so a task that never had one
+    /// (a failed restart) stays unknown rather than half-described.
+    pub(crate) async fn settle_collect(
+        &self,
+        task: TaskId,
+        status: TaskStatus,
+        answer: String,
+        archive: Option<ArchiveId>,
+    ) {
+        if let Some(record) = self.inner.lock().await.collects.get_mut(&task) {
+            record.status = status;
+            record.answer = Some(answer);
+            record.archive = archive;
+        }
+        self.tasks_idle.notify_waiters();
+    }
+
+    /// The records of `tasks` that exist, in order. Waits up to `wait` for
+    /// every one to settle; running out of time (or `cancel`) returns what
+    /// there is, never an error.
+    pub(crate) async fn collect_snapshot(
+        &self,
+        tasks: &[TaskId],
+        wait: Duration,
+        cancel: &CancellationToken,
+    ) -> Vec<(TaskId, Collect)> {
+        let deadline = tokio::time::Instant::now() + wait;
+        let mut give_up = wait.is_zero();
+        loop {
+            let notified = {
+                let inner = self.inner.lock().await;
+                let snapshot: Vec<_> = tasks
+                    .iter()
+                    .filter_map(|t| inner.collects.get(t).map(|c| (*t, c.clone())))
+                    .collect();
+                if give_up || snapshot.iter().all(|(_, c)| c.status.settled()) {
+                    return snapshot;
+                }
+                self.tasks_idle.notified()
+            };
+            tokio::select! {
+                () = notified => {}
+                () = tokio::time::sleep_until(deadline) => give_up = true,
+                () = cancel.cancelled() => give_up = true,
+            }
+        }
     }
 
     /// Awaits until no `TaskKind::Agent` task — a backgrounded `agent`, or
@@ -529,13 +656,14 @@ impl Session {
         label: &str,
         answer: &str,
         detail: &str,
+        collect: bool,
     ) -> Result<(), CoreError> {
         {
             let mut inner = self.inner.lock().await;
             inner.history.push(Message {
                 role: Role::User,
                 content: vec![Content::Text {
-                    text: pointer_line(label, task, detail, answer),
+                    text: pointer_line(label, task, detail, answer, collect),
                 }],
             });
         }
@@ -565,7 +693,8 @@ impl Session {
         })
         .await?;
         let detail = agent_detail(0.0, None);
-        self.publish_task_result(task, label, answer, &detail).await
+        self.publish_task_result(task, label, answer, &detail, false)
+            .await
     }
 
     /// T56.7: the ledger row of a resumed task's external work, the one its
@@ -732,7 +861,7 @@ impl Session {
         }
         let detail = detached_detail(exit_code, archive);
         let _ = self
-            .publish_task_result(task, label, &output.text, &detail)
+            .publish_task_result(task, label, &output.text, &detail, false)
             .await;
     }
 }
@@ -759,6 +888,7 @@ mod tests {
             TaskId::new(),
             &agent_detail(0.002, None),
             &long,
+            false,
         );
         assert!(line.contains("explore: y"), "{line}");
         assert!(line.contains("$0.0020"), "{line}");
