@@ -95,7 +95,6 @@
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
 - T66.20. `cox-serve`: run directory, singleton lock, socket and peer uid
-- T66.21. `cox-serve`: spawn workers, watch them, restart them, shut down
 - T67.3. Five more hook events
 - T67.4. `/goal`: a judged stop condition
 - T67.5. `/goal` in the TUI and stream-json

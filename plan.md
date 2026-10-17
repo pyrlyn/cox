@@ -2638,35 +2638,6 @@ Done when these tests pass, and the existing `lock` tests stay green: `a_second_
 
 Out of scope: the `cox attach` bridge, routing connections to workers, and Windows (later cards).
 
-#### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
-
-Model: Claude Code / opus-5.5 · Status: in progress · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
-
-Goal: the supervisor runs one worker process per session and keeps it alive under T66.19's policy. `docs/design/serve.md` S6, D3 and D7.
-
-Plan: `worker.rs` spawns the program with tokio's process support, writes the wire lines (`open`, `end`) with serde_json, reads the `opened` reply and drains the rest of stdout, and reports each exit through a callback. `supervisor.rs` keeps one slot per session (running, restarting, failed), measures uptime, feeds each exit to `restart::Policy`, schedules a restart as a timed event, refuses a 17th worker, and on an injected shutdown future sends `end`, waits a grace (10 s by default) and kills what is left. Tests drive a fake worker `sh` script in a tempdir with a short grace and a capped restart delay. New third-party deps for cox-serve: tokio, serde_json, thiserror (all already in the workspace); no workspace crate, so the `deps.rs` rule stays as it is.
-
-Files:
-- `crates/cox-serve/src/worker.rs`
-- `crates/cox-serve/src/supervisor.rs`
-
-Steps:
-1. Spawn the worker program (`current_exe() serve --worker` in production; a parameter, so tests pass a fake) with piped stdio.
-2. Apply T66.19's policy on each exit; a restart reopens the session with `resume`. A worker the supervisor gave up on is listed as failed.
-3. Enforce a cap of 16 workers.
-4. On SIGINT or SIGTERM, send `end` to every worker, wait 10 s, then SIGKILL.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-serve supervisor
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when these tests pass, with a fake worker program as `crates/cox/tests/remote.rs` fakes `ssh`: `a_crashed_worker_is_restarted_idle_with_resume`, `give_up_marks_the_session_failed`, `shutdown_ends_every_worker`, `the_cap_refuses_the_seventeenth_open`.
-
-Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
-
 ### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
 
 Rationale in §6 A148. Idea-only: the source is the public Claude Code documentation of each feature, and no code is copied.
