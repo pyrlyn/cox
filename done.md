@@ -273,6 +273,38 @@ $ mise exec -- cargo nextest run -p cox --test docs
     PASS cox::docs docs_relative_links_resolve
     PASS cox::docs docs_name_every_subcommand
     Summary: 5 tests run: 5 passed, 0 skipped
+#### T33.40.6.1 Core: one batched `risk` question per tool batch
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.21, T33.40.1 · Size: ~120 · Files: `crates/cox-core/src/turn.rs`, `crates/cox-core/src/monotone.rs`, `plugins/jev/src/decide.rs`, `crates/cox/tests/plugins_jev.rs`, `crates/cox-plugin-api/src/abi.rs` (doc comment only) (regenerated: `docs/protocol.jsonschema`, `docs/plugin-abi.schema.json`)
+The T33.40.4 Jev guest answered the per-call question, so it must answer the batched one too, or its e2e tests break.
+Goal: J§5.1's one request per tool batch, which T33.40.6 needs and the core cannot ask today: `gate` calls `advise_risk` once per call, and it asks a flat question (`items: vec![]`) whose state has no task, cwd or sandbox mode. Every `PreToolUse` hook of a batch now runs before the batch's first approval prompt (A163).
+Steps:
+1. `run_signed_tools` runs `PreToolUse` for every call of the batch first, then asks one `risk` question for the batch. The shared state is the task (clipped), the cwd, the workspace roots and the sandbox mode; each item is `tool`, `subject`, `input` and `classifier_risk`, never tool output.
+2. `Answer::Items` applies per call through `raise_risk`. A flat answer, a missing item or a late answer leaves every call at its classifier risk.
+3. A late `risk` answer stays "no answer" and records a `Notice` naming the point and its deadline; `Event::Advised` keeps its shape.
+4. The core keeps the advice `note` for `risk` as it does for `approve_hint`, so the probabilities a plugin reports reach the rollout.
+Check:
+- `risk_batch_asks_once_with_one_item_per_call`;
+- `risk_items_raise_only_their_own_call`;
+- `late_risk_answer_records_a_notice`;
+- `risk_note_reaches_the_rollout`;
+- still green: `risk_advice_cannot_lower_risk`, `risk_not_asked_when_outcome_would_not_change`, `late_advice_falls_back_to_static_pick`, `late_salience_keeps_every_item`, `batched_question_answers_each_item`.
+
+Plan: in `turn.rs`, split `gate` so `run_signed_tools` first runs `PreToolUse` for every known call (a block fails only that call), then calls `Session::advise_risk` once with the surviving calls, then runs the engine and the approval loop per call as before. In `monotone.rs`, `advise_risk` takes the batch: it keeps the J5.1 "ask only when the outcome could change" filter per call, sends one `Question` with the shared state (task from `compact::working_state`, cwd, workspace roots, sandbox mode) and one item per eligible call, checks `Question::fits`, and applies each `Answer::Items` entry through `raise_risk` to its own call; `ask_point` tells a late answer from silence so `risk` records a `Notice`; the note is sanitized, clipped and kept on an applied `risk` advice as for `approve_hint`. Verify with the four Check tests in `monotone.rs`, all of `cox-core`, `cox --test plugins_jev` and the other decide e2e tests, clippy and fmt.
+
+Result: `run_signed_tools` runs every `PreToolUse` of a batch first (`pre_tool_use`; a blocked call fails alone), then calls `Session::advise_risk` once with the surviving calls, then gates each call serially as before. `advise_risk` keeps the per-call "ask only when the outcome could change" filter and asks one `Question` with the shared state (`task` from `compact::working_state`, scrubbed and clipped; `cwd`; `workspace_roots`; `sandbox`) and one item per eligible call (`tool`, `subject`, `input`, `classifier_risk`). It checks `Question::fits` again in the core and applies each `Answer::Items` entry through `raise_risk` to its own call. A new `Reply { Silent, Late, Advice }` lets `risk` record an Info `Notice` ("plugin X gave no risk advice within N ms; the classifier's risk stands") with no `Advised`. `clean_note` (sanitized, 200 characters) now serves both `approve_hint` and an applied `risk`; the 200-character clip is a known limit for T33.40.6's probabilities. Widened by the creator (A163): the Jev guest answers a batched question with `Answer::Items`, the same severity Score for each item, and puts the item states under `state.items`; the `plugins_jev` rig writes one file per tool batch so the per-request counts hold. `jev_call_blocked_by_budget_falls_back` changed meaning. Every batch now follows a main provider call that passes the same budget gate, so no second question can be asked over the cap; the test asserts one request, one usage row, no skip notice, `turn_done` with `stop = budget`, `a.txt` written and `b.txt` not. The refused call-out itself stays covered by `cox-core`'s `decide_call_out_over_budget_falls_back`.
+
+Check output:
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-plugin -p cox-plugin-api -p cox-protocol -p cox-core
+     Summary 743 tests run: 743 passed, 1 skipped   (includes the four new tests and every still-green test above)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test plugins_jev --test plugin_cli --test external_agents_cursor
+     Summary 28 tests run: 28 passed, 0 skipped
+$ (cd plugins && mise exec -- cargo test -p cox-plugin-jev -p cox-plugin-sdk --locked)
+     cox-plugin-jev 20 passed; cox-plugin-sdk 10 passed
+$ mise exec -- cargo clippy -p cox-core -p cox -p cox-plugin-api --all-targets -- -D warnings: clean
+$ (cd plugins && mise exec -- cargo clippy -p cox-plugin-jev -p cox-plugin-sdk --all-targets --locked -- -D warnings; cargo clippy -p cox-plugin-jev --target wasm32-unknown-unknown --locked -- -D warnings): clean
+$ mise exec -- cargo fmt --check; (cd plugins && mise exec -- cargo fmt --check): clean
 ```
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
