@@ -1,3 +1,45 @@
+#### T66.11 `cox run -p --autonomous`: shell gates and the headless loop
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.10 · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: a headless run continues under the driver's verdict. Every gate runs inside the same sandbox as `bash`.
+
+Files:
+- `crates/cox-tools/src/gate.rs` (new): `ShellGateRunner`. It uses `sandbox::command` with the session's `Policy` and the gate timeout. The output tail is capped and archived first, as for `bash`.
+- `crates/cox/src/run.rs`: after each `UserTurn`, ask `decide`; on `Continue`, submit its text as the next `UserTurn`; print the stop reason
+- `tests/autonomous.rs`
+
+Steps:
+1. Only `cox run -p` reads `--autonomous`, and the interactive TUI never enters the loop. The model still edits the todo list (`cox-tools/src/todo.rs`); the driver does not.
+2. The stream-json output carries one `autonomous` record per decision.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox autonomous
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when, against `COX_HOME=/tmp/cox-scratch` with the scripted provider, a gate that fails once and then passes yields exactly two turns and `GatesPassed`.
+
+Out of scope: goals that persist across runs.
+
+Execution plan:
+1. `cox-tools/src/gate.rs`: `ShellGateRunner` implements `GateRunner` over `bash::run_line` (the one spawn path: same sandbox wrap, env allowlist, PTY and group kill), with the session's `SandboxPolicy`, workspace roots, cwd and `Archive`. It archives the whole output before returning, caps the tail at a line-safe size with an `expand #id` trailer, and turns a spawn error, sandbox denial or timeout into a failed gate.
+2. `cox/src/cli.rs`: `--autonomous` on `RunArgs`, `requires = prompt`, conflicts with `--loop`.
+3. `cox/src/run.rs`: validate the `[autonomous]` policy before the session opens; `run_autonomous` drives one `UserTurn` at a time, asks `Driver::decide`, submits the `Continue` text as the next turn, and writes one `autonomous` stream-json record per decision and the stop reason to stderr and the `json` summary. Only an `Outcome` fold of `diff`/`Checkpoint` events feeds `files_changed`.
+4. Tests: gate runner unit tests (pass, fail with tail, timeout, archive-before-cap); `crates/cox/tests/autonomous.rs` e2e against the scripted provider and a scratch `COX_HOME`: a failing gate continues, a passing gate stops, no gates refuses the flag, the TUI never sees the flag.
+5. Docs: the `cox run` flag docs and any trycmd help snapshot.
+
+Files changed beyond the list: `crates/cox-core/src/session.rs` (`Session::archive()`, so the gates archive into the session's own store and the CLI opens no second one), `crates/cox/src/cli.rs` (the flag), `crates/cox/src/config_load.rs` (the flag-to-key map, required by `config_every_flag_has_a_config_key`), `docs/getting-started.md`. The e2e test is `crates/cox/tests/autonomous.rs` (the card's `tests/autonomous.rs` has no top-level `tests/`). `files_changed` is read from tool diffs and checkpoints, so a file changed only through `bash` is not seen as progress. A run that stops for any reason other than `gates_passed` or the turn's own stop exits 1.
+
+Check output:
+```
+mise exec -- cargo nextest run -p cox-tools -p cox-core -p cox   # 939 tests run; the only failures were config_every_flag_has_a_config_key (fixed by mapping the flag) and plain_transcript_snapshot (fails identically on the base commit, unrelated); rerun of -p cox: 220 run, 219 passed, plain_transcript_snapshot the one failure. New: cox::autonomous 5 tests, cox-tools gate::tests 6 tests, all passed
+mise exec -- cargo clippy -p cox -p cox-tools -p cox-core --all-targets -- -D warnings   # clean
+mise exec -- cargo fmt --check   # clean
+```
+
 #### T66.10 `[autonomous]` config, which a project cannot set
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.9 · Size: ~100 · Priority: P2 · Complexity: 2
