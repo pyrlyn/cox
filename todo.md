@@ -31,7 +31,6 @@
 - T53.7. `cox-plugin-sdk` ready for crates.io
 - T53.8. Go SDK module ready to tag
 - T53.9. Templates and docs use the published SDKs
-- T56.9. Docs: cloud agents for users and in EA
 - T56.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T56.11. No usage row for a cloud run that never started
 - T56.12. A refused cloud run tells the user why

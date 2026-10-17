@@ -1,3 +1,24 @@
+#### T56.9 Docs: cloud agents for users and in EA
+
+Model: Claude Code / haiku-4.5 · Status: done 2026-10-17 · Depends: T56.8 · Size: ~90 · Priority: P3 · Complexity: 1 · Files: `docs/plugins.md`, `docs/design/external-agents.md`, `docs/design/v0.3-cursor-cloud.md`
+Goal: `docs/plugins.md` documents `[[cloud_agents]]`, the grant, the `CloudAgent(<repo>)` rule and exactly what leaves the machine; EA gains a section for the cloud path next to the local CLI; the gate doc's Review links the shipped cards.
+Plan (Claude Code / haiku-4.5): (1) read the code the docs describe (`crates/cox-cursor-cloud`, `crates/cox-session/src/cloud_agents.rs`, the manifest and grant in `cox-plugin-api` and `cox-plugin`, the permission rule in `how-it-works.md`, the P56 done.md entries); (2) `docs/plugins.md`: a "Cloud agents" section before the generated API index; (3) `docs/design/external-agents.md`: §9 for the cloud path, §6 and the out-of-scope line updated; (4) `docs/design/v0.3-cursor-cloud.md`: a status note linking the cards and recording the deviations; (5) verify the plugin schema test, the generated index and every relative link.
+What landed: `docs/plugins.md` gained "Cloud agents": a manifest example, the fields, the grant line as `cox plugin install` shows it, what leaves the machine, the `CloudAgent(<owner>/<repo>)` rule, running and ending, and a Limits list. `docs/design/external-agents.md` gained §9 (driver, client, guard, request, answer, ledger, persistence, what is not built); §6 notes that the cloud path reports tokens; the out-of-scope line points to §9. `docs/design/v0.3-cursor-cloud.md` gained a status note with links to `done.md` and `docs/plugins.md`, the approval deviation (a background task is refused with the rule to add instead of raising `ApprovalRequired`), the unbuilt follow-up path, and the creator's 2026-10-03 go-ahead, which replaces the "blocked" sentence. No code changed.
+Not done: a check against a real Cursor account (T56.10). The limits recorded in the docs, each with its card: follow-up messages into a run (not built), an approval prompt from a background task (T56.6), cancelling a run after a resume (T56.7), a refused run's finish notice naming the refusal (T56.12). The Cursor terms reading from A123 (5) stays in `v0.3-cursor-cloud.md`; the user page does not restate it. No command examples were added: `crates/cox/tests/doc_examples.rs` covers only `docs/plugins/cursor.md`, so there was nothing new to run there.
+Check:
+```text
+$ CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 mise exec -- cargo nextest run -p cox-plugin-api plugin_schema_matches_committed_file
+        PASS [   0.015s] (1/1) cox-plugin-api tests::plugin_schema_matches_committed_file
+     Summary [   0.015s] 1 test run: 1 passed, 54 skipped
+$ python3 -I scripts/plugin_api_reference.py
+(no output, exit 0: the generated API index in docs/plugins.md is current)
+$ relative link targets in the three docs, each tested with test -e
+docs/design/external-agents.md -> ../../done.md            OK
+docs/design/v0.3-cursor-cloud.md -> ../../done.md          OK
+docs/design/v0.3-cursor-cloud.md -> ../plugins.md          OK
+docs/design/v0.3-cursor-cloud.md -> external-agents.md     OK
+docs/plugins.md -> plugin.schema.json, plugin-abi.schema.json   OK
+
 #### T33.40.4 Jev plugin as a provider, end to end and offline
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T33.40.3, T33.7 · Size: ~180 (landed ~300 lines of code, see Not done) · Priority: P2 · Complexity: 4 · Files: `crates/cox/tests/plugins_jev.rs`, `crates/cox-plugin/src/{provider,advisor}.rs`, `crates/cox-session/src/{lib,provider}.rs`, `crates/cox-provider/src/retried.rs`, `crates/cox-models/src/{catalog,price}.rs`, `crates/cox-plugin-api/src/abi.rs`, `crates/cox/src/plugin_cmd.rs`, `plugins/jev/src/{decide,lib,provider}.rs`, `plugins/sdk/src/lib.rs`
