@@ -88,7 +88,6 @@
 - T66.6. Core: a refine proposal from one cheap call, with the base prompt fixed
 - T66.7. Session: apply a refine, record it, and render the digest after the cached prefix
 - T66.8. `/refine` and `cox refine`
-- T66.9. A pure autonomous driver beside the USD cap
 - T66.10. `[autonomous]` config, which a project cannot set
 - T66.11. `cox run -p --autonomous`: shell gates and the headless loop
 - T66.13. Heartbeat re-entry for a resident session
