@@ -766,6 +766,25 @@ Cargo's own alternative, `resolver.feature-unification = "workspace"`, is still 
 
 Verdict: T61.11 closed as not needed — zero rebuilds between `just test` and `just check-all`; no change to `Cargo.toml`, the hack crate or `.config/hakari.toml`.
 
+#### T61.2 `ffi-dev` profile for the XCFramework (repo at ffa246b5 plus the T61.2 claim commit, measured 2026-10-17)
+
+Setup: Apple M3 Max, 16 cores, macOS 27.0.1, Rust 1.98.1, sccache 0.18.0 as `RUSTC_WRAPPER` (it does not serve incremental workspace crates), default `CARGO_BUILD_JOBS`, the worktree's own `target/`. Both profiles were built once in full before timing. The timed command is `COX_FFI_PROFILE=<profile> mise exec -- bash scripts/desktop/xcframework.sh` (library, `uniffi-bindgen` and `xcodebuild -create-xcframework`) after replacing one `pub const` line at the end of `crates/cox-app/src/lib.rs` (so `cox-app` and `cox-ffi` really recompile; the logs show both). `dist` is the committed profile; `ffi-dev` is the card's `inherits = "release"`, `lto = false`, `codegen-units = 16`, `incremental = true`, `debug = "line-tables-only"`, applied locally and reverted. Five alternating runs each; before every run `pgrep` found no other `cargo`/`rustc`, but the machine was shared (load average 135 falling to 32 over the series).
+
+| Run | `dist` wall | `ffi-dev` wall |
+|---|---|---|
+| 1 | 23 s | 25 s |
+| 2 | 21 s | 25 s |
+| 3 | 20 s | 21 s |
+| 4 | 20 s | 24 s |
+| 5 | 21 s | 23 s |
+| median | 21 s | 24 s |
+
+User+sys CPU, median: `dist` 7.8 s, `ffi-dev` 7.1 s (wall is what the developer waits for). cargo's own "Finished" lines for the library build: `dist` 7.3-9.5 s `[unoptimized + debuginfo]`, `ffi-dev` 8.9-10.3 s `[optimized + debuginfo]`.
+
+Why `ffi-dev` is not faster: `[profile.dist]` is `inherits = "dev"` (`Cargo.toml:238-239`) with no LTO, so there is no fat LTO to remove, and the card's `inherits = "release"` turns optimization (opt-level 3) on for the workspace crates, which `dist` leaves at opt-level 0.
+
+Verdict: T61.2 closed as not needed: the proposed profile is 14% slower in wall time (24 s against 21 s), not at least 10% faster, and the `dist` incremental rebuild is already about 21 s. No change to `Cargo.toml`, `xcframework.sh`, the `justfile` or the workflow.
+
 ### 4.4 Routing evidence (D5)
 Copilot's auto model selection is praised because it is explicit, priced (10 % discount) and switchable; Claude Code's Haiku delegation is complained about because it is silent. aider's `--weak-model` (commits, summaries) and OpenCode's small model for titles are the same pattern. Jobs that tolerate a small model, by consensus of the surveyed tools: titles, summaries, commit messages, compaction, search/explore, tool-result summarisation, classification. Effect-size numbers from the survey ("4.2× savings", "Codex 3–4× fewer tokens than Claude Code") are unsourced and dropped. [med]
 

@@ -112,7 +112,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T61.2 | in progress | P1 | 2 | 10% | Claude Code / sonnet |
 | T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
 | T61.5.1 | todo | P2 | 3 | 0% | |
@@ -1835,42 +1834,13 @@ Every card in this phase:
 
 Rationale in §6 A140. Found by reading the build configuration (2026-10-07), not yet measured: the XCFramework always builds with the `dist` profile (fat LTO, one codegen unit), also under `just desktop-open`'s watcher and in CI's `swift test` job, and its `uniffi-bindgen` binary is linked the same way; the workspace has 79 integration-test binaries (`cox-core` 21, `cox` 19, `cox-tui` 15), each linked against the whole tree; `Swatinem/rust-cache` never caches workspace members, so each desktop CI job rebuilds all 35 crates; the CI matrix builds with `--all-features` and tests without them, so each target compiles the workspace twice; the six Swift packages are tested one by one, each in its own `.build`, so `CoxModel` compiles up to five times; the SwiftLint build-tool plugin runs on every build of every target.
 
-**Order.** T61.1 first (the baseline every later card compares against). Then T61.2 → T61.3 → T61.4 (the desktop path, the largest gain). T61.5.1–T61.5.3, T61.6, T61.7 and T61.9 are independent of each other. T61.8, T61.10 and T61.11 last; each may end as "rejected" with the measurement that rejected it.
+**Order.** T61.1 first (the baseline every later card compares against). Then T61.3 → T61.4 (the desktop path, the largest gain). T61.5.1–T61.5.3, T61.6, T61.7 and T61.9 are independent of each other. T61.8, T61.10 and T61.11 last; each may end as "rejected" with the measurement that rejected it.
 
 Timings go to a new `research.md` §4.3.9 "Build times", in the shape of R§4.3.4: each row is the median of 5 runs, with the machine, load average and commit. A card whose change gains nothing measurable is reverted and closed with that row.
 
-#### T61.2 Fast profile for the XCFramework outside a release
-
-Model: sonnet · Status: open · Depends: T61.1 · Size: ~40 · Priority: P1 · Complexity: 2
-
-Goal: `just desktop-open`, `just desktop-app` and CI's `desktop-macos` job build `cox-ffi` without fat LTO; only a DMG and the desktop build workflow use `dist` (A15: what ships is `dist`).
-
-Files:
-- `Cargo.toml`
-- `scripts/desktop/xcframework.sh`
-- `justfile`
-
-Steps:
-1. `[profile.ffi-dev]` in `Cargo.toml`: `inherits = "release"`, `lto = false`, `codegen-units = 16`, `incremental = true`, `debug = "line-tables-only"`, with a comment saying why it exists next to `dist`.
-2. `xcframework.sh` takes the profile from `COX_FFI_PROFILE` (default `ffi-dev`), validates it against `ffi-dev|dist` and prints which one it built.
-3. `just desktop-dmg` and `.github/workflows/desktop-build.yml` set `COX_FFI_PROFILE=dist` (the workflow is a one-line `env:`; it does not count as a source file).
-
-Check:
-```bash
-just desktop-xcframework
-COX_FFI_PROFILE=dist just desktop-xcframework
-just desktop-app
-```
-
-Done when: §4.3.9 has the incremental `just desktop-xcframework` time before and after; the DMG still comes from `dist` (the script's printed profile in the workflow log).
-
-Execution plan (Claude Code / sonnet, creator decision 2026-10-17: measure, then close if the gain is small): (1) confirm from `Cargo.toml` and `scripts/desktop/xcframework.sh` which profile the XCFramework uses and whether any LTO is on (`dist` inherits `dev`: no LTO). (2) Time the incremental `just desktop-xcframework` (touch one `cox-app` source file) on the quiet machine under the current `dist` and under the proposed `ffi-dev` settings applied locally. (3) Under 10% faster: close as not needed with both timings in `research.md` §4.3.9, drop T61.3's dependency on T61.2; otherwise implement the steps below.
-
-Out of scope: the bindings generator (T61.3), caching (T61.4).
-
 #### T61.3 Bindings generator on the host dev profile, skipped when the library did not change
 
-Model: sonnet · Status: open · Depends: T61.2 · Size: ~40 · Priority: P1 · Complexity: 2
+Model: sonnet · Status: open · Depends: - · Size: ~40 · Priority: P1 · Complexity: 2
 
 Goal: `uniffi-bindgen` is built once in the dev profile for the host, and `xcframework.sh` regenerates the bindings and the XCFramework only when `libcox_ffi.a` changed.
 

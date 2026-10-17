@@ -31,6 +31,43 @@ Check output (`mise exec -- cargo nextest run -p cox --test deps`):
      Summary [   1.398s] 11 tests run: 11 passed, 0 skipped
 ```
 
+#### T61.2 Fast profile for the XCFramework outside a release
+
+Model: sonnet · Status: done 2026-10-17 (not needed: `ffi-dev` 24 s against `dist` 21 s incremental, 14% slower) · Depends: T61.1 · Size: ~40 · Priority: P1 · Complexity: 2
+
+Goal: `just desktop-open`, `just desktop-app` and CI's `desktop-macos` job build `cox-ffi` without fat LTO; only a DMG and the desktop build workflow use `dist` (A15: what ships is `dist`).
+
+Files:
+- `Cargo.toml`
+- `scripts/desktop/xcframework.sh`
+- `justfile`
+
+Steps:
+1. `[profile.ffi-dev]` in `Cargo.toml`: `inherits = "release"`, `lto = false`, `codegen-units = 16`, `incremental = true`, `debug = "line-tables-only"`, with a comment saying why it exists next to `dist`.
+2. `xcframework.sh` takes the profile from `COX_FFI_PROFILE` (default `ffi-dev`), validates it against `ffi-dev|dist` and prints which one it built.
+3. `just desktop-dmg` and `.github/workflows/desktop-build.yml` set `COX_FFI_PROFILE=dist` (the workflow is a one-line `env:`; it does not count as a source file).
+
+Check:
+```bash
+just desktop-xcframework
+COX_FFI_PROFILE=dist just desktop-xcframework
+just desktop-app
+```
+
+Done when: §4.3.9 has the incremental `just desktop-xcframework` time before and after; the DMG still comes from `dist` (the script's printed profile in the workflow log).
+
+Execution plan (Claude Code / sonnet, creator decision 2026-10-17: measure, then close if the gain is small): (1) confirm from `Cargo.toml` and `scripts/desktop/xcframework.sh` which profile the XCFramework uses and whether any LTO is on (`dist` inherits `dev`: no LTO). (2) Time the incremental `just desktop-xcframework` (touch one `cox-app` source file) on the quiet machine under the current `dist` and under the proposed `ffi-dev` settings applied locally. (3) Under 10% faster: close as not needed with both timings in `research.md` §4.3.9, drop T61.3's dependency on T61.2; otherwise implement the steps below.
+
+Out of scope: the bindings generator (T61.3), caching (T61.4).
+
+Result: closed as not needed. `[profile.dist]` is `inherits = "dev"` (no LTO, opt-level 0 for workspace crates, incremental), so the card's premise (fat LTO) does not hold, and `inherits = "release"` would optimize the workspace crates and make the rebuild slower. Incremental `scripts/desktop/xcframework.sh` after a one-line `cox-app` change, five alternating runs each on an Apple M3 Max, wall time: `dist` 23, 21, 20, 20, 21 s (median 21 s); `ffi-dev` as proposed 25, 25, 21, 24, 23 s (median 24 s). Details in `research.md` §4.3.9. Nothing in `Cargo.toml`, the script, the `justfile` or the workflow changed.
+
+Check output (`COX_FFI_PROFILE=dist` run 9 / `ffi-dev` run 10, cargo's lines for the library build):
+```
+Finished `dist` profile [unoptimized + debuginfo] target(s) in 9.53s
+Finished `ffi-dev` profile [optimized + debuginfo] target(s) in 10.34s
+```
+
 #### T66.12 Design: resident sessions and a supervisor
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
