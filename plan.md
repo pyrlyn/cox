@@ -2682,7 +2682,9 @@ Out of scope: the `cox serve --worker` flag and the supervisor that spawns worke
 
 #### T66.20 `cox-serve`: run directory, singleton lock, socket and peer uid
 
-Model: sonnet · Status: open · Depends: T66.19 · Size: ~170 · Priority: P2 · Complexity: 3
+Model: Claude Code / sonnet-5.5 · Status: in progress · Depends: T66.19 · Size: ~170 · Priority: P2 · Complexity: 3
+
+Plan: extract `lock::claim_path` (the existing `lock` tests stay green); `socket.rs` checks the path against `sun_path` first, makes or checks `run/` (`0700`, a real directory, ours, no group or other bits), takes `run/serve.lock` through `claim_path`, then, as the holder, unlinks a stale `serve.sock` and binds it under umask `077` with mode `0600`. Peer uid: tokio `UnixStream::peer_cred` (already in the workspace); effective uid from `nix` (already a workspace dependency). `admit` is a pure predicate and `admit_peer` fails closed. Verify with the seven named tests plus the `lock` and `deps` tests.
 
 Goal: the supervisor's socket is reachable only by the same user, and only one supervisor runs per `COX_HOME`. `docs/design/serve.md` S5 and all of D4 except the `cox attach` bridge and Windows.
 
