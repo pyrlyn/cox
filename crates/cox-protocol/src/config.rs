@@ -918,9 +918,10 @@ impl Default for PermissionsConfig {
 pub struct SandboxConfig {
     /// `sandbox.mode`; project config may not set this to `danger-full-access`.
     pub mode: SandboxMode,
-    /// Whether network access is allowed.
+    /// Whether network access is allowed; project config may not turn it on.
     pub network: bool,
-    /// Extra writable roots beyond the workspace.
+    /// Extra writable roots beyond the workspace; project config may only
+    /// keep roots the user layer already lists.
     pub writable: Vec<PathBuf>,
     /// Paths inside the workspace that stay read-only even in `workspace-write`.
     pub readonly_in_workspace: Vec<PathBuf>,
@@ -934,10 +935,16 @@ impl Default for SandboxConfig {
             mode: SandboxMode::WorkspaceWrite,
             network: false,
             writable: Vec::new(),
+            // Repo-local agent and cloud-credential dirs stay read-only in a
+            // writable workspace; the set follows codex
+            // `codex-rs/protocol/src/permissions.rs` L40-51 at f0c5077c, implemented independently.
             readonly_in_workspace: vec![
                 PathBuf::from(".git"),
                 PathBuf::from(".cox"),
                 PathBuf::from(".claude"),
+                PathBuf::from(".agents"),
+                PathBuf::from(".codex"),
+                PathBuf::from(".aws"),
             ],
             linux_backend: LinuxBackend::Auto,
         }
@@ -1182,7 +1189,8 @@ pub struct McpConfig {
     pub deferred: bool,
     /// `--no-mcp` sets this to `false`; not a `default.toml` key.
     pub enabled: bool,
-    /// `[mcp.servers.<name>]` entries.
+    /// `[mcp.servers.<name>]` entries. User config only: a project config
+    /// cannot add or change a server (T64.7); `.mcp.json` is a separate surface.
     pub servers: HashMap<String, McpServerConfig>,
 }
 
@@ -1500,7 +1508,7 @@ pub struct MemoryConfig {
     pub enabled: bool,
     /// Whether end-of-session extraction runs (on the `memory` job's tier).
     pub extract: bool,
-    /// Override for `~/.cox/projects/<slug>/memory`; empty means default.
+    /// Override for `~/.cox/projects/<slug>/memory`; empty means default. A project config may only name an existing absolute directory inside its own git root (T64.17).
     pub dir: String,
     /// The bar a `salience` `Score` must clear to keep an extracted item
     /// (T33.21.1); fixed here, never moved by the plugin's answer.
@@ -2161,6 +2169,41 @@ mod tests {
                 .compaction
                 .strategy,
             CompactionStrategy::Llm
+        );
+    }
+
+    /// T69.3: repo-local metadata dirs (`.aws` holds credentials that
+    /// `Read(~/.aws/**)` misses when the repo carries its own) stay read-only
+    /// in a writable workspace by default, in the hand-written default and in
+    /// `default.toml` alike.
+    #[test]
+    fn sandbox_readonly_defaults_cover_metadata_dirs() {
+        use figment::providers::Format as _;
+        let expected = [".git", ".cox", ".claude", ".agents", ".codex", ".aws"];
+        let from_toml: Config =
+            figment::Figment::from(figment::providers::Toml::string(DEFAULT_CONFIG_TOML))
+                .extract()
+                .expect("default.toml parses");
+        assert_eq!(
+            Config::default().sandbox.readonly_in_workspace,
+            expected.map(PathBuf::from).to_vec()
+        );
+        assert_eq!(from_toml.sandbox, SandboxConfig::default());
+    }
+
+    /// T69.3: a user who sets `readonly_in_workspace` keeps exactly their own
+    /// list; the default metadata dirs are not appended to it.
+    #[test]
+    fn user_sandbox_readonly_list_is_kept() {
+        use figment::providers::Format as _;
+        let user: Config = figment::Figment::from(figment::providers::Toml::string(
+            "[sandbox]\nreadonly_in_workspace = [\"vendor\"]\n",
+        ))
+        .extract()
+        .expect("user layer parses");
+        assert_eq!(
+            user.sandbox.readonly_in_workspace,
+            vec![PathBuf::from("vendor")]
         );
     }
 

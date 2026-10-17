@@ -106,8 +106,7 @@ thiserror = { workspace = true }
 # T0.7: the CLI boundary loads .env/.env.local before parsing flags.
 dotenvy = { workspace = true }
 serde_json = { workspace = true }
-# T0.5: doctor command checks: keyring for API key detection, crossterm for terminal size
-keyring = { workspace = true }
+# T0.5: doctor command checks: crossterm for terminal size
 crossterm = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }

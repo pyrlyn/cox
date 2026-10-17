@@ -54,8 +54,7 @@ extension View {
         case .connect(let target): connect(target)
         case .connectTyped(let kind, let name):
           if let kind = TargetKind(rawValue: kind),
-            let text = TargetList.text(kind: kind, name: name)
-          {
+            let text = TargetList.text(kind: kind, name: name) {
             connect(text)
           } else {
             connecting.wrappedValue?.failure = "A name has no spaces."

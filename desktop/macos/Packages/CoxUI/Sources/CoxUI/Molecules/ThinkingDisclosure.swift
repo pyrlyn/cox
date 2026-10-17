@@ -33,6 +33,7 @@ struct ThinkingDisclosure: View {
           .textStyle(.caption)
           .foregroundStyle(Color(.textSecondary))
           .textSelection(.enabled)
+          .coxPointer(.selectableText)
           .padding(.vertical, Space.xxs)
           .padding(.leading, Space.l)
           // The mockup's 2 px rule is drawn as the one line width the tokens have.
@@ -68,7 +69,7 @@ public struct ThinkingHeader: View {
       .foregroundStyle(Color(.textSecondary))
       .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
     .accessibilityValue(isExpanded ? "expanded" : "collapsed")
   }
 }

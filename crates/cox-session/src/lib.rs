@@ -28,6 +28,7 @@ use cox_tools::send_message::SendMessageTool;
 
 #[cfg(feature = "plugins")]
 pub mod acp_session;
+pub mod allow_rules;
 #[cfg(feature = "plugins")]
 mod cloud_agents;
 pub mod doctor;
@@ -311,7 +312,8 @@ pub async fn open_reporting(
             Some(keys) => cox_provider::http::resolve_key_with(var, section, |s| keys(s)),
             None => cox_provider::http::resolve_key(var, section),
         };
-        cox_plugin::provider::backends(&plugins.live, &resolve, estimate)
+        let table = |section: &str| provider::abi_section(&config, section);
+        cox_plugin::provider::backends(&plugins.live, &resolve, &table, estimate)
     };
     #[cfg(not(feature = "plugins"))]
     let abi_raw = std::collections::HashMap::new();
@@ -564,6 +566,8 @@ pub async fn open_reporting(
     session.set_checkpointer(Arc::new(cox_tools::checkpoint::GitCheckpointer::new(
         home.clone(),
     )));
+    // T69.2: `permissions.allow_for_session_persists` writes the user config.
+    session.set_allow_rule_store(Arc::new(allow_rules::UserConfigRules::user()));
     // T27.3: `agent(isolation: "worktree")` gets real worktrees on every surface.
     session.set_worktrees(Arc::new(cox_tools::git::GitWorktrees));
     // P43: the repo map, built once on the first submit when

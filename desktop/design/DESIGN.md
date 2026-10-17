@@ -388,6 +388,7 @@ component.
 | `CapsuleStyle(.plain/.active, isIcon:)` | Toolbar capsules and filter chips; `isIcon` makes a round capsule for a symbol alone (`.cap.icon`): readable glass face at e1 with a `surface.capsuleBorder` hairline (the mockup's `--glass-b`); active takes `surface.window`, an `accent` label and an `accent.soft` halo; states as `CoxButtonStyle` | `size.capsuleHeight`, `radius.capsule`, `surface.capsule`, `font.control` | `.cap`, `.cap.hot` |
 | `CoxSegmented(_ label:, selection:, options:, look:, title:)` | Segmented control; the e1-lifted selection pill slides between segments, or cross-fades under Reduce Motion (`coxMatchedGeometry`). `look` marks the selected segment per option: `plain`, `tinted(colour)` label, or `filled(colour)` pill with a `text.onAccent` label (the §3.1 mode colours). A view, not a `PickerStyle`: SwiftUI has no public hook to restyle segments on macOS | `e1`, `surface.capsule`, `font.segment` | `.seg` |
 | `CoxToggleStyle`, `CoxSlider(_ label:, value:, in:)` | Toggles and sliders with the shared 3D `Knob` (white disc, hairline rim, e1) over an `insetWell` track filled with `accent`; the toggle's knob slides, or cross-fades under Reduce Motion. Disabled, both lose the accent and the knob's lift, as a disabled button does: the toggle's track shows `fill.secondary` and its label `text.secondary`, the slider drops its fill. The slider is a view: macOS has no public `SliderStyle` | `e1`, `accent`, `fill.secondary` | `.tog`, `.slider` |
+| `.coxPointer(_ interaction:)`, `.coxPointer(handle:)`, `.coxControlPointer()`, `CoxPlainButtonStyle` (`.buttonStyle(.coxPlain)`) | The pointer over an element. The view says what it is (`PointerInteraction`: `clickable`, `selectable`, `pressed`, `blocked`), the shared Rust rule (`cox_render::pointer`, A141) answers a `Pointer`, and the modifier only maps that to the platform: `Action` → `PointerStyle.link`, `Text` → `.horizontalText`, `Default` → `.default`, `NotAllowed` → `NSCursor.operationNotAllowed` (SwiftUI has no style for it), `Resize(edge)` → `.rowResize` / `.columnResize`. CoxUI links no Rust, so the rule reaches it through the `pointerRule` environment value, which the app sets at each scene root from CoxCore's `corePointer`; with none set (previews, snapshots) every element gets the arrow. `ControlStateReader` applies it, so `CoxButtonStyle`, `CapsuleStyle`, `SendButtonStyle`, the tool header and the stop button need no call of their own; `CoxPlainButtonStyle` is `.plain` plus the pointer, with `isChosen` for the selected row or active tab; `.coxControlPointer()` does the same for a control that must keep a system style (a `Menu`). A drag handle is not an `Interaction`, so its view names the edge with `.coxPointer(handle:)`. A lint rule rejects `.pointerStyle(` outside `Foundations/` | — | CSS `cursor` |
 
 ### 6.2 Atoms
 
@@ -528,6 +529,15 @@ mockup's welcome hero needs a title token and the app icon, which do not exist y
 ## 8. Accessibility
 
 - Every interactive element has a label; icon-only buttons have a tooltip with their shortcut.
+- The pointer says what a click or a selection will do, and one rule decides it for every client
+  (A141, `cox_render::pointer`): a hand over anything that can be clicked, an I-beam over text that
+  can be selected and copied, the arrow over an element already pressed (the selected row, the
+  active segment or tab, a button whose action is running) and over the rest, the not-allowed
+  pointer over a disabled or locked control, and a resize pointer over a drag handle. The first
+  fact that holds wins, in that order: blocked, pressed, clickable, selectable. A client states
+  the facts and maps the answer to its own cursor API; it never writes the rule. The macOS app
+  does it in `.coxPointer(_:)` (§6.1); the Windows client (P58) maps the same `Pointer` to its own
+  cursor, and the TUI to OSC 22.
 - Text contrast is at least 4.5:1 against its surface in every material and appearance; the snapshot
   suite checks the Frosted renders. For Frosted and Glossy the surface is the glass laid over the
   window fill — each pane's tint at the material's window opacity over opaque `surface.window` — the

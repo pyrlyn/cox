@@ -1,7 +1,8 @@
 # SwiftLint for the macOS app (T37.18, DS§9, research.md §9.5.4). One config for every
 # package under Packages/: SwiftLint's default rules plus custom rules that reject literal
 # colours, sizes, fonts, radii, shadows and durations outside `Tokens/` and `Foundations/`,
-# the only two places a design value may be spelled out. Formatting is not SwiftLint's job:
+# the only two places a design value may be spelled out; `.pointerStyle` is also kept inside
+# `Foundations/`. Formatting is not SwiftLint's job:
 # the toolchain's own `swift-format` (default configuration) owns it (research.md §9.5.5).
 #
 # Version: SwiftLint 0.65.1, pinned in the repository's mise.toml. Each package pins the
@@ -89,6 +90,17 @@ custom_rules:
     message: 'Use `.elevation(.<level>)` (DS§3, DS§9)'
     severity: error
     excluded: '/(?:Tokens|Foundations)/'
+    excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+
+  # The pointer is the core's answer (`cox_render::pointer`, A141), mapped to the platform in
+  # one place: `.coxPointer(_:)` in Foundations. A view that sets `.pointerStyle` itself would
+  # bypass the shared rule (DS§6.1, DS§8).
+  no_pointer_style_outside_foundations:
+    name: No pointerStyle outside Foundations
+    regex: '\.pointerStyle\s*\('
+    message: 'Use `.coxPointer(_:)`, which asks the shared pointer rule (DS§6.1, DS§8)'
+    severity: error
+    excluded: '/Foundations/'
     excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
 
   no_literal_duration:

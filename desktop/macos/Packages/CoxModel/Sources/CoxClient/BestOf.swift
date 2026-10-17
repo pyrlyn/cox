@@ -37,6 +37,26 @@ public struct BestOfRequest: Equatable, Sendable {
   }
 }
 
+/// `cox_app::BestOfMerge` (T52.24, T52.25): the candidates of group `id` the person chose to
+/// merge, and who merges them: cox on a model, or an external agent.
+public struct BestOfMerge: Equatable, Sendable {
+  public var id: String
+  /// Candidate indexes, ascending.
+  public var from: [UInt32]
+  public var merger: Candidate
+
+  public init(id: String, from: [UInt32], merger: Candidate) {
+    (self.id, self.from, self.merger) = (id, from.sorted(), merger)
+  }
+}
+
+/// Why `merge` refused before anything started, as `cox_app::BestOfError` words the three cases.
+public enum BestOfMergeError: Error, Equatable, Sendable {
+  case tooFew
+  case notDone(index: UInt32)
+  case picked
+}
+
 /// `cox_app::CandidateState`: where a candidate is.
 public enum CandidateState: Equatable, Sendable {
   case running, waitingOnYou, done
@@ -73,13 +93,15 @@ public struct CandidateView: Equatable, Sendable, Identifiable {
   /// Its own ledger rows; 0 for an external agent, which bills itself.
   public var costUsd: Double
   public var durationMs: UInt64
+  /// The candidates this one merged (T52.26); `nil` for one the launch started.
+  public var mergedFrom: [UInt32]?
 
   public var id: UInt32 { index }
 
   public init(
     index: UInt32, candidate: Candidate, state: CandidateState, session: String? = nil,
     worktree: String? = nil, branch: String? = nil, files: [FileStat] = [], costUsd: Double = 0,
-    durationMs: UInt64 = 0
+    durationMs: UInt64 = 0, mergedFrom: [UInt32]? = nil
   ) {
     (self.index, self.candidate, self.label, self.state) =
       (index, candidate, candidate.label, state)
@@ -87,7 +109,7 @@ public struct CandidateView: Equatable, Sendable, Identifiable {
     (self.added, self.removed) = (
       files.reduce(0) { $0 + $1.added }, files.reduce(0) { $0 + $1.removed }
     )
-    (self.costUsd, self.durationMs) = (costUsd, durationMs)
+    (self.costUsd, self.durationMs, self.mergedFrom) = (costUsd, durationMs, mergedFrom)
   }
 }
 
@@ -125,6 +147,12 @@ public protocol BestOfClient: Sendable {
   /// Keeps candidate `keep` and prunes the others; `discard` is the second confirmation for
   /// worktrees with changes, which are otherwise left and listed.
   func pick(_ id: String, keep: UInt32, discard: Bool) async throws -> Picked
+  /// Merges the chosen finished candidates with `request.by` in a new worktree; the merge joins
+  /// the group as one more candidate, and its session is in the launch. Refused before anything
+  /// starts for fewer than two, one not finished, or a picked group.
+  func merge(_ request: BestOfMerge, theme: String) async throws -> BestOfLaunch
+  /// The candidates a merge may take, decided by the core so every client offers the same choice.
+  func mergeable(_ id: String) async throws -> [UInt32]
 }
 
 /// Fixed columns and the core's pick rule over them: enough to drive the compare view in a test
@@ -132,6 +160,7 @@ public protocol BestOfClient: Sendable {
 public final class FixtureBestOf: BestOfClient {
   private let columns: Mutex<[CandidateView]>
   private let dirty: Set<String>
+  private let asked = Mutex<[BestOfMerge]>([])
 
   public init(_ columns: [CandidateView], dirty: Set<String> = []) {
     self.columns = Mutex(columns)
@@ -145,7 +174,40 @@ public final class FixtureBestOf: BestOfClient {
     BestOfLaunch(id: "fixture", sessions: [])
   }
 
+  /// The merges asked for, in order.
+  public var merges: [BestOfMerge] { asked.withLock { $0 } }
+
   public func compare(_ id: String) async -> [CandidateView] { columns.withLock { $0 } }
+
+  public func mergeable(_ id: String) async -> [UInt32] {
+    columns.withLock { Self.eligible($0) }
+  }
+
+  /// The core's rule: finished, still holding a worktree, and nothing kept yet.
+  private static func eligible(_ views: [CandidateView]) -> [UInt32] {
+    guard !views.contains(where: { $0.state == .kept }) else { return [] }
+    return views.filter { $0.state == .done && $0.worktree != nil }.map(\.index)
+  }
+
+  /// Refuses as the core does, else adds the merger as a running candidate with a worktree.
+  public func merge(_ request: BestOfMerge, theme: String) async throws -> BestOfLaunch {
+    try columns.withLock { views in
+      guard Set(request.from).count >= 2 else { throw BestOfMergeError.tooFew }
+      guard !views.contains(where: { $0.state == .kept }) else { throw BestOfMergeError.picked }
+      let ready = Set(Self.eligible(views))
+      if let missing = request.from.first(where: { !ready.contains($0) }) {
+        throw BestOfMergeError.notDone(index: missing)
+      }
+      let index = (views.map(\.index).max() ?? 0) + 1
+      views.append(
+        CandidateView(
+          index: index, candidate: request.merger, state: .running, session: "s\(index)",
+          worktree: "/w/best-\(request.id)-\(index + 1)",
+          branch: "best-\(request.id)-\(index + 1)", mergedFrom: request.from))
+    }
+    asked.withLock { $0.append(request) }
+    return BestOfLaunch(id: request.id, sessions: [])
+  }
 
   public func pick(_ id: String, keep: UInt32, discard: Bool) async -> Picked {
     columns.withLock { views in

@@ -1,0 +1,146 @@
+// `{{id}}`: a cox plugin scaffolded by `cox plugin new`. Only the exports
+// `--with` asked for are here; `plugin.toml`'s `[capabilities]` matches
+// them exactly. See `docs/design/plugins.md` PL§4 in the cox repository
+// for what each export and host call does.
+//
+// Keep decisions in plain functions so `go test` can check them on the
+// host; the `//go:wasmexport` functions run only in the TinyGo build.
+package main
+
+import (
+	// cox:with=tool
+	"encoding/json"
+
+	// cox:end
+	cox "github.com/pyrlyn/cox/plugins/sdk-go"
+)
+
+// Fields are set one by one rather than in a literal so every `--with`
+// combination stays gofmt-clean.
+func initPlugin(cox.InitIn) (cox.InitOut, error) {
+	var out cox.InitOut
+	// cox:with=status
+	out.Status = []cox.Slot{cox.StatusRight}
+	// cox:end
+	// cox:with=panel
+	out.Panels = []cox.Slot{cox.Panel}
+	// cox:end
+	// cox:with=command
+	out.Commands = []cox.CommandDecl{{Name: "hello", Description: "Say hello"}}
+	// cox:end
+	// cox:with=key
+	out.Keys = []cox.KeyDecl{{Key: "g h", Name: "hello", Description: "Say hello"}}
+	// cox:end
+	// cox:with=renderer
+	out.Renderers = []string{"item:assistant_message"}
+	// cox:end
+	// cox:with=event
+	out.Subscribe = []string{"turn_started"}
+	// cox:end
+	// cox:with=tool
+	out.Tools = []json.RawMessage{json.RawMessage(`{
+		"name": "hello",
+		"description": "TODO: describe what this tool does",
+		"input_schema": {"type": "object", "properties": {}}
+	}`)}
+	// cox:end
+	return out, nil
+}
+
+//go:wasmexport cox_init
+func coxInit() int32 { return cox.Export(initPlugin) }
+
+// cox:with=event
+//go:wasmexport cox_on_event
+func coxOnEvent() int32 {
+	return cox.Export(func(cox.EventBatch) (cox.Effects, error) {
+		// TODO: react to the events this plugin subscribed to in initPlugin.
+		return cox.Effects{}, nil
+	})
+}
+
+// cox:end
+// cox:with=hook
+//go:wasmexport cox_hook
+func coxHook() int32 {
+	return cox.Export(func(cox.HookCall) (any, error) {
+		// TODO: inspect the call's Payload and answer with the hook's own
+		// outcome shape, e.g. {"type": "continue"}.
+		return map[string]string{"type": "continue"}, nil
+	})
+}
+
+// cox:end
+// cox:with=tool
+//go:wasmexport cox_tool_call
+func coxToolCall() int32 {
+	return cox.Export(func(cox.ToolCallIn) (any, error) {
+		// TODO: implement the `hello` tool declared in initPlugin.
+		return map[string]string{"output": "TODO: implement this tool"}, nil
+	})
+}
+
+// cox:end
+// cox:with=provider
+//go:wasmexport cox_provider_stream
+func coxProviderStream() int32 {
+	return cox.Export(func(call map[string]any) ([]any, error) {
+		// TODO: translate call["request"] and stream `ProviderEvent`s back.
+		return []any{}, nil
+	})
+}
+
+// cox:end
+// cox:with=command
+//go:wasmexport cox_command
+func coxCommand() int32 {
+	return cox.Export(func(c cox.CommandIn) (cox.CommandOut, error) {
+		if c.Name != "hello" {
+			return cox.Nothing(), nil
+		}
+		return cox.Notice(cox.Info, "hello from {{id}}"), nil
+	})
+}
+
+// cox:end
+// cox:with=key
+//go:wasmexport cox_key
+func coxKey() int32 {
+	return cox.Export(func(cox.CommandIn) (cox.CommandOut, error) {
+		// TODO: react to the key named in the input's Name.
+		return cox.Nothing(), nil
+	})
+}
+
+// cox:end
+// cox:with=status,panel
+//go:wasmexport cox_render
+func coxRender() int32 {
+	return cox.Export(func(in cox.RenderIn) (cox.Widget, error) {
+		// cox:with=status
+		if in.Slot == cox.StatusLeft || in.Slot == cox.StatusRight {
+			return cox.TextWidget([]cox.Span{{Text: "{{id}} ready"}}), nil
+		}
+		// cox:end
+		// cox:with=panel
+		if in.Slot == cox.Panel {
+			return cox.TextWidget([]cox.Span{{Text: "TODO: panel content"}}), nil
+		}
+		// cox:end
+		return cox.TextWidget(), nil
+	})
+}
+
+// cox:end
+// cox:with=renderer
+//go:wasmexport cox_render_item
+func coxRenderItem() int32 {
+	return cox.Export(func(map[string]any) (cox.Widget, error) {
+		// TODO: return a widget, or nil to keep the default rendering.
+		return nil, nil
+	})
+}
+
+// cox:end
+// TinyGo's c-shared build never runs main; cox calls the exports.
+func main() {}

@@ -21,7 +21,7 @@ struct ComposerChipRow: View {
       } label: {
         ComposerChip("", kind: .attachment)
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.coxPlain)
       .help("Attach files")
       .accessibilityLabel("Attach files")
       if let mode = state.mode {
@@ -34,7 +34,7 @@ struct ComposerChipRow: View {
           ComposerChip(
             model, kind: .model, provider: state.provider, hasProblem: state.modelProblem != nil)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.coxPlain)
         // The screen hangs the model popover over this chip.
         .anchorPreference(key: ModelChipAnchor.self, value: .bounds) { $0 }
         .help(state.modelProblem ?? "Model")

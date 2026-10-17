@@ -191,6 +191,88 @@ fn set_value_in(path: &Path, key: &str, value: TomlValue) -> Result<(), ConfigEr
     write_file(path, &contents)
 }
 
+/// Appends one rule string to `permissions.allow` in the config file at
+/// `path` (T69.2): `Ok(true)` when the file changed, `Ok(false)` when the
+/// rule was already there. Unlike [`set`], which a person runs once at a
+/// terminal, this runs at an approval prompt while other cox sessions may be
+/// doing the same, so the read-edit-write holds an advisory lock on a
+/// sibling file and the new contents land through a temp file and a rename:
+/// two sessions cannot interleave into a lost rule or a half-written file.
+pub fn append_allow_rule_in(path: &Path, rule: &str) -> Result<bool, ConfigError> {
+    const KEY: &str = "permissions.allow";
+    // A dotfiles setup symlinks `config.toml`; renaming over the link would
+    // replace it with a regular file, so the edit lands on the target.
+    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let name = target.file_name().map_or_else(
+        || "config.toml".into(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    // The lock is a separate file: the rename swaps the config's inode, and a
+    // lock on the old inode would guard nothing.
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(target.with_file_name(format!(".{name}.lock")))?;
+    lock.lock()?;
+
+    let existing = match fs::read_to_string(&target) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let mut doc: DocumentMut = existing.parse().map_err(|error| ConfigError::InvalidToml {
+        path: target.clone(),
+        error,
+    })?;
+    let permissions = doc
+        .as_table_mut()
+        .entry("permissions")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| ConfigError::NotATable {
+            part: "permissions".into(),
+            key: KEY.into(),
+        })?;
+    let allow = permissions
+        .entry("allow")
+        .or_insert(Item::Value(TomlValue::Array(Default::default())))
+        .as_array_mut()
+        .ok_or_else(|| ConfigError::NotAnArray { key: KEY.into() })?;
+    if allow.iter().any(|v| v.as_str() == Some(rule)) {
+        return Ok(false);
+    }
+    // One rule per line, like the list a person would write by hand; an
+    // array the user kept inline stays inline.
+    let multiline = allow.is_empty()
+        || allow.iter().any(|v| {
+            v.decor()
+                .prefix()
+                .and_then(|p| p.as_str())
+                .is_some_and(|p| p.contains('\n'))
+        });
+    let mut value = TomlValue::from(rule);
+    if multiline {
+        value.decor_mut().set_prefix("\n    ");
+        allow.set_trailing_comma(true);
+        allow.set_trailing("\n");
+    }
+    allow.push_formatted(value);
+
+    let contents = doc.to_string();
+    config_load::check_user_toml(&contents)?;
+    let temp = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let written = fs::write(&temp, &contents).and_then(|()| fs::rename(&temp, &target));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&temp);
+        return Err(e.into());
+    }
+    Ok(true)
+}
+
 #[cfg(test)]
 // why: env::set_var/remove_var are unsafe in edition 2024 (per-process tests).
 #[allow(unsafe_code)]
@@ -422,5 +504,76 @@ mod tests {
         assert_eq!(loaded.config.desktop.appearance.blur, 60.0);
         let loaded = set_then_load("desktop.transcript.text_size", "24").expect("the bound loads");
         assert_eq!(loaded.config.desktop.transcript.text_size, 24.0);
+    }
+
+    #[test]
+    fn allow_rule_append_creates_the_file_and_adds_one_line() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("nested").join("config.toml");
+        assert!(append_allow_rule_in(&path, "Bash(git status:*)").expect("append"));
+        let written = fs::read_to_string(&path).expect("read back");
+        assert_eq!(
+            written,
+            "[permissions]\nallow = [\n    \"Bash(git status:*)\",\n]\n"
+        );
+        config_load::check_user_toml(&written).expect("the file still loads");
+    }
+
+    #[test]
+    fn allow_rule_append_skips_a_duplicate_and_keeps_comments() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            "# mine\n[permissions]\n# keep\nallow = [\"Read(src/**)\"]\n",
+        )
+        .expect("seed");
+        assert!(append_allow_rule_in(&path, "Bash(cargo test:*)").expect("first"));
+        let once = fs::read_to_string(&path).expect("read");
+        assert!(!append_allow_rule_in(&path, "Bash(cargo test:*)").expect("second"));
+        assert_eq!(fs::read_to_string(&path).expect("read"), once);
+        assert!(once.contains("# mine") && once.contains("# keep"), "{once}");
+        assert_eq!(once.matches("Bash(cargo test:*)").count(), 1);
+        // An inline array stays inline.
+        assert!(
+            once.contains("allow = [\"Read(src/**)\", \"Bash(cargo test:*)\"]"),
+            "{once}"
+        );
+    }
+
+    #[test]
+    fn allow_rule_append_refuses_a_non_array_and_leaves_the_file() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "[permissions]\nallow = \"Bash\"\n").expect("seed");
+        let before = fs::read(&path).expect("read");
+        let err = append_allow_rule_in(&path, "Bash(ls:*)");
+        assert!(
+            matches!(err, Err(ConfigError::NotAnArray { .. })),
+            "{err:?}"
+        );
+        assert_eq!(fs::read(&path).expect("read"), before);
+    }
+
+    #[test]
+    fn allow_rule_append_from_many_threads_loses_nothing() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::thread::scope(|s| {
+            for n in 0..8 {
+                let path = &path;
+                s.spawn(move || {
+                    append_allow_rule_in(path, &format!("Bash(tool{n}:*)")).expect("append");
+                });
+            }
+        });
+        let written = fs::read_to_string(&path).expect("read back");
+        for n in 0..8 {
+            assert_eq!(
+                written.matches(&format!("Bash(tool{n}:*)")).count(),
+                1,
+                "{written}"
+            );
+        }
     }
 }

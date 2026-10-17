@@ -77,8 +77,8 @@ pub fn pending_description(server: &str) -> String {
 
 /// `true` for a server the user wrote down themselves. Project `.mcp.json`
 /// and a plugin package are not that. A missing source fails closed.
-/// `config` is the merged `[mcp.servers]` layer; T64.7 still owns reverting
-/// a project-added entry inside it, and this function does not.
+/// `config` is the merged `[mcp.servers]` layer, in which the project-config
+/// guard has already reverted any project-added or changed entry (T64.7).
 pub fn user_config_layer(source: Option<&str>) -> bool {
     matches!(source, Some("config" | "~/.claude.json"))
 }

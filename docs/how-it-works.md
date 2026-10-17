@@ -397,7 +397,7 @@ repository instruction files are all untrusted. Four guards from
 confinement** (`cox_tools::path::confine`) rejects workspace escapes
 before a file tool runs; the **sandbox** confines shell commands and every
 stdio MCP server's process unless the session chose `danger-full-access`
-or, per server, `sandbox = false` (T33.42); terminal **sanitisation**
+or, per server, `sandbox = false` (T33.42); a server the host cannot wrap is skipped with a warning, never run bare (T64.10); terminal **sanitisation**
 strips escape sequences and bidi overrides before anything the model or
 a tool wrote is displayed. A broken hook, skill, or MCP server is a
 warning and an absence, never a fatal error.

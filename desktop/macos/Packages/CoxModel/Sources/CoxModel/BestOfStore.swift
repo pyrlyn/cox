@@ -44,6 +44,13 @@ public final class BestOfStore {
   /// Why a pick left the rest: still running, or git refused.
   public private(set) var refused: [String] = []
 
+  /// The candidates a merge may take, as the core lists them (T52.25).
+  public private(set) var mergeable: [UInt32] = []
+  /// The candidates the person ticked for the merge; always a subset of `mergeable`.
+  public private(set) var chosen: Set<UInt32> = []
+  /// Who merges them; chosen from the same candidates the best-of control offers.
+  public var merger: Candidate?
+
   private let client: any BestOfClient
 
   public init(id: String, client: any BestOfClient) { (self.id, self.client) = (id, client) }
@@ -51,6 +58,9 @@ public final class BestOfStore {
   public func refresh() async {
     do {
       columns = try await client.compare(id)
+      mergeable = try await client.mergeable(id)
+      // A candidate that was pruned, picked over or is gone can no longer be merged.
+      chosen.formIntersection(mergeable)
       failure = nil
     } catch {
       failure = String(describing: error)
@@ -69,6 +79,48 @@ public final class BestOfStore {
       guard !Task.isCancelled else { return }
       await refresh()
     }
+  }
+
+  /// Ticks or unticks candidate `index` for the merge; one the core does not list is ignored.
+  public func toggle(_ index: UInt32) {
+    guard mergeable.contains(index) else { return }
+    if chosen.contains(index) { chosen.remove(index) } else { chosen.insert(index) }
+  }
+
+  /// Ticks every candidate the core lists, as the merge sheet opens.
+  public func chooseAll() { chosen = Set(mergeable) }
+
+  /// The merge as the core takes it: two or more chosen candidates and a merger.
+  public var mergeRequest: BestOfMerge? {
+    guard chosen.count >= 2, let merger else { return nil }
+    return BestOfMerge(id: id, from: Array(chosen), merger: merger)
+  }
+
+  /// Merges the chosen candidates. The columns are read again so the merge candidate shows at
+  /// once; the person's choice is cleared when it started, and kept when the core refused it.
+  /// Returns the launch, whose session the window opens.
+  @discardableResult
+  public func merge(theme: String) async -> BestOfLaunch? {
+    guard let request = mergeRequest else { return nil }
+    var launch: BestOfLaunch?
+    do {
+      launch = try await client.merge(request, theme: theme)
+      chosen = []
+      failure = nil
+    } catch {
+      failure = String(describing: error)
+    }
+    let reason = failure
+    await refresh()
+    // `refresh` clears a failure it did not hit; the refusal is still the news.
+    if let reason { failure = reason }
+    return launch
+  }
+
+  /// The labels of the candidates `view` merged, in the order it took them; empty for a candidate
+  /// the launch started. A merged candidate that has since gone is skipped.
+  public func merged(by view: CandidateView) -> [String] {
+    (view.mergedFrom ?? []).compactMap { from in columns.first { $0.index == from }?.label }
   }
 
   /// What keeping `index` prunes, for the confirmation to list: every other candidate that still

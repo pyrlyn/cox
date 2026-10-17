@@ -26,16 +26,27 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-const THREE_PLUS_SUMMARY: &str = concat!(
-    "[[turn]]\ntext = \"first\"\n",
-    "[[turn]]\ntext = \"second\"\n",
-    "[[turn]]\ntext = \"third\"\n",
-    "[[turn]]\ntext = \"## Goal\\nstuff\\n## Decisions\\nnone\\n## Files touched\\na.rs\\n## Open todo\\nnone\\n## Errors seen\\nnone\\n## Next step\\ngo\"\n",
-);
+/// A summary body past the 500-character floor (T69.5); the scripted
+/// summaries below carry it as a `## Decisions` section.
+fn pad() -> String {
+    "Keep the parser change small and covered by a test. ".repeat(12)
+}
+
+fn three_plus_summary() -> String {
+    format!(
+        concat!(
+            "[[turn]]\ntext = \"first\"\n",
+            "[[turn]]\ntext = \"second\"\n",
+            "[[turn]]\ntext = \"third\"\n",
+            "[[turn]]\ntext = \"## Goal\\nstuff\\n## Decisions\\n{}\\n## Files touched\\na.rs\\n## Open todo\\nnone\\n## Errors seen\\nnone\\n## Next step\\ngo\"\n",
+        ),
+        pad()
+    )
+}
 
 fn open_three() -> (Session, Arc<MemoryStore>, mpsc::Receiver<Event>) {
     let config = cox_protocol::Config::default();
-    let provider = Arc::new(Scripted::from_toml(THREE_PLUS_SUMMARY, "").expect("scenario"));
+    let provider = Arc::new(Scripted::from_toml(&three_plus_summary(), "").expect("scenario"));
     let store = Arc::new(MemoryStore::new());
     let session = Session::new(
         config,
@@ -156,6 +167,8 @@ async fn compact_request_after_compaction_keeps_cached_prefix() {
     assert_eq!(before, prefix_of(&session.history().await));
 }
 
+const COMPACTED: &str = "compacted-summary: keep the parser change small and covered by a test. compacted-summary: keep the parser change small and covered by a test. compacted-summary: keep the parser change small and covered by a test. compacted-summary: keep the parser change small and covered by a test. compacted-summary: keep the parser change small and covered by a test. compacted-summary: keep the parser change small and covered by a test.";
+
 /// Records the summariser's system prompt so the focus test sees it.
 struct Probe {
     system: Mutex<String>,
@@ -185,7 +198,7 @@ impl Provider for Probe {
             *self.system.lock().expect("lock") = req.system[0].text.clone();
         }
         let text = if req.job == Job::Compact {
-            "compacted-summary"
+            COMPACTED
         } else {
             "ok"
         };
@@ -538,17 +551,22 @@ impl Tool for Named {
     }
 }
 
-const STATE_SCENARIO: &str = concat!(
-    "[[turn]]\ntext = \"working\"\ntool_calls = [\n",
-    "  { name = \"read\", input = { path = \"src/lib.rs\" } },\n",
-    "  { name = \"edit\", input = { path = \"src/lib.rs\" } },\n",
-    "  { name = \"bash\", input = { command = \"cargo test\" } },\n",
-    "]\n",
-    "[[turn]]\ntext = \"first done\"\n",
-    "[[turn]]\ntext = \"second\"\n",
-    "[[turn]]\ntext = \"third\"\n",
-    "[[turn]]\ntext = \"## Goal\\nfix the parser\\n## Next step\\nrerun\"\n",
-);
+fn state_scenario() -> String {
+    format!(
+        concat!(
+            "[[turn]]\ntext = \"working\"\ntool_calls = [\n",
+            "  {{ name = \"read\", input = {{ path = \"src/lib.rs\" }} }},\n",
+            "  {{ name = \"edit\", input = {{ path = \"src/lib.rs\" }} }},\n",
+            "  {{ name = \"bash\", input = {{ command = \"cargo test\" }} }},\n",
+            "]\n",
+            "[[turn]]\ntext = \"first done\"\n",
+            "[[turn]]\ntext = \"second\"\n",
+            "[[turn]]\ntext = \"third\"\n",
+            "[[turn]]\ntext = \"## Decisions\\n{}\\n## Goal\\nfix the parser\\n## Next step\\nrerun\"\n",
+        ),
+        pad()
+    )
+}
 
 #[tokio::test]
 async fn compact_state_llm_summary_lists_touched_paths_and_failing_command() {
@@ -566,7 +584,7 @@ async fn compact_state_llm_summary_lists_touched_paths_and_failing_command() {
     let store = Arc::new(MemoryStore::new());
     let session = Session::new(
         config,
-        Arc::new(Scripted::from_toml(STATE_SCENARIO, "").expect("scenario")),
+        Arc::new(Scripted::from_toml(&state_scenario(), "").expect("scenario")),
         tools,
         store.clone(),
         store.clone(),
@@ -633,7 +651,11 @@ async fn compact_archived(
     let session = Session::new(
         config,
         Arc::new(
-            Scripted::from_toml(&archived_scenario(turns, "## Goal\\nship"), "").expect("scenario"),
+            Scripted::from_toml(
+                &archived_scenario(turns, &format!("## Decisions\\n{}\\n## Goal\\nship", pad())),
+                "",
+            )
+            .expect("scenario"),
         ),
         tools,
         store.clone(),
@@ -752,4 +774,448 @@ async fn compaction_notice_shows_the_newest_32_of_40_ids() {
         .collect();
     assert_eq!(listed, want, "the newest 32 of 40, ascending: {text}");
     assert!(text.ends_with("\n… and 8 more"), "{text}");
+}
+
+/// `Scripted` that fails the first `fail_compact` summariser requests as too
+/// long, records everything it is sent, and can report a context size large
+/// enough to fire the auto trigger.
+struct Flaky {
+    inner: Scripted,
+    fail_compact: usize,
+    /// `(max_context, input_tokens every main call reports)`.
+    context: Option<(u32, u32)>,
+    sent: Mutex<Vec<Request>>,
+}
+
+impl Flaky {
+    fn compact_requests(&self) -> Vec<Request> {
+        let sent = self.sent.lock().expect("lock");
+        sent.iter()
+            .filter(|r| r.job == Job::Compact)
+            .cloned()
+            .collect()
+    }
+}
+
+#[async_trait]
+impl Provider for Flaky {
+    fn id(&self) -> ProviderId {
+        self.inner.id()
+    }
+    fn capabilities(&self) -> Caps {
+        Caps {
+            max_context: self.context.map_or(u32::MAX, |c| c.0),
+            count_tokens: false,
+            ..self.inner.capabilities()
+        }
+    }
+    async fn stream(
+        &self,
+        req: Request,
+        sink: mpsc::Sender<ProviderEvent>,
+        cancel: CancellationToken,
+    ) -> Result<Usage, ProviderError> {
+        let job = req.job.clone();
+        let earlier = {
+            let mut sent = self.sent.lock().expect("lock");
+            let n = sent.iter().filter(|r| r.job == Job::Compact).count();
+            sent.push(req.clone());
+            n
+        };
+        if job == Job::Compact && earlier < self.fail_compact {
+            return Err(ProviderError::ContextTooLong { max: 1, got: 2 });
+        }
+        let Some((_, reported)) = self.context.filter(|_| job == Job::Main) else {
+            return self.inner.stream(req, sink, cancel).await;
+        };
+        // The session reads the context size off the streamed `Usage`.
+        let (tx, mut rx) = mpsc::channel(64);
+        let forward = async {
+            while let Some(mut ev) = rx.recv().await {
+                if let ProviderEvent::Usage { usage } = &mut ev {
+                    usage.input_tokens = reported;
+                }
+                if sink.send(ev).await.is_err() {
+                    break;
+                }
+            }
+        };
+        let (usage, ()) = tokio::join!(self.inner.stream(req, tx, cancel), forward);
+        let mut usage = usage?;
+        usage.input_tokens = reported;
+        Ok(usage)
+    }
+    async fn count_tokens(&self, req: &Request) -> Result<u32, ProviderError> {
+        self.inner.count_tokens(req).await
+    }
+}
+
+/// Turn 1 reads a 20 000-byte result, so the ladder's rungs differ in size.
+fn flaky_scenario(extra: &[&str], summary: &str) -> String {
+    let mut toml = String::from(
+        "[[turn]]\ntext = \"reading\"\ntool_calls = [{ name = \"big\", input = {} }]\n\n",
+    );
+    for text in ["done", "second", "third"].iter().chain(extra) {
+        toml.push_str(&format!("[[turn]]\ntext = \"{text}\"\n\n"));
+    }
+    toml.push_str(&format!("[[turn]]\ntext = \"{summary}\"\n"));
+    toml
+}
+
+fn open_flaky(
+    scenario: &str,
+    fail_compact: usize,
+    context: Option<(u32, u32)>,
+) -> (Session, Arc<Flaky>, mpsc::Receiver<Event>) {
+    let mut config = cox_protocol::Config::default();
+    config.context.tool_output_visible_bytes = 128_000;
+    let provider = Arc::new(Flaky {
+        inner: Scripted::from_toml(scenario, "").expect("scenario"),
+        fail_compact,
+        context,
+        sent: Mutex::new(Vec::new()),
+    });
+    let mut tools = common::tools();
+    tools.push(Arc::new(Big(20_000)));
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        config,
+        provider.clone(),
+        tools,
+        store.clone(),
+        store,
+        PathBuf::from("/tmp/cox-turn"),
+    )
+    .expect("session");
+    let rx = session.events().expect("events once");
+    (session, provider, rx)
+}
+
+fn request_bytes(req: &Request) -> usize {
+    serde_json::to_vec(&req.messages).expect("json").len()
+}
+
+/// Every event up to the end of the queue, without waiting for a turn.
+fn pending(rx: &mut mpsc::Receiver<Event>) -> Vec<Event> {
+    std::iter::from_fn(|| rx.try_recv().ok()).collect()
+}
+
+fn has_notice(events: &[Event], needle: &str) -> bool {
+    events
+        .iter()
+        .any(|e| matches!(e, Event::Notice { text, .. } if text.contains(needle)))
+}
+
+fn has_compacted(events: &[Event]) -> bool {
+    events.iter().any(|e| matches!(e, Event::Compacted { .. }))
+}
+
+#[tokio::test]
+async fn compact_rejects_a_summary_under_500_characters() {
+    let (session, provider, mut rx) = open_flaky(
+        &flaky_scenario(&[], "far too short to stand in for a session"),
+        0,
+        None,
+    );
+    for t in ["t0", "t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    let before = session.history().await;
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    let events = pending(&mut rx);
+    assert!(!has_compacted(&events), "{events:?}");
+    assert!(has_notice(&events, "too short"), "{events:?}");
+    assert_eq!(session.history().await, before, "history untouched");
+    assert_eq!(provider.compact_requests().len(), 1);
+}
+
+#[tokio::test]
+async fn compact_retries_a_too_long_summary_request_with_a_smaller_input() {
+    let summary = format!("## Goal\\nread big\\n## Decisions\\n{}", pad());
+    let (session, provider, mut rx) = open_flaky(&flaky_scenario(&[], &summary), 1, None);
+    for t in ["t0", "t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    let events = pending(&mut rx);
+    assert!(has_compacted(&events), "{events:?}");
+    let sizes: Vec<usize> = provider
+        .compact_requests()
+        .iter()
+        .map(request_bytes)
+        .collect();
+    assert_eq!(sizes.len(), 2, "{sizes:?}");
+    assert!(sizes[1] < sizes[0], "the retry is smaller: {sizes:?}");
+    let history = session.history().await;
+    assert!(
+        matches!(&history[0].content[0], Content::Text { text } if text.contains("read big")),
+        "the summary from the smaller request is kept"
+    );
+}
+
+#[tokio::test]
+async fn compact_gives_up_after_three_too_long_requests_and_pauses_auto() {
+    let summary = format!("## Goal\\nread big\\n## Decisions\\n{}", pad());
+    // 16 000 of 20 000 tokens is over the 0.75 trigger after every call.
+    let (session, provider, mut rx) = open_flaky(
+        &flaky_scenario(&["fourth", "fifth"], &summary),
+        3,
+        Some((20_000, 16_000)),
+    );
+    for t in ["t0", "t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    let before = session.history().await;
+    // The fourth turn's start finds three turns and fires the auto trigger.
+    let events = user_turn(&session, &mut rx, "t3").await;
+    assert!(!has_compacted(&events), "{events:?}");
+    assert!(has_notice(&events, "auto-compaction paused"), "{events:?}");
+    let sizes: Vec<usize> = provider
+        .compact_requests()
+        .iter()
+        .map(request_bytes)
+        .collect();
+    assert_eq!(sizes.len(), 3, "full, cut, state only: {sizes:?}");
+    assert!(sizes[1] < sizes[0] && sizes[2] < sizes[1], "{sizes:?}");
+    let after = session.history().await;
+    assert_eq!(&after[..before.len()], &before[..], "history untouched");
+
+    // Still over the trigger, but the failure is not retried every turn.
+    user_turn(&session, &mut rx, "t4").await;
+    assert_eq!(provider.compact_requests().len(), 3, "no further attempt");
+
+    // `/compact` is the way out, and its summary is kept.
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    assert!(has_compacted(&pending(&mut rx)));
+    assert_eq!(provider.compact_requests().len(), 4);
+}
+
+/// `Scripted`, but the summariser's call parks until released, so a test can
+/// act on the session while a compaction is mid-flight.
+struct Gated {
+    inner: Scripted,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait]
+impl Provider for Gated {
+    fn id(&self) -> ProviderId {
+        self.inner.id()
+    }
+    fn capabilities(&self) -> Caps {
+        self.inner.capabilities()
+    }
+    async fn stream(
+        &self,
+        req: Request,
+        sink: mpsc::Sender<ProviderEvent>,
+        cancel: CancellationToken,
+    ) -> Result<Usage, ProviderError> {
+        if req.job == Job::Compact {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        self.inner.stream(req, sink, cancel).await
+    }
+    async fn count_tokens(&self, req: &Request) -> Result<u32, ProviderError> {
+        self.inner.count_tokens(req).await
+    }
+}
+
+/// A manual `/compact` on an idle session keeps the session busy: a rewind
+/// that lands while the summary is being written is refused instead of
+/// cutting the history the compaction already measured its cut against.
+#[tokio::test]
+async fn compact_refuses_a_rewind_while_the_summary_is_written() {
+    let provider = Arc::new(Gated {
+        inner: Scripted::from_toml(&three_plus_summary(), "").expect("scenario"),
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        cox_protocol::Config::default(),
+        provider.clone(),
+        common::tools(),
+        store.clone(),
+        store,
+        PathBuf::from("/tmp/cox-turn"),
+    )
+    .expect("session");
+    let mut rx = session.events().expect("events once");
+    for t in ["t0", "t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    let before = session.history().await;
+
+    let compacting = {
+        let session = session.clone();
+        tokio::spawn(async move { session.submit(Submission::Compact { focus: None }).await })
+    };
+    provider.entered.notified().await;
+    session
+        .submit(Submission::Rewind {
+            to_turn: 1,
+            code: false,
+            conversation: true,
+        })
+        .await
+        .expect("rewind is refused, not failed");
+    assert_eq!(session.history().await, before, "the rewind cut nothing");
+    let refused = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match rx.recv().await.expect("event stream closed") {
+                Event::Notice { text, .. } if text.starts_with("rewind:") => break text,
+                Event::Rewound { .. } => panic!("rewound during compaction"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("refusal notice");
+    assert!(refused.contains("a turn is running"), "got {refused}");
+
+    provider.release.notify_one();
+    compacting.await.expect("join").expect("compact");
+}
+
+/// T69.6: a session whose only tool is the real `bash`, so a backgrounded
+/// call registers a task in the core's own registry.
+fn open_bash(toml: &str) -> (Session, mpsc::Receiver<Event>) {
+    let dir = std::env::temp_dir().join(format!("cox-t69-6-{}", cox_protocol::ids::CallId::new()));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let dir = dir.canonicalize().expect("canonical");
+    let mut config = cox_protocol::Config::default();
+    config.core.workspace_roots = vec![dir.clone()];
+    config.permissions.allow = vec!["Bash".into()];
+    let provider = Arc::new(Scripted::from_toml(toml, "").expect("scenario"));
+    let store = Arc::new(MemoryStore::new());
+    let session = Session::new(
+        config,
+        provider,
+        vec![Arc::new(cox_tools::bash::BashTool)],
+        store.clone(),
+        store,
+        dir,
+    )
+    .expect("session");
+    let rx = session.events().expect("events once");
+    (session, rx)
+}
+
+/// Four turns in which turn one backgrounds `sleep 300`, then a summary,
+/// then (when `second` is set) two more turns and a second summary.
+fn live_scenario(second: Option<&str>) -> String {
+    let mut toml = format!(
+        concat!(
+            "[[turn]]\ntext = \"starting\"\n",
+            "tool_calls = [{{ name = \"bash\", input = {{ command = \"sleep 300\", background = true }} }}]\n",
+            "[[turn]]\ntext = \"started\"\n",
+            "[[turn]]\ntext = \"second\"\n",
+            "[[turn]]\ntext = \"third\"\n",
+            "[[turn]]\ntext = \"## Goal\\nwatch the server\\n## Decisions\\n{}\"\n",
+        ),
+        pad()
+    );
+    if let Some(second) = second {
+        toml.push_str(&format!(
+            "[[turn]]\ntext = \"fourth\"\n[[turn]]\ntext = \"fifth\"\n[[turn]]\ntext = \"{second}\"\n"
+        ));
+    }
+    toml
+}
+
+fn created_task(events: &[Event]) -> cox_protocol::ids::TaskId {
+    events
+        .iter()
+        .find_map(|e| match e {
+            Event::TaskCreated { task, .. } => Some(*task),
+            _ => None,
+        })
+        .expect("TaskCreated")
+}
+
+async fn first_summary(session: &Session) -> String {
+    match &session.history().await[0].content[0] {
+        Content::Text { text } => text.clone(),
+        other => panic!("not a summary: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn compact_names_a_running_shell_task_the_summary_never_wrote() {
+    let (session, mut rx) = open_bash(&live_scenario(None));
+    let first = user_turn(&session, &mut rx, "t0").await;
+    let task = created_task(&first);
+    for t in ["t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    let summary = first_summary(&session).await;
+    assert!(
+        summary.contains(&format!(
+            "## Still running\n- task {task} (running): bash: sleep 300"
+        )),
+        "{summary}"
+    );
+    assert!(!summary.contains("## Open todos"), "{summary}");
+    assert!(!summary.contains("## Subagents"), "{summary}");
+    session.end();
+}
+
+#[tokio::test]
+async fn compact_adds_no_live_block_to_an_idle_session() {
+    let (session, _, _) = three_turns().await;
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("compact");
+    let summary = first_summary(&session).await;
+    for heading in ["## Still running", "## Open todos", "## Subagents"] {
+        assert!(!summary.contains(heading), "{summary}");
+    }
+}
+
+#[tokio::test]
+async fn compact_second_pass_lists_a_task_once_and_drops_the_models_copy() {
+    // The model repeating the block it read in the first summary must not
+    // double it: the registry is the one source.
+    let second = format!(
+        "## Goal\\nwatch the server\\n## Decisions\\n{}\\n## Still running\\n- task GONE: stale",
+        pad()
+    );
+    let (session, mut rx) = open_bash(&live_scenario(Some(&second)));
+    let task = created_task(&user_turn(&session, &mut rx, "t0").await);
+    for t in ["t1", "t2"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("first");
+    for t in ["t3", "t4"] {
+        user_turn(&session, &mut rx, t).await;
+    }
+    session
+        .submit(Submission::Compact { focus: None })
+        .await
+        .expect("second");
+    let summary = first_summary(&session).await;
+    assert_eq!(summary.matches("## Still running").count(), 1, "{summary}");
+    assert_eq!(summary.matches(&task.to_string()).count(), 1, "{summary}");
+    assert!(!summary.contains("GONE"), "{summary}");
+    session.end();
 }

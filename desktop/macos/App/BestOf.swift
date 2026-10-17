@@ -29,6 +29,8 @@ final class BestOfLauncher {
     let store: BestOfStore
     /// What the group was sent, for the sheet's heading.
     let prompt: String
+    /// The models and agents the control offered, which may also merge (T52.26).
+    let mergers: [BestOfControl.Option]
   }
 
   func toggle(_ id: String) {
@@ -80,7 +82,8 @@ final class BestOfLauncher {
         BestOfRequest(project: project, prompt: prompt, candidates: [own] + added),
         theme: SessionWindow.syntaxTheme)
       (picked, failure) = ([], nil)
-      comparing = Comparing(store: BestOfStore(id: launch.id, client: client), prompt: prompt)
+      comparing = Comparing(
+        store: BestOfStore(id: launch.id, client: client), prompt: prompt, mergers: options)
       return launch
     } catch {
       failure = String(describing: error)
@@ -92,6 +95,15 @@ final class BestOfLauncher {
   static func candidate(_ id: String) -> Candidate {
     if id.hasPrefix("agent:") { return .agent(name: String(id.dropFirst("agent:".count))) }
     return .cox(model: id.hasPrefix("cox:") ? String(id.dropFirst("cox:".count)) : nil)
+  }
+
+  /// A candidate's option id, the inverse of `candidate(_:)`.
+  static func optionID(_ candidate: Candidate) -> String {
+    switch candidate {
+    case .agent(let name): "agent:\(name)"
+    case .cox(let model?): "cox:\(model)"
+    case .cox(nil): "cox"
+    }
   }
 }
 
@@ -147,11 +159,16 @@ struct BestOfBar: View {
 struct BestOfSheet: View {
   let store: BestOfStore
   let prompt: String
+  let mergers: [BestOfControl.Option]
   let workspace: (any WorkspaceClient)?
   let review: (String) -> Void
+  /// Joins the merge's session to the window, as a launch's sessions are.
+  let adopt: ([any SessionClient]) -> Void
   let close: () -> Void
   /// The column whose "Keep this one" waits on the first yes.
   @State private var asking: UInt32?
+  @State private var isMerging = false
+  @State private var isMergerMenuOpen = false
 
   var body: some View {
     BestOfCompare(state: BestOfSheet.state(store, prompt: prompt, asking: asking)) { intent in
@@ -169,7 +186,38 @@ struct BestOfSheet: View {
       case .cancel:
         asking = nil
         store.keepChanges()
+      case .merge:
+        store.chooseAll()
+        // Every result checked and the first merger that can start, so Merge is ready at once.
+        if store.merger == nil {
+          store.merger = mergers.first { $0.unavailable == nil }.map {
+            BestOfLauncher.candidate($0.id)
+          }
+        }
+        isMerging = true
       case .close: close()
+      }
+    }
+    .sheet(isPresented: $isMerging) {
+      BestOfMergeSheet(
+        state: BestOfSheet.mergeState(store, mergers: mergers, isMenuOpen: isMergerMenuOpen)
+      ) { intent in
+        switch intent {
+        case .toggle(let index): store.toggle(index)
+        case .toggleMenu: isMergerMenuOpen.toggle()
+        case .choose(let id):
+          store.merger = BestOfLauncher.candidate(id)
+          isMergerMenuOpen = false
+        case .merge:
+          Task {
+            guard let launch = await store.merge(theme: SessionWindow.syntaxTheme) else { return }
+            adopt(launch.sessions)
+            isMerging = false
+          }
+        case .cancel:
+          isMergerMenuOpen = false
+          isMerging = false
+        }
       }
     }
     .task {
@@ -186,7 +234,8 @@ struct BestOfSheet: View {
           BestOfCompare.File(path: $0.path, added: Int($0.added), removed: Int($0.removed))
         },
         cost: cost(view), duration: duration(view.durationMs),
-        canReview: view.canReview, canKeep: view.canKeep(anotherKept: isKept))
+        canReview: view.canReview, canKeep: view.canKeep(anotherKept: isKept),
+        merges: store.merged(by: view))
     }
     var confirm: BestOfCompare.Confirm?
     if let pending = store.pending {
@@ -202,7 +251,21 @@ struct BestOfSheet: View {
     let total = store.columns.reduce(0) { $0 + $1.costUsd }
     return BestOfCompare.State(
       prompt: prompt, total: usd(total), columns: columns, confirm: confirm,
-      notes: [store.failure].compactMap(\.self) + store.refused)
+      notes: [store.failure].compactMap(\.self) + store.refused, mergeable: store.mergeable.count)
+  }
+
+  /// One checkbox per candidate the core lists as mergeable, and the chosen merger.
+  static func mergeState(
+    _ store: BestOfStore, mergers: [BestOfControl.Option], isMenuOpen: Bool
+  ) -> BestOfMergeSheet.State {
+    let rows = store.columns.filter { store.mergeable.contains($0.index) }.map { view in
+      BestOfMergeSheet.Row(
+        id: view.index, label: view.label, added: Int(view.added), removed: Int(view.removed),
+        files: view.files.count, cost: cost(view), isChecked: store.chosen.contains(view.index))
+    }
+    return BestOfMergeSheet.State(
+      rows: rows, mergers: mergers, merger: store.merger.map(BestOfLauncher.optionID) ?? "",
+      isMenuOpen: isMenuOpen, failure: store.failure)
   }
 
   private static func label(_ store: BestOfStore, _ index: UInt32) -> String {
@@ -237,7 +300,7 @@ extension View {
   /// Shows the compare sheet while `launcher` has a group to compare.
   func bestOfSheet(
     _ launcher: BestOfLauncher, workspace: (any WorkspaceClient)?,
-    review: @escaping (String) -> Void
+    review: @escaping (String) -> Void, adopt: @escaping ([any SessionClient]) -> Void
   ) -> some View {
     sheet(
       isPresented: Binding(
@@ -245,11 +308,13 @@ extension View {
     ) {
       if let comparing = launcher.comparing {
         BestOfSheet(
-          store: comparing.store, prompt: comparing.prompt, workspace: workspace,
+          store: comparing.store, prompt: comparing.prompt, mergers: comparing.mergers,
+          workspace: workspace,
           review: { session in
             launcher.comparing = nil
             review(session)
           },
+          adopt: adopt,
           close: { launcher.comparing = nil })
       }
     }

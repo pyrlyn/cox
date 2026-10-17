@@ -10,16 +10,19 @@
 //! needs stay in `cox-tools` (docs/design/crates.md, AGENTS.md trust
 //! boundaries).
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use async_trait::async_trait;
-use cox_patch::{Op, parse, stage};
+use cox_patch::{Op, Patch, parse, stage};
 use cox_protocol::{
     ArchivePut, Concurrency, Diff, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolSpec,
 };
 use serde_json::{Value, json};
 use similar::TextDiff;
 
+use crate::open::read_confined;
 use crate::path::confine;
 use crate::write::{atomic_write, str_field};
 
@@ -125,68 +128,94 @@ impl Tool for ApplyPatchTool {
             }
         }
 
-        let read = |p: &str| {
-            resolved
-                .get(p)
-                .and_then(|full| std::fs::read_to_string(full).ok())
-        };
-        let changes = stage(&patch, &read)?;
-
-        // Archive what is about to be lost before anything on disk moves,
-        // so `cox expand` can restore it (AGENTS.md: lossless by default).
-        for c in changes.iter().filter(|c| c.before.is_some()) {
-            let Some(before) = &c.before else { continue };
-            cx.archive
-                .put(ArchivePut {
-                    session: cx.session,
-                    call: cx.call,
-                    tool: "apply_patch".to_string(),
-                    subject: Some(c.from.clone().unwrap_or_else(|| c.path.clone())),
-                    bytes: before.clone().into_bytes(),
-                })
-                .await
-                .map_err(|_| ToolError::Io)?;
-        }
-
-        let mut summary = Vec::new();
-        let mut unified = String::new();
-        for c in &changes {
-            let target = resolved.get(&c.path).ok_or(ToolError::Io)?;
-            match &c.after {
-                Some(after) => atomic_write(target, after.as_bytes())?,
-                None => std::fs::remove_file(target).map_err(|_| ToolError::Io)?,
-            }
-            // A move is a write to the new path plus a removal of the old.
-            if let Some(from) = &c.from {
-                let old = resolved.get(from).ok_or(ToolError::Io)?;
-                std::fs::remove_file(old).map_err(|_| ToolError::Io)?;
-            }
-            summary.push(match &c.from {
-                Some(from) => format!("{} {from} -> {}", c.status(), c.path),
-                None => format!("{} {}", c.status(), c.path),
-            });
-            unified.push_str(
-                &TextDiff::from_lines(
-                    c.before.as_deref().unwrap_or_default(),
-                    c.after.as_deref().unwrap_or_default(),
-                )
-                .unified_diff()
-                .context_radius(3)
-                .header(&c.from.clone().unwrap_or_else(|| c.path.clone()), &c.path)
-                .to_string(),
-            );
-        }
-
-        Ok(ToolOutput {
-            text: summary.join("\n"),
-            is_error: false,
-            diff: changes.first().map(|c| Diff {
-                path: std::path::PathBuf::from(&c.path),
-                unified,
-            }),
-            structured: None,
-        })
+        apply_at(&patch, &resolved, cx).await
     }
+}
+
+/// Everything after `confine`: its own function so a test can swap a path
+/// for a symlink between the two, the window T64.15 closes.
+async fn apply_at(
+    patch: &Patch,
+    resolved: &BTreeMap<String, PathBuf>,
+    cx: &ToolCx,
+) -> Result<ToolOutput, ToolError> {
+    // `stage` sees a read as present or absent, so a refused open is
+    // kept aside and wins over whatever `stage` makes of the miss. The
+    // block ends the closure's borrow before the first await below.
+    let changes = {
+        let refused = RefCell::new(None);
+        let read = |p: &str| {
+            let full = resolved.get(p)?;
+            match read_confined(&cx.writable_roots, full) {
+                Ok(bytes) => String::from_utf8(bytes).ok(),
+                Err(e @ ToolError::Confined { .. }) => {
+                    refused.borrow_mut().get_or_insert(e);
+                    None
+                }
+                Err(_) => None,
+            }
+        };
+        let staged = stage(patch, &read);
+        if let Some(e) = refused.into_inner() {
+            return Err(e);
+        }
+        staged?
+    };
+
+    // Archive what is about to be lost before anything on disk moves,
+    // so `cox expand` can restore it (AGENTS.md: lossless by default).
+    for c in changes.iter().filter(|c| c.before.is_some()) {
+        let Some(before) = &c.before else { continue };
+        cx.archive
+            .put(ArchivePut {
+                session: cx.session,
+                call: cx.call,
+                tool: "apply_patch".to_string(),
+                subject: Some(c.from.clone().unwrap_or_else(|| c.path.clone())),
+                bytes: before.clone().into_bytes(),
+            })
+            .await
+            .map_err(|_| ToolError::Io)?;
+    }
+
+    let mut summary = Vec::new();
+    let mut unified = String::new();
+    for c in &changes {
+        let target = resolved.get(&c.path).ok_or(ToolError::Io)?;
+        match &c.after {
+            Some(after) => atomic_write(&cx.writable_roots, target, after.as_bytes())?,
+            None => std::fs::remove_file(target).map_err(|_| ToolError::Io)?,
+        }
+        // A move is a write to the new path plus a removal of the old.
+        if let Some(from) = &c.from {
+            let old = resolved.get(from).ok_or(ToolError::Io)?;
+            std::fs::remove_file(old).map_err(|_| ToolError::Io)?;
+        }
+        summary.push(match &c.from {
+            Some(from) => format!("{} {from} -> {}", c.status(), c.path),
+            None => format!("{} {}", c.status(), c.path),
+        });
+        unified.push_str(
+            &TextDiff::from_lines(
+                c.before.as_deref().unwrap_or_default(),
+                c.after.as_deref().unwrap_or_default(),
+            )
+            .unified_diff()
+            .context_radius(3)
+            .header(&c.from.clone().unwrap_or_else(|| c.path.clone()), &c.path)
+            .to_string(),
+        );
+    }
+
+    Ok(ToolOutput {
+        text: summary.join("\n"),
+        is_error: false,
+        diff: changes.first().map(|c| Diff {
+            path: std::path::PathBuf::from(&c.path),
+            unified,
+        }),
+        structured: None,
+    })
 }
 
 #[cfg(test)]
@@ -206,5 +235,94 @@ mod tests {
             Risk::Write,
             "an unparseable patch keeps the default risk"
         );
+    }
+
+    #[cfg(unix)]
+    fn swap_cx(swap: &crate::swap_fixture::Swap) -> ToolCx {
+        use std::sync::Arc;
+
+        use cox_protocol::{ArchiveId, SandboxMode, SandboxPolicy, SessionId, StoreError};
+
+        struct NoopArchive;
+
+        #[async_trait]
+        impl cox_protocol::Archive for NoopArchive {
+            async fn put(&self, _put: ArchivePut) -> Result<ArchiveId, StoreError> {
+                Ok(ArchiveId::new())
+            }
+            async fn get(&self, _id: &ArchiveId) -> Result<Vec<u8>, StoreError> {
+                Ok(Vec::new())
+            }
+        }
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        crate::tool_cx(
+            vec![swap.root.clone()],
+            swap.root.clone(),
+            SandboxPolicy {
+                mode: SandboxMode::WorkspaceWrite,
+                network: false,
+                writable: vec![],
+                readonly_in_workspace: vec![],
+                linux_backend: Default::default(),
+            },
+            Arc::new(NoopArchive),
+            tokio_util::sync::CancellationToken::new(),
+            tx,
+            SessionId::new(),
+            cox_protocol::CallId::new(),
+        )
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn apply_patch_refuses_a_path_swapped_to_a_symlink_after_confine() {
+        let swap = crate::swap_fixture::Swap::new();
+        swap.file("secret.txt", "mine\n");
+        swap.file("sub/secret.txt", "mine\n");
+        let cx = swap_cx(&swap);
+        let mut resolved = BTreeMap::new();
+        for rel in ["secret.txt", "sub/secret.txt"] {
+            resolved.insert(
+                rel.to_string(),
+                confine(&cx.writable_roots, &cx.cwd, rel).expect("confine"),
+            );
+        }
+        swap.swap_leaf("secret.txt");
+        swap.swap_parent("sub");
+
+        for rel in ["secret.txt", "sub/secret.txt"] {
+            let patch = parse(&format!(
+                "*** Begin Patch\n*** Update File: {rel}\n@@\n-secret\n+changed\n*** End Patch"
+            ))
+            .expect("parse");
+            let err = apply_at(&patch, &resolved, &cx)
+                .await
+                .expect_err("must refuse");
+            assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
+        }
+        assert_eq!(swap.outside_secret(), crate::swap_fixture::SECRET);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn apply_patch_add_file_refuses_a_parent_swapped_to_a_symlink_after_confine() {
+        let swap = crate::swap_fixture::Swap::new();
+        swap.file("sub/keep.txt", "mine\n");
+        let cx = swap_cx(&swap);
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            "sub/new.txt".to_string(),
+            confine(&cx.writable_roots, &cx.cwd, "sub/new.txt").expect("confine"),
+        );
+        swap.swap_parent("sub");
+
+        let patch = parse("*** Begin Patch\n*** Add File: sub/new.txt\n+changed\n*** End Patch")
+            .expect("parse");
+        let err = apply_at(&patch, &resolved, &cx)
+            .await
+            .expect_err("must refuse");
+        assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
+        assert!(!swap.outside.join("new.txt").exists());
     }
 }
