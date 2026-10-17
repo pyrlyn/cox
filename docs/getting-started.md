@@ -138,6 +138,7 @@ diff is reviewed.
 | Doc | Contents |
 | --- | --- |
 | [config.md](config.md) | Every configuration key |
+| [examples.md](examples.md) | Command-line recipes: config, headless runs, sessions and stats, the MCP server |
 | [tools.md](tools.md) | Built-in tools, risk, subjects |
 | [observability.md](observability.md) | Traces, metrics, OTLP backends |
 | [ide.md](ide.md) | Zed, JetBrains, Neovim via ACP |
