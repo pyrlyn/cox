@@ -7,8 +7,10 @@
 //! `cox serve`. Its own crate because it owns process supervision and a trust
 //! boundary (who may connect), which must stay out of `cox-app` (linked into
 //! the macOS app through `cox-ffi`) and out of `crates/cox` (clap and
-//! dispatch only). No workspace dependency yet.
+//! dispatch only). Depends on `cox-store` alone, for the singleton lock.
 
 pub mod restart;
+#[cfg(unix)]
+pub mod socket;
 
 pub use restart::{Decision, Policy};
