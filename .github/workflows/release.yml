@@ -11,7 +11,7 @@ name: release
 # Here: verify (fmt, clippy, nextest — the same gate as CI) on the tagged commit, then the two
 # build workflows on it: build-cli.yml (all three targets through `scripts/package.sh`, smoke
 # tested) and desktop-build.yml (the macOS app's DMG), both signed through
-# .github/actions/macos-signing. Everything goes up to bump's draft, which is published last,
+# pyrlyn/ci's macos-keychain action. Everything goes up to bump's draft, which is published last,
 # then the cask. A failed build leaves the tag and a draft (not on /releases/latest, so
 # `install.sh` and `cox self update` never see it); re-run this workflow with the same tag to
 # finish it.
@@ -132,7 +132,7 @@ jobs:
         run: cargo nextest run --workspace --locked
 
   # The CLI archives (build-cli.yml) and the macOS app's DMG (desktop-build.yml), both from
-  # the tagged commit, both signed through .github/actions/macos-signing with the same two
+  # the tagged commit, both signed through pyrlyn/ci's macos-keychain action with the same two
   # secrets: one signing setup for everything the release ships.
   cli:
     needs: [version, verify]

@@ -1,0 +1,28 @@
+[package]
+name = "cox-serve"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+cox-store = { path = "../cox-store", version = "0.1.2" }
+
+# T66.20: the socket module is unix-only (Windows is a later card).
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["fs", "user"] }
+tokio = { workspace = true, features = ["net"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

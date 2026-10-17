@@ -6,6 +6,25 @@ description: >-
   desktop/macos/build/CoxFFI.xcframework for Apple Silicon only (A67). Runs on
   the xcode-27 image.
 
+inputs:
+  # Passed by the caller because a composite action cannot read secrets; all four empty turns the
+  # shared sccache action off and the build runs uncached (fork pull requests, release builds).
+  sccache-access-key-id:
+    description: R2 Access Key ID for the shared sccache action
+    default: ''
+  sccache-secret-access-key:
+    description: R2 Secret Access Key for the shared sccache action
+    default: ''
+  sccache-bucket:
+    description: R2 bucket name for the shared sccache action
+    default: ''
+  sccache-endpoint:
+    description: R2 endpoint for the shared sccache action
+    default: ''
+  sccache-read-only:
+    description: "'true' reads the cache but never writes it (pull requests)"
+    default: 'false'
+
 runs:
   using: composite
   steps:
@@ -13,18 +32,50 @@ runs:
       with:
         version: '27'
 
-    # Since Xcode 26 the Metal toolchain is a separate component, and the xcode-27 image does
-    # not ship it for Xcode 27: SwiftTerm's Shaders.metal (CoxPlatform) then fails to compile.
-    # Download it for the Xcode setup-xcode just selected.
-    - name: Metal toolchain
-      shell: bash
-      run: |
-        xcodebuild -showComponent MetalToolchain || true
-        xcodebuild -downloadComponent MetalToolchain
+    # Since Xcode 26 the Metal toolchain is a separate component the xcode-27 image lacks:
+    # SwiftTerm's Shaders.metal (CoxPlatform) fails to compile without it.
+    - uses: pyrlyn/ci/.github/actions/metal-toolchain@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
+
+    # SwiftPM clone cache, each package's .build and the app's DerivedData (see the action).
+    - uses: pyrlyn/ci/.github/actions/swift-cache@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
+      with:
+        paths: |
+          desktop/macos/Packages/*/.build
+          desktop/macos/build/DerivedData
+        hash-files: |
+          desktop/macos/Packages/*/Package.resolved
+          desktop/macos/Packages/*/Package.swift
+          desktop/macos/project.yml
+
+    # SwiftPM's clone cache, each package's .build and the app's DerivedData. The runner image is
+    # fresh per job, so without this every run re-fetches SwiftTerm, swift-collections,
+    # swift-snapshot-testing and the rest and rebuilds them from scratch. The key carries the
+    # resolved pins and the sha: an exact hit is rare, so the newest cache for the same pins
+    # (restore-keys) seeds an incremental build and the job saves a fresh one.
+    - name: Swift build cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/Library/Caches/org.swift.swiftpm
+          ~/Library/org.swift.swiftpm
+          desktop/macos/Packages/*/.build
+          desktop/macos/build/DerivedData
+        key: swift-${{ runner.os }}-${{ runner.arch }}-xcode27-${{ hashFiles('desktop/macos/Packages/*/Package.resolved', 'desktop/macos/project.yml', 'desktop/macos/Packages/*/Package.swift') }}-${{ github.sha }}
+        restore-keys: |
+          swift-${{ runner.os }}-${{ runner.arch }}-xcode27-${{ hashFiles('desktop/macos/Packages/*/Package.resolved', 'desktop/macos/project.yml', 'desktop/macos/Packages/*/Package.swift') }}-
+          swift-${{ runner.os }}-${{ runner.arch }}-xcode27-
 
     - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+    - uses: ./.github/actions/sccache
+      with:
+        access-key-id: ${{ inputs.sccache-access-key-id }}
+        secret-access-key: ${{ inputs.sccache-secret-access-key }}
+        bucket: ${{ inputs.sccache-bucket }}
+        endpoint: ${{ inputs.sccache-endpoint }}
+        read-only: ${{ inputs.sccache-read-only }}
 
     - name: CoxFFI.xcframework
       shell: bash

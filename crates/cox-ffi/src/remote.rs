@@ -14,6 +14,7 @@ use std::sync::Arc;
 use cox_app::TimelinePatch;
 use cox_app::plugin_ui::{CanvasUpdate, PluginCanvas};
 use cox_app::remote::{RemoteSession, RemoteWorkspace};
+use cox_app::wire::HostInfo;
 use cox_app::{Block, Changes, Completion, Intent, LinkClick, Project, SearchHit, SessionEntry};
 use cox_protocol::ids::{ArchiveId, SessionId};
 use cox_protocol::plugin::CanvasAttach;
@@ -37,6 +38,12 @@ impl RemoteHandle {
 impl RemoteHandle {
     pub fn host(&self) -> String {
         self.remote.host().to_owned()
+    }
+
+    /// What the target answered to `hello` (T68.5): shown before its first
+    /// session opens.
+    pub fn info(&self) -> HostInfo {
+        self.remote.info()
     }
 
     /// False once the ssh connection dropped; `reconnect` is the action.

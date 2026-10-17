@@ -1,0 +1,18 @@
+---
+source: crates/cox-tui/tests/it/cells.rs
+expression: "text(&s,\ncell(&s, |c| matches!(c, Cell::Tool { call, .. } if call.name == \"read\")))"
+---
+⚙ read src/main.rs · 3ms
+│ 1
+│ 2
+│ 3
+│ 4
+│ 5
+│ 6
+│ … 9 more lines · /expand 01ARZ3NDEKTSV4RRFFQ69G5FAA
+│ 16
+│ 17
+│ 18
+│ 19
+│ 20
+│ ✓ 51B 3ms · cox expand 01ARZ3NDEKTSV4RRFFQ69G5FAA
