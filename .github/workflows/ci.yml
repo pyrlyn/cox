@@ -110,7 +110,8 @@ jobs:
       - uses: taiki-e/install-action@23d41aa71228a2692ee31bb433f070fd4bdc6661 # nextest
 
       - name: sandbox tests without bwrap
-        run: cargo nextest run -p cox-tools sandbox_ bash_ bash::
+        run: |
+          cargo nextest run -p cox-tools sandbox_ bash_ bash::
 
   # P57 (T57.1): `cargo check` and clippy for x64 and ARM64 Windows over the
   # crates that build there, listed once in the justfile (`windows_crates`);
