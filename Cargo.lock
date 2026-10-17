@@ -8996,7 +8996,7 @@ dependencies = [
  "typenum",
  "url",
  "uuid",
- "wasm-encoder 0.258.3",
+ "wasm-encoder 0.259.0",
  "wasmparser 0.258.3",
  "wasmtime-environ",
  "wasmtime-internal-core",
