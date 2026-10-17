@@ -86,23 +86,31 @@ pub fn claim(
     id: &SessionId,
     surface: &str,
 ) -> Result<Result<SessionLock, Holder>, StoreError> {
-    let path = sessions.join(format!("{id}.lock"));
+    claim_path(&sessions.join(format!("{id}.lock")), surface)
+}
+
+/// The same claim for any lock file, so a second kind of singleton (the
+/// `cox serve` supervisor's `run/serve.lock`, T66.20) shares one
+/// implementation with the session locks instead of copying it.
+pub fn claim_path(path: &Path, surface: &str) -> Result<Result<SessionLock, Holder>, StoreError> {
     let mut held = HELD.lock().unwrap_or_else(|poison| poison.into_inner());
     held.retain(|(_, weak)| weak.strong_count() > 0);
     if let Some(file) = held
         .iter()
-        .find(|(p, _)| *p == path)
+        .find(|(p, _)| p == path)
         .and_then(|(_, weak)| weak.upgrade())
     {
         return Ok(Ok(SessionLock { _file: file }));
     }
-    std::fs::create_dir_all(sessions).map_err(|_| StoreError::Io)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|_| StoreError::Io)?;
+    }
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&path)
+        .open(path)
         .map_err(|_| StoreError::Io)?;
     match file.try_lock() {
         Ok(()) => {
@@ -115,7 +123,7 @@ pub fn claim(
             file.set_len(0).map_err(|_| StoreError::Io)?;
             file.write_all(&text).map_err(|_| StoreError::Io)?;
             let file = Arc::new(file);
-            held.push((path, Arc::downgrade(&file)));
+            held.push((path.to_path_buf(), Arc::downgrade(&file)));
             Ok(Ok(SessionLock { _file: file }))
         }
         Err(TryLockError::WouldBlock) => Ok(Err(Holder::read_from(&mut file))),

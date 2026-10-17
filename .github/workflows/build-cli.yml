@@ -6,7 +6,7 @@ name: build cli
 #
 # Per target: the mise.toml Rust, `scripts/package.sh <target> dist`, a smoke test of the
 # native tarball, uploaded as the `cli-<target>` artifact. The macOS binary is Developer
-# ID-signed with the identity .github/actions/macos-signing imports (the same action and the
+# ID-signed with the identity pyrlyn/ci's macos-keychain action imports (the same action and the
 # same two secrets desktop-build.yml signs the app with); notarisation stays behind the
 # repository variable COX_NOTARIZE, off until an App Store Connect key exists.
 on:
@@ -74,11 +74,12 @@ jobs:
       # would be discovered by whoever installs it, not here.
       - name: Import signing certificate
         if: matrix.sign
-        uses: ./.github/actions/macos-signing
+        uses: pyrlyn/ci/.github/actions/macos-keychain@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
         with:
           certificate: ${{ secrets.MACOS_CERTIFICATE }}
           password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           required: ${{ inputs.require-signing && 'true' || 'false' }}
+          identity-env: COX_SIGN_IDENTITY
 
       - name: Package
         run: scripts/package.sh ${{ matrix.target }} dist

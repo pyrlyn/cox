@@ -1,0 +1,14 @@
+---
+source: crates/cox-tui/tests/it/frames.rs
+expression: "format!(\"{scrollback}\\n----\\n{}\", buffer_to_string(&render(&state, 60, 5)))"
+---
+› read main
+⚙ read src/main.rs · 3ms
+│ fn main() {}
+│ ✓ 12B 3ms
+----
+It prints nothing.
+
+
+> Enter send · Shift+Tab mode cycle · @ file · / command
+sonnet-5 · ctx ▱▱▱▱▱ 0% · $0.00/5 · [default]

@@ -27,6 +27,7 @@ pub mod checkpoint;
 pub mod docs;
 pub mod edit;
 pub mod expand;
+pub mod gate;
 pub mod git;
 pub mod glob;
 pub mod grep;

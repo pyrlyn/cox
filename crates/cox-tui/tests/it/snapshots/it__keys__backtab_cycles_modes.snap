@@ -1,0 +1,15 @@
+---
+source: crates/cox-tui/tests/it/keys.rs
+expression: "prompts.join(\"\\n---\\n\")"
+---
+
+> Enter send · Shift+Tab mode cycle · @
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [default]
+---
+
+▷ Enter send · Shift+Tab mode cycle · @
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [plan]
+---
+
+» Enter send · Shift+Tab mode cycle · @
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [auto]

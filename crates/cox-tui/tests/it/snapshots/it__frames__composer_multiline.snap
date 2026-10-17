@@ -1,0 +1,11 @@
+---
+source: crates/cox-tui/tests/it/frames.rs
+assertion_line: 258
+expression: "buffer_to_string(&render(&state, 40, 6))"
+---
+
+
+
+> first line
+  second
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [default]

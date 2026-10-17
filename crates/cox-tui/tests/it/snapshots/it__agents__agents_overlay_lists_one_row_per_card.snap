@@ -1,0 +1,8 @@
+---
+source: crates/cox-tui/tests/it/agents.rs
+assertion_line: 89
+expression: "rows.join(\"\\n\")"
+---
+01ARZ3NDEKTSV4RRFFQ69G5FAV · preset - · tier - · cost - · elapsed - · active
+01BX5ZZKBKACTAV9WEVGEMMVRZ · preset - · tier - · cost - · elapsed - · waiting
+explore: find the flaky test · preset explore · tier cheap · cost - · elapsed 0.7s · running
