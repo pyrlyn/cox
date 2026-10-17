@@ -283,11 +283,15 @@ fn no_crate_below_cox_depends_on_core() {
     );
 
     // cox-serve (T66.19) owns process supervision and the socket's trust
-    // boundary, kept out of cox-app and crates/cox; no workspace-crate
-    // dependencies yet.
-    assert!(
-        deps["cox-serve"].is_empty(),
-        "cox-serve must not depend on any other workspace crate, found {:?}",
+    // boundary, kept out of cox-app and crates/cox. T66.20 lets it depend on
+    // cox-store alone, for the singleton lock (`lock::claim_path`).
+    assert_eq!(
+        deps["cox-serve"]
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["cox-store"],
+        "cox-serve may depend on cox-store and no other workspace crate, found {:?}",
         deps["cox-serve"]
     );
 

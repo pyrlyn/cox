@@ -2582,37 +2582,6 @@ Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size:
 
 Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
 
-
-#### T66.20 `cox-serve`: run directory, singleton lock, socket and peer uid
-
-Model: sonnet · Status: open · Depends: T66.19 · Size: ~170 · Priority: P2 · Complexity: 3
-
-Goal: the supervisor's socket is reachable only by the same user, and only one supervisor runs per `COX_HOME`. `docs/design/serve.md` S5 and all of D4 except the `cox attach` bridge and Windows.
-
-Files:
-- `crates/cox-store/src/lock.rs` (extract `claim_path` from `claim`, same behaviour)
-- `crates/cox-serve/src/socket.rs` (`#[cfg(unix)]`)
-- `crates/cox-serve/src/lib.rs`
-
-Steps:
-1. `COX_HOME/run` is created with mode `0700`; an existing one must be a directory, not a symlink, owned by the effective uid, with no group or other bits, or startup is refused naming the path and mode.
-2. A second supervisor on the same `COX_HOME` is refused through an OS lock on `run/serve.lock` taken with the extracted `lock::claim_path`, naming the holder.
-3. Only the lock holder unlinks a stale `serve.sock`; it binds with umask `077` and sets mode `0600`.
-4. A path over `sun_path` (104 bytes on macOS, 108 on Linux) is refused naming the limit; no fallback to `/tmp`.
-5. `admit(peer_uid, own_uid)` is a pure predicate; every accepted connection is checked before its first line is read, and a mismatch is dropped and logged.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-serve socket
-mise exec -- cargo nextest run -p cox-store lock
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when these tests pass, and the existing `lock` tests stay green: `a_second_supervisor_is_refused_naming_the_holder`, `a_stale_socket_is_replaced`, `a_run_dir_open_to_others_is_refused`, `a_symlinked_run_dir_is_refused`, `a_path_over_sun_path_is_refused`, `the_socket_is_owner_only`, `admit_refuses_another_uid`.
-
-Out of scope: the `cox attach` bridge, routing connections to workers, and Windows (later cards).
-
 ### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
 
 Rationale in §6 A148. Idea-only: the source is the public Claude Code documentation of each feature, and no code is copied.
