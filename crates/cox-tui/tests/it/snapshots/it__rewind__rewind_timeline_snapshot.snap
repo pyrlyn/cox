@@ -1,0 +1,6 @@
+---
+source: crates/cox-tui/tests/it/rewind.rs
+expression: "picker_rows(&state).join(\"\\n\")"
+---
+T2 · 0 files · "now a very long prompt that the timeline shorten…"
+T1 · 3 files · "add the cache column"

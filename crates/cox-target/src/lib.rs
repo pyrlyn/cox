@@ -8,16 +8,21 @@
 //! launcher program. Separate from `cox-app` because the desktop link, the
 //! `--on` flag and the agent presets all build these commands, and the argv
 //! rules are a trust guard that must have one owner. Pure: no workspace
-//! dependency, no I/O; `command` only describes a process.
+//! dependency, no I/O; `command` only describes a process and `resolve`
+//! checks configured names, paths and directories before one is built.
 
 use std::fmt;
 use std::str::FromStr;
 
 pub mod command;
+pub mod discover;
 pub mod launcher;
+pub mod resolve;
 
 pub use command::{Tty, command, kept_env};
+pub use discover::{listing, parse_listing};
 pub use launcher::{candidates, find, launcher};
+pub use resolve::{Entry, Resolved, resolve};
 
 /// What went wrong choosing or launching a target.
 #[derive(Debug, thiserror::Error)]
@@ -34,6 +39,16 @@ pub enum TargetError {
     /// No launcher program at any of the fixed paths.
     #[error("{0} not found; set its path in config")]
     NoLauncher(&'static str),
+    /// A configured launcher path that is not absolute, so it would be found
+    /// through the working directory.
+    #[error("launcher {0:?} must be an absolute path")]
+    RelativeLauncher(std::path::PathBuf),
+    /// A configured launcher path with no file behind it.
+    #[error("launcher {0:?} does not exist")]
+    MissingLauncher(std::path::PathBuf),
+    /// A docker `context` on a target that is not a container.
+    #[error("context applies to docker targets only, not {0}")]
+    ContextNeedsDocker(String),
 }
 
 /// How a target is reached.

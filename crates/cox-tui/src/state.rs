@@ -169,6 +169,9 @@ pub enum Modal {
     /// irreversible action before `Cmd::PluginMgmt(PluginMgmtRequest::Remove)`
     /// reaches the runtime.
     PluginRemove(RemoveConfirm),
+    /// `/refine` (T66.8): a proposed change drawn as a diff over the
+    /// transcript; `y` applies it, `n` or `Esc` drops it.
+    Refine(crate::refine::Review),
     Picker(Picker),
     /// `Ctrl+G` (T15.3): the working tree's `git diff HEAD`, drawn over the
     /// transcript; `scroll` is lines from the top.
@@ -515,6 +518,8 @@ pub enum Msg {
     /// new`/`update`/`remove`/`list` would have printed, joined; `Err`
     /// names why. Shown as a notice, the same as `Event::Notice`.
     PluginMgmt(Result<String, String>),
+    /// The runtime's answer to `Ask::Refine` (T66.8).
+    Refine(crate::refine::Msg),
     /// The status command's first line (T46.3), `None` when it failed,
     /// timed out or printed nothing; answers `Ask::StatusLine`.
     StatusLine(Option<String>),
@@ -624,6 +629,9 @@ pub enum Ask {
         dark: bool,
         tokens: Vec<(String, String)>,
     },
+    /// `/refine` (T66.8): propose, apply the reviewed proposal, list or
+    /// undo; the runtime answers `Msg::Refine`.
+    Refine(crate::refine::Request),
 }
 
 /// `Modal::PluginGrant`'s `y` (T33.8, PL§3): the full requested capability
@@ -909,6 +917,7 @@ impl State {
         match &self.modal {
             Some(
                 Modal::Diff { .. }
+                | Modal::Refine(_)
                 | Modal::Help
                 | Modal::Context
                 | Modal::Agents { .. }
@@ -1047,6 +1056,16 @@ fn step(state: &mut State, msg: Msg) -> Vec<Cmd> {
             state.modal = Some(Modal::Diff { text, scroll: 0 });
             Vec::new()
         }
+        Msg::Refine(msg) => {
+            match msg {
+                crate::refine::Msg::Review { evidence, diff } => {
+                    state.modal = Some(Modal::Refine(crate::refine::Review::new(&evidence, &diff)));
+                }
+                crate::refine::Msg::Notice(Ok(text)) => notice(state, Level::Info, text),
+                crate::refine::Msg::Notice(Err(text)) => notice(state, Level::Warn, text),
+            }
+            Vec::new()
+        }
         Msg::Focus(focused) => {
             state.focused = focused;
             Vec::new()
@@ -1144,6 +1163,7 @@ fn on_mouse(state: &mut State, ev: MouseEvent) -> Vec<Cmd> {
                 picker.key(KeyEvent::new(code, KeyModifiers::NONE));
             }
         }
+        Some(Modal::Refine(review)) => review.wheel(up, WHEEL_LINES),
         Some(Modal::Diff { scroll, text }) => {
             *scroll = if up {
                 scroll.saturating_sub(WHEEL_LINES)
@@ -1491,6 +1511,11 @@ fn on_key(state: &mut State, key: KeyEvent) -> Vec<Cmd> {
                 },
             }
             Vec::new()
+        }
+        Some(Modal::Refine(review)) => {
+            let (review, cmds) = review.key(key);
+            state.modal = review.map(Modal::Refine);
+            cmds
         }
         Some(Modal::Diff { text, scroll }) => {
             let scroll = match key.code {
@@ -2161,6 +2186,17 @@ fn act(state: &mut State, action: Action) -> Vec<Cmd> {
             notice(state, Level::Info, text);
         }
         Action::Context => state.modal = Some(Modal::Context),
+        // The proposal is a model call, so say so before the review opens.
+        Action::Refine(request) => {
+            if matches!(request, crate::refine::Request::Propose { .. }) {
+                notice(
+                    state,
+                    Level::Info,
+                    "refine: asking the cheap tier for a proposal".into(),
+                );
+            }
+            return vec![Cmd::Ask(Ask::Refine(request))];
+        }
         Action::Cost => {
             let s = &state.status;
             let text = format!(
@@ -4025,5 +4061,62 @@ mod tests {
             })]
         );
         assert!(!confirmed(&state));
+    }
+
+    /// T66.8: `/refine <text>` asks the runtime, the runtime's proposal
+    /// opens the review overlay, and only `y` sends the apply; `n` drops it.
+    #[test]
+    fn refine_asks_then_reviews_then_applies_only_on_y() {
+        use crate::refine::{Msg as RefineMsg, Request};
+        let mut state = State::new(PermissionMode::Default, SandboxMode::WorkspaceWrite);
+        assert_eq!(
+            type_command(&mut state, "/refine run tests first"),
+            vec![Cmd::Ask(Ask::Refine(Request::Propose {
+                text: "run tests first".into(),
+                global: false,
+            }))]
+        );
+        let proposal = || {
+            Msg::Refine(RefineMsg::Review {
+                evidence: "seen twice".into(),
+                diff: "diff --git a/x b/x\n--- /dev/null\n+++ x\n@@ -0,0 +1 @@\n+a\n".into(),
+            })
+        };
+        update(&mut state, proposal());
+        assert!(matches!(state.modal, Some(Modal::Refine(_))));
+        assert_eq!(state.context(), Context::Overlay);
+
+        let key = |c| Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        assert_eq!(update(&mut state, key('x')), Vec::new());
+        assert!(state.modal.is_some(), "a stray key keeps the review");
+        assert_eq!(
+            update(&mut state, key('y')),
+            vec![Cmd::Ask(Ask::Refine(Request::Apply))]
+        );
+        assert!(state.modal.is_none());
+
+        update(&mut state, proposal());
+        assert_eq!(update(&mut state, key('n')), Vec::new());
+        assert!(state.modal.is_none(), "n sends nothing");
+    }
+
+    /// T66.8: `--global` is the only way to ask for the global scope, and a
+    /// bare `/refine` says how.
+    #[test]
+    fn refine_global_needs_the_flag_and_a_bare_refine_prints_usage() {
+        use crate::refine::Request;
+        let mut state = State::new(PermissionMode::Default, SandboxMode::WorkspaceWrite);
+        assert_eq!(
+            type_command(&mut state, "/refine be concise --global"),
+            vec![Cmd::Ask(Ask::Refine(Request::Propose {
+                text: "be concise".into(),
+                global: true,
+            }))]
+        );
+        assert_eq!(type_command(&mut state, "/refine"), Vec::new());
+        assert!(matches!(
+            state.transcript.last(),
+            Some(Cell::Notice { text, .. }) if text.starts_with("/refine <text>")
+        ));
     }
 }

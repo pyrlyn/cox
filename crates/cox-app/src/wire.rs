@@ -53,6 +53,9 @@ pub struct Request {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Call {
+    /// The first call on a link (T68.3): what the other end is, so a client
+    /// can refuse a wire it does not speak before it relies on one.
+    Hello,
     Projects {
         limit: i64,
     },
@@ -125,10 +128,24 @@ pub enum Call {
         frame: String,
         value: String,
     },
-    /// Stops the session's patch stream; the session keeps running.
+    /// Stops the session's patch stream and sends `ended`; the session keeps
+    /// running, and its timeline keeps folding for `attach`.
     Close {
         session: SessionId,
     },
+    /// Streams a session this server still holds again, from its snapshot;
+    /// answered like `open`.
+    Attach {
+        session: SessionId,
+    },
+    /// Ends the session: its turns stop and what they detached is killed.
+    /// `close` does not.
+    End {
+        session: SessionId,
+    },
+    /// The inbox, so a client that attaches sees what arrived while it was
+    /// away; an item is pushed only once.
+    Inbox,
 }
 
 /// The answer to request `id`.
@@ -153,6 +170,7 @@ pub enum Outcome {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Reply {
+    Hello(HostInfo),
     Projects(#[schemars(with = "Vec<Value>")] Vec<Project>),
     Sessions(#[schemars(with = "Vec<Value>")] Vec<SessionEntry>),
     Search(#[schemars(with = "Vec<Value>")] Vec<SearchHit>),
@@ -178,6 +196,25 @@ pub enum Reply {
     Shown,
     CanvasAttach(#[schemars(with = "Option<Value>")] Option<CanvasAttach>),
     Closed,
+    Inbox(#[schemars(with = "Vec<Value>")] Vec<InboxItem>),
+}
+
+/// What `hello` answers: the host a server runs on, as the client shows it
+/// and checks it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HostInfo {
+    /// The server's `wire::VERSION`.
+    pub wire: u32,
+    /// The server's cox version.
+    pub cox: String,
+    /// `std::env::consts::OS`: `macos`, `linux`, `windows`.
+    pub os: String,
+    /// `std::env::consts::ARCH`: `aarch64`, `x86_64`.
+    pub arch: String,
+    /// The backend that confines shell commands there (`seatbelt`, `bwrap`,
+    /// `landlock`), or `None` when the host has none (D7 then forces
+    /// `on-request` approval).
+    pub sandbox: Option<String>,
 }
 
 /// Pushed by the server, never answered.
@@ -304,6 +341,7 @@ mod tests {
     fn every_message() -> Vec<Line> {
         let id = session();
         vec![
+            request(Call::Hello),
             request(Call::Projects { limit: 20 }),
             request(Call::Sessions {
                 project: PathBuf::from("/work/cox"),
@@ -356,6 +394,23 @@ mod tests {
                 value: "screen#home/hero".into(),
             }),
             request(Call::Close { session: id }),
+            request(Call::Attach { session: id }),
+            request(Call::End { session: id }),
+            request(Call::Inbox),
+            reply(Reply::Hello(HostInfo {
+                wire: VERSION,
+                cox: "0.1.2".into(),
+                os: "linux".into(),
+                arch: "aarch64".into(),
+                sandbox: Some("bwrap".into()),
+            })),
+            reply(Reply::Hello(HostInfo {
+                wire: VERSION,
+                cox: "0.1.2".into(),
+                os: "windows".into(),
+                arch: "x86_64".into(),
+                sandbox: None,
+            })),
             reply(Reply::Projects(Vec::new())),
             reply(Reply::Sessions(Vec::new())),
             reply(Reply::Search(Vec::new())),
@@ -390,6 +445,7 @@ mod tests {
             }))),
             reply(Reply::CanvasAttach(None)),
             reply(Reply::Closed),
+            reply(Reply::Inbox(Vec::new())),
             Line::Response(Response {
                 v: VERSION,
                 id: 8,

@@ -48,6 +48,19 @@
       "description": "What `App`, its `Workspace` and a `LiveSession` answer, one variant per\nmethod the desktop app calls over the FFI.",
       "oneOf": [
         {
+          "description": "The first call on a link (T68.3): what the other end is, so a client\ncan refuse a wire it does not speak before it relies on one.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "hello"
+            }
+          },
+          "required": [
+            "method"
+          ]
+        },
+        {
           "type": "object",
           "properties": {
             "method": {
@@ -492,7 +505,7 @@
           ]
         },
         {
-          "description": "Stops the session's patch stream; the session keeps running.",
+          "description": "Stops the session's patch stream and sends `ended`; the session keeps\nrunning, and its timeline keeps folding for `attach`.",
           "type": "object",
           "properties": {
             "method": {
@@ -514,6 +527,69 @@
           "required": [
             "method",
             "params"
+          ]
+        },
+        {
+          "description": "Streams a session this server still holds again, from its snapshot;\nanswered like `open`.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "attach"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                }
+              },
+              "required": [
+                "session"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "Ends the session: its turns stop and what they detached is killed.\n`close` does not.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "end"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                }
+              },
+              "required": [
+                "session"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "The inbox, so a client that attaches sees what arrived while it was\naway; an item is pushed only once.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "inbox"
+            }
+          },
+          "required": [
+            "method"
           ]
         }
       ]
@@ -592,6 +668,22 @@
     "Reply": {
       "description": "A call's result, named as the call. The payload types are the FFI's own;\nthe schema leaves their fields to those types (`Value`), so it pins the\nenvelope without a second copy of every block shape.",
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "hello"
+            },
+            "value": {
+              "$ref": "#/$defs/HostInfo"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -863,7 +955,61 @@
           "required": [
             "kind"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "inbox"
+            },
+            "value": {
+              "type": "array",
+              "items": true
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
         }
+      ]
+    },
+    "HostInfo": {
+      "description": "What `hello` answers: the host a server runs on, as the client shows it\nand checks it.",
+      "type": "object",
+      "properties": {
+        "wire": {
+          "description": "The server's `wire::VERSION`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "cox": {
+          "description": "The server's cox version.",
+          "type": "string"
+        },
+        "os": {
+          "description": "`std::env::consts::OS`: `macos`, `linux`, `windows`.",
+          "type": "string"
+        },
+        "arch": {
+          "description": "`std::env::consts::ARCH`: `aarch64`, `x86_64`.",
+          "type": "string"
+        },
+        "sandbox": {
+          "description": "The backend that confines shell commands there (`seatbelt`, `bwrap`,\n`landlock`), or `None` when the host has none (D7 then forces\n`on-request` approval).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "wire",
+        "cox",
+        "os",
+        "arch"
       ]
     },
     "TodoItem": {
