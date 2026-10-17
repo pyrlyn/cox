@@ -307,6 +307,15 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 ## `[desktop.review]`
 
 - `send` = `"queue"` — queue | now — the Review pane's "Send to agent" while a turn runs: queue it behind the turn like a prompt, or send it at once (A108)
+## `[autonomous]`
+
+- `gates` = `[]` — shell commands `cox run -p --autonomous` runs after each turn, in order; the first failure wins and its output tail is fed back. User config only: a project config cannot set any autonomous.* key (a gate is a shell command, so a repository must not choose one). Empty means the flag is refused
+- `max_continuations` = `3` — turns the driver may start after your own
+- `max_turns` = `12` — turns in the whole run, yours included
+- `max_tokens` = `80000` — tokens the run's turns may use in total
+- `timeout_secs` = `1800` — wall-clock seconds the run may take
+- `gate_retries` = `3` — failed checks of one gate the run may retry before it gives up
+- `gate_timeout_secs` = `300` — seconds one gate command may run before it counts as failed
 ## `[external_agents.<name>]`
 
 An ACP agent a new session can be driven by instead of cox's own loop (T52.2, DT§3.3.1). None by default. **User config only**: a project `.cox/config.toml` cannot add, change or widen an entry, because an entry runs a program; the loader reverts it with a warning. cox never installs the agent: you install it, and cox runs the installed program.

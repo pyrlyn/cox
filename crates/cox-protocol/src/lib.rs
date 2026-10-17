@@ -14,7 +14,7 @@
 //! process lives behind a trait in `cox-protocol`").
 //!
 //! - [`ids`] — ULID newtypes (`SessionId`, `TurnId`, `ItemId`, `CallId`, `ArchiveId`, `TaskId`).
-//! - [`autonomous`] — `AutonomousPolicy`, `GateRunner`, `GateResult`, `AutonomousStop`: the contract of a gate-driven headless run (T66.9). Not reachable from `Submission`/`Event`, so it has no wire schema yet.
+//! - [`autonomous`] — `AutonomousPolicy`, `GateRunner`, `GateResult`, `AutonomousStop`: the contract of a gate-driven headless run (T66.9). It is the `[autonomous]` config table (`Config.autonomous`, T66.10); not reachable from `Submission`/`Event`, so it has no wire schema.
 //! - [`agent`] — `AgentDef`, `tier_for`: a discovered subagent definition. Not reachable from `Submission`/`Event` (no wire schema), but crosses the `cox-ext` → `cox-core` boundary, so it lives here (T34.1).
 //! - [`types`] — `Submission`, `Event`, the provider-neutral `Request`/`Content`, `ToolSpec`, and everything reachable from them.
 //! - [`errors`] — the error taxonomy (plan.md §1.14): `ProviderError`, `ToolError`, `CoreError`, `StoreError`, `ExtError`, `McpError`.

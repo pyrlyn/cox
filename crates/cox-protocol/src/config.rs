@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::autonomous::AutonomousPolicy;
 use crate::types::{
     ApprovalPolicy, Effort, LinuxBackend, Mode, PermissionMode, SandboxMode, Thinking, Tier,
 };
@@ -87,6 +88,10 @@ pub struct Config {
     pub targets: BTreeMap<String, TargetConfig>,
     /// `[launchers]` (T68.2): launcher program paths, user config only.
     pub launchers: LaunchersConfig,
+    /// `[autonomous]` (T66.10): gates and limits of `cox run -p
+    /// --autonomous`. User config only: the gates are shell commands, so a
+    /// project config cannot set any `autonomous.*` key.
+    pub autonomous: AutonomousPolicy,
 }
 
 impl Config {

@@ -2316,32 +2316,6 @@ Done when the tests, run with a fake `GateRunner`, show that:
 
 Out of scope: config, the shell runner and the run loop (T66.10, T66.11). The TUI does not enter this loop.
 
-#### T66.10 `[autonomous]` config, which a project cannot set
-
-Model: sonnet · Status: open · Depends: T66.9 · Size: ~100 · Priority: P2 · Complexity: 2
-
-Goal: the user sets gates and limits, but a repository cannot. Gates are shell commands, so a project-set gate would let a repository run code.
-
-Files:
-- `crates/cox-protocol/src/config.rs`
-- `crates/cox-config/src/load.rs`: add `autonomous` to `GUARDED_KEYS` (`load.rs:497`)
-- `docs/config.jsonschema`, regenerated through the drift test
-
-Steps:
-1. The `[autonomous]` table has `gates = []`, `max_continuations`, `max_turns`, `max_tokens`, `timeout_secs`, `gate_retries` and `gate_timeout_secs`.
-2. A project layer that sets any of these keys is reverted with a warning, as for the other guarded keys.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-config
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `project_cannot_set_autonomous_gates` passes and the schema drift test is green.
-
-Out of scope: running the gates.
-
 #### T66.11 `cox run -p --autonomous`: shell gates and the headless loop
 
 Model: sonnet · Status: open · Depends: T66.10 · Size: ~180 · Priority: P2 · Complexity: 3
