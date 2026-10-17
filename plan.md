@@ -126,6 +126,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
+| T66.12 | in progress | P2 | 4 | 0% | Claude Code / opus-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2621,7 +2622,7 @@ Out of scope: goals that persist across runs.
 
 #### T66.12 Design: resident sessions and a supervisor
 
-Model: opus · Status: open · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
+Model: opus-5.5 · Status: in progress · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
 
 Goal: settle the crate-boundary change before any code. Today the TUI owns `cox_core::Session` (`cox-tui/src/app.rs:18, 94`), and the session lock (`cox-store/src/lock.rs`) ends with the process.
 
@@ -2646,6 +2647,12 @@ test -s docs/design/serve.md
 Done when the doc ends with the implementation cards (each within the size limit). The creator then approves them in a new §6 amendment, and only then does code start.
 
 Out of scope: any code.
+
+Execution plan:
+1. Read `docs/app-server.md`, `cox-app/src/server.rs`, `cox-store/src/lock.rs`, the open/resume path in `cox-session` and `cox-app`, and the TUI's ownership of `Session`; note file:line for every claim.
+2. Write `docs/design/serve.md`: answer steps 1–8 with code references, list alternatives, trust boundaries, failure modes and out-of-scope items; cite primary sources for other tools (checked 2026-10-17).
+3. End the doc with proposed implementation cards (title, files, size, Check); do not add them to `plan.md` — they wait for the creator's §6 amendment.
+4. Verify: `test -s docs/design/serve.md`, and any docs link test that covers `docs/design/`.
 
 #### T66.13 Heartbeat re-entry for a resident session
 
