@@ -41,6 +41,7 @@ pub mod mcp;
 pub mod plugin_ui;
 pub mod plugins;
 pub mod provider;
+pub mod refine;
 pub mod sandbox;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
@@ -479,6 +480,14 @@ pub async fn open_reporting(
     session.set_instructions(instructions, skills_index);
     if !memory_index.is_empty() {
         session.set_memory_index(memory_index);
+    }
+    // T66.7: prompt notes from earlier refines (global ones, and a resumed
+    // session's own) join the volatile `system[3]`, never the cached prefix.
+    // A note that cannot be read is skipped with a warning, like any extension.
+    match refine::prompt_notes(&home, &mdir, &session.id()) {
+        Ok(notes) if !notes.is_empty() => session.set_harness_notes(notes),
+        Ok(_) => {}
+        Err(e) => warnings.push(Warning::Instruction(format!("prompt notes: {e}"))),
     }
     // T35.13: one driver per granted `[[external_agents]]` entry; an entry
     // whose CLI or key is missing is left out with one warning (EA§7).

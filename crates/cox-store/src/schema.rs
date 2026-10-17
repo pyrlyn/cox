@@ -170,6 +170,24 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    /// `00000000000010_refine_events` (T66.4): one row per refine of the
+    /// harness entries. `scope`, `trigger` and `outcome` are CHECKed text;
+    /// `edits` is a JSON array.
+    refine_events (id) {
+        id -> Text,
+        session_id -> Text,
+        scope -> Text,
+        trigger -> Text,
+        evidence -> Text,
+        edits -> Text,
+        outcome -> Text,
+        rollback_of -> Nullable<Text>,
+        fingerprint -> Text,
+        created_at -> Text,
+    }
+}
+
 // `usage` joins `sessions` on `session_id` (no foreign key in the DDL, so no
 // `joinable!`): the project spend in `queries.rs` groups by the session's cwd.
 diesel::allow_tables_to_appear_in_same_query!(sessions, usage);

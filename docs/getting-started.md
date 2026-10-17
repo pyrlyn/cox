@@ -114,6 +114,25 @@ it stops after `N` turns or once the session hits `budget.session_usd`,
 whichever comes first. `Ctrl+C` between iterations exits cleanly with
 whatever already ran.
 
+## Refine
+
+`/refine <text> [--global]` asks the cheap model to propose a change to
+prompt notes, memory, skills or subagent definitions from `text` and the
+session so far. The proposal opens as a diff and nothing is written until
+you press `y` (or `Enter`); `n` or `Esc` drops it. The change is local to
+this session unless you pass `--global`, which writes what every session
+reads. Skills and subagents are read when a session opens, so those edits
+show up in the next one.
+
+`/refine list` shows this session's refines, newest first. `/refine undo
+[<event id>]` reverses the given one, or the newest applied local one; a
+refine that changed the global entries is undone only with `--global`.
+
+The same history is available outside the TUI: `cox refine list [--session
+<id>]` (default: the newest session in this directory) and `cox refine undo
+<event id> [--global]`. Proposing and applying stay in the TUI, where the
+diff is reviewed.
+
 ## What to read next
 
 | Doc | Contents |

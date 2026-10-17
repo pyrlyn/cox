@@ -15,6 +15,7 @@ pub mod agents;
 pub mod claude_settings;
 pub mod commands;
 pub mod frontmatter;
+pub mod harness;
 pub mod hooks;
 pub mod instructions;
 pub mod memory;

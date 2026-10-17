@@ -23,6 +23,7 @@ pub mod mode;
 mod monotone;
 mod plugin_model;
 pub mod redact;
+pub mod refine;
 mod repomap;
 mod rewind;
 mod rollout;

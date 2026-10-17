@@ -44,6 +44,12 @@ cox-plugin-api = { path = "../cox-plugin-api", version = "0.1.2", optional = tru
 # the client is the one place a socket to its API opens.
 cox-cursor-cloud = { path = "../cox-cursor-cloud", version = "0.1.2", optional = true }
 thiserror = { workspace = true }
+# T66.7: a refine event's id is a lowercase ULID (`harness::apply` takes
+# `[a-z0-9-]`); already in the tree through `cox-protocol`.
+ulid = { workspace = true }
+# T66.8: the review diff of a proposed refine; already `cox-tools`' and
+# `cox-tui`'s diff engine.
+similar = { workspace = true }
 tokio = { workspace = true }
 # T56.6: reads the cloud run's event stream (`StreamExt::next`); already
 # in the tree through `cox-cursor-cloud`.
