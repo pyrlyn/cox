@@ -76,6 +76,14 @@ pub enum SessionError {
     },
     #[error("unknown provider `{0}` in tiers.code")]
     UnknownProvider(String),
+    /// A section whose client lives in a plugin, with that plugin not
+    /// loaded (T33.40.12). A typed variant, not `UnknownProvider`, so the
+    /// router can fail open on it and name the install step (T33.40.13).
+    #[error(
+        "provider `{section}` is provided by plugin {plugin}, not loaded; \
+         build `plugins/{plugin}` and run `cox plugin install <dir>`"
+    )]
+    PluginNotLoaded { section: String, plugin: String },
     #[error("unknown api `{api}` for provider `{owner}` (want \"chat\" or \"responses\")")]
     UnknownApi { api: String, owner: String },
     /// T37.34 (A67): another process drives session `id`; one writer per

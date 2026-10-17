@@ -47,7 +47,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.9 | todo | P2 | 4 | 0% | |
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
-| T33.40.12 | in progress | P2 | 3 | 0% | Claude Code / sonnet |
 | T33.40.13 | todo | P2 | 3 | 0% | |
 | T33.40.14 | todo | P2 | 3 | 0% | |
 | T33.40.15 | todo | P2 | 3 | 0% | |
@@ -941,21 +940,6 @@ Goal: one page for users. It covers:
 - the E1/E2 results and the defaults they justify;
 - the migration from `[providers.typesafe]` (J§7).
 Check: `doc_examples` parses every `toml` block on the page against `Config` or the plugin manifest schema and fails on drift.
-
-#### T33.40.12 Remove the built-in Jev client
-
-Depends: T33.40.5, T33.40.6 (parity: the provider and one advisor are served by the plugin) · Size: ~120 edited (the deleted `jev.rs` does not count) · Files: `crates/cox-provider/src/jev.rs` (deleted), `crates/cox-provider/src/lib.rs`, `crates/cox/src/session.rs`
-Goal: C1, step 1.
-- The `typesafe` arm of `backend_for_with` returns the plugin's `PluginProvider` when the plugin is loaded.
-- Otherwise it returns a typed "provided by plugin jev, not loaded" error, which the router step (T33.40.13) turns into fail-open.
-- `jev.rs`'s tests now live in `plugins/jev` (T33.40.2).
-Check: `rg -n 'jev' crates/cox-provider/src` is empty; `typesafe_backend_without_plugin_is_typed_error`; the three standard commands green.
-Execution plan:
-- The card's file list is stale: `backend_for_with` lives in `crates/cox-session/src/provider.rs`, and `assemble` there already returns the loaded plugin's priced `PluginProvider` before `backend_for_with` runs, so the `typesafe` arm only needs the error branch (a new `SessionError` variant).
-- Delete `crates/cox-provider/src/jev.rs` and its `pub mod jev` line; fix the crate header and the doc references (`deps.rs`, AGENTS.md, plan.md §1, toolchain.md, rust.md) that name it.
-- Replace `builtin_jev_used_when_plugin_absent` with `typesafe_backend_without_plugin_is_typed_error`; the doctor row no longer claims a built-in client.
-- jev.rs's seven tests already have equivalents in `plugins/jev` (`wire.rs` answer parsing, `provider.rs` body and `status_error`), so none is ported.
-- Verify: `-p cox-provider`, `-p cox-session`, `-p cox --test deps`, `-p cox --test plugins_jev`, clippy, fmt.
 
 #### T33.40.13 Router and `ProviderId` without Jev
 

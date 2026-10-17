@@ -1,3 +1,36 @@
+#### T33.40.12 Remove the built-in Jev client
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.5, T33.40.6 (parity: the provider and one advisor are served by the plugin) · Size: ~120 edited (the deleted `jev.rs` does not count) · Files: `crates/cox-provider/src/jev.rs` (deleted), `crates/cox-provider/src/lib.rs`, `crates/cox/src/session.rs`
+Goal: C1, step 1.
+- The `typesafe` arm of `backend_for_with` returns the plugin's `PluginProvider` when the plugin is loaded.
+- Otherwise it returns a typed "provided by plugin jev, not loaded" error, which the router step (T33.40.13) turns into fail-open.
+- `jev.rs`'s tests now live in `plugins/jev` (T33.40.2).
+Check: `rg -n 'jev' crates/cox-provider/src` is empty; `typesafe_backend_without_plugin_is_typed_error`; the three standard commands green.
+Plan:
+- The card's file list is stale: `backend_for_with` lives in `crates/cox-session/src/provider.rs`, and `assemble` there already returns the loaded plugin's priced `PluginProvider` before `backend_for_with` runs, so the `typesafe` arm only needs the error branch (a new `SessionError` variant).
+- Delete `crates/cox-provider/src/jev.rs` and its `pub mod jev` line; fix the crate header and the doc references (`deps.rs`, AGENTS.md, plan.md §1, toolchain.md, rust.md) that name it.
+- Replace `builtin_jev_used_when_plugin_absent` with `typesafe_backend_without_plugin_is_typed_error`; the doctor row no longer claims a built-in client.
+- jev.rs's seven tests already have equivalents in `plugins/jev` (`wire.rs` answer parsing, `provider.rs` body and `status_error`), so none is ported.
+- Verify: `-p cox-provider`, `-p cox-session`, `-p cox --test deps`, `-p cox --test plugins_jev`, clippy, fmt.
+
+Result:
+- `crates/cox-provider/src/jev.rs` and `pub mod jev` are gone; no cox-provider dependency became unused (`futures`, `thiserror` and `insta` were already unused before this task and are left alone).
+- `SessionError::PluginNotLoaded { section, plugin }` is the typed error; `backend_for_with`'s `typesafe` arm returns it. A loaded plugin never reaches the arm: `assemble` serves its priced `PluginProvider` first.
+- `typesafe_backend_without_plugin_is_typed_error` replaces `builtin_jev_used_when_plugin_absent`. The `typesafe client` doctor row says "provided by plugin jev, not loaded" instead of naming a built-in client (the warning level and install pointer stay with T33.40.14).
+- The seven `jev.rs` tests already have equivalents in `plugins/jev` (`wire.rs`: choice, score, Noul, missing and unknown answers; `provider.rs`: body mapping and `status_error`), so none was ported.
+- Not done: `ProviderId::Jev`, the router pin and the fail-open notice (T33.40.13); the `[providers.typesafe]` tombstone (T33.40.14).
+
+Check output:
+```
+$ rg -in jev crates/cox-provider/src: empty
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-provider -p cox-session -p cox-provider-anthropic
+     Summary 152 tests run: 152 passed, 0 skipped (includes typesafe_backend_without_plugin_is_typed_error)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox -p cox-app -p cox-acp
+     Summary 511 tests run: 511 passed, 5 skipped (plugins_jev 15/15 on a rerun; typesafe_table_overrides_plugin_transport timed out once under load, as known)
+$ mise exec -- cargo clippy -p cox-provider -p cox-session -p cox -p cox-provider-anthropic --all-targets -- -D warnings: clean
+$ mise exec -- cargo fmt --check: clean
+```
+
 #### T33.40.6 `risk` advisor: raise only
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4, T33.40.6.1 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/plugins_jev.rs` (also touched: `plugins/jev/src/decide.rs`, `plugins/jev/plugin.toml`, `crates/cox-core/src/monotone.rs`)
