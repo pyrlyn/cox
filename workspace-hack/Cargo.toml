@@ -93,7 +93,7 @@ tracing-core = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 typenum = { version = "1", default-features = false, features = ["const-generics"] }
 url = { version = "2", features = ["serde"] }
-wasm-encoder = { version = "0.258", features = ["wasmparser"] }
+wasm-encoder = { version = "0.259", features = ["wasmparser"] }
 wasmparser = { version = "0.258", default-features = false, features = ["component-model", "features", "hash-collections", "serde", "simd", "std", "validate"] }
 wasmtime-environ = { version = "49", default-features = false, features = ["anyhow", "compile", "component-model", "demangle", "gc-copying", "gc-drc", "gc-null", "stack-switching", "threads"] }
 wasmtime-internal-core = { version = "49", default-features = false, features = ["anyhow", "serde", "std"] }
@@ -149,7 +149,7 @@ toml_edit = { version = "0.25", features = ["serde"] }
 toml_parser = { version = "1" }
 toml_writer = { version = "1" }
 typenum = { version = "1", default-features = false, features = ["const-generics"] }
-wasm-encoder = { version = "0.258", features = ["wasmparser"] }
+wasm-encoder = { version = "0.259", features = ["wasmparser"] }
 wasmparser = { version = "0.258", default-features = false, features = ["component-model", "features", "hash-collections", "serde", "simd", "std", "validate"] }
 wasmtime-environ = { version = "49", default-features = false, features = ["anyhow", "compile", "component-model", "demangle", "gc-copying", "gc-drc", "gc-null", "stack-switching", "threads"] }
 wasmtime-internal-core = { version = "49", default-features = false, features = ["anyhow", "serde", "std"] }
