@@ -1,5 +1,5 @@
 ---
-source: crates/cox-ext/tests/instructions.rs
+source: crates/cox-ext/tests/it/instructions.rs
 expression: loaded.block
 ---
 # Instructions
