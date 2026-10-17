@@ -116,10 +116,12 @@ struct SessionWindow: View {
     .alert(refused ?? "", isPresented: isRefused) {}
     .connectHostSheet($connecting, remotes: model.remotes)
     .newSessionSheet($picking) { agent in await open(resume: nil, agent: agent) }
-    .bestOfSheet(bestOf, workspace: try? model.launch.live.get()) { session in
-      handle(Sidebar.Intent.select(session))
-      reviewing = Reviewing(path: nil)
-    }
+    .bestOfSheet(
+      bestOf, workspace: try? model.launch.live.get(),
+      review: { session in
+        handle(Sidebar.Intent.select(session))
+        reviewing = Reviewing(path: nil)
+      }, adopt: adopt)
   }
 
   private var main: some View {
@@ -215,11 +217,7 @@ struct SessionWindow: View {
             }
           let panels = PluginWidgets.panels(showing.store)
           if !panels.isEmpty { PluginPanel(panels).fixedSize(horizontal: false, vertical: true) }
-          BestOfBar(launcher: bestOf, open: showing, model: model, usable: usable) { sessions in
-            for session in sessions where opened[session.id] == nil {
-              opened[session.id] = OpenedSession(model.registry.adopt(session, window: windowID))
-            }
-          }
+          BestOfBar(launcher: bestOf, open: showing, model: model, usable: usable, adopt: adopt)
           // At its own height, so the transcript takes the rest of the column.
           composer(for: showing).fixedSize(horizontal: false, vertical: true)
           if isTerminalShown {
@@ -340,6 +338,13 @@ struct SessionWindow: View {
 }
 
 extension SessionWindow {
+  /// Joins sessions a best-of launch or merge started to this window.
+  private func adopt(_ sessions: [any SessionClient]) {
+    for session in sessions where opened[session.id] == nil {
+      opened[session.id] = OpenedSession(model.registry.adopt(session, window: windowID))
+    }
+  }
+
   /// The browser or the plugin canvas beside the column, whichever shows.
   @ViewBuilder func paneBeside(_ showing: OpenedSession) -> some View {
     if isBrowserVisible {

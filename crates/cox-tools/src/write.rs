@@ -18,6 +18,8 @@ use async_trait::async_trait;
 use cox_protocol::{ArchivePut, Concurrency, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolSpec};
 use serde_json::{Value, json};
 
+use cox_sandbox::write::{stage_confined, temp_name, write_confined};
+
 use crate::open::read_confined;
 use crate::path::confine;
 
@@ -39,41 +41,26 @@ pub(crate) fn str_field(input: &Value, field: &str) -> Result<String, ToolError>
         })
 }
 
-/// Writes `bytes` to `path` atomically: write a sibling temp file in the
-/// same directory, then rename over the target. A rename within one
-/// filesystem is atomic, so a crash mid-write never leaves a half-written
-/// file at `path` — the temp file must be a sibling (not `/tmp`) because a
-/// rename across filesystems is neither atomic nor guaranteed to succeed.
-pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
-    let tmp = stage(path, bytes)?;
-    std::fs::rename(&tmp, path).map_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-        ToolError::Io
-    })
+/// Writes `bytes` to `path` atomically, through a parent directory checked
+/// against `roots` (T64.15.3). Every workspace write goes through this.
+pub(crate) fn atomic_write(roots: &[PathBuf], path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
+    write_confined(roots, path, bytes)
 }
 
-/// Writes `bytes` to a fresh sibling temp file of `path` and returns it,
-/// the first half of [`atomic_write`].
-fn stage(path: &Path, bytes: &[u8]) -> Result<PathBuf, ToolError> {
+/// The same atomic write for a path no tool input names (the docs cache under
+/// the user's cache directory), which has no roots to confine to.
+pub(crate) fn atomic_write_trusted(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(dir).map_err(|_| ToolError::Io)?;
-
-    let pid = std::process::id();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or_default();
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("cox-write");
-    let tmp = dir.join(format!(".{name}.cox-tmp-{pid}-{nanos}"));
-
+    let tmp = dir.join(temp_name(path.file_name().unwrap_or_default()));
     std::fs::write(&tmp, bytes).map_err(|_| {
         let _ = std::fs::remove_file(&tmp);
         ToolError::Io
     })?;
-    Ok(tmp)
+    std::fs::rename(&tmp, path).map_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+        ToolError::Io
+    })
 }
 
 /// One file a multi-file change rewrites (`rename_symbol`, T59.7).
@@ -93,6 +80,7 @@ pub(crate) async fn rewrite_all(
     rewrites: &[Rewrite],
     cx: &ToolCx,
 ) -> Result<(), ToolError> {
+    let roots = cx.writable_roots.as_slice();
     for r in rewrites {
         cx.archive
             .put(ArchivePut {
@@ -108,31 +96,19 @@ pub(crate) async fn rewrite_all(
     }
     let mut staged = Vec::with_capacity(rewrites.len());
     for r in rewrites {
-        match stage(&r.path, r.after.as_bytes()) {
-            Ok(tmp) => staged.push(tmp),
-            Err(e) => {
-                discard(&staged);
-                return Err(e);
-            }
-        }
+        // An early return drops `staged`, which removes every temp file.
+        staged.push(stage_confined(roots, &r.path, r.after.as_bytes())?);
     }
-    for (i, (r, tmp)) in rewrites.iter().zip(&staged).enumerate() {
-        if std::fs::rename(tmp, &r.path).is_err() {
-            discard(&staged[i..]);
+    for (i, tmp) in staged.into_iter().enumerate() {
+        if tmp.commit().is_err() {
             for done in &rewrites[..i] {
                 // Best effort: the archive above still holds each pre-image.
-                let _ = atomic_write(&done.path, done.before.as_bytes());
+                let _ = atomic_write(roots, &done.path, done.before.as_bytes());
             }
             return Err(ToolError::Io);
         }
     }
     Ok(())
-}
-
-fn discard(temps: &[PathBuf]) {
-    for t in temps {
-        let _ = std::fs::remove_file(t);
-    }
 }
 
 pub struct WriteTool;
@@ -223,7 +199,7 @@ async fn write_at(path: PathBuf, content: &str, cx: &ToolCx) -> Result<ToolOutpu
         .await
         .map_err(|_| ToolError::Io)?;
 
-    atomic_write(&path, content.as_bytes())?;
+    atomic_write(&cx.writable_roots, &path, content.as_bytes())?;
 
     Ok(ToolOutput {
         text: format!("wrote {} ({} bytes)", path.display(), content.len()),
@@ -428,5 +404,31 @@ mod tests {
             assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
         }
         assert_eq!(swap.outside_secret(), crate::swap_fixture::SECRET);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_of_a_new_file_refuses_a_parent_swapped_to_a_symlink_after_confine() {
+        let swap = crate::swap_fixture::Swap::new();
+        swap.file("sub/keep.txt", "mine");
+        let cx = cx(&swap.root);
+        let existing = confine(&cx.writable_roots, &swap.root, "sub/new.txt").expect("confine");
+        let missing = confine(&cx.writable_roots, &swap.root, "deep/x/new.txt").expect("confine");
+        swap.swap_parent("sub");
+        swap.plant_parent("deep");
+
+        for path in [existing, missing] {
+            let err = write_at(path, "changed", &cx)
+                .await
+                .expect_err("must refuse");
+            assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
+        }
+        // Nothing landed outside: no new file, no created directory, no
+        // leftover temp file.
+        let left: Vec<_> = std::fs::read_dir(&swap.outside)
+            .expect("list")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, ["secret.txt"], "outside gained entries");
     }
 }

@@ -1085,6 +1085,9 @@ fn row_json(
                 "dev": p.dev,
                 "surfaces": surface_names(manifest),
                 "declared": serde_json::to_value(&manifest.capabilities).unwrap_or_default(),
+                // Contributions outside `capabilities` (PL§7a/§7b, T33.40.4).
+                "providers": manifest.provider.iter().map(|p| &p.name).collect::<Vec<_>>(),
+                "models": manifest.models.iter().map(|m| &m.id).collect::<Vec<_>>(),
             });
             if let (Some(added), Some(removed)) = (added, removed) {
                 v["grant_added"] = serde_json::json!(added);

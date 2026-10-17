@@ -93,13 +93,15 @@ public struct CandidateView: Equatable, Sendable, Identifiable {
   /// Its own ledger rows; 0 for an external agent, which bills itself.
   public var costUsd: Double
   public var durationMs: UInt64
+  /// The candidates this one merged (T52.26); `nil` for one the launch started.
+  public var mergedFrom: [UInt32]?
 
   public var id: UInt32 { index }
 
   public init(
     index: UInt32, candidate: Candidate, state: CandidateState, session: String? = nil,
     worktree: String? = nil, branch: String? = nil, files: [FileStat] = [], costUsd: Double = 0,
-    durationMs: UInt64 = 0
+    durationMs: UInt64 = 0, mergedFrom: [UInt32]? = nil
   ) {
     (self.index, self.candidate, self.label, self.state) =
       (index, candidate, candidate.label, state)
@@ -107,7 +109,7 @@ public struct CandidateView: Equatable, Sendable, Identifiable {
     (self.added, self.removed) = (
       files.reduce(0) { $0 + $1.added }, files.reduce(0) { $0 + $1.removed }
     )
-    (self.costUsd, self.durationMs) = (costUsd, durationMs)
+    (self.costUsd, self.durationMs, self.mergedFrom) = (costUsd, durationMs, mergedFrom)
   }
 }
 
@@ -201,7 +203,7 @@ public final class FixtureBestOf: BestOfClient {
         CandidateView(
           index: index, candidate: request.merger, state: .running, session: "s\(index)",
           worktree: "/w/best-\(request.id)-\(index + 1)",
-          branch: "best-\(request.id)-\(index + 1)"))
+          branch: "best-\(request.id)-\(index + 1)", mergedFrom: request.from))
     }
     asked.withLock { $0.append(request) }
     return BestOfLaunch(id: request.id, sessions: [])
