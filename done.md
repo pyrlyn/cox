@@ -1,4 +1,4 @@
-#### T66.15 `docs/app-server.md` says what a dropped connection does
+#### T66.16 `docs/app-server.md` says what a dropped connection does
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~10 (docs only) · Priority: P2 · Complexity: 1
 
