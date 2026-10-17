@@ -1,3 +1,39 @@
+#### T66.5 Harness entries on disk: apply, backup, rollback, fingerprint
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T66.4 · Size: ~200 · Files: `crates/cox-ext/src/harness.rs` (new), `crates/cox-ext/src/lib.rs`, `crates/cox-ext/tests/harness.rs` (new), `crates/cox-ext/Cargo.toml`
+Goal: the four refinable kinds (`prompt-note`, `memory`, `skill` and `subagent`; no factory) are applied with a backup first, undone exactly, and fingerprinted by content.
+- Scope: `Scope::Local { root }` keeps `harness/<kind>/<id>.md` under the session directory; `Scope::Global { home, memory_dir }` writes where cox already reads each kind (memory facts in the memory directory plus `memory::rebuild_index`, `skills/<id>/SKILL.md`, `agents/<id>.md`, `notes/<id>.md`). Ids go through `memory::is_valid_name` (`[a-z0-9-]{1,64}`), so no path built from one leaves the scope root; an entry that is a symlink is refused.
+- `Scope::apply(event_id, edits) -> Applied { event_id, before, after, edits }` checks every edit first (action against existence, content presence, no duplicates), copies each touched file to `<root>/harness-backup/<event id>/` with a manifest, then writes; a failed write rolls back. `before`/`after` are scope fingerprints and each `EditRecord` carries the `before_sha`/`after_sha` that `refine_events` stores. `rollback(event_id)` restores the copies, deletes entries the event created and consumes the backup.
+- `Scope::fingerprint()` is sha256 over the entries sorted by `scope\0kind\0id` with their length-prefixed content. cox-ext now links the workspace `sha2`.
+Check: `rollback_restores_the_bytes_and_deletes_what_the_event_created`, `an_id_with_a_slash_or_dots_is_refused_and_nothing_is_written`, `the_same_store_gives_the_same_fingerprint`, `a_local_edit_is_invisible_to_another_sessions_load` and six more in `crates/cox-ext/tests/harness.rs`.
+```text
+$ mise exec -- cargo nextest run -p cox-ext harness
+     Summary [   0.087s] 10 tests run: 10 passed, 66 skipped
+$ mise exec -- cargo nextest run -p cox-ext
+     Summary [   1.157s] 76 tests run: 76 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-ext --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Out of scope: proposing edits (T66.6) and the session wiring (T66.7).
+
+#### T66.4 Store: the `refine_events` table
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: - · Size: ~120 · Files: `crates/cox-store/migrations/00000000000010_refine_events/{up,down}.sql`, `crates/cox-store/src/{schema,models,refine,lib}.rs`, the schema snapshot
+Goal: every refine (proposed, applied, rejected or rolled back) is one Diesel row that a later undo and `cox refine list` can read.
+- Columns: `id` (TEXT primary key), `session_id`, `scope` (`local`|`global`), `trigger` (`manual`|`auto`), `evidence` (the model's rationale for the whole refine), `edits` (JSON array of `{action, kind, id, before_sha, after_sha}`), `outcome` (`applied`|`rejected`|`rolled_back`), `rollback_of` (nullable), `fingerprint`, `created_at`.
+- `Store::refine_insert`, `refine_get` and `refine_list(session, limit)` through the typed DSL, with no raw SQL outside the migration.
+Check: `refine_event_round_trips_every_field`, `refine_list_is_newest_first_and_honours_limit`, `down_migration_drops_the_refine_events_table`.
+Done: the migration carries CHECKs for the three enums and an index on `(session_id, created_at)`; `refine.rs` holds `RefineScope`, `RefineTrigger`, `RefineOutcome` and `RefineEdit` (`before_sha` is absent on a create, `after_sha` on a removal). `refine_list` orders by `created_at` then `id`, both descending. A repeated id is an error (append-only). `older_binary_refuses_newer_schema` now expects `00000000000010`.
+```text
+$ mise exec -- cargo nextest run -p cox-store
+     Summary [   5.342s] 51 tests run: 51 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-store --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Out of scope: writing files, which is T66.5.
+
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
 Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
