@@ -338,6 +338,21 @@ refused it, with the refusal as the visible failure. macOS: `BestOfStore`
 (`CoxModel`) over `BestOfClient.merge`/`mergeable`; a Windows or Linux client
 repeats the same store logic over the same two exports.
 
+The compare view shows the screen for it (T52.26). A **Merge** button sits
+beside Done only when `mergeable` lists more than one candidate. It opens a
+sheet with one checkbox per mergeable candidate (all checked at first;
+label, diffstat, cost), a "Merge with" picker over the models and external
+agents the Best of control offers (models first, then agents; an option that
+cannot start here is listed with why and cannot be chosen), and Merge, which
+stays blocked, with the not-allowed pointer (T37.50), until two or more are
+checked and a merger that can start is set. The app presets the first merger
+that can start. A refusal from the core is shown in the sheet; a started merge
+closes it and its session joins the window like a launch's. `CandidateView`
+carries `merged_from`, so the merge's column is headed "Merge by <merger>" with
+"Merges <labels>" under it and is then kept, reviewed or pruned like any other
+column. The picker's list is drawn by the view, not a system menu, so a
+snapshot can show it open.
+
 ## 4. Architecture
 
 ### 4.1 Layers

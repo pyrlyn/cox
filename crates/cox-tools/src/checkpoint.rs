@@ -213,7 +213,7 @@ impl Checkpointer for GitCheckpointer {
     ) -> Result<(), ToolError> {
         let path = confine(roots, cwd, &path.to_string_lossy())?;
         match bytes {
-            Some(bytes) => crate::write::atomic_write(&path, bytes),
+            Some(bytes) => crate::write::atomic_write(roots, &path, bytes),
             None => match tokio::fs::remove_file(&path).await {
                 Ok(()) => Ok(()),
                 // Already gone is the state we want.

@@ -1,0 +1,13 @@
+# {{id}} — build recipe. Needs Go (1.25 or newer) and TinyGo (0.43 or
+# newer); `mise use go tinygo` installs both.
+
+# Build the guest module next to plugin.toml.
+build:
+    go mod tidy
+    tinygo build -o {{crate_name}}.wasm -target wasip1 -buildmode=c-shared .
+
+# Build, then run the smoke test (smoke_test.go): it installs this package
+# into a scratch COX_HOME with `cox plugin install --yes` and checks
+# `cox plugin list --json` reports it loaded. Needs `cox` on PATH.
+smoke: build
+    go test ./...

@@ -269,8 +269,9 @@ impl HostEnv {
         name: &str,
         base_url: &str,
         header: Option<(String, String)>,
+        timeout: Option<Duration>,
     ) -> bool {
-        self.net.bind_section(name, base_url, header)
+        self.net.bind_section(name, base_url, header, timeout)
     }
 
     /// Whether `name` is an ABI section bound to this plugin: one of its own
@@ -1242,7 +1243,7 @@ pub(crate) mod tests {
         env.runtime = Some(rt.handle().clone());
         let env = Arc::new(env);
         let header = Some(("authorization".to_owned(), "Bearer k".to_owned()));
-        assert!(env.bind_provider("own", &server.uri(), header));
+        assert!(env.bind_provider("own", &server.uri(), header, None));
         let _active = env.activate_provider("own");
         for export in ["cox_on_event", "cox_command", "cox_hook", "cox_tool_call"] {
             let reply = call(

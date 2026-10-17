@@ -301,22 +301,29 @@ fn cloud_agent_requests_carry_no_git_identity() {
 
 /// T56.8 Check: with no `CloudAgent` rule the ask cannot be answered, so the
 /// run is refused before any request and no Cursor tokens are recorded: no code leaves
-/// the machine on the strength of a plugin alone. (The refusal text, which
-/// names the rule, reaches the task's error but not yet the stream: the
-/// notice says only that the task produced no answer.)
+/// the machine on the strength of a plugin alone. T56.12: the notice that
+/// closes the task gives the refusal, which names the rule to add, instead
+/// of "produced no answer"; `TaskCompleted` itself has no text field.
 #[test]
 fn cloud_agent_without_an_allow_rule_makes_no_request() {
     let rig = Rig::new(&["Agent"]);
     let events = rig.run();
     assert!(types(&events).contains(&"task_completed"), "{events:#?}");
     assert!(rig.backend.requests().is_empty());
-    // The core still closes the task with an empty external row; it holds no
-    // Cursor tokens because no run existed to report any.
+    let notice = events
+        .iter()
+        .filter(|e| e["type"] == "notice")
+        .filter_map(|e| e["text"].as_str())
+        .find(|t| t.contains("background task finished"))
+        .unwrap_or_else(|| panic!("the task's closing notice in {events:#?}"));
+    assert!(notice.contains("CloudAgent(acme/widgets)"), "{notice}");
+    assert!(
+        notice.contains("task failed"),
+        "marked as a failure: {notice}"
+    );
+    assert!(!notice.contains("produced no answer"), "{notice}");
+    // A row means a request was made (T56.11); the refused run made none.
     let rows = rig.usage_rows();
     let external = rows.iter().filter(|r| r.provider == ProviderId::External);
-    for row in external {
-        let u = &row.usage;
-        let tokens = u.input_tokens + u.output_tokens + u.cache_read_tokens;
-        assert_eq!(tokens, 0, "{row:#?}");
-    }
+    assert_eq!(external.count(), 0, "{rows:#?}");
 }

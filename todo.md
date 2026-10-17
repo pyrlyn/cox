@@ -1,9 +1,6 @@
 # Todo
 
-- T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
-- T33.40.4. Jev plugin as a provider, end to end and offline
-- T33.40.5. Parity: the `typesafe` table configures the plugin's section
 - T33.40.6. `risk` advisor: raise only
 - T33.40.7. Eval E1: risk escalation against the classifier alone
 - T33.40.9. `route` advisor: downgrade only
@@ -17,9 +14,6 @@
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
 - T33.45.6. App core: notifications, links and images
-- T33.45.7. FFI and Swift: the desktop contributions
-- T33.45.9. Docs: the three-part plugin API reference
-- T33.45.7. FFI and Swift: the desktop contributions
 - T33.45.10. Docs: Russian and Ukrainian translations
 - T33.47. Plugin canvas: a desktop pane of plugin-drawn pages
 - T33.47.8. The pane, the shortcut and the composer chip
@@ -30,16 +24,12 @@
 - T37.33. Performance budget suite
 - T39.7. Optional: live check against the real Gemini endpoint (needs the creator's key)
 - T43.6. Bench the map on and off
-- T52.26. CoxUI: Merge in the best-of compare view
 - T53.5. Freeze ABI `api = 1`
 - T53.6. `cox-plugin-api` ready for crates.io
 - T53.7. `cox-plugin-sdk` ready for crates.io
 - T53.8. Go SDK module ready to tag
 - T53.9. Templates and docs use the published SDKs
-- T56.9. Docs: cloud agents for users and in EA
 - T56.10. Optional: live check against a real Cursor account (needs the creator's key)
-- T56.11. No usage row for a cloud run that never started
-- T56.12. A refused cloud run tells the user why
 - T57.1. Windows CI job: `cargo check` over a growing crate list
 - T57.4. `path::confine` on Windows paths
 - T57.5. One kill path for process trees: hooks and the session environment
