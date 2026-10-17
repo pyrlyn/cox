@@ -25,6 +25,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const KEY: &str = "jev-e2e-key-do-not-leak";
+const TABLE_KEY: &str = "jev-table-key-do-not-leak";
 
 /// One wiremock standing in for `api.typesafe.ai`, on its own runtime so
 /// the blocking `cox` runs below need no async test.
@@ -76,6 +77,11 @@ struct Rig {
 
 impl Rig {
     fn new(server: &Typesafe, files: &[&str]) -> Self {
+        Self::with_table(server, files, "")
+    }
+
+    /// `table` is extra `[providers.typesafe]` lines after `base_url`.
+    fn with_table(server: &Typesafe, files: &[&str], table: &str) -> Self {
         let rig = Self {
             home: tempfile::tempdir().unwrap(),
             cwd: tempfile::tempdir().unwrap(),
@@ -97,7 +103,7 @@ impl Rig {
         std::fs::write(
             rig.home.path().join("config.toml"),
             format!(
-                "[providers.typesafe]\nbase_url = \"{}\"\n\n[permissions]\nmode = \"auto\"\n\n\
+                "[providers.typesafe]\nbase_url = \"{}\"\n{table}\n[permissions]\nmode = \"auto\"\n\n\
                  [plugins.decide]\nrisk = \"jev\"\nrisk_ms = 30000\n",
                 server.server.uri()
             ),
@@ -138,6 +144,7 @@ impl Rig {
             .env("COX_PROVIDER", "scripted")
             .env("COX_SCENARIO", &self.scenario)
             .env("TYPESAFE_API_KEY", KEY)
+            .env("JEV_TABLE_KEY", TABLE_KEY)
             .args(["--cwd", self.cwd.path().to_str().unwrap()]);
         cmd
     }
@@ -366,4 +373,55 @@ fn plugin_list_json_shows_provider_and_model_contributions() {
     assert_eq!(row["providers"], json!(["typesafe"]), "{list}");
     assert_eq!(row["models"], json!(["jev-1.13.0", "jev-latest"]), "{list}");
     assert!(server.requests().is_empty());
+}
+
+#[test]
+fn typesafe_table_overrides_plugin_transport() {
+    // The reply outlives `timeout_s`, so the call ends on the table's
+    // deadline, not the client's 30 s; `max_retries = 0` leaves one request.
+    let server = Typesafe::answering(reply(10).set_delay(std::time::Duration::from_secs(4)));
+    let rig = Rig::with_table(
+        &server,
+        &["a.txt"],
+        "api_key_env = \"JEV_TABLE_KEY\"\ntimeout_s = 1\nmax_retries = 0\n",
+    );
+    let started = std::time::Instant::now();
+    rig.run();
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1, "{:?}", rig.notices());
+    let auth: Vec<_> = requests[0]
+        .headers
+        .get_all("authorization")
+        .iter()
+        .collect();
+    assert_eq!(auth, [format!("Bearer {TABLE_KEY}").as_str()]);
+    assert!(started.elapsed() < std::time::Duration::from_secs(4));
+    assert_eq!(decide_skipped(&rig.notices()).len(), 1);
+    assert!(rig.wrote("a.txt"), "fail open: the write still runs");
+    assert!(!rig.rollout_text().contains(TABLE_KEY));
+}
+
+#[test]
+fn doctor_names_the_plugin_that_serves_typesafe() {
+    let server = Typesafe::answering(reply(10));
+    let rig = Rig::new(&server, &[]);
+    let out = rig
+        .cox()
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap()
+        .stdout;
+    let rows: Vec<Value> = serde_json::from_slice(&out).unwrap();
+    let row = rows
+        .iter()
+        .find(|r| r["check"] == "typesafe client")
+        .unwrap_or_else(|| panic!("{rows:?}"));
+    assert!(
+        row["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with("served by the jev plugin"),
+        "{row}"
+    );
 }

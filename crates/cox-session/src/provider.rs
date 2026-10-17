@@ -96,10 +96,26 @@ pub(crate) fn assemble(
 
 /// The native `[providers.<name>]` table an ABI section shares its name
 /// with: only `typesafe`, whose client is moving into the Jev plugin
-/// (T33.40). Its `base_url` and `max_retries` override the manifest's
-/// (T33.40.4); the rest of the table is T33.40.5.
+/// (T33.40). While both exist one name serves one client, so every field
+/// of the table configures the plugin's section (T33.40.4, T33.40.5).
 pub(crate) fn abi_transport(config: &Config, section: &str) -> Option<Transport> {
     (section == "typesafe").then(|| config.providers.typesafe.transport())
+}
+
+/// [`abi_transport`] with the table's default `model`, as the plugin host
+/// takes it.
+#[cfg(feature = "plugins")]
+pub(crate) fn abi_section(
+    config: &Config,
+    section: &str,
+) -> Option<cox_plugin::provider::SectionConfig> {
+    let t = abi_transport(config, section)?;
+    Some(cox_plugin::provider::SectionConfig {
+        base_url: t.base_url,
+        api_key_env: t.api_key_env,
+        timeout_s: t.timeout_s,
+        model: config.providers.typesafe.model.clone(),
+    })
 }
 
 /// [`provider_for_with`] plus what a local server reported for the
@@ -457,6 +473,47 @@ mod tests {
         let p = provider_for_with(&local, fake_key)
             .expect("local goes through the same openai_shaped path as any compatible section");
         assert_eq!(p.id(), ProviderId::Local);
+    }
+
+    /// T33.40.5: with no Jev plugin loaded the ABI map is empty and the
+    /// `typesafe` section keeps its built-in client.
+    #[test]
+    fn builtin_jev_used_when_plugin_absent() {
+        let mut cfg = Config::default();
+        cfg.tiers.code.provider = "typesafe".into();
+        let models: &[cox_models::PluginModels] = &[];
+        let (primary, map) = assemble(
+            &cfg,
+            |_, _| Ok("sk-test".to_string()),
+            None,
+            models,
+            AbiProviders::new(),
+        )
+        .expect("the built-in Jev client builds from a resolved key");
+        assert_eq!(primary.id(), ProviderId::Jev);
+        assert!(map.is_empty());
+    }
+
+    /// T33.40.5: every field of `[providers.typesafe]` reaches the plugin's
+    /// section, and no other section name is claimed by that table.
+    #[cfg(feature = "plugins")]
+    #[test]
+    fn typesafe_table_supplies_the_plugin_section() {
+        let mut cfg = Config::default();
+        cfg.providers.typesafe.base_url = "http://127.0.0.1:9".into();
+        cfg.providers.typesafe.api_key_env = "MY_JEV_KEY".into();
+        cfg.providers.typesafe.timeout_s = 7;
+        cfg.providers.typesafe.model = "jev-1.13.0".into();
+        assert_eq!(
+            abi_section(&cfg, "typesafe"),
+            Some(cox_plugin::provider::SectionConfig {
+                base_url: "http://127.0.0.1:9".into(),
+                api_key_env: "MY_JEV_KEY".into(),
+                timeout_s: 7,
+                model: "jev-1.13.0".into(),
+            })
+        );
+        assert_eq!(abi_section(&cfg, "acme"), None);
     }
 
     /// T30.15: `--provider lmstudio` builds through the Anthropic wire
