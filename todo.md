@@ -93,9 +93,6 @@
 - T66.11. `cox run -p --autonomous`: shell gates and the headless loop
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
-- T66.16. `docs/app-server.md` says what a dropped connection does
-- T66.17. App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
-- T66.18. Worker mode in `cox-app`'s server: one session, ended on EOF
 - T66.19. New crate `cox-serve`: the restart policy
 - T66.20. `cox-serve`: run directory, singleton lock, socket and peer uid
 - T66.21. `cox-serve`: spawn workers, watch them, restart them, shut down

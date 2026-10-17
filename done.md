@@ -85,6 +85,7 @@ $ mise exec -- cargo nextest run -p cox --test docs
     PASS cox::docs docs_relative_links_resolve
     PASS cox::docs docs_name_every_subcommand
     Summary: 5 tests run: 5 passed, 0 skipped
+```
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
