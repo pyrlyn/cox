@@ -441,7 +441,7 @@ mod tests {
             answering_at(RESUME, RESUMED, 8192),
         );
         let env = Arc::new(HostEnv::new("p"));
-        assert!(env.bind_provider("own", "https://own.example", None));
+        assert!(env.bind_provider("own", "https://own.example", None, None));
         let host = Arc::new(
             PluginHost::load_with(&module(&body), &Limits::default(), env.clone())
                 .expect("module loads"),
