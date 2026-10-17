@@ -752,6 +752,21 @@ Test count (`cargo nextest list -p cox-core`): 431 before and 431 after, and the
 
 Test count (`cargo nextest list -p cox`): 215 before and 215 after, and the sets of names are identical once the old binary name is read as the new module name. `nextest run -p cox`: 214 passed, 1 failed (`plain_transcript_snapshot`, failing on `main` too, with the same snapshot diff before and after), 5 ignored.
 
+**One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app` (T61.5.3, measured 2026-10-17, same method).** `cox-tui` (14 of 15 files; `screenshots` stays because `just screenshots` names it), `cox-tools` (all 7) and `cox-ext` (all 6) became `tests/it/main.rs`; in `cox-app` only `intents` and `scenarios` did, because `app`, `best_of`, `external` and `mcp_login` call `set_var`/`remove_var`. Each crate: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4`, warm sccache, dependencies built, `cargo clean -p <crate>` immediately before, then `cargo nextest run -p <crate> --no-run`. One run each, and the machine load swung between 9 and 37 across the runs (load column), so the gaps are directions, not figures; the load for `cox-tools`, `cox-ext` and the `cox-app` "before" rows was two to four times the "after" load.
+
+| Crate | Layout | `Finished` | Wall | Load average (1-minute) | `clean -p` removed |
+| --- | --- | --- | --- | --- | --- |
+| `cox-tui` | before: 17 test suites | 4.40 s | 5 s | 8.7 | 191 files, 256.4 MiB |
+| `cox-tui` | after: 4 | 2.93 s | 4 s | 8.9 | 170 files, 145.2 MiB |
+| `cox-tools` | before: 8 | 14.42 s | 20 s | 35.6 | 110 files, 155.9 MiB |
+| `cox-tools` | after: 2 | 9.78 s | 13 s | 24.7 | 131 files, 166.9 MiB |
+| `cox-ext` | before: 7 | 6.56 s | 8 s | 35.7 | 96 files, 82.0 MiB |
+| `cox-ext` | after: 2 | 2.03 s | 3 s | 15.7 | 100 files, 76.2 MiB |
+| `cox-app` | before: 7 | 17.09 s | 21 s | 37.7 | 135 files, 1.1 GiB |
+| `cox-app` | after: 6 | 7.80 s | 10 s | 10.5 | 177 files, 1.1 GiB |
+
+Test count (`cargo nextest list -p <crate>`, tests listed): `cox-tui` 298 and 298, `cox-tools` 266 and 266, `cox-ext` 66 and 66, `cox-app` 270 and 270; the sets of names are identical once the old binary name is read as the new module name. `nextest run`: 298, 265 (1 skipped, as before), 66 and 270 passed. The workspace-wide build-phase time the card asks for was not measured: the run was told to build one crate at a time.
+
 **Machine line for the record:** Apple M3 Max, 16 cores, 64 GiB, macOS 27.0.1 (26A434), Xcode 27.1, Swift 6.4, Rust 1.98.1, measured 2026-10-17 on a shared machine (load 9–70).
 
 ### 4.4 Routing evidence (D5)
