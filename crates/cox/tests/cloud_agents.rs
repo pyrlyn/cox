@@ -310,13 +310,8 @@ fn cloud_agent_without_an_allow_rule_makes_no_request() {
     let events = rig.run();
     assert!(types(&events).contains(&"task_completed"), "{events:#?}");
     assert!(rig.backend.requests().is_empty());
-    // The core still closes the task with an empty external row; it holds no
-    // Cursor tokens because no run existed to report any.
+    // A row means a request was made (T56.11); the refused run made none.
     let rows = rig.usage_rows();
     let external = rows.iter().filter(|r| r.provider == ProviderId::External);
-    for row in external {
-        let u = &row.usage;
-        let tokens = u.input_tokens + u.output_tokens + u.cache_read_tokens;
-        assert_eq!(tokens, 0, "{row:#?}");
-    }
+    assert_eq!(external.count(), 0, "{rows:#?}");
 }

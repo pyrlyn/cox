@@ -32,7 +32,6 @@
 - T53.8. Go SDK module ready to tag
 - T53.9. Templates and docs use the published SDKs
 - T56.10. Optional: live check against a real Cursor account (needs the creator's key)
-- T56.11. No usage row for a cloud run that never started
 - T56.12. A refused cloud run tells the user why
 - T57.1. Windows CI job: `cargo check` over a growing crate list
 - T57.4. `path::confine` on Windows paths
