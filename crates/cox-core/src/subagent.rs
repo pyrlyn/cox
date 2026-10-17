@@ -677,7 +677,7 @@ impl Tool for AgentTool {
         let outcome = outcome?;
         Ok(ToolOutput {
             text: outcome.answer,
-            is_error: false,
+            is_error: outcome.is_error,
             diff: None,
             structured: Some(json!({
                 "task": task,
@@ -750,6 +750,8 @@ fn relay_question(
 /// What one child run produced, foreground or background.
 struct TaskOutcome {
     answer: String,
+    /// The driver refused the run: `answer` is its reason, not the run's result.
+    is_error: bool,
     cost_usd: f64,
     turns: u32,
     summarised: bool,
@@ -1104,6 +1106,7 @@ async fn run_task(
     let mut cost_usd = 0.0;
     let mut turns = 0u32;
     let mut interrupted = false;
+    let mut refusal = None;
     // `TurnDone` is the child's last event (turn.rs: nothing follows it).
     let outcome = loop {
         tokio::select! {
@@ -1148,6 +1151,13 @@ async fn run_task(
                 Some(Event::TaskMessage { task: to, text, .. }) => {
                     let _ = relay(parent, io.task, to, text).await;
                 }
+                // The child's stream is the only place a refusal shows: its
+                // history holds no assistant message, so without this the
+                // task would close as "produced no answer" (T56.12).
+                Some(Event::Error {
+                    error: e @ CoreError::ExternalAgentRefused { .. },
+                    ..
+                }) => refusal = Some(e.to_string()),
                 Some(_) => {}
                 None => break Err(ToolError::Io),
             },
@@ -1157,6 +1167,19 @@ async fn run_task(
         return Err(core_error(e));
     }
     outcome?;
+    if let Some(reason) = refusal {
+        // The reason carries repository names from the remote, so it is
+        // cleaned like any other text from outside. No request was made, so
+        // there is no cost to charge and no answer to cap.
+        return Ok(TaskOutcome {
+            answer: format!("task failed: {}", cox_sanitize::sanitize(&reason)),
+            is_error: true,
+            cost_usd,
+            turns,
+            summarised: false,
+            archive: None,
+        });
+    }
     if budget::counts(io.spec.tier, parent.config.budget.cheap_counts) {
         parent.add_spend(cost_usd).await;
     }
@@ -1214,6 +1237,7 @@ async fn run_task(
     }
     Ok(TaskOutcome {
         answer: result,
+        is_error: false,
         cost_usd,
         turns,
         summarised,

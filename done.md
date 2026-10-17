@@ -1,3 +1,26 @@
+#### T56.12 A refused cloud run tells the user why
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T56.8 · Size: ~60 · Priority: P3 · Complexity: 2 · Files: `crates/cox-core/src/session.rs` (`external_turn`), `crates/cox-core/src/subagent.rs`, `crates/cox/tests/cloud_agents.rs`
+Goal: when the driver refuses a cloud run (no `CloudAgent(<repo>)` allow rule, a non-GitHub origin, plan mode), the parent and the user see the driver's reason, which names the rule to add, the repository and the HEAD warning. Today `external_turn` emits the driver's error as a non-fatal `Event::Error` in the child session only; the child's history holds no assistant message, so `subagent.rs` closes the task with "(the subagent produced no answer)" and that is all the stream, the TUI notice and the model see (found in T56.8). The task's result becomes the refusal text, passed through `sanitize` (it carries repository names from the remote) and marked as an error so the model does not read it as the run's answer; the same text reaches `TaskCompleted` and the notice. A run that produced an answer is unchanged.
+Check: `mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_no_request` asserts the `task_completed` event and the task result carry the refusal text naming `CloudAgent(acme/widgets)` and not "produced no answer" (fails before the fix); `mise exec -- cargo nextest run -p cox-core subagent` still passes.
+Done when: the tests pass.
+Out of scope: an approval prompt from a background task (needs core work: a background task has no way to show one yet, T56.6).
+Plan (Claude Code / sonnet-5.5): (1) extend `cloud_agent_without_an_allow_rule_makes_no_request` and watch it fail; (2) carry the refusal text from `external_turn` (sanitized) into the task close in `subagent.rs`, as an error result; (3) run the cox and cox-core tests, clippy, fmt.
+What landed: `run_task` (`subagent.rs`) watches the child's stream for `Event::Error { ExternalAgentRefused }` (the only place the refusal shows, since the child's history holds no assistant message) and, instead of "(the subagent produced no answer)", returns `task failed: <reason>` passed through `cox_sanitize::sanitize`, with a new `TaskOutcome.is_error`. The foreground tool result carries `is_error: true`; a background task's closing notice and history pointer line carry the text (the same `task failed: ...` shape `drive` already uses for a failed child). No cap, worktree trailer or spend applies to a refusal. No protocol change.
+Not done: `Event::TaskCompleted` has no text field (only `result_item`), so the refusal text reaches the user through the closing notice and the model through the pointer line, not through that event; adding a field would change the protocol and was not in the card's files. A run that produced an answer is unchanged.
+Result: the extended test failed before the fix and passes after.
+```text
+$ mise exec -- cargo nextest run -p cox cloud_agent_without_an_allow_rule_makes_no_request   (before the fix)
+        FAIL cox::cloud_agents cloud_agent_without_an_allow_rule_makes_no_request
+        panicked at cloud_agents.rs:319: notice "... (the subagent produced no answer)" lacks CloudAgent(acme/widgets)
+$ mise exec -- cargo nextest run -p cox cloud_agent   (after)
+     Summary 3 tests run: 3 passed
+$ mise exec -- cargo nextest run -p cox-core
+     Summary 431 tests run: 431 passed, 1 skipped
+$ mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings   clean
+$ mise exec -- cargo fmt --check   clean
+```
+
 #### T33.34 Go: SDK wrapper, template, example
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T33.29, T33.43 · Size: ~400 code (SDK ~330, `plugin_new.rs` ~40) plus tests, example and template · Priority: P2 · Complexity: 4 · Files: `plugins/sdk-go/*`, `plugins/examples/go/*`, `plugins/templates/go/*.tmpl`, `plugins/mise.toml`, `crates/cox/src/plugin_new.rs`, `crates/cox/src/cli.rs`, `crates/cox-tui/src/picker.rs`, `crates/cox/tests/plugin_example_go.rs`, `justfile`, `.github/workflows/ci.yml`, `docs/plugins.md`, `docs/design/plugins.md`, `toolchain.md`, `plan.md` §1
