@@ -118,7 +118,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.5.1 | todo | P2 | 3 | 0% | |
 | T61.5.2 | todo | P2 | 3 | 0% | |
 | T61.5.3 | todo | P2 | 3 | 0% | |
-| T61.6 | todo | P2 | 2 | 0% | |
+| T61.6 | in progress | P2 | 2 | 0% | Claude Code / haiku-5.5 |
 | T61.7 | todo | P2 | 2 | 0% | |
 | T61.8 | todo | P3 | 1 | 0% | |
 | T61.9 | todo | P2 | 3 | 0% | |
@@ -1982,9 +1982,11 @@ Out of scope: unit tests in `src/`.
 
 #### T61.6 CI: one feature set per target
 
-Model: haiku · Status: open · Depends: T61.1 · Size: ~5 · Priority: P2 · Complexity: 2
+Model: haiku · Status: in progress · Depends: T61.1 · Size: ~5 · Priority: P2 · Complexity: 2
 
 Goal: the `rust` matrix compiles the workspace once per target: `build-command`, clippy and nextest use the same features, so nextest reuses the build.
+
+Plan (Claude Code / haiku-5.5): (1) claim commit; (2) `ci.yml` `test-command` and `justfile` `check-all` get `--all-features` (clippy already gets it from the shared workflow's `feature-args` default); (3) local `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 mise exec -- cargo nextest run --workspace --all-features --no-run`, then the tests; a failure that appears only under `--all-features` stops the task; `actionlint` on `ci.yml`; (4) §4.3.9 row with the T61.1 CI times as "before" and "after: pending first CI run"; (5) close the card, PR stacked on T61.1 (#312).
 
 Files:
 - `.github/workflows/ci.yml`
