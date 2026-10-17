@@ -1,3 +1,46 @@
+#### T61.3 Bindings generator on the host dev profile, skipped when the library did not change
+
+Model: sonnet · Status: done 2026-10-17 · Depends: - · Size: ~40 · Priority: P1 · Complexity: 2
+
+Execution plan (Claude Code / sonnet): edit `xcframework.sh` (generator without `--profile`/`--target`; stamp over `libcox_ffi.a`, the only library the script packages; skip when the stamp and the bindings file both exist and match; a missing or corrupt stamp rebuilds). Test: `scripts/desktop/test_xcframework.py` runs the real script with fake `cargo`/`xcodebuild` on `PATH` (match skips, mismatch or missing stamp rebuilds, failed create leaves no stamp), wired into CI next to `test_brand_icons.py`. Then run the Check and record the no-op time in `research.md` §4.3.9.
+
+Goal: `uniffi-bindgen` is built once in the dev profile for the host, and `xcframework.sh` regenerates the bindings and the XCFramework only when `libcox_ffi.a` changed.
+
+Files:
+- `scripts/desktop/xcframework.sh`
+
+Steps:
+1. Run the generator with `cargo run -p cox-ffi --features bindgen --bin uniffi-bindgen` and no `--profile`/`--target`: library mode reads the metadata from the archive passed as `--library`, so the generator's own profile does not matter.
+2. After `cargo build`, hash the library (`shasum -a 256`) and compare with `desktop/macos/build/CoxFFI.xcframework/.source-sha256`; on a match print "unchanged" and exit 0. Write the stamp after a successful `-create-xcframework`.
+
+Check:
+```bash
+just desktop-xcframework
+cp desktop/macos/build/bindings/cox_ffi.swift "$TMPDIR/before.swift"
+just desktop-xcframework   # prints "unchanged"
+git stash && just desktop-xcframework && git stash pop
+diff "$TMPDIR/before.swift" desktop/macos/build/bindings/cox_ffi.swift
+```
+
+Done when: the bindings are byte-identical to the ones the `dist`-profile generator wrote; a second run with no Rust change is a no-op; §4.3.9 has the time of that no-op.
+
+Out of scope: CI caching (T61.4).
+
+Result: `xcframework.sh` runs the generator without `--profile`/`--target` and stamps `CoxFFI.xcframework/.source-sha256` (sha256 of `libcox_ffi.a`, the only library it packages) after the bindings are copied; a matching stamp plus an existing `bindings/cox_ffi.swift` prints "unchanged" and exits 0, anything else rebuilds. Test: `scripts/desktop/test_xcframework.py` (fake `cargo` and `xcodebuild`), run in CI next to the brand-icon test. Timings and the load caveat are in `research.md` §4.3.9.
+
+Check output:
+```text
+$ just desktop-xcframework            (empty target/: library + host dev generator, 3 min 13 s)
+xcframework successfully written out to: .../desktop/macos/build/CoxFFI.xcframework
+$ just desktop-xcframework            (x5, no Rust change; load average 46-53)
+unchanged: .../desktop/macos/build/CoxFFI.xcframework      real 5.86 5.14 9.94 19.41 3.50 s
+$ git stash && just desktop-xcframework && git stash pop     (old script: dist-profile generator)
+$ diff before.swift desktop/macos/build/bindings/cox_ffi.swift
+(empty: byte-identical)
+$ python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
+Ran 5 tests ... OK
+```
+
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
 Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3

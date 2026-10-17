@@ -410,6 +410,9 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_brand_icons.py'
           python3 scripts/brand_icons.py --check
 
+      - name: xcframework.sh skip stamp
+        run: python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
+
       - name: swiftlint fixtures
         working-directory: desktop/macos
         run: |

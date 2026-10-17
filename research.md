@@ -785,6 +785,17 @@ Why `ffi-dev` is not faster: `[profile.dist]` is `inherits = "dev"` (`Cargo.toml
 
 Verdict: T61.2 closed as not needed: the proposed profile is 14% slower in wall time (24 s against 21 s), not at least 10% faster, and the `dist` incremental rebuild is already about 21 s. No change to `Cargo.toml`, `xcframework.sh`, the `justfile` or the workflow.
 
+#### T61.3 Bindings generator on the host dev profile, skipped when the library did not change (repo at the T61.3 claim commit, measured 2026-10-17)
+
+Setup: Apple M3 Max, 16 cores, macOS 27.0.1, Rust 1.98.1, sccache 0.18.0 as `RUSTC_WRAPPER`, the worktree's own `target/`. Another agent was running `cargo nextest` and builds in a sibling worktree throughout: `pgrep` found `rustc` and `cargo` processes before every series and the load average was 46-53, so the absolute times are inflated and noisy.
+
+- **Bindings identical.** The new script (host dev-profile generator, no `--profile`/`--target`) and the old one (`dist`/`aarch64-apple-darwin` generator) wrote byte-identical `bindings/cox_ffi.swift` (`diff` empty, both directions of the Check).
+- **First full run** (empty `target/`, new script): 3 min 13 s for the library build plus the host dev generator build; the old script's `dist` generator build was 2 min 30 s on a warm library. Both are one-time costs: the host dev generator is built once and shared by every later run, whatever the Rust change.
+- **No-op run** (`just desktop-xcframework` with no Rust change; cargo no-op build, `shasum`, "unchanged", exit 0): runs of 5.86, 5.14, 9.94, 19.41, 3.50 s (median 5.86 s) and a second series of 7.97, 3.85, 5.95, 4.65, 4.22 s (median 4.65 s). One run in a third sequence took 45 s while the load average was above 50. Without the stamp the same command regenerated the bindings and re-packaged the XCFramework every time (41 s on the same loaded machine, right after the stamp was missing).
+- Test: `scripts/desktop/test_xcframework.py` (fake `cargo` and `xcodebuild`; match skips, changed library, missing or corrupt stamp and missing bindings rebuild, a failed `-create-xcframework` leaves no stamp).
+
+Verdict: T61.3 done: bindings unchanged byte for byte, a no-op run is about 5 s, down from the full regenerate-and-package run.
+
 ### 4.4 Routing evidence (D5)
 Copilot's auto model selection is praised because it is explicit, priced (10 % discount) and switchable; Claude Code's Haiku delegation is complained about because it is silent. aider's `--weak-model` (commits, summaries) and OpenCode's small model for titles are the same pattern. Jobs that tolerate a small model, by consensus of the surveyed tools: titles, summaries, commit messages, compaction, search/explore, tool-result summarisation, classification. Effect-size numbers from the survey ("4.2× savings", "Codex 3–4× fewer tokens than Claude Code") are unsourced and dropped. [med]
 
