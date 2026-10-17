@@ -6,6 +6,25 @@ description: >-
   desktop/macos/build/CoxFFI.xcframework for Apple Silicon only (A67). Runs on
   the xcode-27 image.
 
+inputs:
+  # Passed by the caller because a composite action cannot read secrets; all four empty turns the
+  # shared sccache action off and the build runs uncached (fork pull requests, release builds).
+  sccache-access-key-id:
+    description: R2 Access Key ID for the shared sccache action
+    default: ''
+  sccache-secret-access-key:
+    description: R2 Secret Access Key for the shared sccache action
+    default: ''
+  sccache-bucket:
+    description: R2 bucket name for the shared sccache action
+    default: ''
+  sccache-endpoint:
+    description: R2 endpoint for the shared sccache action
+    default: ''
+  sccache-read-only:
+    description: "'true' reads the cache but never writes it (pull requests)"
+    default: 'false'
+
 runs:
   using: composite
   steps:
@@ -25,6 +44,14 @@ runs:
     - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+    - uses: ./.github/actions/sccache
+      with:
+        access-key-id: ${{ inputs.sccache-access-key-id }}
+        secret-access-key: ${{ inputs.sccache-secret-access-key }}
+        bucket: ${{ inputs.sccache-bucket }}
+        endpoint: ${{ inputs.sccache-endpoint }}
+        read-only: ${{ inputs.sccache-read-only }}
 
     - name: CoxFFI.xcframework
       shell: bash

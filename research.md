@@ -736,6 +736,17 @@ Below the top two the order changes between the two runs: `onig_sys` 25.1 s cold
 
 **Machine line for the record:** Apple M3 Max, 16 cores, 64 GiB, macOS 27.0.1 (26A434), Xcode 27.1, Swift 6.4, Rust 1.98.1, measured 2026-10-17 on a shared machine (load 9–70).
 
+**T61.7: a second worktree reuses the first one's dependencies (measured 2026-10-17).** `cargo build -p cox-config` with `CARGO_BUILD_JOBS=4` (the crate pulls in 670 compiler requests: 310 C/C++, 126 assembler, 231 Rust), sccache 0.18.0 on a fresh `SCCACHE_DIR` and its own server port so the user's cache was untouched, rustc 1.98.1, Apple M3 Max on a shared machine (load per row). Two worktrees of one checkout, each with its own empty `target/`.
+
+| # | Measurement | Wall | Load (1 min) | sccache |
+| --- | --- | --- | --- | --- |
+| 1 | worktree A, cold cache | 155 s | 15 | 0 hits / 667 misses |
+| 2 | worktree B, fresh `target/`, cache from row 1 | 71 s | 42 | 597 hits, 70 new misses (69 Rust: the workspace path crates, whose absolute path differs per worktree; 1 C) |
+| 3 | worktree B, fresh `target/`, warm cache, repeated twice | 36 s, 35 s | 7, 8 | 667 hits of 670 requests in each run |
+| 4 | worktree B, fresh `target/`, no sccache, repeated twice | 106 s, 105 s | 12, 9 | none: `MISE_SCCACHE_PROBE=1 mise exec -- cargo build -p cox-config`, 0 compile requests |
+
+Reading: a second worktree with an empty `target/` builds this crate in 35 to 36 s with the shared cache and in 105 to 106 s without it (rows 3 and 4), about three times faster; only the workspace path crates recompile (row 2). Row 2's 71 s is the load of 42 at that moment, not the cache. The loads of rows 3 and 4 are lower than row 1's, so the gap between warm and cold is not only the cache, but it is far larger than the load difference. Two traps found while measuring: under `mise exec`, an `RUSTC_WRAPPER=` set in the calling shell is overridden by `mise.toml`'s `[env]` template, so the cache is on whatever the shell says; the way to turn it off is `MISE_SCCACHE_PROBE=1` (an earlier pair of "no sccache" runs of this session, 36 s and 34 s, still went through sccache and are not reported); and the cache hits C/C++ (`cc` crate and CMake) compiles too, which is most of the 670 requests.
+
 ### 4.4 Routing evidence (D5)
 Copilot's auto model selection is praised because it is explicit, priced (10 % discount) and switchable; Claude Code's Haiku delegation is complained about because it is silent. aider's `--weak-model` (commits, summaries) and OpenCode's small model for titles are the same pattern. Jobs that tolerate a small model, by consensus of the surveyed tools: titles, summaries, commit messages, compaction, search/explore, tool-result summarisation, classification. Effect-size numbers from the survey ("4.2× savings", "Codex 3–4× fewer tokens than Claude Code") are unsourced and dropped. [med]
 

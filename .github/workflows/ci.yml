@@ -410,6 +410,9 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_brand_icons.py'
           python3 scripts/brand_icons.py --check
 
+      - name: sccache wiring
+        run: python3 -m unittest discover -s scripts -p 'test_sccache_config.py'
+
       - name: swiftlint fixtures
         working-directory: desktop/macos
         run: |
@@ -467,6 +470,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: ./.github/actions/desktop-macos
+        with:
+          sccache-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          sccache-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          sccache-bucket: ${{ vars.SCCACHE_BUCKET }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-read-only: ${{ github.event_name == 'pull_request' }}
 
       # Serial: the UI tests share one NSApplication (key window, appearance, main run loop),
       # and the benchmark times the main thread, so tests running alongside break both. Every
