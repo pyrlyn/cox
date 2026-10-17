@@ -135,6 +135,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | todo | P2 | 3 | 0% |  |
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | todo | P2 | 1 | 0% |  |
+| T66.11 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 
 ## Reference
 
@@ -2522,7 +2523,7 @@ Out of scope: running refine automatically on a timer.
 
 #### T66.11 `cox run -p --autonomous`: shell gates and the headless loop
 
-Model: sonnet · Status: open · Depends: T66.10 · Size: ~180 · Priority: P2 · Complexity: 3
+Model: Claude Code / sonnet-5.5 · Status: in progress · Depends: T66.10 · Size: ~180 · Priority: P2 · Complexity: 3
 
 Goal: a headless run continues under the driver's verdict. Every gate runs inside the same sandbox as `bash`.
 
@@ -2545,6 +2546,13 @@ mise exec -- cargo fmt --check
 Done when, against `COX_HOME=/tmp/cox-scratch` with the scripted provider, a gate that fails once and then passes yields exactly two turns and `GatesPassed`.
 
 Out of scope: goals that persist across runs.
+
+Execution plan:
+1. `cox-tools/src/gate.rs`: `ShellGateRunner` implements `GateRunner` over `bash::run_line` (the one spawn path: same sandbox wrap, env allowlist, PTY and group kill), with the session's `SandboxPolicy`, workspace roots, cwd and `Archive`. It archives the whole output before returning, caps the tail at a line-safe size with an `expand #id` trailer, and turns a spawn error, sandbox denial or timeout into a failed gate.
+2. `cox/src/cli.rs`: `--autonomous` on `RunArgs`, `requires = prompt`, conflicts with `--loop`.
+3. `cox/src/run.rs`: validate the `[autonomous]` policy before the session opens; `run_autonomous` drives one `UserTurn` at a time, asks `Driver::decide`, submits the `Continue` text as the next turn, and writes one `autonomous` stream-json record per decision and the stop reason to stderr and the `json` summary. Only an `Outcome` fold of `diff`/`Checkpoint` events feeds `files_changed`.
+4. Tests: gate runner unit tests (pass, fail with tail, timeout, archive-before-cap); `crates/cox/tests/autonomous.rs` e2e against the scripted provider and a scratch `COX_HOME`: a failing gate continues, a passing gate stops, no gates refuses the flag, the TUI never sees the flag.
+5. Docs: the `cox run` flag docs and any trycmd help snapshot.
 
 #### T66.12 Design: resident sessions and a supervisor
 
