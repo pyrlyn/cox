@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use cox_plugin_api::ProviderCall;
+use cox_plugin_api::{AbiError, ProviderCall};
 use cox_protocol::config::{CompatibleProviderConfig, ProvidersConfig};
 use cox_protocol::errors::ProviderError;
 use cox_protocol::plugin::{ProviderApi, ProviderAuth, ProviderDecl};
@@ -144,6 +144,7 @@ pub(crate) const EXPORT: &str = "cox_provider_stream";
 /// An ABI provider: one `[[provider]]` section with `api = "plugin"`.
 pub struct PluginProvider {
     section: String,
+    base_url: String,
     host: Arc<PluginHost>,
     env: Arc<HostEnv>,
     estimate: Arc<dyn Fn(&Request) -> u32 + Send + Sync>,
@@ -153,12 +154,14 @@ pub struct PluginProvider {
 impl PluginProvider {
     pub(crate) fn new(
         section: impl Into<String>,
+        base_url: impl Into<String>,
         host: Arc<PluginHost>,
         env: Arc<HostEnv>,
         estimate: Arc<dyn Fn(&Request) -> u32 + Send + Sync>,
     ) -> Self {
         Self {
             section: section.into(),
+            base_url: base_url.into(),
             host,
             env,
             estimate,
@@ -198,6 +201,7 @@ impl Provider for PluginProvider {
                 message: e.to_string(),
             })?,
             model: req.model.0.clone(),
+            base_url: Some(self.base_url.clone()),
         };
         let host = Arc::clone(&self.host);
         let env = Arc::clone(&self.env);
@@ -258,10 +262,13 @@ impl Provider for PluginProvider {
 
 /// Builds one [`PluginProvider`] per granted `api = "plugin"` section.
 /// Lower plugin id wins a contested name. A missing key is a warning and
-/// a keyless client, not a failed session (fail open).
+/// a keyless client, not a failed session (fail open). `base_url` is the
+/// user's override for a section, if any: it replaces the manifest's, so
+/// `cox_http` reaches only the overriding host (T33.40.4).
 pub fn backends(
     live: &LivePlugins,
     resolve: &dyn Fn(&str, &str) -> Result<String, ProviderError>,
+    base_url: &dyn Fn(&str) -> Option<String>,
     estimate: Arc<dyn Fn(&Request) -> u32 + Send + Sync>,
 ) -> (HashMap<String, Arc<dyn Provider>>, Vec<String>) {
     let mut plugins: Vec<_> = live.plugins().iter().collect();
@@ -283,10 +290,8 @@ pub fn backends(
                 continue;
             }
             let header = auth_header(plugin.id(), decl, resolve, &mut warnings);
-            if !plugin
-                .env()
-                .bind_provider(&decl.name, &decl.base_url, header)
-            {
+            let url = base_url(&decl.name).unwrap_or_else(|| decl.base_url.clone());
+            if !plugin.env().bind_provider(&decl.name, &url, header) {
                 warnings.push(format!(
                     "plugin {}'s provider section `{}` has no usable base_url; skipped",
                     plugin.id(),
@@ -297,6 +302,7 @@ pub fn backends(
             owners.insert(decl.name.clone(), plugin.id().to_string());
             let provider = Arc::new(PluginProvider::new(
                 decl.name.clone(),
+                url,
                 Arc::clone(plugin.host()),
                 Arc::clone(plugin.env()),
                 Arc::clone(&estimate),
@@ -371,16 +377,33 @@ fn floor_usage(reported: Option<Usage>, estimate: u32, warned: &AtomicBool) -> U
     }
 }
 
+/// An export failure reaches the host only as text, so a guest that writes
+/// its `AbiError` as JSON (the SDK's convention, T33.40.3) keeps its kind:
+/// `transient` becomes `Overloaded`, which the session's retry backs off
+/// on; every other kind stays a non-retryable `BadRequest`.
 fn map_plugin(error: PluginError) -> ProviderError {
     match error {
         PluginError::Timeout { .. } => ProviderError::Timeout,
         PluginError::MissingExport(_) => ProviderError::Unsupported {
             feature: "cox_provider_stream".into(),
         },
+        PluginError::Trap { message, .. } => match abi_error(&message) {
+            Some(AbiError::Transient { .. }) => ProviderError::Overloaded,
+            Some(error) => ProviderError::BadRequest {
+                message: error.to_string(),
+            },
+            None => ProviderError::BadRequest { message },
+        },
         other => ProviderError::BadRequest {
             message: other.to_string(),
         },
     }
+}
+
+/// The JSON `AbiError` inside a trap message, which extism may prefix.
+fn abi_error(message: &str) -> Option<AbiError> {
+    let start = message.find('{')?;
+    serde_json::from_str(&message[start..]).ok()
 }
 
 #[cfg(test)]
@@ -673,8 +696,13 @@ mod tests {
             )
             .expect("module loads"),
         );
-        let provider =
-            PluginProvider::new(section, host, env, Arc::new(move |_: &Request| estimate));
+        let provider = PluginProvider::new(
+            section,
+            base,
+            host,
+            env,
+            Arc::new(move |_: &Request| estimate),
+        );
         let (tx, mut rx) = mpsc::channel(16);
         let usage = provider
             .stream(sample_request(), tx, CancellationToken::new())
@@ -821,6 +849,7 @@ mod tests {
         );
         let provider = Arc::new(PluginProvider::new(
             "acme",
+            "https://llm.example",
             host,
             env,
             Arc::new(|_: &Request| 12),
@@ -863,5 +892,35 @@ mod tests {
         assert_eq!(rows[0].provider, ProviderId::Plugin("acme".into()));
         assert!(rows[0].usage.estimated);
         assert_eq!(rows[0].usage.input_tokens, 12);
+    }
+
+    /// T33.40.4: the guest's JSON `AbiError` survives the trap text, so a
+    /// 429/529 is retried and a 401 is not.
+    #[test]
+    fn transient_export_error_is_retryable() {
+        let trap = |message: &str| PluginError::Trap {
+            export: EXPORT.into(),
+            message: message.into(),
+        };
+        assert_eq!(
+            map_plugin(trap(
+                r#"{"kind":"transient","message":"typesafe returned 529"}"#
+            )),
+            ProviderError::Overloaded
+        );
+        assert_eq!(
+            map_plugin(trap(
+                r#"{"kind":"failed","message":"typesafe returned 401"}"#
+            )),
+            ProviderError::BadRequest {
+                message: "typesafe returned 401".into()
+            }
+        );
+        assert_eq!(
+            map_plugin(trap("unreachable")),
+            ProviderError::BadRequest {
+                message: "unreachable".into()
+            }
+        );
     }
 }

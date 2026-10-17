@@ -309,7 +309,9 @@ pub async fn open_reporting(
             Some(keys) => cox_provider::http::resolve_key_with(var, section, |s| keys(s)),
             None => cox_provider::http::resolve_key(var, section),
         };
-        cox_plugin::provider::backends(&plugins.live, &resolve, estimate)
+        let base_url =
+            |section: &str| provider::abi_transport(&config, section).map(|t| t.base_url);
+        cox_plugin::provider::backends(&plugins.live, &resolve, &base_url, estimate)
     };
     #[cfg(not(feature = "plugins"))]
     let abi_raw = std::collections::HashMap::new();
