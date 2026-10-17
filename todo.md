@@ -75,7 +75,6 @@
 - T61.4. CI: cache the XCFramework and SwiftPM
 - T61.5.3. One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
 - T61.7. sccache for local builds and the in-repository CI jobs
-- T61.8. Optimized build scripts and proc macros in dev
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
 - T66.3. `agent` collect: a status and a capped preview by task id
