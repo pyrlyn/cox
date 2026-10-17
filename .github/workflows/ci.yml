@@ -196,8 +196,8 @@ jobs:
   # Guest-language examples that need a toolchain of their own (PL§13):
   # each is `#[ignore]`d in the main `rust` job with a reason naming
   # `just plugin-examples <lang>`, so a missing toolchain here is a CI
-  # failure rather than a silently skipped test. Dart (T33.38) and Go
-  # (T33.34) today; kotlin joins this job once T33.36 lands.
+  # failure rather than a silently skipped test: Dart (T33.38), Go (T33.34)
+  # and Kotlin (T33.36).
   plugin-examples:
     needs: config
     if: >-
@@ -213,14 +213,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      # Go and TinyGo at the versions plugins/mise.toml pins. Before the
-      # sccache step, which sets RUSTC_WRAPPER after mise's [env] does. No
-      # shims: the template test runs `go` from a scratch dir, where a shim
-      # finds no config; the real bin dirs go on PATH instead.
+      # Go, TinyGo, Java and Gradle at the versions plugins/mise.toml pins.
+      # Before the sccache step, which sets RUSTC_WRAPPER after mise's [env]
+      # does. No shims: the template tests run `go` and `gradle` from a
+      # scratch dir, where a shim finds no config; the real bin dirs go on
+      # PATH instead.
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
         with:
           working_directory: plugins
-          install_args: go tinygo
+          install_args: go tinygo java gradle
           add_shims_to_path: false
 
       - uses: ./.github/actions/sccache
@@ -260,8 +261,23 @@ jobs:
           tinygo build -o example_go.wasm -target wasip1 -buildmode=c-shared .
 
       # Also scaffolds `cox plugin new --lang go` and builds it with TinyGo.
+      # `cargo` here is mise's shim, whose `mise exec` drops the real Go and
+      # TinyGo dirs from PATH, so the template test's TinyGo resolves to a
+      # shim with no version; hand it this step's PATH as `just` does.
       - name: go plugin example e2e
-        run: cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
+        run: PLUGIN_TOOLS_PATH="$PATH" cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
+
+      # Stages plugin.toml and example_kotlin.wasm in build/plugin. No
+      # daemon, so the job leaves no Gradle process running.
+      - name: build the Kotlin example
+        run: |
+          cd plugins/examples/kotlin
+          gradle --no-daemon -q pluginPackage
+
+      # Also scaffolds `cox plugin new --lang kotlin` and builds it with
+      # Gradle, which needs the same real PATH as the Go template test.
+      - name: kotlin plugin example e2e
+        run: PLUGIN_TOOLS_PATH="$PATH" cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_kotlin)'
 
   deny:
     needs: config

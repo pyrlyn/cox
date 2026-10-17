@@ -1,0 +1,23 @@
+# {{id}} — build recipe. Needs a JDK, Gradle and a cox checkout for the
+# Kotlin PDK (`coxSdk` in gradle.properties); `mise use java gradle`
+# installs the first two.
+
+# Compile the guest module and stage the package in build/plugin.
+build:
+    gradle --no-daemon pluginPackage
+
+# Build, then install the package into a scratch COX_HOME with
+# `cox plugin install --yes` and check `cox plugin list --json` reports it
+# loaded. Needs `cox` on PATH.
+smoke: build
+    #!/usr/bin/env sh
+    set -eu
+    home="$(mktemp -d)"
+    trap 'rm -rf "$home"' EXIT
+    export COX_HOME="$home" HOME="$home"
+    cox plugin install build/plugin --yes
+    # The scratch home holds only this plugin, so one row answers.
+    case "$(cox plugin list --json)" in
+      *'"id":"{{id}}"'*'"loaded":true'*) echo "{{id}} loaded" ;;
+      *) echo "{{id}} is not loaded" >&2; exit 1 ;;
+    esac

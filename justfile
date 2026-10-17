@@ -102,6 +102,16 @@ plugin-examples lang:
         go test ./...
         tinygo build -o example_go.wasm -target wasip1 -buildmode=c-shared .
         ;;
+      kotlin)
+        cd plugins && mise install java gradle
+        # The template test runs `gradle` from a scratch dir, where mise's
+        # shims find no config: put the real binaries on PATH.
+        eval "$(mise env -s bash)"
+        export PLUGIN_TOOLS_PATH="$PATH"
+        # No daemon: the recipe leaves no Gradle process behind.
+        cd examples/kotlin
+        gradle --no-daemon -q pluginPackage
+        ;;
       *)
         echo "plugin-examples: no {{lang}} example yet" >&2
         exit 1

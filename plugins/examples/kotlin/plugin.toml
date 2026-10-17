@@ -9,6 +9,9 @@ version = "0.1.0"
 name = "Turn counter (Kotlin)"
 description = "Turns and failed tool calls in the status line; /example-kotlin:reset clears both"
 wasm = "example_kotlin.wasm"
+# Kotlin's stdlib imports `random_get` from WASI; no preopens, since
+# `[capabilities.fs]` is absent.
+wasi = true
 
 [capabilities]
 events = ["turn_started"]

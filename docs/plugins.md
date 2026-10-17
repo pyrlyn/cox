@@ -146,6 +146,21 @@ TinyGo is not gc: it evaluates `return n, json.Unmarshal(raw, &n)` with `n` read
 
 The complete version is `plugins/examples/go`; `cox plugin new <name> --lang go` scaffolds a package with a `justfile` and a smoke test. `just plugin-examples go` builds the example and runs its end-to-end tests.
 
+## Kotlin
+
+`plugins/sdk-kotlin` is cox's own PDK over extism's raw `extism:host/env` imports and `cox:host/v1`, because no maintained Kotlin extism PDK exists. It is not published: a plugin takes it through a Gradle composite build (`includeBuild`) of a cox checkout's `plugins/sdk-kotlin`. Java, Gradle and Kotlin come from `plugins/mise.toml`. A Kotlin plugin is a Kotlin/Wasm `wasmWasi` module, and Kotlin's stdlib imports WASI's `random_get`, so its `plugin.toml` sets `wasi = true`.
+
+Each export is a `@WasmExport` function whose whole body is `Cox.export { input -> … }`: the handler takes the export's input as a `JsonElement` and returns its output as one, with the shapes in `docs/plugin-abi.schema.json`. `cox_init` is required; cox probes the rest by name. The host functions are `Cox.log`, `notify`, `kvGet`, `kvPut`, `kvDelete`, `context`, `invokeTool`, `modelCall`, `http`, `output`, `cancelled` and `redraw`. A refusal throws `HostException`, whose `error` is the `AbiError`.
+
+```kotlin
+@WasmExport
+fun cox_init(): Int = Cox.export {
+    buildJsonObject { putJsonArray("subscribe") { add("turn_started") } }
+}
+```
+
+The complete version is `plugins/examples/kotlin`; `gradle pluginPackage` stages `plugin.toml` and the module in `build/plugin`, which is what `cox plugin install` takes, because it copies a whole directory. `cox plugin new <name> --lang kotlin` scaffolds a package with a `justfile` whose `smoke` recipe installs it into a scratch `COX_HOME`. `just plugin-examples kotlin` builds the example and runs its end-to-end tests.
+
 ## Shared
 
 The manifest's package identity, resource limits, providers, models, agents, MCP servers, and shared capabilities apply wherever the plugin loads. `surfaces` optionally narrows loading to `terminal`, `desktop`, `headless`, or `acp`; when absent, it permits all four. `InitIn.surface` tells the guest which one opened the session. `cox:host/v1`, the exports above except `cox_key`, commands, renderers, and the `status.left`, `status.right`, `panel`, and `overlay` slots use this part. Headless and ACP sessions have no UI, so they omit UI grants. `[[skills]]` entries (`name`, `dir`) ship Agent Skills: `dir` is a package folder named for the skill that holds a `SKILL.md` in the `.cox/skills` format. A granted plugin's skills join the session's skill index, and a user or project skill of the same name wins. A package of only `[[mcp]]`, `[[agents]]` and `[[skills]]` needs no `wasm`. `Span.link` accepts an HTTPS URL or workspace-relative path and opens only on a person's click; unsupported links remain text.
