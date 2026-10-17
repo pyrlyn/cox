@@ -125,7 +125,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
-| T63.2 | todo | P2 | 3 | 0% | |
+| T63.2 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2158,7 +2158,7 @@ Each card is written so an agent can do it from the card alone: what to install,
 
 #### T63.2 CI: re-run only the Swift packages a change can affect
 
-Model: sonnet · Status: open · Depends: T61.4 (shared job; not a code dependency) · Size: ~120 (script, workflow) · Priority: P2 · Complexity: 3
+Model: sonnet-5.5 · Status: in progress · Depends: T61.4 (shared job; not a code dependency) · Size: ~120 (script, workflow) · Priority: P2 · Complexity: 3
 
 Goal: on a pull request, a package whose test inputs are byte-identical to a run that already passed on `main` (or earlier on the same pull request) is not tested again; everything else runs as today. A change to `CoxUI` alone re-runs `CoxUI` and `CoxTranscript`, not `CoxModel`, `CoxCore`, `CoxPlatform` or `CoxTranscriptText`; a Rust-only change skips the 1,109 snapshot images entirely.
 
@@ -2283,6 +2283,13 @@ Done when: §4.3.9 (T61.1's table) has the `desktop-macos` job time for a Rust-o
 Risks: an input the hash misses lets a broken package skip — the list is explicit and `main` always runs everything, so a miss is caught on the next `main` run (step 5) and fixed by adding the path; a flaky test that passed once stays green until its inputs change.
 
 Out of scope: caching `.build` and DerivedData (T61.4, T61.9); splitting the job per package across runners.
+
+Execution plan (sonnet-5.5):
+1. `scripts/swift_test_select.py` (the input lists, the hash, the run/skip plan; stdlib only) and `scripts/test_swift_test_select.py` (Rust-only, `CoxUI`-only, shared, Fixtures, toolchain, unchanged, run-all, unknown package, and a drift test against the real `Package.swift` files), run by the lint job's `unittest discover`.
+2. `scripts/desktop/swift_test.sh`: the loop from `ci.yml` plus the plan from the Python module. The card's input table misses `desktop/macos/Fixtures` for `CoxPlatform`, `CoxTranscriptText` and `CoxTranscript` (their tests read it through `#filePath`) and the repo-root `AGENTS.md`/`CLAUDE.md` for `CoxCore` (`WelcomeTests`); hash them too.
+3. `ci.yml` `desktop-macos`: restore, script, save with `actions/cache` v6.1.0 (`55cc8345863c7cc4c66a329aec7e433d2d1c52a9`, checked with `gh api`), job comment; `justfile` `desktop-test`.
+4. Step 5 (`push` to `main`) needs the creator's answer first: not done here. `workflow_dispatch` runs on `main` write markers meanwhile.
+5. Verify: script tests, YAML load, `bash -n`; before/after times in research.md §4.3.9 from CI.
 
 #### P63 acceptance criteria
 
