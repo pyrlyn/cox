@@ -121,7 +121,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.8 | todo | P3 | 1 | 0% | |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
-| T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
@@ -2039,30 +2038,6 @@ Check: `just desktop-lint` fails on `desktop/macos/LintFixtures`; `COX_SWIFTLINT
 Done when: §4.3.9 has an incremental `just desktop-app` after a one-line `CoxUI` change, before and after.
 
 Out of scope: lint rules.
-
-#### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
-
-Model: opus · Status: open · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
-
-Goal: switching between `just test` (a `-p` subset) and `just check-all` (`--workspace`) does not rebuild dependencies because their features unify differently, or the card is rejected with the reason.
-
-Files:
-- `Cargo.toml`
-- a workspace-hack crate if chosen (`crates/cox-workspace-hack`)
-- `docs/design/crates.md`
-
-Steps:
-1. Measure the rebuild first: `just check-all`, then `just test --changed-since HEAD~1` and count the dependency crates `cargo` recompiles. Zero → close as not needed.
-2. Compare cargo's own workspace feature unification (check whether it is stable in the pinned Rust; cite the cargo docs) with `cargo-hakari`. hakari makes every member depend on the hack crate: `crates/cox/tests/deps.rs` (`ffi_depends_only_on_app_and_protocol`, `app_has_no_terminal_or_cli`, the "only X depends on Y" rules) must still pass; a hack crate that drags `ratatui` or `clap` into `cox-ffi`'s graph is rejected.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox --test deps
-```
-
-Done when: §4.3.9 has the rebuild count before and after, or the rejection and its reason.
-
-Out of scope: changing which crates depend on which.
 
 ---
 
