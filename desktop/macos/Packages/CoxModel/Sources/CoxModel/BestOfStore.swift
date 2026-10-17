@@ -87,6 +87,9 @@ public final class BestOfStore {
     if chosen.contains(index) { chosen.remove(index) } else { chosen.insert(index) }
   }
 
+  /// Ticks every candidate the core lists, as the merge sheet opens.
+  public func chooseAll() { chosen = Set(mergeable) }
+
   /// The merge as the core takes it: two or more chosen candidates and a merger.
   public var mergeRequest: BestOfMerge? {
     guard chosen.count >= 2, let merger else { return nil }
@@ -112,6 +115,12 @@ public final class BestOfStore {
     // `refresh` clears a failure it did not hit; the refusal is still the news.
     if let reason { failure = reason }
     return launch
+  }
+
+  /// The labels of the candidates `view` merged, in the order it took them; empty for a candidate
+  /// the launch started. A merged candidate that has since gone is skipped.
+  public func merged(by view: CandidateView) -> [String] {
+    (view.mergedFrom ?? []).compactMap { from in columns.first { $0.index == from }?.label }
   }
 
   /// What keeping `index` prunes, for the confirmation to list: every other candidate that still

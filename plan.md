@@ -70,7 +70,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T37.33 | todo | P1 | 3 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
-| T52.26 | todo | P2 | 3 | 0% | |
 | T53.5 | todo | P3 | 3 | 0% | |
 | T53.6 | todo | P3 | 2 | 0% | |
 | T53.7 | todo | P3 | 2 | 0% | |
@@ -1470,12 +1469,6 @@ Every card keeps the P51 rules, and:
 - an external agent's usage is its own billing: no `usage` row is invented for it, and the cost pill shows "—" as the mockup does;
 - a remote session never sends API keys or the Keychain's secrets over the wire and never forwards the ssh agent;
 - plugin widgets reach the screen only through `cox_sanitize::sanitize` and PL§8's limits, as in the TUI.
-
-#### T52.26 CoxUI: Merge in the best-of compare view
-
-Depends: T52.25 · Size: ~180 · Files: CoxUI `BestOfCompare` screen, the merge sheet (new molecule), `desktop/macos/App` wiring
-Goal: the compare view shows a **Merge** button when more than one candidate is in `mergeable`. It opens a sheet with one checkbox per mergeable candidate (all checked at first; label, diffstat, cost), a merger picker with the composer's providers and models and the external agents the best-of control offers, and Merge, which stays blocked until two or more are checked (the not-allowed pointer, T37.50). The merge then appears as one more column, labelled with what it merged and by which model or agent, and can be opened in Review or kept like any other candidate.
-Check: CoxUI snapshots: compare view with one result (no Merge button) and with three (button shown); the sheet with two checked, with one checked (Merge blocked), with the merger menu open on a model and on an agent; a merge column running and done; swiftlint strict and swift-format clean.
 
 ### P53 — Plugin distribution (goal: a plugin installs from git or a URL through the same validation and per-digest grant as a local folder, and the plugin API, the Rust SDK and the Go SDK are ready to publish once `api = 1` is frozen)
 

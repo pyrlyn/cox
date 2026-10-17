@@ -30,7 +30,6 @@
 - T37.33. Performance budget suite
 - T39.7. Optional: live check against the real Gemini endpoint (needs the creator's key)
 - T43.6. Bench the map on and off
-- T52.26. CoxUI: Merge in the best-of compare view
 - T53.5. Freeze ABI `api = 1`
 - T53.6. `cox-plugin-api` ready for crates.io
 - T53.7. `cox-plugin-sdk` ready for crates.io
