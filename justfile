@@ -31,9 +31,10 @@ docs-check:
     {{docs_cargo}} test --locked -p cox-tui --lib keymap_table_matches_docs
 
 docs_cargo := env("CARGO", "mise exec -- cargo")
-# The whole workspace, then the swarfr cleanup; CI runs the same suite.
+# The whole workspace, then the swarfr cleanup; CI runs the same suite with the same
+# features (--all-features), so local and CI runs share build artifacts.
 check-all: && swarfr
-    mise exec -- cargo nextest run --workspace
+    mise exec -- cargo nextest run --workspace --all-features
 
 # The crates that build for Windows (P57, T57.1): the one list `just
 # windows-check` and CI's `windows` job use. Each P57 card adds the crates it

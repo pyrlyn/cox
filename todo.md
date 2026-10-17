@@ -76,7 +76,6 @@
 - T61.5.1. One integration-test binary for `cox-core`
 - T61.5.2. One integration-test binary for `cox`
 - T61.5.3. One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
-- T61.6. CI: one feature set per target
 - T61.7. sccache for local builds and the in-repository CI jobs
 - T61.8. Optimized build scripts and proc macros in dev
 - T61.9. One build graph for the Swift package tests

@@ -69,7 +69,9 @@ jobs:
       setup-command: |
         if [ "$RUNNER_OS" = Linux ]; then bash .github/actions/bwrap/install.sh; fi
         bash .github/actions/voice/install.sh
-      test-command: cargo nextest run --workspace
+      # Same features as build-command and clippy, so nextest reuses the build's artifacts
+      # instead of compiling the default feature set a second time.
+      test-command: cargo nextest run --workspace --all-features
       build-command: cargo build --workspace --all-targets --all-features --target "$TARGET"
       # CI runs only on pull requests, so the default-branch-only cache would
       # never be written.
@@ -260,8 +262,11 @@ jobs:
           tinygo build -o example_go.wasm -target wasip1 -buildmode=c-shared .
 
       # Also scaffolds `cox plugin new --lang go` and builds it with TinyGo.
+      # `cargo` here is mise's shim, whose `mise exec` drops the real Go and
+      # TinyGo dirs from PATH, so the template test's TinyGo resolves to a
+      # shim with no version; hand it this step's PATH as `just` does.
       - name: go plugin example e2e
-        run: cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
+        run: PLUGIN_TOOLS_PATH="$PATH" cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
 
   deny:
     needs: config

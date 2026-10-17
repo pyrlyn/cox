@@ -118,7 +118,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.5.1 | todo | P2 | 3 | 0% | |
 | T61.5.2 | todo | P2 | 3 | 0% | |
 | T61.5.3 | todo | P2 | 3 | 0% | |
-| T61.6 | todo | P2 | 2 | 0% | |
 | T61.7 | todo | P2 | 2 | 0% | |
 | T61.8 | todo | P3 | 1 | 0% | |
 | T61.9 | todo | P2 | 3 | 0% | |
@@ -1978,25 +1977,6 @@ mise exec -- cargo insta test --check
 Done when: equal test counts per crate; §4.3.9 has the workspace build-phase time after all three cards.
 
 Out of scope: unit tests in `src/`.
-
-#### T61.6 CI: one feature set per target
-
-Model: haiku · Status: open · Depends: T61.1 · Size: ~5 · Priority: P2 · Complexity: 2
-
-Goal: the `rust` matrix compiles the workspace once per target: `build-command`, clippy and nextest use the same features, so nextest reuses the build.
-
-Files:
-- `.github/workflows/ci.yml`
-
-Steps:
-1. `test-command: cargo nextest run --workspace --all-features` (the voice packages are already installed by `setup-command`). If a test fails only under `--all-features`, stop and report it rather than dropping the flag.
-2. Make `just check-all` match, so local and CI runs share artifacts.
-
-Check: the job log of `rust / aarch64-apple-darwin` shows nextest starting with no `Compiling` line for a workspace crate after the build step.
-
-Done when: §4.3.9 has the job time before and after for all three targets.
-
-Out of scope: `pyrlyn/ci`'s shared `ci-rust.yml` (its own repository).
 
 #### T61.7 sccache for local builds and the in-repository CI jobs
 
