@@ -81,7 +81,6 @@
 - T61.8. Optimized build scripts and proc macros in dev
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
-- T61.11. No feature-unification rebuilds between `just test` and `just check-all`
 - T66.3. `agent` collect: a status and a capped preview by task id
 - T66.4. Store: the `refine_events` table
 - T66.5. Harness entries on disk: apply, backup, rollback, fingerprint
