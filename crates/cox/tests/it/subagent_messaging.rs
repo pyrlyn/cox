@@ -6,7 +6,7 @@
 //! (`cox run -p --output-format stream-json`) against a real `COX_HOME`
 //! scratch tree and the `Scripted` provider — no network, no API key
 //! (D12). The card names `tests/subagent_messaging.rs`, but this repo has
-//! no root-level `tests/` directory; `crates/cox/tests/run_cli.rs` is
+//! no root-level `tests/` directory; `crates/cox/tests/it/run_cli.rs` is
 //! where this repo's other real-binary `cox run` e2e tests live, so this
 //! file joins them there instead.
 //!

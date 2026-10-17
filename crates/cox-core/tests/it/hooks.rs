@@ -6,7 +6,7 @@
 //! sites, and a broken hook is a warning, never a stopped turn
 //! (`broken_hook_is_skipped_not_fatal`, plan.md §1.10 #10).
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

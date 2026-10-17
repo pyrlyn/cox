@@ -7,7 +7,7 @@
 //! Names use `compact_` so `cargo test -p cox-core compact_` matches them;
 //! the plan's `compaction_…` names do not contain that substring.
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

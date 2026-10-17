@@ -5,7 +5,7 @@
 //! End-of-session extraction (T10.2): `Shutdown` with `memory.extract`
 //! runs the memory job, dedups against FTS and saves survivors.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

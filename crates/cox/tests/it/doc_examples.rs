@@ -18,7 +18,7 @@ use std::path::Path;
 use assert_cmd::Command;
 
 /// The repository's own manifest: the doc installs this exact plugin.
-const MANIFEST: &str = include_str!("../../../plugins/cursor/plugin.toml");
+const MANIFEST: &str = include_str!("../../../../plugins/cursor/plugin.toml");
 
 fn cox(home: &Path, cwd: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_cox"));

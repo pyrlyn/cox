@@ -57,7 +57,7 @@ OpenAI-compatible endpoint
   back exactly as received. cox keeps it in history and returns it as
   `extra_content.google.thought_signature` on that tool call. This field
   path is **unverified**: the page that documented it now only says it has
-  moved. `crates/cox/tests/gemini_compat.rs` runs a two-round tool loop
+  moved. `crates/cox/tests/it/gemini_compat.rs` runs a two-round tool loop
   offline against fixtures in that shape. A live recording (T39.7) will
   confirm or refute it.
 

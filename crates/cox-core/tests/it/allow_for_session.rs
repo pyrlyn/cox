@@ -5,7 +5,7 @@
 //! T69.2: `permissions.allow_for_session_persists` writes the approved
 //! command prefixes through the installed `AllowRuleStore`, and nothing else.
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

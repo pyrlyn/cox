@@ -583,7 +583,7 @@ Jev's price (J7) is under 0.1 % of a typical coding session ($0.5–5 at the J19
 There is no key and no network, and the keychain is never touched (A49, A51).
 
 - **Guest unit tests (host target).** The wire, the state builders, the question sets, the thresholds and the Noul certainty are pure Rust in `plugins/jev/src/*.rs`. extism-pdk glue sits behind `cfg(target_arch = "wasm32")`. `cargo test --manifest-path plugins/Cargo.toml -p cox-plugin-jev` runs in the `plugins` CI job. The fixtures are the documented response shapes (J1, J2, and the ones `jev.rs`'s tests already use), inline as in `jev.rs`.
-- **Host e2e (`tests/plugins_jev.rs`).**
+- **Host e2e (`tests/it/plugins_jev.rs`).**
   - `crates/cox-plugin-fixtures/build.rs` builds the plugin, as T33.28 builds the example.
   - The real binary runs against a scratch `COX_HOME`. Main turns come from `COX_PROVIDER=scripted`.
   - Jev is a wiremock server on 127.0.0.1 whose `/v1/systemone` returns fixture bodies, reached through `[providers.typesafe] base_url` in the scratch config.
@@ -734,6 +734,24 @@ Below the top two the order changes between the two runs: `onig_sys` 25.1 s cold
 - **An incremental edit is cheap.** One touched file in `cox-core` rebuilds the workspace in 18 s (row 2), the nextest test build in 29 s (row 4) and the dist library in 13 s (row 6). A one-line Swift edit in `CoxUI` rebuilds the app in 31 s.
 - **The six package builds add up to more than the app.** Built one by one they take 272 s, but the clean app build takes 83 s. The likely reason is that each package builds its own copy of the shared dependencies, which is the duplication T61.9 targets (not verified here).
 
+**One integration-test binary for `cox-core` (T61.5.1, measured 2026-10-17, same machine and toolchain).** The 24 `crates/cox-core/tests/*.rs` files became modules of `tests/it/main.rs`, so nextest links 1 test binary instead of 24 (plus the lib's unit-test binary in both cases). Both runs: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4`, warm sccache, every dependency already built, `cargo clean -p cox-core` immediately before, then `cargo nextest run -p cox-core --no-run`. One run each, not a median, on a machine under load from two other agents, so a gap of this size (about 2x) is the signal and the exact seconds are not.
+
+| Layout | `Finished` | Wall | Load average (1-minute) before → after | `clean -p cox-core` removed |
+| --- | --- | --- | --- | --- |
+| before: 24 test binaries | 21.92 s | 28 s | 47 → 39 | 315 files, 789.8 MiB |
+| after: `tests/it` | 10.86 s | 14 s | 41 → 39 | 181 files, 216.4 MiB |
+
+Test count (`cargo nextest list -p cox-core`): 431 before and 431 after, and the sets of names are identical once the old binary name is read as the new module name. `nextest run -p cox-core`: 431 passed; `-p cox-app` (which includes `tests/common/mod.rs` by path): 270 passed.
+
+**One integration-test binary for `cox` (T61.5.2, measured 2026-10-17, same method).** 16 of the 22 `crates/cox/tests/*.rs` files became modules of `tests/it/main.rs`; `docs`, `ide`, `deps`, `trycmd`, `tui_e2e` and `remote` stay separate, so nextest links 7 test binaries instead of 22 (the `cox` bin and the two helper bins are in both). Both runs: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4`, warm sccache, dependencies built, `cargo clean -p cox` immediately before, then `cargo nextest run -p cox --no-run`. One run each, on a loaded machine; the gap is small because sccache serves most of the link inputs, so treat it as a direction, not a figure.
+
+| Layout | `Finished` | Wall | Load average (1-minute) before → after | `clean -p cox` removed |
+| --- | --- | --- | --- | --- |
+| before: 22 test binaries | 8.35 s | 10 s | 14.9 → 14.5 | 336 files, 974.5 MiB |
+| after: `tests/it` + 6 | 6.42 s | 9 s | 12.1 → 11.0 | 206 files, 780.8 MiB |
+
+Test count (`cargo nextest list -p cox`): 215 before and 215 after, and the sets of names are identical once the old binary name is read as the new module name. `nextest run -p cox`: 214 passed, 1 failed (`plain_transcript_snapshot`, failing on `main` too, with the same snapshot diff before and after), 5 ignored.
+
 **Machine line for the record:** Apple M3 Max, 16 cores, 64 GiB, macOS 27.0.1 (26A434), Xcode 27.1, Swift 6.4, Rust 1.98.1, measured 2026-10-17 on a shared machine (load 9–70).
 
 #### T61.11 Feature-unification rebuilds (repo at ffa246b5, checked 2026-10-17)
@@ -864,8 +882,8 @@ the noisiest; the call rows are within budget by an order of magnitude.
 ### 4.8 `diagnostics` with a real rust-analyzer (T41.9, checked 2026-09-29)
 
 Source: the ignored test `real_rust_analyzer_reports_a_type_error_under_the_sandbox`
-in `crates/cox/tests/lsp.rs`, run with `mise exec -- cargo nextest run -p cox
---test lsp --run-ignored only --no-capture`, plus two manual `cox run -p`
+in `crates/cox/tests/it/lsp.rs`, run with `mise exec -- cargo nextest run -p cox
+-E 'test(/^lsp::/)' --run-ignored only --no-capture`, plus two manual `cox run -p`
 runs against `COX_HOME=/tmp/cox-t41-9` with the server's stdin and stdout
 tee'd to files. The host is macOS, so the sandbox backend is Seatbelt; bwrap
 was not run. Server: `rust-analyzer 1.98.1 (48a229ce 2026-09-01)`, from the

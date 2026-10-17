@@ -1,3 +1,54 @@
+#### T61.5.2 One integration-test binary for `cox`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.5.1 · Size: ~60 · Priority: P2 · Complexity: 3
+
+Goal: as T61.5.1 for `crates/cox/tests/` (22 files), except the binaries a command names by itself: `docs` and `ide` (`just docs-check`, CI's docs job), `deps` (named in `AGENTS.md`), `trycmd` and `tui_e2e` (own fixtures and terminal) stay separate.
+
+Files: as T61.5.1, for `crates/cox`.
+
+Steps: as T61.5.1. `plugin_example_dart` keeps its test name, which `just plugin-examples` filters on.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox
+just docs-check
+```
+
+Done when: equal test counts; §4.3.9 has the before/after.
+
+Out of scope: `cox-tui` and the rest.
+
+Done: 16 files are modules of `crates/cox/tests/it/main.rs` (the card said 19 files; there were 22). Kept separate: `docs` and `ide` (`just docs-check`), `deps` (`AGENTS.md`), `trycmd`, `tui_e2e` as the card says, and also `remote`, which the card did not name: it calls `env::set_var` for `HOME` and an API key, so under a runner that shares one process (`cargo test`) it would leak into the other tests. `fixtures/`, `scenarios/` and `support/` stay in `tests/` (the helper `[[bin]]`s and `CARGO_MANIFEST_DIR` paths name them). Two `include_str!` paths gained a `../`. The `plain` snapshot moved to `tests/it/snapshots/it__plain__plain_transcript.snap` (insta prefixes the binary name `it`; only the `source:` line changed). References updated: `Cargo.toml` and `support/` comments, `docs/compat.md`, `docs/design/providers.md`, `research.md` (the `--test lsp` command is now `-E 'test(/^lsp::/)'`), the `cursor_fixtures.py` docstring, and `plan.md` cards that named the moved paths or `--test gemini_compat` / `--test windows_e2e`. `plugin_example_dart` and `plugin_example_go` keep their test names, so the `just plugin-examples` and CI filters `test(plugin_example_dart)` / `test(plugin_example_go)` still select them (checked with `nextest list --run-ignored only`). Test count (`cargo nextest list -p cox`): 215 before and 215 after, identical names once the old binary name is read as the module. Build phase of `-p cox --no-run` after `cargo clean -p cox`: 8.35 s to 6.42 s (`research.md` §4.3.9; one run each on a loaded machine, a small gap because sccache is warm). Checks: `nextest run -p cox`: 214 passed, 1 failed, 5 ignored, the failure being `plain_transcript_snapshot`, which fails on `main` with the same snapshot diff before and after; `cargo test --locked -p cox --test docs --test ide`: 5 + 3 passed (the other two `docs-check` commands touch other crates and are unchanged); `cargo clippy -p cox --all-targets -- -D warnings` and `cargo fmt --check` clean (the whole workspace was not built).
+
+#### T61.5.1 One integration-test binary for `cox-core`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.1 · Size: ~60 (moves, plus one `main.rs`) · Priority: P2 · Complexity: 3
+
+Goal: `crates/cox-core/tests/*.rs` (21 files) become modules of one test binary, so `nextest` links one binary instead of 21.
+
+Files:
+- `crates/cox-core/tests/it/main.rs` (new; `mod` lines only)
+- `crates/cox-core/Cargo.toml` (one `[[test]] name = "it"` if auto-discovery needs it)
+- the moved test files (renames; they do not count as source files)
+
+Steps:
+1. `git mv` each file into `tests/it/`; `common/` and `scenarios/` move with them. `cox-app`'s dev setup reuses cox-core's harness (`crates/cox-app/Cargo.toml` comment): keep the path it uses working.
+2. insta snapshot names carry the module path: move the snapshot files with `cargo insta test --accept` only after confirming each moved snapshot's content is unchanged (`git diff -M --stat` shows renames only).
+3. Update every `--test <name>` for this crate in `justfile`, `.github/`, `docs/`, `AGENTS.md` and open `plan.md` cards to `--test it -E 'test(/^<name>::/)'`.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core
+mise exec -- cargo nextest run -p cox-app
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Done when: the test count before and after is equal (`nextest list`); §4.3.9 has the `-p cox-core` build-phase time before and after.
+
+Out of scope: other crates (T61.5.2, T61.5.3).
+
+Done: 24 files (the card said 21) are modules of `crates/cox-core/tests/it/main.rs`; `common/` and `scenarios/` stay in `tests/`, because `cox`, `cox-app` and `cox-tui` name their paths (`#[path = "../common/mod.rs"] mod common;` in `main.rs`, `use crate::common;` in the modules). The compact snapshot moved to `tests/it/snapshots/it__compact__...snap` (body unchanged, only the `source:` header line differs, since insta prefixes the crate name `it`); the scenario snapshots stay, their `snapshot_path` is now `../scenarios`. No `--test <name>` for cox-core existed outside `done.md`. Test count 431 before and after, identical names. Build phase of `-p cox-core --no-run` 28 s to 14 s (`research.md` §4.3.9). Checks: nextest `-p cox-core` 431 passed, `-p cox-app` 270 passed, clippy `-p cox-core -p cox-app --all-targets` and `fmt --check` clean (the whole workspace was not run: too heavy beside parallel agents).
+
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
 Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3

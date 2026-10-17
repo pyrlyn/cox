@@ -10,7 +10,7 @@
 //! hands its files over before writing; here the gate, the engine and the
 //! approval round trip are the real ones.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

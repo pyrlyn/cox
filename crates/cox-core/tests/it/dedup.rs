@@ -5,7 +5,7 @@
 //! Re-read dedup through the loop (T2.6): a repeated read-only call shows a
 //! pointer, a write to its subject brings the payload back.
 
-mod common;
+use crate::common;
 
 use common::{run_with, tool_results};
 use cox_protocol::types::{Event, PermissionMode};
