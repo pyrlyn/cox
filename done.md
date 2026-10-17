@@ -1,3 +1,22 @@
+#### T66.5 Harness entries on disk: apply, backup, rollback, fingerprint
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T66.4 · Size: ~200 · Files: `crates/cox-ext/src/harness.rs` (new), `crates/cox-ext/src/lib.rs`, `crates/cox-ext/tests/harness.rs` (new), `crates/cox-ext/Cargo.toml`
+Goal: the four refinable kinds (`prompt-note`, `memory`, `skill` and `subagent`; no factory) are applied with a backup first, undone exactly, and fingerprinted by content.
+- Scope: `Scope::Local { root }` keeps `harness/<kind>/<id>.md` under the session directory; `Scope::Global { home, memory_dir }` writes where cox already reads each kind (memory facts in the memory directory plus `memory::rebuild_index`, `skills/<id>/SKILL.md`, `agents/<id>.md`, `notes/<id>.md`). Ids go through `memory::is_valid_name` (`[a-z0-9-]{1,64}`), so no path built from one leaves the scope root; an entry that is a symlink is refused.
+- `Scope::apply(event_id, edits) -> Applied { event_id, before, after, edits }` checks every edit first (action against existence, content presence, no duplicates), copies each touched file to `<root>/harness-backup/<event id>/` with a manifest, then writes; a failed write rolls back. `before`/`after` are scope fingerprints and each `EditRecord` carries the `before_sha`/`after_sha` that `refine_events` stores. `rollback(event_id)` restores the copies, deletes entries the event created and consumes the backup.
+- `Scope::fingerprint()` is sha256 over the entries sorted by `scope\0kind\0id` with their length-prefixed content. cox-ext now links the workspace `sha2`.
+Check: `rollback_restores_the_bytes_and_deletes_what_the_event_created`, `an_id_with_a_slash_or_dots_is_refused_and_nothing_is_written`, `the_same_store_gives_the_same_fingerprint`, `a_local_edit_is_invisible_to_another_sessions_load` and six more in `crates/cox-ext/tests/harness.rs`.
+```text
+$ mise exec -- cargo nextest run -p cox-ext harness
+     Summary [   0.087s] 10 tests run: 10 passed, 66 skipped
+$ mise exec -- cargo nextest run -p cox-ext
+     Summary [   1.157s] 76 tests run: 76 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-ext --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Out of scope: proposing edits (T66.6) and the session wiring (T66.7).
+
 #### T66.4 Store: the `refine_events` table
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17

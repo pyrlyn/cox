@@ -126,7 +126,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T66.5 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -214,7 +213,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-provider-testkit` | the pure scenario and cassette helpers behind `Scripted`/`Replay` (T32.11; split out of `cox-provider`): scenario parsing, event building, cassette hashing, secret redaction, cassette writing | figment, sha2 |
 | `cox-mcp` | MCP client (stdio, Streamable HTTP, OAuth), server discovery (`.mcp.json`, config), tool namespacing `mcp__<server>__<tool>`, `cox mcp` server, tool-contract quarantine (T64.24) | rmcp 3.2 (`client`, `server`, `auth`, `transport-io`, `transport-child-process`, `transport-streamable-http-client-reqwest`), async-trait (server tools as `Tool` impls, T7.6), keyring 4 (OAuth tokens as `cox/mcp/<server>`, T22.5), reqwest 0.13 (the version rmcp implements its HTTP client trait for; the workspace row stays 0.12 for the providers), sha2 (the tool-contract hash, already a workspace dependency, T64.24) |
 | `cox-store` | `~/.cox/cox.db` Diesel models, `schema.rs`, embedded migrations, rollout writer/reader, archive, FTS5 search (`sql_query`), ledger queries | diesel 2.2 (`sqlite`, `returning_clauses_for_sqlite_3_35`, `r2d2` off), diesel_migrations 2.2, libsqlite3-sys 0.30 (`bundled`), directories 6, keyring 4 |
-| `cox-ext` | instruction-file hierarchy, `SKILL.md`, commands, subagent definitions, hook runner (Claude JSON protocol), `.claude/settings.json` import | serde-saphyr (frontmatter, T7.9), shlex, tokio + nix `signal` (hook runner: `sh -c` with a process-group kill on timeout, T7.4), regex 1 (hook `matcher` regexes, T22.3) |
+| `cox-ext` | instruction-file hierarchy, `SKILL.md`, commands, subagent definitions, hook runner (Claude JSON protocol), `.claude/settings.json` import | serde-saphyr (frontmatter, T7.9), shlex, tokio + nix `signal` (hook runner: `sh -c` with a process-group kill on timeout, T7.4), regex 1 (hook `matcher` regexes, T22.3), sha2 (the harness fingerprint and per-edit content hashes, T66.5; already a workspace dependency) |
 | `cox-sanitize` | `sanitize`, `sanitize_with`, `truncate` (T5.6; split out of `cox-tui` by T32.1): strips escape sequences, C0 controls, bidi overrides and zero-width runs from untrusted text before it reaches the terminal; width-aware truncation. `cox-tui` re-exports it as `text` | unicode-width 0.2 |
 | `cox-i18n` | localization (`docs/i18n.md`): embedded gettext catalogs (`po/messages.pot`; `en.po` source and fallback, `ru.po`, `uk.po`), `Plural-Forms` evaluation, locale negotiation, a per-message fallback chain, `t`/`tr!` with `{name}` placeholders; the `po-export` bin writes Apple `.strings`/`.stringsdict` and Windows `.resw`. No workspace dependency | polib 0.3 (MIT): parses the embedded `.po` files in pure Rust (no libintl/C, so macOS and Windows need nothing installed); maintained (0.3.0, Dec 2025), two small deps; chosen over `gettext` 0.4 (`.mo` only, last release 2019), `i18n-embed` 0.16 with its gettext backend (the same `gettext` crate plus rust-embed, a proc macro and `i18n.toml`) and `tr` 0.1 (a global translator with positional `{}` arguments). The plural-expression evaluator is in-crate (`src/plural.rs`): polib has none and the others keep theirs private. unic-langid 0.9 (MIT OR Apache-2.0): language tag parsing for negotiation; sys-locale 0.3 (MIT OR Apache-2.0): the OS UI languages when the env names none |
 | `cox-render` | themes and colour tokens, colour-depth mapping, markdown with syntax highlighting, diffs, SVG export, glyph sets, OSC 8 link marking and `Look` (split out of `cox-tui` by T32.2): pure rendering, text and settings in, ratatui spans and buffers out. `cox-tui` re-exports every module at its old path | syntect, two-face, pulldown-cmark, terminal-colorsaurus, similar, toml_edit |
@@ -2354,46 +2353,6 @@ Done when a scripted-provider test shows:
 - `expand` returns the full body.
 
 Out of scope: a separate `task_output` tool; peer messages between children.
-
-#### T66.5 Harness entries on disk: apply, backup, rollback, fingerprint
-
-Model: sonnet · Status: open · Depends: T66.4 · Size: ~200 · Priority: P2 · Complexity: 3
-
-Goal: the four refinable kinds (`prompt-note`, `memory`, `skill` and `subagent`; no factory) are applied with a backup first, undone exactly, and fingerprinted by content.
-
-Plan (Claude Code / sonnet-5.5): (1) `crates/cox-ext/src/harness.rs`: `Kind`, `Scope` (`Local { root }` keeps `harness/<kind>/<id>.md` under the session dir; `Global { home, memory_dir }` maps to `memory.rs`, `skills/<id>/SKILL.md`, `agents/<id>.md`, `notes/<id>.md`), `Edit`, `Applied { event_id, before, after, edits }` where `before`/`after` are the scope fingerprints and each edit carries the `before_sha`/`after_sha` that `cox_store::refine::RefineEdit` stores; (2) `apply` validates every id and action first, then copies each touched file into `<root>/harness-backup/<event id>/` with a manifest, then writes (memory goes through `save_fact`/`rebuild_index`); `rollback(event id)` restores copies and deletes entries the manifest marks as created; (3) `fingerprint(scope)` sha256 over `scope\0kind\0id` + content in sorted order; adds `sha2` to cox-ext (plan §1 row and toolchain.md); (4) tests in `crates/cox-ext/tests/harness.rs`; run `cargo nextest run -p cox-ext harness`, clippy, fmt.
-
-Files:
-- `crates/cox-ext/src/harness.rs` (new)
-- `crates/cox-ext/src/lib.rs`
-- the cox-ext harness test file
-
-Steps:
-1. Scope:
-   - Local is the default and stays in the session: `COX_HOME/sessions/<id>/harness/<kind>/<id>.md`.
-   - Global is used only when the caller asks for it, and writes where cox already reads each kind:
-     - a memory fact through `memory.rs` `save_fact`/`rebuild_index`;
-     - skills under `~/.cox/skills`;
-     - subagents under `~/.cox/agents` (`agents.rs:49-64`);
-     - prompt notes under `~/.cox/notes`.
-   - Ids match `[a-z0-9-]{1,64}`, so no path built from one can leave the scope root.
-2. `apply(edits) -> Applied { before, after }` copies every file it touches to `<scope>/harness-backup/<event id>/` before writing. `rollback(event id)` restores those copies. An entry created with no previous version is deleted on rollback (idea: `pa-core/src/refinement/mod.rs` `rollback_proposal`).
-3. `fingerprint(scope)` is sha256 over the entries sorted by `scope\0kind\0id`, together with their content (idea: `pa-core/src/refinement/ranking.rs` `harness_digest_fingerprint`). cox-ext links the workspace `sha2`.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-ext harness
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when tests prove that:
-- rollback restores the bytes;
-- an id with `/` or `..` is refused;
-- the same store gives the same fingerprint;
-- a local edit is invisible to another session's load.
-
-Out of scope: proposing edits (T66.6) and the session wiring (T66.7).
 
 #### T66.6 Core: a refine proposal from one cheap call, with the base prompt fixed
 
