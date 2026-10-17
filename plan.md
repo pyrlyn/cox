@@ -2274,42 +2274,6 @@ Done when a scripted-provider test shows:
 
 Out of scope: a separate `task_output` tool; peer messages between children.
 
-#### T66.4 Store: the `refine_events` table
-
-Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
-
-Goal: every refine (proposed, applied, rejected or rolled back) is one Diesel row that a later undo and `cox refine list` can read.
-
-Files:
-- `crates/cox-store/migrations/00000000000010_refine_events/{up,down}.sql`
-- `crates/cox-store/src/schema.rs`
-- `crates/cox-store/src/refine.rs` (new): model and queries, in the same shape as `mcp_trust.rs`
-
-Steps:
-1. Columns:
-   - `id` (TEXT primary key)
-   - `session_id`
-   - `scope` (`local`|`global`)
-   - `trigger` (`manual`|`auto`)
-   - `evidence` (the model's rationale for the whole refine; prime-agent records evidence per refine, not per edit)
-   - `edits` (JSON array of `{action, kind, id, before_sha, after_sha}`)
-   - `outcome` (`applied`|`rejected`|`rolled_back`)
-   - `rollback_of` (nullable)
-   - `fingerprint`
-   - `created_at`
-2. Add `refine_insert`, `refine_get` and `refine_list(session, limit)` through the typed DSL, with no raw SQL outside the migration.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-store refine
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when a row round-trips, the list is newest first, and the down migration drops the table.
-
-Out of scope: writing files, which is T66.5.
-
 #### T66.5 Harness entries on disk: apply, backup, rollback, fingerprint
 
 Model: sonnet · Status: open · Depends: T66.4 · Size: ~200 · Priority: P2 · Complexity: 3
