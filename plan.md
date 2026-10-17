@@ -2284,7 +2284,7 @@ Rationale in §6 A142. T65.1 is in `done.md`.
 
 Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) at `afe8d14` (v0.9.8). It is MIT, but no code is copied, so no notice is needed. Each card cites prime-agent files for the idea only, and the implementation is written from the card. If a later card ever copies a substantial part, that file and `THIRD-PARTY-NOTICES` carry prime-agent's full MIT text, both copyright lines and the repository URL, and that notice is never replaced by cox's header.
 
-**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it.
+**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it. A161 adds the first three, T66.16 → T66.17 → T66.18. A162 adds T66.19 → T66.20; T66.21 follows T66.18 and T66.19.
 
 **Already in cox, so no card:**
 - `ContextTooLong` already compacts once per user turn and then surfaces the error (`session.rs:1846-1867`, `retried_after_too_long`). That is the contract of prime-agent's `OverflowRecovery` (`pa-daemon/src/overflow_compaction.rs`).
@@ -2606,6 +2606,106 @@ Goal: a resident session can receive a recurring prompt (idea: `pa-core/src/cron
 Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 2
 
 Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
+
+#### T66.16 `docs/app-server.md` says what a dropped connection does
+
+Model: haiku · Status: open · Depends: T66.12 · Size: ~10 (docs only) · Priority: P2 · Complexity: 1
+
+Goal: the doc stops promising that a running turn survives a dropped client. `docs/design/serve.md` S1 and D8: today the turn stops, the session can be resumed, and resident sessions are planned.
+
+Files:
+- `docs/app-server.md`
+
+Steps:
+1. Replace "A running turn keeps running on the host" and "the session itself keeps running on the host" with today's behaviour.
+
+Check:
+```bash
+! grep -n "keeps running on the host" docs/app-server.md
+mise exec -- cargo nextest run -p cox --test docs
+```
+
+Done when the Check passes.
+
+Out of scope: any code.
+
+#### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
+
+Model: sonnet · Status: open · Depends: T66.16 · Size: ~140 · Priority: P2 · Complexity: 3
+
+Goal: a client can detach and reattach to a session the server holds, and one session never gets a second core. `docs/design/serve.md` S2, D1, D2 and F1.
+
+Files:
+- `crates/cox-app/src/wire.rs`
+- `crates/cox-app/src/server.rs`
+- `docs/app-server.md` (the call list); generated: `docs/app-server.schema.json`
+
+Steps:
+1. `Call::Attach`, `Call::End` and `Call::Inbox`, with `Reply::Inbox`.
+2. `close` stops the pump and sends `ended`, but no longer closes the controller.
+3. `open` with `resume` of an id this server already holds attaches instead of calling `App::open` again (F1).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app server wire
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core`, `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`; and the schema drift test is green.
+
+Out of scope: the supervisor, the socket and worker mode (T66.18 and later cards).
+
+#### T66.18 Worker mode in `cox-app`'s server: one session, ended on EOF
+
+Model: sonnet · Status: open · Depends: T66.17 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the server can run as one session's worker, and on EOF every mode ends its sessions instead of only closing them, so detached bash processes are killed. `docs/design/serve.md` S3, D3 and F2.
+
+Files:
+- `crates/cox-app/src/server.rs`
+
+Steps:
+1. `ServeMode::{Client, Worker}` for `serve`. A worker refuses a second `open` and skips `load_login_env`.
+2. On EOF both modes end their sessions (F2).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app server
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `eof_ends_every_session` and `a_worker_refuses_a_second_session` pass.
+
+Out of scope: the `cox serve --worker` flag and the supervisor that spawns workers (later cards).
+
+#### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
+
+Model: opus · Status: open · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Goal: the supervisor runs one worker process per session and keeps it alive under T66.19's policy. `docs/design/serve.md` S6, D3 and D7.
+
+Files:
+- `crates/cox-serve/src/worker.rs`
+- `crates/cox-serve/src/supervisor.rs`
+
+Steps:
+1. Spawn the worker program (`current_exe() serve --worker` in production; a parameter, so tests pass a fake) with piped stdio.
+2. Apply T66.19's policy on each exit; a restart reopens the session with `resume`. A worker the supervisor gave up on is listed as failed.
+3. Enforce a cap of 16 workers.
+4. On SIGINT or SIGTERM, send `end` to every worker, wait 10 s, then SIGKILL.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve supervisor
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass, with a fake worker program as `crates/cox/tests/remote.rs` fakes `ssh`: `a_crashed_worker_is_restarted_idle_with_resume`, `give_up_marks_the_session_failed`, `shutdown_ends_every_worker`, `the_cap_refuses_the_seventeenth_open`.
+
+Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
 
 ### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
 
@@ -3099,6 +3199,8 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A157 §3 P33 (T33.47.8, new T33.47.10) — split the pane, shortcut and chip card into T33.47.8.1–T33.47.8.10, one layer each (CoxClient seam, CoxModel store, CoxCore calls, CoxUI pane, App wiring, shortcut and DT§ text, one canvas store per session in `AppStore`, a canvas page's content height and zoom in CoxPlatform, the store's pick for the palette, and a redraw that keeps §6's scroll and outline), because the card spans six Swift packages and the app, well over 200 lines and three files. `CanvasClient` is a protocol of its own rather than five more `SessionClient` requirements, so a client without canvases needs no stubs. T33.47.10 fixes a T33.47.4 bug found while wiring the pane: a local `next_canvas` never returned after `close()`, so the FFI pull held the session for ever. Effect: T33.47.8 stays open until the ten cards and its Check pass; no API or design decision changes.
 - A158 §3 (new P68: T68.1–T68.10), by the creator (2026-10-14) — run targets: a whole cox session runs over ssh on Linux, macOS or Windows, in a Docker container, in a Lima instance or in the Colima VM, from the desktop app, the TUI and `cox run` (`--on <target>`) and the `agent` tool. Why: the only remote path is the desktop app's `ssh <host> cox app-server --stdio` with a hard-coded `/usr/bin/ssh` (T52.19–T52.21); containers and VMs are the usual isolation for agents (research.md 9.1.x). Effect: a new pure crate `cox-target` owns target names, launcher lookup (absolute paths only) and launch argv, and `cox-app/src/remote.rs` delegates to it; the app-server wire gains a `hello` handshake; `targets.*` is user config only. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link and nothing typed by the model or the person goes on the remote command line. `cox` must already be on the target; installing it and throwaway `docker run` containers are ideas, not cards. No new dependency; D7 holds on targets without a sandbox backend. No §0 decision changes.
 - A159 §3 (new P69: T69.1–T69.8), by the creator (2026-10-15) — tasks from a comparison of openai/codex at `f0c5077c` and xai-org/grok-build at `2bdd1d6a` with cox: PowerShell readers meet `Read` denies, `allow_for_session_persists` is honored, more default read-only workspace dirs, a store `quick_check`, a compaction that rejects stubs and survives overflow, live tasks reattached after compaction, optional edit anchors, an integer compact threshold. Why: cox already leads on sandboxing, lossless archives and truncation; these are the gaps. Both sources are Apache-2.0; every card says implement similar, not copy, and records the licence. Effect: eight cards; no new dependency, no §0 decision changes.
+- A161 §3 P66 (new T66.16–T66.18), by the creator (2026-10-17): the first three implementation cards from `docs/design/serve.md` (T66.12), its proposals S1–S3. S1 corrects `docs/app-server.md`, which promises that a turn survives a dropped client; S2 adds `attach`, `end` and `inbox` to the app-server wire and makes `open` of a held session attach (F1: two cores for one session); S3 adds worker mode and ends sessions on EOF (F2). Why: they need no new crate or dependency and fix two bugs the design found. S4–S9 (`cox-serve`, the socket, supervision, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
+- A162 §3 P66 (new T66.19–T66.21), by the creator (2026-10-17): the next three implementation cards from `docs/design/serve.md`, its proposals S4–S6. S4 adds the crate `cox-serve` with a pure restart policy; S5 adds its run directory, singleton lock and owner-only socket with a peer-uid check (D4), extracting `lock::claim_path` in cox-store so one lock implementation serves both; S6 adds worker supervision and shutdown. Why: a new crate, because process supervision and the socket's trust boundary must stay out of `cox-app` (linked into the macOS app) and out of `crates/cox`. No new dependency. S7–S9 (router and bridge, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
 
 ## 7. Risk register
 
