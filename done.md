@@ -238,6 +238,43 @@ Goal: decide by measurement whether `[profile.dev.build-override] opt-level = 3`
 Check: `MISE_SCCACHE_PROBE=1 CARGO_BUILD_JOBS=4 mise exec -- cargo build --workspace --timings`, clean `target/`, on the kept variant (no override). Output: `real 300.23 s, user 1023.86 s, sys 81.67 s`; load 18.95 before, 37.69 at the end (a 1-minute average that includes the build); the report is `target/cargo-timings/cargo-timing.html`. Top build-script run: `aws-lc-sys` 86.4 s. Top proc-macro crate: `diesel_derives` 12.2 s, `typify-impl` 11.4 s, `uniffi_macros` 8.9 s.
 Done: verdict rejected; the override is not kept. Clean builds (`rm -rf target`, A, B, A, B): A 322.37 s and 306.22 s (mean 314.3 s), B 379.04 s and 303.48 s (mean 341.3 s, +8.6 %), inside the 16 to 76 s spread of each variant. Incremental (`touch crates/cox-tui/src/lib.rs`): medians A 5.45 s, B 5.00 s, with the first run after each clean at 10 to 12 s in both. Neither path shows a speedup, and the clean build is not shown to be not slower, so the rule (keep only if both are not slower) rejects it. Rows, loads, commands and the top units are in `research.md` §4.3.9.
 
+#### T66.16 `docs/app-server.md` says what a dropped connection does
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~10 (docs only) · Priority: P2 · Complexity: 1
+
+Goal: the doc stops promising that a running turn survives a dropped client. `docs/design/serve.md` S1 and D8: today the turn stops, the session can be resumed, and resident sessions are planned.
+
+Files:
+- `docs/app-server.md`
+
+Steps:
+1. Replace "A running turn keeps running on the host" and "the session itself keeps running on the host" with today's behaviour.
+
+Check:
+```bash
+! grep -n "keeps running on the host" docs/app-server.md
+mise exec -- cargo nextest run -p cox --test docs
+```
+
+Done when the Check passes.
+
+Out of scope: any code.
+
+Done: `docs/app-server.md` no longer promises that a running turn survives a dropped client. When the connection drops, the running turn stops, the session can be resumed with `open` and `resume`, and resident sessions are planned in `docs/design/serve.md` (T66.12). The two sentences are the only changes in the file.
+
+Check output:
+```
+$ ! grep -n "keeps running on the host" docs/app-server.md
+(no output)
+$ mise exec -- cargo nextest run -p cox --test docs
+    PASS cox::docs relative_links_skip_urls_and_anchors
+    PASS cox::docs app_server_doc_cites_paths_that_exist
+    PASS cox::docs docs_config_covers_every_key
+    PASS cox::docs docs_relative_links_resolve
+    PASS cox::docs docs_name_every_subcommand
+    Summary: 5 tests run: 5 passed, 0 skipped
+```
+
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
 Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3

@@ -2329,28 +2329,6 @@ Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size:
 
 Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
 
-#### T66.16 `docs/app-server.md` says what a dropped connection does
-
-Model: haiku · Status: open · Depends: T66.12 · Size: ~10 (docs only) · Priority: P2 · Complexity: 1
-
-Goal: the doc stops promising that a running turn survives a dropped client. `docs/design/serve.md` S1 and D8: today the turn stops, the session can be resumed, and resident sessions are planned.
-
-Files:
-- `docs/app-server.md`
-
-Steps:
-1. Replace "A running turn keeps running on the host" and "the session itself keeps running on the host" with today's behaviour.
-
-Check:
-```bash
-! grep -n "keeps running on the host" docs/app-server.md
-mise exec -- cargo nextest run -p cox --test docs
-```
-
-Done when the Check passes.
-
-Out of scope: any code.
-
 #### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
 
 Model: sonnet · Status: open · Depends: T66.16 · Size: ~140 · Priority: P2 · Complexity: 3
