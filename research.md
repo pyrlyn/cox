@@ -668,6 +668,74 @@ resulting question by deciding Cursor is a **plugin** (P35, `plan.md` §6
 A54), driving the CLI's two official headless modes, never the desktop
 session and never one of the unofficial proxies named above.
 
+### 4.3.9 Build times (T61.1, measured 2026-10-17)
+
+Source: this repository at `main` 5efb2ba4 (https://github.com/pyrlyn/cox/commit/5efb2ba4), plus the T61.1 claim commit, which changes no code. Machine: Apple M3 Max, 16 cores (12 performance, 4 efficiency), 64 GiB RAM, macOS 27.0.1 (26A434), Xcode 27.1 (27A9275), Swift 6.4 (`swift --version`). Toolchain from `mise.toml`: Rust 1.98.1, cargo-nextest 0.9.143, just 1.58.0, Node 24.21.0, and sccache 0.18.0 as `RUSTC_WRAPPER` through mise (local cache 10 GiB, `~/Library/Caches/Mozilla.sccache`).
+
+**Conditions.** The machine was shared: other agents ran vitest, an Astro build and Simulator processes during the session. Load averages are recorded per row (1-minute, before → after). Rows 1–2 started at load 27 and 54, so their numbers are the least clean. Every row is one run, not the median of 5 that the P61 header asks for; five clean builds per row was not feasible in one session, so differences under about 10 % are noise. The "clean" rows use a warm sccache (70–97 % hits, from earlier builds on this machine). Row 8 repeats the clean workspace build with the wrapper bypassed, as the cold reference. CI times are from the GitHub API, not measured locally.
+
+**Rust (`cargo` with `--timings`; HTML reports kept under the worktree's `target/`, not in git).**
+
+| # | Measurement | Command | `Finished` | Wall | Load before → after | sccache hits / requests |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | clean `cargo build --workspace` | `cargo clean`, then `cargo build --workspace --timings` | 2m 09s | 129.6 s | 27 → 70 | 770 / 1094 |
+| 2 | incremental, after `touch crates/cox-core/src/turn.rs` | `cargo build --workspace --timings` | 18.07 s | 20.3 s | 54 → 50 | 0 (incremental, not cached) |
+| 3 | `cargo nextest run --workspace --no-run`, clean | `cargo clean`, then the command with `--timings` | 1m 27s | 96.7 s | 20 → 62 | 1098 / 1133 |
+| 4 | same, after the same touch | `cargo nextest run --workspace --no-run --timings` | 28.99 s | 45.0 s | 31 → 40 | 0 |
+| 5 | `cargo build -p cox-ffi --lib --profile dist --target aarch64-apple-darwin`, clean | `cargo clean`, then the command with `--timings` | 2m 09s | 131.0 s | 28 → 46 | 790 / 1024 |
+| 6 | same, after the same touch | same command | 13.44 s | 14.0 s | 18 → 19 | 0 |
+| 7 | full `just desktop-xcframework`, clean | `cargo clean`, then the recipe (the script's cargo calls take no `--timings`) | 1m 28s (cox-ffi, dist) + 1m 11s (uniffi-bindgen, dist) | 167.5 s | 19 → 23 | 901 / 1074 |
+| 8 | extra: clean `cargo build --workspace`, sccache bypassed | `cargo clean`, then `env RUSTC_WRAPPER= cargo build --workspace --timings` | 2m 27s | 147.7 s | 9 → 54 | workspace crates: 0 requests; 25 requests went through sccache (all hits; not traced, probably the nested cargo in `cox-plugin-fixtures`' build script) |
+
+**Swift (`swift build --build-tests --build-system swiftbuild`, one package at a time, `.build` removed first; wall time includes the SwiftPM fetch from its shared cache).**
+
+| Package | Wall | `Build complete` | Note |
+| --- | --- | --- | --- |
+| `CoxCore` | 45.0 s | 28.6 s | linker warning `__eh_frame section too large (max 16MB)` for `CoxCoreTests-product` |
+| `CoxModel` | 43.2 s | 24.5 s | |
+| `CoxPlatform` | 68.7 s | 45.9 s | |
+| `CoxTranscript` | 41.4 s | 26.8 s | |
+| `CoxTranscriptText` | 35.1 s | 23.2 s | |
+| `CoxUI` | 38.9 s | 23.0 s | |
+| **sum** | **272.2 s** | | run one after another, not in parallel |
+
+**Desktop app (`just desktop-app`, Debug, ad-hoc signed; the app is built, not launched).**
+
+| Measurement | Wall | Result |
+| --- | --- | --- |
+| clean: `rm -rf desktop/macos/build`, then the recipe (xcframework step with the Rust target already warm from row 7, XcodeGen, xcodebuild) | 83.3 s | exit 0; 49 `warning:` lines; xcodebuild printed three `error: the following command failed with exit code 0 but produced no further output` lines, and the build still exited 0 |
+| incremental: one-line change in `desktop/macos/Packages/CoxUI/Sources/CoxUI/Molecules/ProjectDropZone.swift:50` (a trailing comment), then the recipe | 30.5 s | exit 0; 11 `warning:` lines. The change was reverted with `git checkout`; the worktree is clean and nothing was committed |
+
+**CI (GitHub Actions, job times from `gh run view --json jobs`: `completedAt` minus `startedAt` of the latest attempt, read 2026-10-17).**
+
+| Job | Last green on `main` | Last green on a pull request |
+| --- | --- | --- |
+| `rust / aarch64-apple-darwin` | 6 min 44 s (404 s), run https://github.com/pyrlyn/cox/actions/runs/37258328643 (CI, `workflow_dispatch`, 2026-10-05) | 24 min 42 s (1482 s), run https://github.com/pyrlyn/cox/actions/runs/38933123898 (2026-10-16, PR `t69.3-readonly-metadata-dirs`) |
+| `desktop-macos` | 35 min 55 s (2155 s), same run as above | 56 min 18 s (3378 s), same run as the PR row above |
+
+The CI workflow runs on `pull_request` and `workflow_dispatch` only (`.github/workflows/ci.yml:4-9`), and no CI run on `main` is newer than 2026-10-05. The `pipeline` workflow on runs on `main` skips its `rust` job (for example run https://github.com/pyrlyn/cox/actions/runs/38886359637). The `main` and PR rows are therefore 11 days and two triggers apart; they are not like for like.
+
+**Top five crates by compile time (clean workspace, `UNIT_DATA` of `cargo-timing.html`).** Each value is the sum of a crate's build-script compile, build-script run and library units. Units run in parallel, so these are CPU-time shares, not wall shares (the report's unit total is 1714 s cold for a 147 s build).
+
+| Rank | Crate | Cold (row 8) | Warm sccache (row 1) |
+| --- | --- | --- | --- |
+| 1 | `aws-lc-sys` 0.45.0 | 100.1 s | 80.0 s |
+| 2 | `cranelift-codegen` 0.136.3 | 47.4 s | 34.1 s |
+| 3 | `whisper-rs-sys` 0.15.0 | 43.4 s | 47.8 s |
+| 4 | `zstd-sys` 2.1.0 | 37.4 s | 44.7 s |
+| 5 | `wasmtime` 49.0.3 | 29.2 s | 19.2 s |
+
+Below the top two the order changes between the two runs: `onig_sys` 25.1 s cold and 43.9 s warm, `ring` 16.3 s and 42.7 s. Those build-script runs swing with machine load, so only the top two are stable. The largest workspace members are `cox-plugin-fixtures` (20.8 s cold; its build script runs a nested `wasm32` cargo build), `cox` (16.9 s, bin and lib), `cox-provider-anthropic` (12.9 s), `cox-plugin` (10.0 s) and `cox-store` (9.9 s).
+
+**Findings.**
+
+- **The P61 premise about `dist` does not hold on `main`.** The card (plan.md, P61) says the XCFramework builds with fat LTO and one codegen unit. `Cargo.toml` says otherwise: `[profile.dist]` is `inherits = "dev"` with no `lto` or `codegen-units` (`Cargo.toml:238-239`, from commit ae5ed7bd "build(release): dev builds, published as prereleases (#189)", whose comment says so explicitly). The dist `cox-ffi` build therefore costs the same as the dev workspace (row 5 against row 1: 131 s against 130 s). Incremental dist after a touch is 13 s (row 6). T61.2 step 1 needs re-checking against this before it is claimed.
+- **sccache is a small part of the clean numbers.** Bypassing it adds 18 s to the clean workspace build (row 8 against row 1). The expensive units are build-script runs (the C builds of `aws-lc-sys` and `zstd-sys`) and workspace crates, which the wrapper does not serve.
+- **An incremental edit is cheap.** One touched file in `cox-core` rebuilds the workspace in 18 s (row 2), the nextest test build in 29 s (row 4) and the dist library in 13 s (row 6). A one-line Swift edit in `CoxUI` rebuilds the app in 31 s.
+- **The six package builds add up to more than the app.** Built one by one they take 272 s, but the clean app build takes 83 s. The likely reason is that each package builds its own copy of the shared dependencies, which is the duplication T61.9 targets (not verified here).
+
+**Machine line for the record:** Apple M3 Max, 16 cores, 64 GiB, macOS 27.0.1 (26A434), Xcode 27.1, Swift 6.4, Rust 1.98.1, measured 2026-10-17 on a shared machine (load 9–70).
+
 ### 4.4 Routing evidence (D5)
 Copilot's auto model selection is praised because it is explicit, priced (10 % discount) and switchable; Claude Code's Haiku delegation is complained about because it is silent. aider's `--weak-model` (commits, summaries) and OpenCode's small model for titles are the same pattern. Jobs that tolerate a small model, by consensus of the surveyed tools: titles, summaries, commit messages, compaction, search/explore, tool-result summarisation, classification. Effect-size numbers from the survey ("4.2× savings", "Codex 3–4× fewer tokens than Claude Code") are unsourced and dropped. [med]
 
