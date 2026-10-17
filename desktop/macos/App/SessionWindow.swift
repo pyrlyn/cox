@@ -14,7 +14,7 @@
 // pane under the column (T51.6; the window asks before closing over a running command), ⌘⇧B
 // shows the browser pane beside it (T51.10) and a plugin's canvas takes its place (T33.47.8.5),
 // plugin panels sit above the composer and a plugin
-// overlay shows as a sheet (T52.17), File › Connect to Host… lists a remote host's sessions in
+// overlay shows as a sheet (T52.17), File › Connect to Target… lists a remote target's sessions in
 // the sidebar and opens one through that host (T52.21), New session asks which agent drives it
 // and an external agent's transcript opens with its ACP banner (T52.8), the composer offers
 // best of n and its compare sheet (T52.12), the Appearance popover writes
@@ -67,8 +67,8 @@ struct SessionWindow: View {
   @State var isCanvasVisible = false
   /// ⌘K's palette, while it shows (T37.44.13).
   @State var palette: SessionPalette?
-  /// The Connect to Host sheet, while it shows (T52.21).
-  @State var connecting: ConnectHostSheet.State?
+  /// The Connect to Target sheet, while it shows (T52.21, T68.5).
+  @State var connecting: ConnectTargetSheet.State?
   /// The New-session sheet's agents, while it shows (T52.8).
   @State private var picking: AgentPicker?
   /// The composer's best-of-n candidates and the group the compare sheet shows (T52.12).
@@ -114,7 +114,7 @@ struct SessionWindow: View {
       if !appearanceWrites.isPending { readAppearance() }
     }
     .alert(refused ?? "", isPresented: isRefused) {}
-    .connectHostSheet($connecting, remotes: model.remotes)
+    .connectTargetSheet($connecting, remotes: model.remotes)
     .newSessionSheet($picking) { agent in await open(resume: nil, agent: agent) }
     .bestOfSheet(
       bestOf, workspace: try? model.launch.live.get(),
@@ -137,7 +137,7 @@ struct SessionWindow: View {
           toggleTerminal: { toggleTerminal() }, toggleBrowser: { isBrowserVisible.toggle() },
           toggleCanvas: canvasToggle,
           popOut: current.map { session -> (Bool) -> Void in { openPopOut(session, asTab: $0) } },
-          connectHost: model.remotes.canConnect ? { connecting = ConnectHostSheet.State() } : nil,
+          connectTarget: model.remotes.canConnect ? { connecting = .opening } : nil,
           newSession: { Task { await newSession() } }, review: showing.map { _ in toggleReview },
           palette: showing.map { _ in togglePalette })
       )

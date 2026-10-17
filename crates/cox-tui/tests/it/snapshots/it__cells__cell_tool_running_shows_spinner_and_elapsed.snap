@@ -1,0 +1,6 @@
+---
+source: crates/cox-tui/tests/it/cells.rs
+expression: "text(&s,\ncell(&s, |c| matches!(c, Cell::Tool { call, .. } if call.name == \"bash\")))"
+---
+⚙ bash sleep 30
+⠧ 1.4s

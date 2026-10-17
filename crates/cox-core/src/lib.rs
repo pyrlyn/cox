@@ -8,6 +8,7 @@
 //! events instead of calling a model.
 
 mod advise;
+pub mod autonomous;
 mod budget;
 pub mod cache_diag;
 mod checkpoint;
@@ -23,6 +24,7 @@ pub mod mode;
 mod monotone;
 mod plugin_model;
 pub mod redact;
+pub mod refine;
 mod repomap;
 mod rewind;
 mod rollout;
