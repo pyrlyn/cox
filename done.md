@@ -1,3 +1,25 @@
+#### T61.5.2 One integration-test binary for `cox`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.5.1 · Size: ~60 · Priority: P2 · Complexity: 3
+
+Goal: as T61.5.1 for `crates/cox/tests/` (22 files), except the binaries a command names by itself: `docs` and `ide` (`just docs-check`, CI's docs job), `deps` (named in `AGENTS.md`), `trycmd` and `tui_e2e` (own fixtures and terminal) stay separate.
+
+Files: as T61.5.1, for `crates/cox`.
+
+Steps: as T61.5.1. `plugin_example_dart` keeps its test name, which `just plugin-examples` filters on.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox
+just docs-check
+```
+
+Done when: equal test counts; §4.3.9 has the before/after.
+
+Out of scope: `cox-tui` and the rest.
+
+Done: 16 files are modules of `crates/cox/tests/it/main.rs` (the card said 19 files; there were 22). Kept separate: `docs` and `ide` (`just docs-check`), `deps` (`AGENTS.md`), `trycmd`, `tui_e2e` as the card says, and also `remote`, which the card did not name: it calls `env::set_var` for `HOME` and an API key, so under a runner that shares one process (`cargo test`) it would leak into the other tests. `fixtures/`, `scenarios/` and `support/` stay in `tests/` (the helper `[[bin]]`s and `CARGO_MANIFEST_DIR` paths name them). Two `include_str!` paths gained a `../`. The `plain` snapshot moved to `tests/it/snapshots/it__plain__plain_transcript.snap` (insta prefixes the binary name `it`; only the `source:` line changed). References updated: `Cargo.toml` and `support/` comments, `docs/compat.md`, `docs/design/providers.md`, `research.md` (the `--test lsp` command is now `-E 'test(/^lsp::/)'`), the `cursor_fixtures.py` docstring, and `plan.md` cards that named the moved paths or `--test gemini_compat` / `--test windows_e2e`. `plugin_example_dart` and `plugin_example_go` keep their test names, so the `just plugin-examples` and CI filters `test(plugin_example_dart)` / `test(plugin_example_go)` still select them (checked with `nextest list --run-ignored only`). Test count (`cargo nextest list -p cox`): 215 before and 215 after, identical names once the old binary name is read as the module. Build phase of `-p cox --no-run` after `cargo clean -p cox`: 8.35 s to 6.42 s (`research.md` §4.3.9; one run each on a loaded machine, a small gap because sccache is warm). Checks: `nextest run -p cox`: 214 passed, 1 failed, 5 ignored, the failure being `plain_transcript_snapshot`, which fails on `main` with the same snapshot diff before and after; `cargo test --locked -p cox --test docs --test ide`: 5 + 3 passed (the other two `docs-check` commands touch other crates and are unchanged); `cargo clippy -p cox --all-targets -- -D warnings` and `cargo fmt --check` clean (the whole workspace was not built).
+
 #### T61.5.1 One integration-test binary for `cox-core`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.1 · Size: ~60 (moves, plus one `main.rs`) · Priority: P2 · Complexity: 3
