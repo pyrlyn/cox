@@ -112,7 +112,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T61.2 | todo | P1 | 2 | 0% | |
+| T61.2 | in progress | P1 | 2 | 10% | Claude Code / sonnet |
 | T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
 | T61.5.1 | todo | P2 | 3 | 0% | |
@@ -1863,6 +1863,8 @@ just desktop-app
 ```
 
 Done when: §4.3.9 has the incremental `just desktop-xcframework` time before and after; the DMG still comes from `dist` (the script's printed profile in the workflow log).
+
+Execution plan (Claude Code / sonnet, creator decision 2026-10-17: measure, then close if the gain is small): (1) confirm from `Cargo.toml` and `scripts/desktop/xcframework.sh` which profile the XCFramework uses and whether any LTO is on (`dist` inherits `dev`: no LTO). (2) Time the incremental `just desktop-xcframework` (touch one `cox-app` source file) on the quiet machine under the current `dist` and under the proposed `ffi-dev` settings applied locally. (3) Under 10% faster: close as not needed with both timings in `research.md` §4.3.9, drop T61.3's dependency on T61.2; otherwise implement the steps below.
 
 Out of scope: the bindings generator (T61.3), caching (T61.4).
 
