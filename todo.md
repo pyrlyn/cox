@@ -85,7 +85,6 @@
 - T66.3. `agent` collect: a status and a capped preview by task id
 - T66.4. Store: the `refine_events` table
 - T66.5. Harness entries on disk: apply, backup, rollback, fingerprint
-- T66.6. Core: a refine proposal from one cheap call, with the base prompt fixed
 - T66.7. Session: apply a refine, record it, and render the digest after the cached prefix
 - T66.8. `/refine` and `cox refine`
 - T66.9. A pure autonomous driver beside the USD cap
