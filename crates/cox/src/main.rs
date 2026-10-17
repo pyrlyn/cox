@@ -25,6 +25,7 @@ mod plugin_new;
 #[cfg(feature = "plugins")]
 mod plugin_ui;
 mod record;
+mod refine_cmd;
 mod resume;
 mod run;
 mod self_update;
@@ -187,6 +188,17 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Expand(args)) => {
             let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
             expand_cmd::run(&home, &args.id, args.lines.as_deref())
+        }
+        Some(Command::Refine(args)) => {
+            let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
+            match &args.action {
+                cli::RefineAction::List { session } => {
+                    refine_cmd::list(&home, &cwd, session.as_deref())
+                }
+                cli::RefineAction::Undo { id, global } => {
+                    refine_cmd::undo(&home, &loaded.config, &cwd, id, *global)
+                }
+            }
         }
         #[cfg(feature = "voice")]
         Some(Command::Voice(args)) => {

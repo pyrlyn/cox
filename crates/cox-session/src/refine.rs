@@ -47,6 +47,12 @@ pub enum RefineError {
     AlreadyUndone(String),
     #[error("{kind} {id:?} changed after the refine; undo the later change first")]
     ChangedSince { kind: String, id: String },
+    /// Global entries reach every session, so undoing them is as explicit
+    /// as making them was.
+    #[error("refine event {0:?} changed the global entries; pass --global to undo it")]
+    GlobalNeedsFlag(String),
+    #[error("this session has no applied refine to undo")]
+    NothingToUndo,
 }
 
 /// What one `refine` call did.
@@ -73,6 +79,29 @@ pub struct Undone {
     pub undid: String,
 }
 
+/// A proposal that passed every check and waits for the user's yes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pending {
+    pub scope: RefineScope,
+    pub evidence: String,
+    /// What applying would change, as a unified diff the user reviews.
+    pub diff: String,
+    edits: Vec<Edit>,
+}
+
+/// What `propose` found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reviewed {
+    Ready(Pending),
+    /// Same meaning as [`Refined::Unchanged`].
+    Unchanged,
+    /// Same meaning as [`Refined::Rejected`]; the `rejected` row is written.
+    Rejected {
+        event_id: String,
+        reason: String,
+    },
+}
+
 /// Applies, records and undoes refines for one session.
 pub struct Refiner {
     session: Session,
@@ -95,31 +124,61 @@ impl Refiner {
         }
     }
 
-    /// One `/refine`: propose, apply under `scope`, record.
+    /// One `/refine` without a review step: propose, apply under `scope`,
+    /// record.
     pub async fn refine(&self, text: &str, scope: RefineScope) -> Result<Refined, RefineError> {
+        Ok(match self.propose(text, scope).await? {
+            Reviewed::Ready(pending) => return self.apply(&pending),
+            Reviewed::Unchanged => Refined::Unchanged,
+            Reviewed::Rejected { event_id, reason } => Refined::Rejected { event_id, reason },
+        })
+    }
+
+    /// The model's proposal for `text`, checked against what is on disk and
+    /// not written. A refusal is recorded here, since nothing will follow.
+    pub async fn propose(&self, text: &str, scope: RefineScope) -> Result<Reviewed, RefineError> {
         let session_id = self.session.id();
         let target = scope_for(&self.home, &self.memory_dir, scope, &session_id);
         let current = target.load()?;
         let proposed = match self.session.propose_refine(text, &digest(&current)).await {
             Ok(proposed) => proposed,
             Err(rejected) => {
-                return self.reject(&target, scope, session_id, rejected.reason);
+                let reason = rejected.reason;
+                let event_id = self.reject(&target, scope, session_id, &reason)?;
+                return Ok(Reviewed::Rejected { event_id, reason });
             }
         };
         let edits = harness_edits(&proposed);
         if edits.is_empty() || is_noop(&current, &edits) {
-            return Ok(Refined::Unchanged);
+            return Ok(Reviewed::Unchanged);
         }
+        Ok(Reviewed::Ready(Pending {
+            scope,
+            evidence: proposed.evidence,
+            diff: cox_sanitize::sanitize(&unified(&current, &edits)),
+            edits,
+        }))
+    }
+
+    /// Writes a reviewed proposal and records it.
+    pub fn apply(&self, pending: &Pending) -> Result<Refined, RefineError> {
+        let (scope, edits) = (pending.scope, &pending.edits);
+        let session_id = self.session.id();
+        let target = scope_for(&self.home, &self.memory_dir, scope, &session_id);
         let event_id = new_event_id();
-        let applied = match target.apply(&event_id, &edits) {
+        let applied = match target.apply(&event_id, edits) {
             Ok(applied) => applied,
-            // The model named an entry the disk disagrees with; that is a bad
-            // proposal, not a broken store.
+            // The entry changed since the review, or the model named one the
+            // disk disagrees with: a bad proposal, not a broken store.
             Err(
                 e @ (HarnessError::Refused { .. }
                 | HarnessError::Duplicate { .. }
                 | HarnessError::InvalidId(_)),
-            ) => return self.reject(&target, scope, session_id, e.to_string()),
+            ) => {
+                let reason = e.to_string();
+                let event_id = self.reject(&target, scope, session_id, &reason)?;
+                return Ok(Refined::Rejected { event_id, reason });
+            }
             Err(e) => return Err(e.into()),
         };
         let row = NewRefineEvent {
@@ -127,7 +186,7 @@ impl Refiner {
             session_id,
             scope,
             trigger: RefineTrigger::Manual,
-            evidence: proposed.evidence.clone(),
+            evidence: pending.evidence.clone(),
             edits: applied.edits.iter().map(refine_edit).collect(),
             outcome: RefineOutcome::Applied,
             rollback_of: None,
@@ -141,49 +200,33 @@ impl Refiner {
         let _ = self.refresh_notes();
         Ok(Refined::Applied {
             event_id,
-            evidence: proposed.evidence,
+            evidence: pending.evidence.clone(),
             edits: applied.edits,
         })
     }
 
-    /// Reverses an applied refine and records a `rolled_back` row that
-    /// names it. Refuses when a later change touched one of its entries,
-    /// because restoring the backup would erase that work.
-    pub fn undo(&self, event_id: &str) -> Result<Undone, RefineError> {
-        let event = self
-            .store
-            .refine_get(event_id)?
-            .ok_or_else(|| RefineError::UnknownEvent(event_id.to_string()))?;
-        if event.outcome != RefineOutcome::Applied {
-            return Err(RefineError::NotApplied(event_id.to_string()));
-        }
-        let history = self.store.refine_list(&event.session_id, usize::MAX)?;
-        if history
-            .iter()
-            .any(|e| e.rollback_of.as_deref() == Some(event_id))
-        {
-            return Err(RefineError::AlreadyUndone(event_id.to_string()));
-        }
-        let target = scope_for(&self.home, &self.memory_dir, event.scope, &event.session_id);
-        untouched_since(&target.load()?, &event)?;
-        target.rollback(event_id)?;
-        let undo_id = new_event_id();
-        self.store.refine_insert(&NewRefineEvent {
-            id: undo_id.clone(),
-            session_id: event.session_id,
-            scope: event.scope,
-            trigger: RefineTrigger::Manual,
-            evidence: format!("undo of {event_id}"),
-            edits: event.edits.iter().map(reverse).collect(),
-            outcome: RefineOutcome::RolledBack,
-            rollback_of: Some(event_id.to_string()),
-            fingerprint: target.fingerprint()?,
-        })?;
+    /// This session's refines, newest first.
+    pub fn history(&self, limit: usize) -> Result<Vec<RefineEvent>, RefineError> {
+        Ok(self.store.refine_list(&self.session.id(), limit)?)
+    }
+
+    /// [`Self::undo`] of the newest applied refine nobody undid yet.
+    pub fn undo_latest(&self, allow_global: bool) -> Result<Undone, RefineError> {
+        let id = latest_undoable(&self.store, &self.session.id())?;
+        self.undo(&id, allow_global)
+    }
+
+    /// [`undo_event`], then the prompt notes catch up with the files.
+    pub fn undo(&self, event_id: &str, allow_global: bool) -> Result<Undone, RefineError> {
+        let undone = undo_event(
+            &self.store,
+            &self.home,
+            &self.memory_dir,
+            event_id,
+            allow_global,
+        )?;
         let _ = self.refresh_notes();
-        Ok(Undone {
-            event_id: undo_id,
-            undid: event_id.to_string(),
-        })
+        Ok(undone)
     }
 
     /// Re-renders the prompt notes into `system[3]` when the entries under
@@ -209,22 +252,116 @@ impl Refiner {
         target: &Scope,
         scope: RefineScope,
         session_id: SessionId,
-        reason: String,
-    ) -> Result<Refined, RefineError> {
+        reason: &str,
+    ) -> Result<String, RefineError> {
         let event_id = new_event_id();
         self.store.refine_insert(&NewRefineEvent {
             id: event_id.clone(),
             session_id,
             scope,
             trigger: RefineTrigger::Manual,
-            evidence: reason.clone(),
+            evidence: reason.to_string(),
             edits: Vec::new(),
             outcome: RefineOutcome::Rejected,
             rollback_of: None,
             fingerprint: target.fingerprint()?,
         })?;
-        Ok(Refined::Rejected { event_id, reason })
+        Ok(event_id)
     }
+}
+
+/// Reverses an applied refine and records a `rolled_back` row that names
+/// it. Refuses when a later change touched one of its entries, because
+/// restoring the backup would erase that work. It needs no `Session`, so
+/// `cox refine undo` runs without a provider.
+pub fn undo_event(
+    store: &Store,
+    home: &Path,
+    memory_dir: &Path,
+    event_id: &str,
+    allow_global: bool,
+) -> Result<Undone, RefineError> {
+    let event = store
+        .refine_get(event_id)?
+        .ok_or_else(|| RefineError::UnknownEvent(event_id.to_string()))?;
+    if event.outcome != RefineOutcome::Applied {
+        return Err(RefineError::NotApplied(event_id.to_string()));
+    }
+    if event.scope == RefineScope::Global && !allow_global {
+        return Err(RefineError::GlobalNeedsFlag(event_id.to_string()));
+    }
+    let history = store.refine_list(&event.session_id, usize::MAX)?;
+    if history
+        .iter()
+        .any(|e| e.rollback_of.as_deref() == Some(event_id))
+    {
+        return Err(RefineError::AlreadyUndone(event_id.to_string()));
+    }
+    let target = scope_for(home, memory_dir, event.scope, &event.session_id);
+    untouched_since(&target.load()?, &event)?;
+    target.rollback(event_id)?;
+    let undo_id = new_event_id();
+    store.refine_insert(&NewRefineEvent {
+        id: undo_id.clone(),
+        session_id: event.session_id,
+        scope: event.scope,
+        trigger: RefineTrigger::Manual,
+        evidence: format!("undo of {event_id}"),
+        edits: event.edits.iter().map(reverse).collect(),
+        outcome: RefineOutcome::RolledBack,
+        rollback_of: Some(event_id.to_string()),
+        fingerprint: target.fingerprint()?,
+    })?;
+    Ok(Undone {
+        event_id: undo_id,
+        undid: event_id.to_string(),
+    })
+}
+
+/// The newest applied refine of `session` that no later row undid: what a
+/// bare `/refine undo` reverses.
+pub fn latest_undoable(store: &Store, session: &SessionId) -> Result<String, RefineError> {
+    let history = store.refine_list(session, usize::MAX)?;
+    history
+        .iter()
+        .find(|e| {
+            e.outcome == RefineOutcome::Applied
+                && !history
+                    .iter()
+                    .any(|u| u.rollback_of.as_deref() == Some(e.id.as_str()))
+        })
+        .map(|e| e.id.clone())
+        .ok_or(RefineError::NothingToUndo)
+}
+
+/// One line per refine for `/refine list` and `cox refine list`. The
+/// evidence is the model's text, so it is sanitized here, once.
+pub fn describe(event: &RefineEvent) -> String {
+    let scope = match event.scope {
+        RefineScope::Local => "local",
+        RefineScope::Global => "global",
+    };
+    let outcome = match event.outcome {
+        RefineOutcome::Applied => "applied".to_string(),
+        RefineOutcome::Rejected => "rejected".to_string(),
+        RefineOutcome::RolledBack => format!(
+            "rolled back {}",
+            event.rollback_of.as_deref().unwrap_or("?")
+        ),
+    };
+    let edits: Vec<String> = event
+        .edits
+        .iter()
+        .map(|e| format!("{} {}/{}", e.action, e.kind, e.id))
+        .collect();
+    let first = event.evidence.lines().next().unwrap_or("");
+    let why: String = first.chars().take(DIGEST_LINE_CHARS).collect();
+    let mut line = format!("{} {scope} {outcome}", event.id);
+    if !edits.is_empty() {
+        line.push_str(&format!(" [{}]", edits.join(", ")));
+    }
+    line.push_str(&format!(": {}", cox_sanitize::sanitize(why.trim())));
+    line
 }
 
 /// The prompt-note block for a session's `system[3]`: global notes, then the
@@ -337,6 +474,40 @@ fn is_noop(current: &[Loaded], edits: &[Edit]) -> bool {
                     && Some(c.content.as_slice()) == edit.content.as_deref().map(str::as_bytes)
             })
     })
+}
+
+/// The edits as one git-style patch against what is on disk, for the review.
+/// A created entry diffs from `/dev/null` and a deleted one to it.
+fn unified(current: &[Loaded], edits: &[Edit]) -> String {
+    let eol = |s: String| {
+        if s.is_empty() || s.ends_with('\n') {
+            s
+        } else {
+            s + "\n"
+        }
+    };
+    let mut out = String::new();
+    for edit in edits {
+        let name = format!("{}/{}", edit.kind.as_str(), edit.id);
+        let old = current
+            .iter()
+            .find(|c| c.kind == edit.kind && c.id == edit.id)
+            .map(|c| eol(String::from_utf8_lossy(&c.content).into_owned()));
+        let new = edit.content.clone().map(eol);
+        let (old_label, new_label) = (
+            old.as_ref()
+                .map_or("/dev/null".to_string(), |_| name.clone()),
+            new.as_ref()
+                .map_or("/dev/null".to_string(), |_| name.clone()),
+        );
+        let (old, new) = (old.unwrap_or_default(), new.unwrap_or_default());
+        let diff = similar::TextDiff::from_lines(&old, &new);
+        let mut unified = diff.unified_diff();
+        unified.context_radius(3).header(&old_label, &new_label);
+        // The git header lets the TUI split a multi-entry patch per entry.
+        out.push_str(&format!("diff --git a/{name} b/{name}\n{unified}"));
+    }
+    out
 }
 
 fn refine_edit(record: &EditRecord) -> RefineEdit {
@@ -582,7 +753,7 @@ mod tests {
             panic!("second refine");
         };
 
-        let stale = f.refiner.undo(&first);
+        let stale = f.refiner.undo(&first, false);
         assert!(
             matches!(stale, Err(RefineError::ChangedSince { .. })),
             "{stale:?}"
@@ -592,7 +763,7 @@ mod tests {
             "v2"
         );
 
-        let undone = f.refiner.undo(&second).expect("undo");
+        let undone = f.refiner.undo(&second, false).expect("undo");
         assert_eq!(
             fs::read_to_string(f.note_path("tests-first")).expect("v1"),
             "v1"
@@ -602,12 +773,12 @@ mod tests {
         assert_eq!(newest.outcome, RefineOutcome::RolledBack);
         assert_eq!(newest.rollback_of.as_deref(), Some(second.as_str()));
         assert!(matches!(
-            f.refiner.undo(&second),
+            f.refiner.undo(&second, false),
             Err(RefineError::AlreadyUndone(_))
         ));
 
         f.refiner
-            .undo(&first)
+            .undo(&first, false)
             .expect("now the first is latest again");
         assert!(!f.note_path("tests-first").exists());
         assert_eq!(
@@ -687,5 +858,128 @@ mod tests {
 
         assert!(seen.contains("## concise\nBe concise."), "{seen}");
         assert!(seen.starts_with(NOTES_OPEN) && seen.trim_end().ends_with(NOTES_CLOSE));
+    }
+
+    #[tokio::test]
+    async fn propose_shows_a_diff_and_writes_nothing_until_applied() {
+        let f = fixture(&[answer(
+            "create",
+            "prompt-note",
+            "tests-first",
+            Some("Test first."),
+        )]);
+        user_turn(&f.refiner.session, "go").await;
+
+        let Ok(Reviewed::Ready(pending)) = f.refiner.propose("tests", RefineScope::Local).await
+        else {
+            panic!("a proposal was expected");
+        };
+
+        assert_eq!(
+            pending.diff,
+            "diff --git a/prompt-note/tests-first b/prompt-note/tests-first\n\
+             --- /dev/null\n+++ prompt-note/tests-first\n@@ -0,0 +1 @@\n+Test first.\n"
+        );
+        assert!(
+            !f.note_path("tests-first").exists(),
+            "review writes nothing"
+        );
+        assert!(f.rows().is_empty(), "and records nothing");
+
+        let applied = f.refiner.apply(&pending);
+        assert!(
+            matches!(applied, Ok(Refined::Applied { .. })),
+            "{applied:?}"
+        );
+        assert!(f.note_path("tests-first").exists());
+        assert_eq!(f.rows().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_entry_changed_after_the_review_is_rejected_at_apply() {
+        let f = fixture(&[
+            answer("create", "prompt-note", "tests-first", Some("v1")),
+            answer("create", "prompt-note", "tests-first", Some("v2")),
+        ]);
+        user_turn(&f.refiner.session, "go").await;
+        let Ok(Reviewed::Ready(stale)) = f.refiner.propose("a", RefineScope::Local).await else {
+            panic!("first proposal");
+        };
+        f.refiner
+            .refine("b", RefineScope::Local)
+            .await
+            .expect("another refine lands first");
+
+        let outcome = f.refiner.apply(&stale);
+
+        assert!(
+            matches!(outcome, Ok(Refined::Rejected { .. })),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(f.note_path("tests-first")).expect("note"),
+            "v2"
+        );
+    }
+
+    #[tokio::test]
+    async fn undoing_a_global_refine_needs_the_flag_and_a_bare_undo_takes_the_latest_local() {
+        let f = fixture(&[
+            answer("create", "prompt-note", "everywhere", Some("Always.")),
+            answer("create", "prompt-note", "here", Some("Only here.")),
+        ]);
+        user_turn(&f.refiner.session, "go").await;
+        let Ok(Refined::Applied {
+            event_id: global, ..
+        }) = f.refiner.refine("g", RefineScope::Global).await
+        else {
+            panic!("global refine");
+        };
+
+        let refused = f.refiner.undo(&global, false);
+        assert!(
+            matches!(refused, Err(RefineError::GlobalNeedsFlag(_))),
+            "{refused:?}"
+        );
+        assert!(f.home().join("notes/everywhere.md").exists(), "left alone");
+
+        let Ok(Refined::Applied {
+            event_id: local, ..
+        }) = f.refiner.refine("l", RefineScope::Local).await
+        else {
+            panic!("local refine");
+        };
+        assert_eq!(latest_undoable(&f.store, &f.id()).expect("latest"), local);
+        f.refiner.undo(&local, false).expect("undo local");
+        assert_eq!(latest_undoable(&f.store, &f.id()).expect("latest"), global);
+
+        f.refiner.undo(&global, true).expect("with the flag");
+        assert!(!f.home().join("notes/everywhere.md").exists());
+        assert!(matches!(
+            latest_undoable(&f.store, &f.id()),
+            Err(RefineError::NothingToUndo)
+        ));
+    }
+
+    #[tokio::test]
+    async fn describe_names_scope_outcome_edits_and_a_clean_first_line_of_evidence() {
+        let f = fixture(&[
+            json!({"evidence": "seen\u{1b}[31m twice\nsecond line", "edits": [{
+                "action": "create", "kind": "prompt-note", "id": "tests-first",
+                "content": "Test first.", "reason": "r",
+            }]})
+            .to_string(),
+        ]);
+        user_turn(&f.refiner.session, "go").await;
+        let Ok(Refined::Applied { event_id, .. }) = f.refiner.refine("a", RefineScope::Local).await
+        else {
+            panic!("refine");
+        };
+        let row = f.store.refine_get(&event_id).expect("get").expect("row");
+
+        assert_eq!(
+            describe(&row),
+            format!("{event_id} local applied [create prompt-note/tests-first]: seen twice")
+        );
     }
 }

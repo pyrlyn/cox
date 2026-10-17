@@ -1,0 +1,16 @@
+---
+source: crates/cox-tui/src/view.rs
+expression: "buffer_to_string(&render(&state, 70, 12))"
+---
+ refine · the user asked for tests first twice
+ y applies · n or Esc cancels · PageUp/PageDown scroll
+  ± prompt-note/tests-first  +2 −0
+  --- /dev/null
+  +++ prompt-note/tests-first
+  @@ -0,0 +1,2 @@
+  +Write the failing test first.
+  +Then the fix.
+
+
+> Esc close · PageUp scroll up · PageDown scroll down
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · workspace-write · [default]
