@@ -8,6 +8,14 @@ Goal: the three-part plugin API reference exists in Russian and Ukrainian beside
 Check: both cover all three parts and every heading of the English page; `just test` green.
 Check output: `cargo nextest run -p cox --test docs` 7 passed, including `plugin_docs_translations_match_the_english_page` and `a_translation_missing_a_heading_fails_the_parity_check`; `cargo clippy -p cox --test docs -- -D warnings` and `cargo fmt --check` clean. `just docs-check` runs the same `docs` test binary.
 
+#### T61.1 Build-time baseline
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
+Depends: — · Size: ~0 (research.md only) · Files: `research.md`
+Goal: `research.md` §4.3.9 holds the numbers P61 is judged by.
+Check: `grep -n '4.3.9' research.md`
+Done: §4.3.9 has a row for every measurement (Rust `--timings`, Swift packages, desktop app, CI jobs), the top five crates and the machine line. Single runs on a shared machine; the clean rows use a warm sccache, and a cold clean row was added. Finding: `[profile.dist]` inherits `dev` (`Cargo.toml:238-239`, since ae5ed7bd), not fat LTO, so the P61 premise behind T61.2 needs re-checking.
+
 #### T33.40.5 Parity: the `typesafe` table configures the plugin's section
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
