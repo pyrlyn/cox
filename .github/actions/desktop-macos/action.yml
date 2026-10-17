@@ -22,6 +22,24 @@ runs:
         xcodebuild -showComponent MetalToolchain || true
         xcodebuild -downloadComponent MetalToolchain
 
+    # SwiftPM's clone cache, each package's .build and the app's DerivedData. The runner image is
+    # fresh per job, so without this every run re-fetches SwiftTerm, swift-collections,
+    # swift-snapshot-testing and the rest and rebuilds them from scratch. The key carries the
+    # resolved pins and the sha: an exact hit is rare, so the newest cache for the same pins
+    # (restore-keys) seeds an incremental build and the job saves a fresh one.
+    - name: Swift build cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/Library/Caches/org.swift.swiftpm
+          ~/Library/org.swift.swiftpm
+          desktop/macos/Packages/*/.build
+          desktop/macos/build/DerivedData
+        key: swift-${{ runner.os }}-${{ runner.arch }}-xcode27-${{ hashFiles('desktop/macos/Packages/*/Package.resolved', 'desktop/macos/project.yml', 'desktop/macos/Packages/*/Package.swift') }}-${{ github.sha }}
+        restore-keys: |
+          swift-${{ runner.os }}-${{ runner.arch }}-xcode27-${{ hashFiles('desktop/macos/Packages/*/Package.resolved', 'desktop/macos/project.yml', 'desktop/macos/Packages/*/Package.swift') }}-
+          swift-${{ runner.os }}-${{ runner.arch }}-xcode27-
+
     - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
