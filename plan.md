@@ -126,6 +126,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
+| T66.4 | in progress | P2 | 2 | 0% | Claude Code / sonnet-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2359,6 +2360,8 @@ Out of scope: a separate `task_output` tool; peer messages between children.
 Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2
 
 Goal: every refine (proposed, applied, rejected or rolled back) is one Diesel row that a later undo and `cox refine list` can read.
+
+Plan (Claude Code / sonnet-5.5): (1) migration `00000000000010_refine_events` (up creates the table with CHECKs on `scope`, `trigger` and `outcome` plus an index on `(session_id, created_at)`; down drops them); (2) `schema.rs` entry and a `RefineEventDbRow` in `models.rs`; the committed schema snapshot is updated for the new table; (3) `refine.rs` with `RefineEvent`, the `RefineScope`/`RefineTrigger`/`RefineOutcome` enums and `refine_insert`, `refine_get`, `refine_list` over the typed DSL; (4) tests at the bottom of `refine.rs`: round trip, newest first with `limit`, the down migration drops the table; (5) run the Check for `-p cox-store`.
 
 Files:
 - `crates/cox-store/migrations/00000000000010_refine_events/{up,down}.sql`
