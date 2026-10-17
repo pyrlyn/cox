@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use cox_plugin_api::ProviderCall;
+use cox_plugin_api::{AbiError, ProviderCall};
 use cox_protocol::config::{CompatibleProviderConfig, ProvidersConfig};
 use cox_protocol::errors::ProviderError;
 use cox_protocol::plugin::{ProviderApi, ProviderAuth, ProviderDecl};
@@ -137,6 +137,27 @@ fn merge_one(
     );
 }
 
+/// The user's `[providers.<section>]` table for an ABI section, which wins
+/// over the plugin's `[[provider]]` row field by field, as a user config
+/// section wins over a plugin's declarative one (T33.40.5).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionConfig {
+    /// Replaces the manifest's `base_url`, and with it the one host
+    /// `cox_http` may reach.
+    pub base_url: String,
+    /// Replaces the manifest's key variable; empty means no auth header.
+    pub api_key_env: String,
+    /// The `cox_http` request timeout, in seconds.
+    pub timeout_s: u32,
+    /// The model sent when a request names none, as the built-in client
+    /// does: a request's own model still wins. Empty means no default.
+    pub model: String,
+}
+
+/// How long the host call may run past the guest's own HTTP timeout, which
+/// only starts once the guest has built its request.
+const CALL_HEADROOM: Duration = Duration::from_secs(30);
+
 /// The export an ABI provider runs; `cox_http` keys the provider-host rule
 /// on it (T33.40.1).
 pub(crate) const EXPORT: &str = "cox_provider_stream";
@@ -144,26 +165,41 @@ pub(crate) const EXPORT: &str = "cox_provider_stream";
 /// An ABI provider: one `[[provider]]` section with `api = "plugin"`.
 pub struct PluginProvider {
     section: String,
+    base_url: String,
     host: Arc<PluginHost>,
     env: Arc<HostEnv>,
     estimate: Arc<dyn Fn(&Request) -> u32 + Send + Sync>,
     warned: AtomicBool,
+    /// Sent when a request names no model (T33.40.5).
+    model: String,
+    timeout: Option<Duration>,
 }
 
 impl PluginProvider {
     pub(crate) fn new(
         section: impl Into<String>,
+        base_url: impl Into<String>,
         host: Arc<PluginHost>,
         env: Arc<HostEnv>,
         estimate: Arc<dyn Fn(&Request) -> u32 + Send + Sync>,
     ) -> Self {
         Self {
             section: section.into(),
+            base_url: base_url.into(),
             host,
             env,
             estimate,
             warned: AtomicBool::new(false),
+            model: String::new(),
+            timeout: None,
         }
+    }
+
+    /// Applies the user's table values the constructor has no argument for.
+    fn with_section(mut self, section: &SectionConfig) -> Self {
+        self.model = section.model.clone();
+        self.timeout = Some(Duration::from_secs(u64::from(section.timeout_s)));
+        self
     }
 }
 
@@ -197,19 +233,16 @@ impl Provider for PluginProvider {
             request: serde_json::to_value(&req).map_err(|e| ProviderError::BadRequest {
                 message: e.to_string(),
             })?,
-            model: req.model.0.clone(),
+            model: model_for(&req.model.0, &self.model),
+            base_url: Some(self.base_url.clone()),
         };
         let host = Arc::clone(&self.host);
         let env = Arc::clone(&self.env);
         let section = self.section.clone();
+        let deadline = self.timeout.unwrap_or(CALL_HEADROOM) + CALL_HEADROOM;
         let events = tokio::task::spawn_blocking(move || {
             let _guard = env.activate_provider(&section);
-            match host.call::<_, Vec<ProviderEvent>>(
-                Lane::Control,
-                EXPORT,
-                &call,
-                Duration::from_secs(60),
-            ) {
+            match host.call::<_, Vec<ProviderEvent>>(Lane::Control, EXPORT, &call, deadline) {
                 Ok(Some(events)) => Ok(events),
                 Ok(None) => Err(ProviderError::Unsupported {
                     feature: EXPORT.into(),
@@ -258,10 +291,14 @@ impl Provider for PluginProvider {
 
 /// Builds one [`PluginProvider`] per granted `api = "plugin"` section.
 /// Lower plugin id wins a contested name. A missing key is a warning and
-/// a keyless client, not a failed session (fail open).
+/// a keyless client, not a failed session (fail open). `base_url` is the
+/// user's table for a section, if any (T33.40.5): its `base_url` replaces
+/// the manifest's, so `cox_http` reaches only the overriding host, and its
+/// `api_key_env`, `timeout_s` and `model` replace theirs.
 pub fn backends(
     live: &LivePlugins,
     resolve: &dyn Fn(&str, &str) -> Result<String, ProviderError>,
+    table: &dyn Fn(&str) -> Option<SectionConfig>,
     estimate: Arc<dyn Fn(&Request) -> u32 + Send + Sync>,
 ) -> (HashMap<String, Arc<dyn Provider>>, Vec<String>) {
     let mut plugins: Vec<_> = live.plugins().iter().collect();
@@ -282,10 +319,20 @@ pub fn backends(
                 ));
                 continue;
             }
-            let header = auth_header(plugin.id(), decl, resolve, &mut warnings);
+            let user = table(&decl.name);
+            let key_env = user.as_ref().map_or(decl.api_key_env.as_deref(), |t| {
+                Some(t.api_key_env.as_str())
+            });
+            let header = auth_header(plugin.id(), decl, key_env, resolve, &mut warnings);
+            let url = user
+                .as_ref()
+                .map_or_else(|| decl.base_url.clone(), |t| t.base_url.clone());
+            let timeout = user
+                .as_ref()
+                .map(|t| Duration::from_secs(u64::from(t.timeout_s)));
             if !plugin
                 .env()
-                .bind_provider(&decl.name, &decl.base_url, header)
+                .bind_provider(&decl.name, &url, header, timeout)
             {
                 warnings.push(format!(
                     "plugin {}'s provider section `{}` has no usable base_url; skipped",
@@ -295,28 +342,45 @@ pub fn backends(
                 continue;
             }
             owners.insert(decl.name.clone(), plugin.id().to_string());
-            let provider = Arc::new(PluginProvider::new(
+            let mut provider = PluginProvider::new(
                 decl.name.clone(),
+                url,
                 Arc::clone(plugin.host()),
                 Arc::clone(plugin.env()),
                 Arc::clone(&estimate),
-            ));
-            out.insert(decl.name.clone(), provider as Arc<dyn Provider>);
+            );
+            if let Some(user) = &user {
+                provider = provider.with_section(user);
+            }
+            out.insert(decl.name.clone(), Arc::new(provider) as Arc<dyn Provider>);
         }
     }
     (out, warnings)
 }
 
+/// A request's own model wins over the section's default, as in the
+/// built-in Jev client: a plugin that pins a model per question (Jev's
+/// decisions) must not be overridden by the table's `jev-latest`.
+fn model_for(requested: &str, default: &str) -> String {
+    if requested.is_empty() {
+        default
+    } else {
+        requested
+    }
+    .to_string()
+}
+
 fn auth_header(
     plugin: &str,
     decl: &ProviderDecl,
+    key_env: Option<&str>,
     resolve: &dyn Fn(&str, &str) -> Result<String, ProviderError>,
     warnings: &mut Vec<String>,
 ) -> Option<(String, String)> {
     if decl.auth == ProviderAuth::None {
         return None;
     }
-    let Some(var) = decl.api_key_env.as_deref().filter(|var| !var.is_empty()) else {
+    let Some(var) = key_env.filter(|var| !var.is_empty()) else {
         warnings.push(format!(
             "plugin {plugin}'s provider section `{}` has no api_key_env; built without auth",
             decl.name
@@ -371,16 +435,33 @@ fn floor_usage(reported: Option<Usage>, estimate: u32, warned: &AtomicBool) -> U
     }
 }
 
+/// An export failure reaches the host only as text, so a guest that writes
+/// its `AbiError` as JSON (the SDK's convention, T33.40.3) keeps its kind:
+/// `transient` becomes `Overloaded`, which the session's retry backs off
+/// on; every other kind stays a non-retryable `BadRequest`.
 fn map_plugin(error: PluginError) -> ProviderError {
     match error {
         PluginError::Timeout { .. } => ProviderError::Timeout,
         PluginError::MissingExport(_) => ProviderError::Unsupported {
             feature: "cox_provider_stream".into(),
         },
+        PluginError::Trap { message, .. } => match abi_error(&message) {
+            Some(AbiError::Transient { .. }) => ProviderError::Overloaded,
+            Some(error) => ProviderError::BadRequest {
+                message: error.to_string(),
+            },
+            None => ProviderError::BadRequest { message },
+        },
         other => ProviderError::BadRequest {
             message: other.to_string(),
         },
     }
+}
+
+/// The JSON `AbiError` inside a trap message, which extism may prefix.
+fn abi_error(message: &str) -> Option<AbiError> {
+    let start = message.find('{')?;
+    serde_json::from_str(&message[start..]).ok()
 }
 
 #[cfg(test)]
@@ -659,7 +740,7 @@ mod tests {
         env.set_runtime(tokio::runtime::Handle::current());
         let env = Arc::new(env);
         assert!(
-            env.bind_provider(section, base, header),
+            env.bind_provider(section, base, header, None),
             "section host binds"
         );
         let host = Arc::new(
@@ -673,8 +754,13 @@ mod tests {
             )
             .expect("module loads"),
         );
-        let provider =
-            PluginProvider::new(section, host, env, Arc::new(move |_: &Request| estimate));
+        let provider = PluginProvider::new(
+            section,
+            base,
+            host,
+            env,
+            Arc::new(move |_: &Request| estimate),
+        );
         let (tx, mut rx) = mpsc::channel(16);
         let usage = provider
             .stream(sample_request(), tx, CancellationToken::new())
@@ -696,6 +782,34 @@ mod tests {
                 _ => None,
             })
             .expect("a usage event")
+    }
+
+    #[test]
+    fn request_model_wins_over_the_section_default() {
+        assert_eq!(model_for("jev-1.13.0", "jev-latest"), "jev-1.13.0");
+        assert_eq!(model_for("", "jev-latest"), "jev-latest");
+    }
+
+    #[test]
+    fn user_table_replaces_the_manifest_key_variable() {
+        let decl = decl("acme", ProviderApi::Plugin);
+        let resolve = |var: &str, _: &str| match var {
+            "TABLE_KEY" => Ok("from-table".to_string()),
+            _ => Ok("from-manifest".to_string()),
+        };
+        let mut warnings = Vec::new();
+        let manifest = auth_header(
+            "p",
+            &decl,
+            decl.api_key_env.as_deref(),
+            &resolve,
+            &mut warnings,
+        );
+        let table = auth_header("p", &decl, Some("TABLE_KEY"), &resolve, &mut warnings);
+        let keyless = auth_header("p", &decl, Some(""), &resolve, &mut warnings);
+        assert_eq!(manifest.expect("manifest header").1, "Bearer from-manifest");
+        assert_eq!(table.expect("table header").1, "Bearer from-table");
+        assert!(keyless.is_none());
     }
 
     #[tokio::test]
@@ -807,7 +921,7 @@ mod tests {
         let mut env = HostEnv::new("acme");
         env.set_runtime(tokio::runtime::Handle::current());
         let env = Arc::new(env);
-        assert!(env.bind_provider("acme", "https://llm.example", None));
+        assert!(env.bind_provider("acme", "https://llm.example", None, None));
         let host = Arc::new(
             PluginHost::load_with(
                 &answering(&events.to_string()),
@@ -821,6 +935,7 @@ mod tests {
         );
         let provider = Arc::new(PluginProvider::new(
             "acme",
+            "https://llm.example",
             host,
             env,
             Arc::new(|_: &Request| 12),
@@ -863,5 +978,35 @@ mod tests {
         assert_eq!(rows[0].provider, ProviderId::Plugin("acme".into()));
         assert!(rows[0].usage.estimated);
         assert_eq!(rows[0].usage.input_tokens, 12);
+    }
+
+    /// T33.40.4: the guest's JSON `AbiError` survives the trap text, so a
+    /// 429/529 is retried and a 401 is not.
+    #[test]
+    fn transient_export_error_is_retryable() {
+        let trap = |message: &str| PluginError::Trap {
+            export: EXPORT.into(),
+            message: message.into(),
+        };
+        assert_eq!(
+            map_plugin(trap(
+                r#"{"kind":"transient","message":"typesafe returned 529"}"#
+            )),
+            ProviderError::Overloaded
+        );
+        assert_eq!(
+            map_plugin(trap(
+                r#"{"kind":"failed","message":"typesafe returned 401"}"#
+            )),
+            ProviderError::BadRequest {
+                message: "typesafe returned 401".into()
+            }
+        );
+        assert_eq!(
+            map_plugin(trap("unreachable")),
+            ProviderError::BadRequest {
+                message: "unreachable".into()
+            }
+        );
     }
 }

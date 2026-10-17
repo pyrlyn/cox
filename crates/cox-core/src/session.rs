@@ -14,8 +14,8 @@ use cox_protocol::agent::AgentDef;
 use cox_protocol::errors::{CoreError, ProviderError, StoreError, ToolError};
 use cox_protocol::ids::{ArchiveId, CallId, ItemId, SessionId, TaskId, TurnId};
 use cox_protocol::traits::{
-    Advisor, Archive, ArchivePut, Checkpointer, EventTap, ExternalAgent, Hook, HunkReverter,
-    Provider, RepoMapper, Store, Tool, Worktrees,
+    Advisor, AllowRuleStore, Archive, ArchivePut, Checkpointer, EventTap, ExternalAgent, Hook,
+    HunkReverter, Provider, RepoMapper, Store, Tool, Worktrees,
 };
 use cox_protocol::types::{
     ArchiveRef, Attachment, Content, ContextBreakdown, Decision, Event, HookEvent, HookOutcome,
@@ -42,7 +42,7 @@ use crate::turn::{consume_provider, results_message, run_signed_tools, run_tools
 pub enum State {
     /// No turn in flight.
     Idle,
-    /// Building the next provider request.
+    /// Building the next provider request, or compacting the history it carries.
     Assembling,
     /// A provider stream is open.
     Streaming,
@@ -50,9 +50,6 @@ pub enum State {
     RunningTools,
     /// Waiting on `Submission::Approve`.
     AwaitingApproval,
-    /// Compaction is running (wired in T8.1).
-    #[allow(dead_code)]
-    Compacting,
     /// Emitting `TurnDone` and flushing.
     Finishing,
     /// `Submission::Interrupt` is draining work.
@@ -129,6 +126,9 @@ pub(crate) struct Inner {
     pub(crate) renamed: bool,
     /// Context size of the last main call, for the §1.10 auto trigger.
     pub(crate) last_context_tokens: u32,
+    /// The context size at which the last compaction failed on the summary,
+    /// so the auto triggers stay quiet until `/compact` or a smaller context.
+    pub(crate) compact_suppressed_at: Option<u32>,
     /// The last main call's usage: `ContextBreakdown.cached` (A98).
     last_usage: Option<cox_protocol::types::Usage>,
     /// The model catalog `ContextBreakdown.window` is read from (A98),
@@ -215,6 +215,10 @@ pub struct Session {
     /// What puts one of Review's hunks back (T51.19); installed by the
     /// surface like the checkpointer, since it is cox-render's.
     hunks: Arc<OnceLock<Arc<dyn HunkReverter>>>,
+    /// Where a persisted `AllowForSession` rule is written (T69.2); installed
+    /// by the surface and shared with children, whose approvals reach the
+    /// same user. Absent in tests and in `cox mcp`, which then persist nothing.
+    allow_rules: Arc<OnceLock<Arc<dyn AllowRuleStore>>>,
     /// Roots mutation may target. Empty until a worktree-isolated surface
     /// narrows it; ordinary sessions write anywhere they can read.
     writable_roots: Arc<OnceLock<Vec<PathBuf>>>,
@@ -425,6 +429,7 @@ impl Session {
         child.hook = self.hook.clone();
         child.checkpointer = self.checkpointer.clone();
         child.hunks = self.hunks.clone();
+        child.allow_rules = self.allow_rules.clone();
         child.worktrees = self.worktrees.clone();
         child.instructions = self.instructions.clone();
         child.memory_index = self.memory_index.clone();
@@ -558,6 +563,7 @@ impl Session {
             hook: Arc::new(OnceLock::new()),
             checkpointer: Arc::new(OnceLock::new()),
             hunks: Arc::new(OnceLock::new()),
+            allow_rules: Arc::new(OnceLock::new()),
             writable_roots: Arc::new(OnceLock::new()),
             worktrees: Arc::new(OnceLock::new()),
             repo_mapper: Arc::new(OnceLock::new()),
@@ -610,6 +616,7 @@ impl Session {
                 detach: HashMap::new(),
                 extracted: Vec::new(),
                 last_context_tokens: 0,
+                compact_suppressed_at: None,
                 last_usage: None,
                 catalog: None,
                 retried_after_too_long: false,
@@ -851,6 +858,12 @@ impl Session {
     /// (T51.19); a second call is ignored, as for the checkpointer.
     pub fn set_hunk_reverter(&self, hunks: Arc<dyn HunkReverter>) {
         let _ = self.hunks.set(hunks);
+    }
+
+    /// Installs where `permissions.allow_for_session_persists` writes; a
+    /// second call is ignored, as for the checkpointer.
+    pub fn set_allow_rule_store(&self, store: Arc<dyn AllowRuleStore>) {
+        let _ = self.allow_rules.set(store);
     }
 
     pub(crate) fn hunk_reverter(&self) -> Option<Arc<dyn HunkReverter>> {
@@ -1237,6 +1250,43 @@ impl Session {
         self.inner.lock().await.grants.push((tool, subject));
     }
 
+    /// Saves what an `AllowForSession` answer to `call` may keep past the
+    /// session (T69.2), when `permissions.allow_for_session_persists` is on:
+    /// the engine's `persistable_allow_rules`, appended to the user config.
+    /// A failed write is a warning, never an error: the session grant already
+    /// covers this run, and the approval must not fail because a file is
+    /// read-only.
+    pub(crate) async fn persist_grant(&self, call: &ToolCall) {
+        if !self.config.permissions.allow_for_session_persists {
+            return;
+        }
+        let Some(store) = self.allow_rules.get().cloned() else {
+            return;
+        };
+        let rules = self.engine.persistable_allow_rules(call);
+        if rules.is_empty() {
+            return;
+        }
+        let saved = tokio::task::spawn_blocking(move || {
+            rules
+                .iter()
+                .map(|rule| store.append_allow(rule))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .await;
+        let failure = match saved {
+            Ok(Ok(_)) => return,
+            Ok(Err(e)) => e.to_string(),
+            Err(e) => e.to_string(),
+        };
+        let _ = self
+            .emit(Event::Notice {
+                level: Level::Warn,
+                text: format!("could not save the approval to permissions.allow: {failure}"),
+            })
+            .await;
+    }
+
     /// The `AllowForSession` grants in force, as `(tool, subject prefix)`,
     /// oldest first and without repeats, for the app's Settings (T37.45.3).
     pub async fn grants(&self) -> Vec<(String, String)> {
@@ -1614,35 +1664,41 @@ impl Session {
                 }
             }
         }
-        let reported = match run.await {
-            Ok(Ok(reported)) => reported,
+        // A row means a request was made (§0 ledger rule): only a driver that
+        // refused before making one (T56.11) leaves none. Any other failure
+        // keeps its row with whatever usage and latency is known.
+        let (ran, reported) = match run.await {
+            Ok(Ok(reported)) => (true, reported),
             Ok(Err(error)) => {
+                let refused = matches!(error, CoreError::ExternalAgentRefused { .. });
                 self.emit(Event::Error {
                     error,
                     fatal: false,
                 })
                 .await?;
                 stop = Some(StopReason::Error);
-                None
+                (!refused, None)
             }
             Err(_) => {
                 stop = Some(StopReason::Interrupted);
-                None
+                (true, None)
             }
         };
-        let mut usage = reported.unwrap_or(cox_protocol::types::Usage {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            estimated: false,
-            cost_usd: 0.0,
-            latency_ms: 0,
-        });
-        usage.latency_ms = started.elapsed().as_millis() as u64;
-        let usage =
-            self.insert_external_usage(self.job.clone(), tier, &agent.ledger_model(), usage)?;
-        self.emit(Event::Usage { turn, usage }).await?;
+        if ran {
+            let mut usage = reported.unwrap_or(cox_protocol::types::Usage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                estimated: false,
+                cost_usd: 0.0,
+                latency_ms: 0,
+            });
+            usage.latency_ms = started.elapsed().as_millis() as u64;
+            let usage =
+                self.insert_external_usage(self.job.clone(), tier, &agent.ledger_model(), usage)?;
+            self.emit(Event::Usage { turn, usage }).await?;
+        }
         let stop = stop.unwrap_or(if self.cancel_token().is_cancelled() {
             StopReason::Interrupted
         } else {

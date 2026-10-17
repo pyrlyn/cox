@@ -103,7 +103,7 @@ struct SuggestionCard: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       .contentShape(shape)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
     .hairline(in: shape)
     .accessibilityHint(suggestion.detail)
   }

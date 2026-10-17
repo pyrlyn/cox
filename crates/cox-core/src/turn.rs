@@ -461,6 +461,7 @@ async fn gate(
                 for (tool, subject) in crate::permission::grants_for(&call) {
                     session.grant(tool, subject).await;
                 }
+                session.persist_grant(&call).await;
                 return Ok(Ok(call));
             }
             Decision::Deny { reason } => return Ok(Err(denied(&reason))),

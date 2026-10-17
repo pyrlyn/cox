@@ -107,7 +107,7 @@ struct SessionTerminal: View {
     Color.clear
       .frame(height: Space.xs)
       .contentShape(Rectangle())
-      .pointerStyle(.frameResize(position: .top))
+      .coxPointer(handle: .vertical)
       .gesture(
         DragGesture(coordinateSpace: .global)
           .onChanged { drag in

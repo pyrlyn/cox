@@ -17,6 +17,8 @@ use cox_protocol::traits::Provider;
 use cox_provider::anthropic::{AnthropicProvider, CacheTtl};
 use cox_provider::openai::chat::OpenAiChatProvider;
 use cox_provider::openai::responses::OpenAiResponsesProvider;
+use cox_provider::retried::Retried;
+use cox_provider::retry::Policy;
 use cox_provider::usage::{PriceTable, Priced};
 
 use crate::SessionError;
@@ -61,14 +63,24 @@ pub(crate) fn assemble(
             abi,
         ));
     }
-    let prices = Arc::new(PriceTable::embedded()?);
+    // A plugin's `[[models]]` price is the only one a plugin-only model has.
+    let prices = Arc::new(
+        match cox_models::Catalog::load(config, plugin_models, None) {
+            Ok(catalog) => catalog.price_table(),
+            Err(_) => PriceTable::embedded()?,
+        },
+    );
     let abi: AbiProviders = abi
         .into_iter()
         .map(|(name, provider)| {
-            (
-                name,
-                Arc::new(Priced::new(provider, Arc::clone(&prices))) as Arc<dyn Provider>,
-            )
+            let policy = Policy {
+                max_retries: abi_transport(config, &name)
+                    .map_or(Policy::default().max_retries, |t| t.max_retries),
+                ..Policy::default()
+            };
+            let retried = Arc::new(Retried::new(provider, policy));
+            let priced = Priced::new(retried, Arc::clone(&prices));
+            (name, Arc::new(priced) as Arc<dyn Provider>)
         })
         .collect();
     if cox_provider::from_env()?.is_none()
@@ -80,6 +92,30 @@ pub(crate) fn assemble(
         provider_for_served(config, resolve, served, plugin_models)?,
         abi,
     ))
+}
+
+/// The native `[providers.<name>]` table an ABI section shares its name
+/// with: only `typesafe`, whose client is moving into the Jev plugin
+/// (T33.40). While both exist one name serves one client, so every field
+/// of the table configures the plugin's section (T33.40.4, T33.40.5).
+pub(crate) fn abi_transport(config: &Config, section: &str) -> Option<Transport> {
+    (section == "typesafe").then(|| config.providers.typesafe.transport())
+}
+
+/// [`abi_transport`] with the table's default `model`, as the plugin host
+/// takes it.
+#[cfg(feature = "plugins")]
+pub(crate) fn abi_section(
+    config: &Config,
+    section: &str,
+) -> Option<cox_plugin::provider::SectionConfig> {
+    let t = abi_transport(config, section)?;
+    Some(cox_plugin::provider::SectionConfig {
+        base_url: t.base_url,
+        api_key_env: t.api_key_env,
+        timeout_s: t.timeout_s,
+        model: config.providers.typesafe.model.clone(),
+    })
 }
 
 /// [`provider_for_with`] plus what a local server reported for the
@@ -439,6 +475,47 @@ mod tests {
         assert_eq!(p.id(), ProviderId::Local);
     }
 
+    /// T33.40.5: with no Jev plugin loaded the ABI map is empty and the
+    /// `typesafe` section keeps its built-in client.
+    #[test]
+    fn builtin_jev_used_when_plugin_absent() {
+        let mut cfg = Config::default();
+        cfg.tiers.code.provider = "typesafe".into();
+        let models: &[cox_models::PluginModels] = &[];
+        let (primary, map) = assemble(
+            &cfg,
+            |_, _| Ok("sk-test".to_string()),
+            None,
+            models,
+            AbiProviders::new(),
+        )
+        .expect("the built-in Jev client builds from a resolved key");
+        assert_eq!(primary.id(), ProviderId::Jev);
+        assert!(map.is_empty());
+    }
+
+    /// T33.40.5: every field of `[providers.typesafe]` reaches the plugin's
+    /// section, and no other section name is claimed by that table.
+    #[cfg(feature = "plugins")]
+    #[test]
+    fn typesafe_table_supplies_the_plugin_section() {
+        let mut cfg = Config::default();
+        cfg.providers.typesafe.base_url = "http://127.0.0.1:9".into();
+        cfg.providers.typesafe.api_key_env = "MY_JEV_KEY".into();
+        cfg.providers.typesafe.timeout_s = 7;
+        cfg.providers.typesafe.model = "jev-1.13.0".into();
+        assert_eq!(
+            abi_section(&cfg, "typesafe"),
+            Some(cox_plugin::provider::SectionConfig {
+                base_url: "http://127.0.0.1:9".into(),
+                api_key_env: "MY_JEV_KEY".into(),
+                timeout_s: 7,
+                model: "jev-1.13.0".into(),
+            })
+        );
+        assert_eq!(abi_section(&cfg, "acme"), None);
+    }
+
     /// T30.15: `--provider lmstudio` builds through the Anthropic wire
     /// client (R§4.3.2), keyed or keyless alike — the "no key" leg is what
     /// `openai_shaped` already proves for the other families; this proves
@@ -740,6 +817,7 @@ mod tests {
         let (raw, warnings) = cox_plugin::provider::backends(
             &live,
             &|_, _| Err(cox_protocol::errors::ProviderError::Auth),
+            &|_| None,
             Arc::new(|_: &cox_protocol::types::Request| 1),
         );
         assert!(warnings.is_empty(), "{warnings:?}");

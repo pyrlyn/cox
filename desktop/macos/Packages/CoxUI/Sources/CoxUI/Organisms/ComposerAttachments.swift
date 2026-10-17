@@ -29,7 +29,7 @@ struct ComposerAttachments: View {
                 .symbolRenderingMode(.palette)
                 .foregroundStyle(Color(.textSecondary), Color(.surfaceWindow))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.coxPlain)
             .padding(Space.xxs)
             .help("Remove \(attachment.name)")
             .accessibilityLabel("Remove \(attachment.name)")

@@ -317,6 +317,42 @@ client draws the same column from the same fields.
   files worth a look, an empty one has nothing to open). Both are disabled on
   a failed candidate with no changes.
 
+#### 3.3.4 Best of n: the merge a client carries (T52.24, T52.25, A142)
+
+A client merges finished candidates through two calls on the same owner as
+`best_of`: `mergeable(group) -> [index]` lists the candidates a merge may take
+(finished, still holding a worktree, group not picked), so no client decides
+that on its own, and `best_of_merge(BestOfMerge { id, from, by }, theme)`
+returns the same `Launch` as `best_of`: the merger's session, a new candidate
+row (`Launched.merged_from` names the candidates it took) that `compare` and
+`pick` handle like any other. `by` is the existing `Candidate`: cox on a model,
+or an external agent. The core refuses before anything starts for fewer than
+two candidates, one not finished, or a picked group.
+
+The client keeps only the person's choice: the ticked candidates (a subset of
+`mergeable`, trimmed whenever the comparison is read again), the chosen merger,
+and the request built from them once two or more are ticked and a merger is
+set. After the call it reads the comparison again so the merge candidate shows
+at once, clears the ticks when the merge started and keeps them when the core
+refused it, with the refusal as the visible failure. macOS: `BestOfStore`
+(`CoxModel`) over `BestOfClient.merge`/`mergeable`; a Windows or Linux client
+repeats the same store logic over the same two exports.
+
+The compare view shows the screen for it (T52.26). A **Merge** button sits
+beside Done only when `mergeable` lists more than one candidate. It opens a
+sheet with one checkbox per mergeable candidate (all checked at first;
+label, diffstat, cost), a "Merge with" picker over the models and external
+agents the Best of control offers (models first, then agents; an option that
+cannot start here is listed with why and cannot be chosen), and Merge, which
+stays blocked, with the not-allowed pointer (T37.50), until two or more are
+checked and a merger that can start is set. The app presets the first merger
+that can start. A refusal from the core is shown in the sheet; a started merge
+closes it and its session joins the window like a launch's. `CandidateView`
+carries `merged_from`, so the merge's column is headed "Merge by <merger>" with
+"Merges <labels>" under it and is then kept, reviewed or pruned like any other
+column. The picker's list is drawn by the view, not a system menu, so a
+snapshot can show it open.
+
 ## 4. Architecture
 
 ### 4.1 Layers

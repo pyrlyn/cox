@@ -106,7 +106,7 @@ struct CompletionRow: View {
       .background { if isSelected { shape.fill(Color(.accent)) } }
       .contentShape(shape)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
     .disabled(!isEnabled)
     .accessibilityAddTraits(isSelected ? .isSelected : [])
   }

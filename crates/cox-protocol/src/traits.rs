@@ -465,6 +465,17 @@ pub trait HunkReverter: Send + Sync {
     fn revert(&self, before: &str, now: &str, index: usize) -> Option<String>;
 }
 
+/// Where a persisted `AllowForSession` answer lands (T69.2): one rule
+/// string appended to the user config's `permissions.allow`. Implemented by
+/// `cox-session` over `cox-config`'s writer, because `cox-core` does no file
+/// I/O and may not depend on `toml_edit`; the surface installs it like the
+/// `Checkpointer`.
+pub trait AllowRuleStore: Send + Sync {
+    /// Appends `rule` to `permissions.allow` unless it is already there.
+    /// `Ok(true)` when the file changed, `Ok(false)` for a duplicate.
+    fn append_allow(&self, rule: &str) -> Result<bool, crate::errors::CoreError>;
+}
+
 /// Where the loop gets a file's bytes before a call changes it (T26.1).
 /// Implemented by `cox-tools` (`checkpoint::GitCheckpointer`), which is
 /// the crate allowed to read files and run git; `cox-core` only decides
