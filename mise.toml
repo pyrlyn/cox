@@ -21,6 +21,12 @@ cmake = "3.31.12" # builds whisper.cpp for cox-voice (T54.2, A123); the version 
 # missing sccache would break every build. The probe variable stops `mise which` from recursing
 # into this same template. CI backend (R2): .github/actions/sccache, where the repo has its own jobs.
 RUSTC_WRAPPER = "{% if os() != 'windows' and get_env(name='MISE_SCCACHE_PROBE', default='') == '' %}{{ exec(command='MISE_SCCACHE_PROBE=1 \"' ~ mise_bin ~ '\" which sccache 2>/dev/null || true') }}{% endif %}"
+# bounded so the cache cannot fill the disk (the default is 10 GB; stated so a change is deliberate)
+SCCACHE_CACHE_SIZE = "10G"
+# CMake reads these two as the initial value of the same-named variable, so whisper.cpp (cox-voice)
+# goes through sccache too; empty (no sccache) is the unset case, since CMake ignores an empty value.
+CMAKE_C_COMPILER_LAUNCHER = "{% if os() != 'windows' and get_env(name='MISE_SCCACHE_PROBE', default='') == '' %}{{ exec(command='MISE_SCCACHE_PROBE=1 \"' ~ mise_bin ~ '\" which sccache 2>/dev/null || true') }}{% endif %}"
+CMAKE_CXX_COMPILER_LAUNCHER = "{% if os() != 'windows' and get_env(name='MISE_SCCACHE_PROBE', default='') == '' %}{{ exec(command='MISE_SCCACHE_PROBE=1 \"' ~ mise_bin ~ '\" which sccache 2>/dev/null || true') }}{% endif %}"
 
 [tasks.sweep]
 description = "Remove cargo build artifacts unused for 1 day (cargo-sweep, via ptools)"

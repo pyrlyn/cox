@@ -1,3 +1,14 @@
+#### T61.7 sccache for local builds and the in-repository CI jobs
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T61.1 · Size: ~60 · Files: `mise.toml`, `.github/actions/desktop-macos/action.yml`, `.github/workflows/ci.yml`, `scripts/test_sccache_config.py`, `research.md`
+Goal: dependencies compiled in one worktree are reused by another without sharing a `target/` (sharing one breaks, as seen 2026-09-23), and the CI jobs outside the shared `rust` matrix reuse compiled crates across runs.
+- Already there when the card was claimed: the `sccache` pin and the fail-open `RUSTC_WRAPPER` template in `mise.toml`, the R2 backend action `.github/actions/sccache` in the `sandbox-landlock`, `plugins` and `plugin-examples` jobs, and the `toolchain.md` row. The R2 action was reused instead of the Actions cache backend named in step 3.
+- Added: `SCCACHE_CACHE_SIZE = "10G"` and `CMAKE_C_COMPILER_LAUNCHER`/`CMAKE_CXX_COMPILER_LAUNCHER` (same probe template, so whisper.cpp in `cox-voice` is cached and an empty value means no launcher); optional `sccache-*` inputs on the `desktop-macos` action that run the shared sccache action before the XCFramework build, passed by `ci.yml`'s `desktop-macos` job (read-only on pull requests). `desktop-build.yml` (release) stays uncached: passing the secrets would need `release.yml` changes.
+- Test: `scripts/test_sccache_config.py` pins the variables and the wiring (config-only change, so the assertion on the config is the test).
+Check: `python3 -m unittest discover -s scripts -p 'test_sccache_config.py'` ran 6 tests, OK. `mise exec -- env` shows `RUSTC_WRAPPER`, `CMAKE_C_COMPILER_LAUNCHER`, `CMAKE_CXX_COMPILER_LAUNCHER` set to the mise sccache and `SCCACHE_CACHE_SIZE=10G`. `cargo build -p cox-config` in a second worktree with an empty `target/`: 667 hits of 670 requests, 35 to 36 s with the cache against 105 to 106 s without it (research.md §4.3.9, T61.7).
+Done: §4.3.9 has the clean build of the second worktree with and without sccache.
+
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
 Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3

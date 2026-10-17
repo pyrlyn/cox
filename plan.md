@@ -119,7 +119,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.5.2 | todo | P2 | 3 | 0% | |
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
-| T61.7 | todo | P2 | 2 | 0% | |
 | T61.8 | todo | P3 | 1 | 0% | |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
@@ -1997,32 +1996,6 @@ Check: the job log of `rust / aarch64-apple-darwin` shows nextest starting with 
 Done when: §4.3.9 has the job time before and after for all three targets.
 
 Out of scope: `pyrlyn/ci`'s shared `ci-rust.yml` (its own repository).
-
-#### T61.7 sccache for local builds and the in-repository CI jobs
-
-Model: sonnet · Status: open · Depends: T61.1 · Size: ~40 · Priority: P2 · Complexity: 2
-
-Goal: dependencies compiled in one worktree are reused by another without sharing a `target/` (sharing one breaks, as seen 2026-09-23), and the CI jobs outside the shared `rust` matrix reuse compiled crates across runs.
-
-Files:
-- `mise.toml`
-- `.github/actions/desktop-macos/action.yml`
-- `toolchain.md` (and the workspace `rust.md` row, as its rule asks)
-
-Steps:
-1. Pin sccache in `mise.toml` with a reason comment. Set `RUSTC_WRAPPER` only when sccache is on `PATH` (fail open: a missing sccache never fails a build), `SCCACHE_CACHE_SIZE` bounded for this disk, and `CMAKE_C_COMPILER_LAUNCHER`/`CMAKE_CXX_COMPILER_LAUNCHER` so whisper.cpp (`cox-voice`) is cached too.
-2. Leave `CARGO_INCREMENTAL` alone: sccache skips incremental workspace crates and caches their dependencies, which is the gain.
-3. CI: `mozilla-actions/sccache-action` (pinned by SHA) with the GitHub Actions cache backend in the desktop action and the `sandbox-landlock`, `plugins` and `plugin-examples` jobs.
-
-Check:
-```bash
-mise exec -- cargo build -p cox && sccache --show-stats
-```
-then the same in a second worktree with a fresh `target/`: the stats show cache hits for the dependencies.
-
-Done when: §4.3.9 has the clean build of the second worktree with and without sccache.
-
-Out of scope: the shared `rust` matrix (lives in `pyrlyn/ci`; proposed there separately).
 
 #### T61.8 Optimized build scripts and proc macros in dev
 
