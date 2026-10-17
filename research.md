@@ -736,6 +736,35 @@ Below the top two the order changes between the two runs: `onig_sys` 25.1 s cold
 
 **Machine line for the record:** Apple M3 Max, 16 cores, 64 GiB, macOS 27.0.1 (26A434), Xcode 27.1, Swift 6.4, Rust 1.98.1, measured 2026-10-17 on a shared machine (load 9–70).
 
+**T61.8: `[profile.dev.build-override] opt-level = 3` (measured 2026-10-17, rustc 1.98.1 `48a229cea 2026-09-01`, cargo 1.98.1 `797e8a9bc 2026-08-05`).**
+
+Question: does optimizing build scripts and proc macros in `dev` speed the dev build? Variant A is `main` as it is (`Cargo.toml:226-238`); variant B adds the two lines `[profile.dev.build-override]` and `opt-level = 3` after the `[profile.dev.package."*"]` block. Commands: `rm -rf target` (clean) or `touch crates/cox-tui/src/lib.rs` (incremental), then `/usr/bin/time -p mise exec -- cargo build --workspace`, run as `MISE_SCCACHE_PROBE=1 CARGO_BUILD_JOBS=4` in this worktree's own `target/` (`RUSTC_WRAPPER` verified empty under the probe). Order A, B, A, B, with each clean run followed by its two incremental runs. The driver script is kept outside the repository. Load is the 1-, 5- and 15-minute `uptime` average taken before each run; the machine was shared, with other agents' builds running.
+
+| Variant | Clean run | `real` | `user` | Load before (1 / 5 / 15 min) |
+| --- | --- | --- | --- | --- |
+| A (no override) | 1 | 322.37 s | 1061.11 s | 9.30 / 10.13 / 10.60 |
+| B (override) | 1 | 379.04 s | 1138.98 s | 9.32 / 9.88 / 10.31 |
+| A | 2 | 306.22 s | 1032.15 s | 23.24 / 19.86 / 15.31 |
+| B | 2 | 303.48 s | 1029.54 s | 18.33 / 17.33 / 15.46 |
+
+Clean means: A 314.3 s, B 341.3 s (B +27.0 s, +8.6 %). The two runs of each variant differ by 16 to 76 s, so the difference is inside the run-to-run spread, and it is not explained by load (B's slowest run started at the lowest load).
+
+| Variant | Incremental run | `real` | Load before (1 / 5 / 15 min) |
+| --- | --- | --- | --- |
+| A | 1 (first after clean) | 10.07 s | 10.51 / 10.13 / 10.41 |
+| A | 2 | 4.87 s | 9.52 / 9.93 / 10.34 |
+| A | 3 | 6.03 s | 18.44 / 17.32 / 15.44 |
+| A | 4 | 4.83 s | 17.93 / 17.23 / 15.42 |
+| B | 1 (first after clean) | 11.55 s | 23.77 / 19.83 / 15.23 |
+| B | 2 | 4.90 s | 20.65 / 19.30 / 15.09 |
+| B | 3 | 5.10 s | 14.05 / 13.98 / 14.38 |
+| B | 4 | 4.72 s | 15.41 / 14.26 / 14.48 |
+
+Incremental medians: A 5.45 s, B 5.00 s. Means: A 6.45 s, B 6.57 s. Only the first incremental after a clean is slow (10 to 12 s); the other runs are 4.7 to 6.0 s in both variants, so the incremental path shows no speedup and no clear slowdown.
+
+**Check (T61.8 card, `--timings`, run once on the kept variant A, clean target, load 18.95 before and 37.69 at the end, the latter a 1-minute average that includes the build):** `real 300.23 s`, `user 1023.86 s`, `sys 81.67 s`. Largest build-script run units in `target/cargo-timings/cargo-timing.html`: `aws-lc-sys` 86.4 s, `cox-plugin-fixtures` 17.4 s, `zstd-sys` 14.8 s, `whisper-rs-sys` 11.4 s, `libsqlite3-sys` 9.8 s, `onig_sys` 8.0 s. Largest proc-macro crate compile units: `diesel_derives` 12.2 s, `typify-impl` 11.4 s, `uniffi_macros` 8.9 s, `serde_derive` 6.2 s, `schemars_derive` 5.0 s, `clap_derive` 4.7 s. These unit durations overlap across parallel jobs, so they are shares of work, not wall time.
+
+**Verdict: rejected, `Cargo.toml` unchanged.** The clean build is not shown to be not slower (B's mean is 8.6 % higher, inside the spread), and neither path shows a speedup. The rule is to keep the override only if both are not slower and it speeds the build; it does neither here. The override stays out of `Cargo.toml`. The proc macros and build scripts that dominate the build (`aws-lc-sys`, `diesel_derives`, `typify-impl`) are not sped up by it on this machine at this sample size.
 #### T61.11 Feature-unification rebuilds (repo at ffa246b5, checked 2026-10-17)
 
 Setup: Apple M3 Max, 16 cores, load average 36–74 (other builds running), rustc 1.98.1 (48a229cea 2026-09-01), cargo 1.98.1 (797e8a9bc 2026-08-05), cargo-nextest 0.9.143, cargo-hakari 0.9.39, sccache 0.18.0 as `RUSTC_WRAPPER`, `CARGO_BUILD_JOBS=4`, the worktree's own `target/`. The metric is a count, not a time, so load does not skew it: every `compiler-artifact` message of `cargo nextest run … --no-run --cargo-message-format json` with `"fresh": false` whose package is not a workspace member. `just check-all` was run as its cargo command, `cargo nextest run --workspace`, without the swarfr step.

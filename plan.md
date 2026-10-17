@@ -120,7 +120,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
 | T61.7 | todo | P2 | 2 | 0% | |
-| T61.8 | todo | P3 | 1 | 0% | |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
@@ -2023,28 +2022,6 @@ then the same in a second worktree with a fresh `target/`: the stats show cache 
 Done when: §4.3.9 has the clean build of the second worktree with and without sccache.
 
 Out of scope: the shared `rust` matrix (lives in `pyrlyn/ci`; proposed there separately).
-
-#### T61.8 Optimized build scripts and proc macros in dev
-
-Model: haiku · Status: open · Depends: T61.1 · Size: ~5 · Priority: P3 · Complexity: 1
-
-Goal: decide by measurement whether `[profile.dev.build-override] opt-level = 3` speeds the dev build (diesel, serde, schemars, uniffi and clap macros; typify's `build.rs`).
-
-Files:
-- `Cargo.toml`
-
-Steps:
-1. Add the override; record a clean and an incremental `cargo build --workspace`.
-2. Keep it only if both are not slower; otherwise revert.
-
-Check:
-```bash
-mise exec -- cargo build --workspace --timings
-```
-
-Done when: §4.3.9 has the row and the verdict.
-
-Out of scope: other profile changes.
 
 #### T61.9 One build graph for the Swift package tests
 
