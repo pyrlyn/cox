@@ -1,6 +1,5 @@
 # Todo
 
-- T61.1. Build-time baseline
 - T33.36. Kotlin: thin PDK, template, example
 - T33.40.6. `risk` advisor: raise only
 - T33.40.7. Eval E1: risk escalation against the classifier alone
@@ -71,7 +70,6 @@
 - T58.28. Packaging
 - T58.29. UI automation smoke test
 - T58.30. Snapshot spike: WinUI controls to PNG
-- T61.1. Build-time baseline
 - T61.2. Fast profile for the XCFramework outside a release
 - T61.3. Bindings generator on the host dev profile, skipped when the library did not change
 - T61.4. CI: cache the XCFramework and SwiftPM
