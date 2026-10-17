@@ -112,7 +112,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T61.3 | todo | P1 | 2 | 0% | |
+| T61.3 | in progress | P1 | 2 | 0% | Claude Code / sonnet |
 | T61.4 | todo | P1 | 2 | 0% | |
 | T61.5.1 | todo | P2 | 3 | 0% | |
 | T61.5.2 | todo | P2 | 3 | 0% | |
@@ -1840,7 +1840,9 @@ Timings go to a new `research.md` §4.3.9 "Build times", in the shape of R§4.3.
 
 #### T61.3 Bindings generator on the host dev profile, skipped when the library did not change
 
-Model: sonnet · Status: open · Depends: - · Size: ~40 · Priority: P1 · Complexity: 2
+Model: sonnet · Status: in progress · Depends: - · Size: ~40 · Priority: P1 · Complexity: 2
+
+Execution plan: edit `xcframework.sh` (generator without `--profile`/`--target`; stamp over `libcox_ffi.a`, the only library the script packages; skip when the stamp and the bindings file both exist and match; a missing or corrupt stamp rebuilds). Test: `scripts/desktop/test_xcframework.py` runs the real script with fake `cargo`/`xcodebuild` on `PATH` (match skips, mismatch or missing stamp rebuilds, failed create leaves no stamp), wired into CI next to `test_brand_icons.py`. Then run the Check and record the no-op time in `research.md` §4.3.9.
 
 Goal: `uniffi-bindgen` is built once in the dev profile for the host, and `xcframework.sh` regenerates the bindings and the XCFramework only when `libcox_ffi.a` changed.
 
