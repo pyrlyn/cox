@@ -32,6 +32,22 @@ $ (cd plugins && mise exec -- cargo clippy -p cox-plugin-jev -p cox-plugin-sdk -
 clean
 $ mise exec -- cargo fmt --check; (cd plugins && mise exec -- cargo fmt --check)
 clean
+
+#### T52.26 CoxUI: Merge in the best-of compare view
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T52.25 · Size: ~180 · Files: CoxUI `BestOfCompare` screen, the merge sheet (new molecule), `desktop/macos/App` wiring
+Goal: the compare view shows a **Merge** button when more than one candidate is in `mergeable`. It opens a sheet with one checkbox per mergeable candidate (all checked at first; label, diffstat, cost), a merger picker with the composer's providers and models and the external agents the best-of control offers, and Merge, which stays blocked until two or more are checked (the not-allowed pointer, T37.50). The merge then appears as one more column, labelled with what it merged and by which model or agent, and can be opened in Review or kept like any other candidate.
+Plan: (1) `BestOfCompare` shows Merge when `mergeable > 1` and reports `.merge`; (2) new molecule `BestOfMergeSheet`: checkbox rows, merger picker drawn by the view (so a snapshot can show it open), Merge blocked under two checked; (3) the merge column reads "Merge by <merger>" over "Merges <labels>"; (4) fixtures and snapshot tests, references from the CI artifact; (5) `App/BestOf.swift` wiring; (6) DT§3.3.4.
+What landed: `BestOfCompare` gains `State.mergeable` (`offersMerge`: more than one), `Intent.merge` and `Column.merges`. `BestOfMergeSheet` (Molecules): a checkbox row per mergeable result (label, `+n -m`, files, cost), a "Merge with" picker over the control's options (models, then agents; an option that cannot start shows why and cannot be chosen) whose list is drawn inline when `isMenuOpen`, the failure and Cancel/Merge; `canMerge` is two or more checked and a merger that can start, and the disabled button gets the not-allowed pointer from `CoxButtonStyle`. A small core change was needed for the column's label: `cox_app::CandidateView.merged_from` (and its `#[uniffi::remote]` record) was not carried, so a client could not tell a merge's column from another; `compare` now fills it, and CoxModel's `CandidateView.mergedFrom`, `BestOfStore.merged(by:)` (the labels it merged) and `chooseAll()` (the sheet opens with every mergeable result checked) read it. The app (`App/BestOf.swift`): `BestOfSheet` opens the merge sheet over the compare sheet, presets the first merger that can start, runs `store.merge`, and adopts the merge's session into the window as a launch's are (`SessionWindow.adopt`, shared with the Best of bar). DT§3.3.4 describes the screen for Windows and Linux clients.
+Not done: the snapshot reference PNGs. The new tests (`BestOfMergeSnapshotTests`: compare with one result and with three, the sheet with two checked, one checked, the picker open on a model and on an agent, a merge column running and done, each in light/dark x Solid/Frosted) record their references from the desktop-macos CI artifact, since local macOS differs from the runner's; locally the new ones record and the existing BestOf snapshots already mismatch by a pixel or two, before and after this change. The merge sheet's cancel does not undo the ticks. A merge's session is adopted into the window the compare sheet belongs to only.
+Check:
+```
+mise exec -- cargo nextest run -p cox-app --test best_of best_of_merge_is_a_candidate_compare_and_pick_see: 1 passed (asserts views[2].merged_from == Some([0, 1]), views[0].merged_from == None)
+mise exec -- cargo clippy -p cox-app -p cox-ffi --all-targets -- -D warnings: clean; cargo fmt --check: clean
+swift test (desktop/macos/Packages/CoxModel): 189 tests passed, 3 new: bestOfMergeSheetOpensWithEveryMergeableCandidateChecked, bestOfMergeColumnNamesWhatItMergedAndOnlyThat (plus the 1 known issue that was already there)
+swift test --filter BestOfTests (CoxUI): suite BestOfTests passed (4 new logic tests: Merge only for more than one mergeable result; blocked under two checked, with no merger and with one that cannot start; models split from agents; the merge column's labels); the snapshot tests need CI references
+just desktop-xcframework and scripts/desktop/app.sh CODE_SIGNING_ALLOWED=NO: Cox.app built with the new bindings (mergedFrom: [UInt32]?)
+swiftlint lint --strict (App, CoxModel, CoxCore, the files touched in CoxUI) and swift-format lint --strict: clean
 ```
 
 #### T69.8 Integer compact threshold
@@ -405,6 +421,31 @@ Not done: the `lsp`, `repomap` and checkpoint reads (deferred in the finding); t
 Check:
 - `cargo nextest run -p cox-tools -p cox-sandbox`: 279 run, 279 passed, 1 skipped.
 - `cargo clippy -p cox-tools -p cox-sandbox --all-targets -- -D warnings`: clean.
+
+#### T64.15.3 Write through a checked parent-directory descriptor
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Files: `crates/cox-sandbox/src/write.rs`, `crates/cox-sandbox/src/open.rs`, `crates/cox-sandbox/src/lib.rs`, `crates/cox-tools/src/write.rs`, `crates/cox-tools/src/edit.rs`, `crates/cox-tools/src/v4a/tool.rs`, `crates/cox-tools/src/checkpoint.rs`, `crates/cox-tools/src/docs.rs`, `crates/cox-tools/src/swap_fixture.rs`, `plan.md`
+Goal: part C of T64.15. After `confine` approved a path, a parent directory swapped for a symlink (or planted where a missing one would be created) redirected `create_dir_all`, the temp file and the rename outside the roots. Stacked on T64.15.1 and T64.15.2; `confine` keeps its one call site and `open.rs`'s real-path check is reused.
+Plan: (1) a failing test that swaps the parent of a new file to a symlink after `confine`; (2) `cox_sandbox::write`: open the parent with `O_DIRECTORY|O_NOFOLLOW`, check its real path with the `open.rs` helper, create missing components with `mkdirat` + `openat` from that descriptor, write the temp file with `openat` and replace with `renameat`, all relative to it; (3) route `write`, `edit`, `apply_patch`, `rename_symbol` (`rewrite_all`) and the checkpoint restore through it; (4) the docs cache keeps a plain write, since it is not a workspace path.
+What landed:
+- `cox_sandbox::write::{write_confined, stage_confined, Staged}`. The deepest existing ancestor of the parent is opened without following a symlink at its leaf and its real path must lie in the canonical roots before anything is created; missing components are then made and entered relative to the descriptor in hand, the temp file is created with `O_EXCL|O_NOFOLLOW`, and `commit` is `renameat` on the same descriptor. A parent resolving outside the roots, or a symlink planted at a new directory name, is `Confined` with nothing created or written there. A symlink leaf at the target is replaced by the rename, not followed. Dropping a `Staged` without `commit` removes its temp file.
+- `open::check_inside_roots` is the real-path check `open_confined` already did, extracted so both modules share it; `opened_path` now takes any descriptor. No new `unsafe`, no new dependency (`nix` already had `fs`).
+- `write`, `edit`, `apply_patch`, the checkpoint restore and `rewrite_all` call `atomic_write(roots, path, bytes)`, now a forward to `write_confined`. `rewrite_all` stages every file as a `Staged` and commits them in turn, so an early return drops (and removes) every temp file. The docs cache uses `atomic_write_trusted`, the old plain write, because its path is under the user's cache directory and no tool input names it.
+- Non-Unix targets keep the std create/write/rename in a `portable` module; the swap window remains there, as for `open_confined`. Not compiled for Windows here.
+- Tests: `write_of_a_new_file_refuses_a_parent_swapped_to_a_symlink_after_confine` (a new file under an existing parent swapped to a symlink, and one under a not-yet-created parent with a planted symlink; asserts `Confined` and that the outside directory gained nothing), `apply_patch_add_file_refuses_a_parent_swapped_to_a_symlink_after_confine`, and four in `cox-sandbox::write` (create and replace, swapped parent writes nothing, symlink leaf replaced not followed, dropped `Staged` leaves no temp file). `apply_patch`'s test setup moved into a `swap_cx` helper.
+Not done: only the `write` test was run red before the fix, not the `apply_patch` add-file one; the Linux `/proc` path and Windows were not compiled or run (macOS host, CI covers them); a workspace root that does not exist yet now fails as `Confined`, because its parent is outside the roots, where `create_dir_all` used to create it; `lsp`, `repomap` and other reads stay as T64.15.2 left them.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-tools write_of_a_new_file   (new test, before the fix)
+FAIL write::tests::write_of_a_new_file_refuses_a_parent_swapped_to_a_symlink_after_confine
+must refuse: ToolOutput { text: "wrote /private/var/folders/.../root/sub/new.txt (7 bytes)", is_error: false, .. }
+$ mise exec -- cargo nextest run -p cox-tools -p cox-sandbox
+301 tests run: 301 passed, 1 skipped
+$ mise exec -- cargo clippy -p cox-tools -p cox-sandbox --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+```
 
 #### T69.1 PowerShell and cmd readers hit existing `Read` denies
 

@@ -26,7 +26,7 @@ New bugs, dead code and moves from a read-only Cursor cloud review of clean `mai
 | T64.14 | P2 | bug | done | `cox-store/src/lock.rs:100-105` | An unreadable or corrupt session lock file becomes `Holder::default()` (pid 0). Treat it as busy with an unknown holder. |
 | T64.15.1 | P2 | bug | done | `cox-sandbox/src/open.rs` | `confine` then `std::fs::read`/`write` leaves a symlink-swap window. Part A: `open_confined` opens with `O_NOFOLLOW` and checks the descriptor's real path against the canonical roots; tests show `std::fs::read` follows a leaf or parent swap and the helper refuses both. |
 | T64.15.2 | P2 | bug | done | `cox-tools/src/read.rs:103`; `edit.rs:107`; `write.rs:191`; `v4a/tool.rs:131` | Part B: open through `cox_tools::open::open_confined` at the read side — `read`, `edit`, `write`'s prior-content read and `apply_patch`. Deferred, not in this task: the `lsp`, `repomap` and checkpoint reads. |
-| T64.15.3 | P2 | bug | confirmed | `cox-tools/src/write.rs:46-76` (`stage`, `atomic_write`) | Part C: a swapped parent directory still redirects `create_dir_all`, the temp file and the rename. Open the parent with `O_DIRECTORY`/`O_NOFOLLOW`, check its real path, then `openat`/`renameat` relative to that descriptor. |
+| T64.15.3 | P2 | bug | done | `cox-tools/src/write.rs:46-76` (`stage`, `atomic_write`) | Part C: a swapped parent directory still redirects `create_dir_all`, the temp file and the rename. Open the parent with `O_DIRECTORY`/`O_NOFOLLOW`, check its real path, then `openat`/`renameat` relative to that descriptor. |
 | T64.16 | P2 | bug | done | `cox-permission/src/lib.rs:256-268` | The Bash read-deny skips relative tokens: `deny Read(~/.ssh/**)` misses `cat id_rsa` run inside `~/.ssh`. Resolve relative tokens against the session cwd. |
 | T64.17 | P2 | bug | done | `cox-protocol/src/config.rs:1416-1417`; `cox-session/src/lib.rs:552-559` | A project may point `memory.dir` anywhere. Guard it like the other path keys. |
 | T64.18 | P2 | dead code | done | `cox-core/src/session.rs:53-55` (`#[allow(dead_code)]`); set at `compact.rs:413` | `State::Compacting` is written but never matched. Match it in the UI/status, or drop it and its allow. |
@@ -69,7 +69,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T37.33 | todo | P1 | 3 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
-| T52.26 | todo | P2 | 3 | 0% | |
 | T53.5 | todo | P3 | 3 | 0% | |
 | T53.6 | todo | P3 | 2 | 0% | |
 | T53.7 | todo | P3 | 2 | 0% | |
@@ -1451,12 +1450,6 @@ Every card keeps the P51 rules, and:
 - an external agent's usage is its own billing: no `usage` row is invented for it, and the cost pill shows "—" as the mockup does;
 - a remote session never sends API keys or the Keychain's secrets over the wire and never forwards the ssh agent;
 - plugin widgets reach the screen only through `cox_sanitize::sanitize` and PL§8's limits, as in the TUI.
-
-#### T52.26 CoxUI: Merge in the best-of compare view
-
-Depends: T52.25 · Size: ~180 · Files: CoxUI `BestOfCompare` screen, the merge sheet (new molecule), `desktop/macos/App` wiring
-Goal: the compare view shows a **Merge** button when more than one candidate is in `mergeable`. It opens a sheet with one checkbox per mergeable candidate (all checked at first; label, diffstat, cost), a merger picker with the composer's providers and models and the external agents the best-of control offers, and Merge, which stays blocked until two or more are checked (the not-allowed pointer, T37.50). The merge then appears as one more column, labelled with what it merged and by which model or agent, and can be opened in Review or kept like any other candidate.
-Check: CoxUI snapshots: compare view with one result (no Merge button) and with three (button shown); the sheet with two checked, with one checked (Merge blocked), with the merger menu open on a model and on an agent; a merge column running and done; swiftlint strict and swift-format clean.
 
 ### P53 — Plugin distribution (goal: a plugin installs from git or a URL through the same validation and per-digest grant as a local folder, and the plugin API, the Rust SDK and the Go SDK are ready to publish once `api = 1` is frozen)
 

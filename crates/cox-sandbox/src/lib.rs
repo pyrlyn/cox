@@ -8,7 +8,9 @@
 //! turns a shell command plus the session's `SandboxPolicy` into the
 //! `Command` that confines it on this host (Seatbelt on macOS, bubblewrap
 //! or Landlock+seccomp on Linux). `open::open_confined` (T64.15) opens a
-//! confined path without following a symlink swapped in after `confine`.
+//! confined path without following a symlink swapped in after `confine`, and
+//! `write::write_confined` (T64.15.3) writes one atomically through a
+//! checked parent-directory descriptor.
 //!
 //! Separate from `cox-tools` (dependencies (a): `landlock` and
 //! `seccompiler` are Linux-only and platform-gated, and guard (b): both
@@ -25,3 +27,4 @@
 pub mod open;
 pub mod path;
 pub mod sandbox;
+pub mod write;
