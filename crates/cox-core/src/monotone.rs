@@ -59,9 +59,14 @@ impl Session {
             return Reply::Silent;
         };
         let budget = Duration::from_millis(ms);
+        let started = tokio::time::Instant::now();
         // The core holds the budget itself, as for `route`.
         match tokio::time::timeout(budget, advisor.advise(question, budget)).await {
             Err(_) => Reply::Late,
+            // A plugin advisor gives up on the same budget and returns
+            // silence; when both timers fire on one tick `timeout` sees the
+            // silence first, so a deadline the advisor hit is still late.
+            Ok(None) if started.elapsed() >= budget => Reply::Late,
             Ok(None) => Reply::Silent,
             Ok(Some(advice)) => Reply::Advice(plugin.to_string(), advice),
         }
@@ -528,6 +533,20 @@ mod tests {
         delay: Duration,
         tools: Vec<Arc<dyn Tool>>,
     ) -> (Session, Arc<Fake>, mpsc::Receiver<Event>, Arc<MemoryStore>) {
+        let (session, store) = bare(mode, tools);
+        let fake = Arc::new(Fake {
+            advice,
+            delay,
+            asked: Mutex::new(Vec::new()),
+        });
+        session.set_advisors(vec![fake.clone()]);
+        let rx = session.events().expect("events once");
+        (session, fake, rx, store)
+    }
+
+    /// A session whose every decision point names the advisor `fake`, with
+    /// no advisor set yet.
+    fn bare(mode: PermissionMode, tools: Vec<Arc<dyn Tool>>) -> (Session, Arc<MemoryStore>) {
         let mut config = cox_protocol::Config::default();
         config.permissions.mode = mode;
         let decide = &mut config.plugins.decide;
@@ -551,14 +570,7 @@ mod tests {
             PathBuf::from("/tmp/cox-monotone"),
         )
         .expect("session");
-        let fake = Arc::new(Fake {
-            advice,
-            delay,
-            asked: Mutex::new(Vec::new()),
-        });
-        session.set_advisors(vec![fake.clone()]);
-        let rx = session.events().expect("events once");
-        (session, fake, rx, store)
+        (session, store)
     }
 
     fn call(risk: Risk) -> ToolCall {
@@ -784,6 +796,36 @@ mod tests {
             assert_eq!(fake.asked(), 1);
             assert_eq!(advised(&drain(&mut rx)), vec![(false, None)], "{wrong:?}");
         }
+    }
+
+    /// Gives up on its own copy of the budget, as `PluginAdvisor` does.
+    struct GivesUp;
+
+    #[async_trait]
+    impl Advisor for GivesUp {
+        fn id(&self) -> &str {
+            "fake"
+        }
+
+        async fn advise(&self, _: Question, budget: Duration) -> Option<Advice> {
+            tokio::time::sleep(budget).await;
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn advisor_silent_at_its_deadline_is_late() {
+        let (session, _) = bare(PermissionMode::Auto, vec![]);
+        session.set_advisors(vec![Arc::new(GivesUp)]);
+        let mut rx = session.events().expect("events once");
+        let out = advise_one(&session, write("a.md")).await;
+        assert_eq!(out.risk, Risk::Write);
+        let events = drain(&mut rx);
+        assert!(advised(&events).is_empty(), "silence is no answer");
+        let late = events.iter().filter(|e| {
+            matches!(e, Event::Notice { text, .. } if text.contains("gave no risk advice within"))
+        });
+        assert_eq!(late.count(), 1, "{events:?}");
     }
 
     #[tokio::test]

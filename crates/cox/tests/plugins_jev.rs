@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-//! T33.40.4 Check: the Jev plugin as a provider, end to end and offline.
-//! The real binary installs the Jev package built by `cox-plugin-fixtures`
-//! into a scratch `COX_HOME`, `[providers.typesafe] base_url` points it at a
-//! local wiremock, and a scripted `write` in `auto` mode asks the `risk`
-//! point, which Jev answers through a call-out on its own `typesafe` section.
-//!
-//! The package copy adds `decide = ["risk"]` to the manifest: the shipped
-//! manifest declares no decision point until T33.40.6 lands the advisor.
+//! T33.40.4 and T33.40.6 Checks: the Jev plugin as a provider and as the
+//! J§5.1 `risk` advisor, end to end and offline. The real binary installs
+//! the Jev package built by `cox-plugin-fixtures` into a scratch `COX_HOME`,
+//! `[providers.typesafe] base_url` points it at a local wiremock, and a
+//! scripted `write` in `auto` mode, or a `git push origin main` under a
+//! confining sandbox, asks the `risk` point, which Jev answers through a
+//! call-out on its own `typesafe` section.
 
 #![cfg(feature = "plugins")]
 
@@ -55,16 +54,57 @@ impl Typesafe {
     }
 }
 
-/// A System One reply whose `severity` is low, so the write stays allowed.
+/// A System One reply to a batch of one, low on every J§5.1 question, so
+/// the call stays allowed.
 fn reply(input_tokens: u32) -> ResponseTemplate {
+    fixture(1, false, input_tokens)
+}
+
+/// A System One reply to a batch of `items` calls: every call `high`
+/// (likely irreversible and acting outside the workspace) or low on all four
+/// J§5.1 questions.
+fn fixture(items: usize, high: bool, input_tokens: u32) -> ResponseTemplate {
+    let (severity, p) = if high { (2.8, 0.9) } else { (0.4, 0.05) };
+    let mut answers = serde_json::Map::new();
+    for i in 0..items {
+        answers.insert(
+            format!("{i}.severity"),
+            json!({ "type": "score", "score": severity, "confidence": 0.9,
+                    "legend": { "0": "only reads" }, "probabilities": { "0": 0.9 } }),
+        );
+        for name in ["irreversible", "external_effect", "exfiltration"] {
+            answers.insert(format!("{i}.{name}"), json!({ "type": "noul", "noul": p }));
+        }
+    }
     ResponseTemplate::new(200).set_body_json(json!({
         "model": "jev-1.13.0",
-        "answers": { "severity": {
-            "type": "score", "score": 0.4, "confidence": 0.9,
-            "legend": { "0": "only reads" }, "probabilities": { "0": 0.9 }
-        }},
+        "answers": answers,
         "usage": { "input_tokens": input_tokens, "output_tokens": 0 }
     }))
+}
+
+/// The J§5.1 command the classifier rates `Exec` (A164): under `on-failure`
+/// and `workspace-write` it runs confined without asking.
+const PUSH: &str = "git push origin main";
+
+/// A headless run asks nothing under its default `never` policy, so the
+/// `risk` point is reached only with an explicit `on-failure`.
+const ON_FAILURE: [&str; 2] = ["--approve", "on-failure"];
+
+/// The `[sandbox]` that confines [`PUSH`], and a 1 s driver deadline so a
+/// raised call's ask is denied headless without stalling the test.
+const CONFINED: &str = "\n[sandbox]\nmode = \"workspace-write\"\n\n[hooks]\ntimeout_s = 1\n";
+
+/// One turn whose tool batch is a `bash` call per command.
+fn bash_batch(commands: &[&str]) -> String {
+    let calls: Vec<String> = commands
+        .iter()
+        .map(|c| format!("{{ name = \"bash\", input = {{ command = \"{c}\" }} }}"))
+        .collect();
+    format!(
+        "[[turn]]\ntext = \"pushing\"\ntool_calls = [{}]\n\n",
+        calls.join(", ")
+    )
 }
 
 /// A scratch home with the Jev package installed and enabled, and a
@@ -75,6 +115,8 @@ struct Rig {
     home: tempfile::TempDir,
     cwd: tempfile::TempDir,
     scenario: PathBuf,
+    /// Extra `cox run` arguments.
+    args: Vec<&'static str>,
 }
 
 impl Rig {
@@ -84,12 +126,6 @@ impl Rig {
 
     /// `table` is extra `[providers.typesafe]` lines after `base_url`.
     fn with_table(server: &Typesafe, files: &[&str], table: &str) -> Self {
-        let rig = Self {
-            home: tempfile::tempdir().unwrap(),
-            cwd: tempfile::tempdir().unwrap(),
-            scenario: PathBuf::new(),
-        };
-        let scenario = rig.home.path().join("scenario.toml");
         let turns: String = files
             .iter()
             .map(|f| {
@@ -99,12 +135,32 @@ impl Rig {
                 )
             })
             .collect();
+        Self::build(
+            server,
+            &turns,
+            table,
+            "",
+            "risk = \"jev\"\nrisk_ms = 30000\n",
+        )
+    }
+
+    /// `turns` is the scripted run before its closing turn, `permissions`
+    /// extra `[permissions]` lines after `mode = "auto"` (they may open
+    /// further tables) and `decide` the `[plugins.decide]` lines.
+    fn build(server: &Typesafe, turns: &str, table: &str, permissions: &str, decide: &str) -> Self {
+        let rig = Self {
+            home: tempfile::tempdir().unwrap(),
+            cwd: tempfile::tempdir().unwrap(),
+            scenario: PathBuf::new(),
+            args: vec![],
+        };
+        let scenario = rig.home.path().join("scenario.toml");
         std::fs::write(&scenario, format!("{turns}[[turn]]\ntext = \"done\"\n")).unwrap();
         std::fs::write(
             rig.home.path().join("config.toml"),
             format!(
-                "[providers.typesafe]\nbase_url = \"{}\"\n{table}\n[permissions]\nmode = \"auto\"\n\n\
-                 [plugins.decide]\nrisk = \"jev\"\nrisk_ms = 30000\n",
+                "[providers.typesafe]\nbase_url = \"{}\"\n{table}\n\
+                 [plugins.decide]\n{decide}\n[permissions]\nmode = \"auto\"\n{permissions}",
                 server.server.uri()
             ),
         )
@@ -115,13 +171,6 @@ impl Rig {
             let entry = entry.unwrap().path();
             std::fs::copy(&entry, package.join(entry.file_name().unwrap())).unwrap();
         }
-        let manifest = package.join("plugin.toml");
-        let text = std::fs::read_to_string(&manifest).unwrap();
-        std::fs::write(
-            &manifest,
-            format!("{text}\n[capabilities]\ndecide = [\"risk\"]\n"),
-        )
-        .unwrap();
         let rig = Self { scenario, ..rig };
         let package = package.to_str().unwrap();
         rig.cox()
@@ -154,6 +203,7 @@ impl Rig {
     fn run(&self) {
         self.cox()
             .args(["run", "-p", "write them", "--output-format", "json"])
+            .args(&self.args)
             .output()
             .unwrap();
     }
@@ -218,6 +268,23 @@ impl Rig {
     fn wrote(&self, file: &str) -> bool {
         self.cwd.path().join(file).exists()
     }
+
+    fn of_type(&self, kind: &str) -> Vec<Value> {
+        self.events()
+            .into_iter()
+            .filter(|e| e["type"] == kind)
+            .collect()
+    }
+}
+
+/// A rig whose run is one tool batch of `commands` under [`CONFINED`], with
+/// Jev as the `risk` advisor within `risk_ms`.
+fn push_rig(server: &Typesafe, commands: &[&str], risk_ms: u32) -> Rig {
+    let decide = format!("risk = \"jev\"\nrisk_ms = {risk_ms}\n");
+    Rig {
+        args: ON_FAILURE.to_vec(),
+        ..Rig::build(server, &bash_batch(commands), "", CONFINED, &decide)
+    }
 }
 
 fn decide_skipped(notices: &[String]) -> Vec<&String> {
@@ -244,14 +311,9 @@ fn jev_request_carries_host_injected_bearer() {
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["model"], "jev-1.13.0");
     assert_eq!(body["state"]["items"][0]["tool"], "write");
-    assert_eq!(body["questions"]["severity"]["type"], "score");
-    let advised: Vec<_> = rig
-        .events()
-        .into_iter()
-        .filter(|e| e["type"] == "advised")
-        .collect();
-    assert_eq!(advised.len(), 1, "{}", rig.rollout_text());
-    assert_eq!(advised[0]["plugin"], "jev");
+    assert_eq!(body["questions"]["0.severity"]["type"], "score");
+    // Low answers are no advice (J§5.1: raise or nothing).
+    assert!(rig.of_type("advised").is_empty(), "{}", rig.rollout_text());
     assert!(rig.wrote("a.txt"));
 }
 
@@ -436,4 +498,110 @@ fn doctor_names_the_plugin_that_serves_typesafe() {
             .starts_with("served by the jev plugin"),
         "{row}"
     );
+}
+
+#[test]
+fn git_push_is_auto_allowed_without_the_plugin() {
+    let server = Typesafe::answering(fixture(1, true, 10));
+    let rig = Rig {
+        args: ON_FAILURE.to_vec(),
+        ..Rig::build(&server, &bash_batch(&[PUSH]), "", CONFINED, "")
+    };
+    rig.run();
+
+    assert!(server.requests().is_empty(), "no advisor, no question");
+    assert!(
+        rig.of_type("approval_required").is_empty(),
+        "{}",
+        rig.rollout_text()
+    );
+    assert_eq!(
+        rig.of_type("tool_call_done").len(),
+        1,
+        "{}",
+        rig.rollout_text()
+    );
+}
+
+#[test]
+fn high_risk_answer_asks_and_headless_denies() {
+    let server = Typesafe::answering(fixture(1, true, 10));
+    let rig = push_rig(&server, &[PUSH], 30_000);
+    rig.run();
+
+    assert_eq!(server.requests().len(), 1);
+    let asked = rig.of_type("approval_required");
+    assert_eq!(asked.len(), 1, "{}", rig.rollout_text());
+    assert_eq!(asked[0]["call"]["risk"], "destructive", "{}", asked[0]);
+    let decided = rig.of_type("approval_decided");
+    assert_eq!(decided.len(), 1, "{}", rig.rollout_text());
+    assert_eq!(decided[0]["decision"]["type"], "deny", "{}", decided[0]);
+    let advised = rig.of_type("advised");
+    assert_eq!(advised.len(), 1, "{}", rig.rollout_text());
+    assert_eq!(advised[0]["point"], "risk");
+    assert_eq!(advised[0]["plugin"], "jev");
+    assert_eq!(advised[0]["applied"], true);
+    let note = advised[0]["advice"]["note"].as_str().unwrap_or_default();
+    assert!(note.contains("external 0.90"), "the probabilities: {note}");
+}
+
+#[test]
+fn low_risk_answer_leaves_the_call_allowed() {
+    let server = Typesafe::answering(fixture(1, false, 10));
+    let rig = push_rig(&server, &[PUSH], 30_000);
+    rig.run();
+
+    assert_eq!(server.requests().len(), 1);
+    assert!(
+        rig.of_type("approval_required").is_empty(),
+        "{}",
+        rig.rollout_text()
+    );
+    assert!(rig.of_type("advised").is_empty());
+    assert_eq!(rig.of_type("tool_call_done").len(), 1);
+}
+
+#[test]
+fn late_risk_answer_leaves_the_call_allowed_with_a_notice() {
+    let late = fixture(1, true, 10).set_delay(std::time::Duration::from_secs(2));
+    let server = Typesafe::answering(late);
+    let rig = push_rig(&server, &[PUSH], 200);
+    rig.run();
+
+    assert!(
+        rig.of_type("approval_required").is_empty(),
+        "{}",
+        rig.rollout_text()
+    );
+    assert!(rig.of_type("advised").is_empty(), "{}", rig.rollout_text());
+    let late: Vec<_> = rig
+        .of_type("notice")
+        .into_iter()
+        .filter(|n| {
+            n["text"]
+                == "plugin jev gave no risk advice within 200 ms; the classifier's risk stands"
+        })
+        .collect();
+    assert_eq!(late.len(), 1, "{}", rig.rollout_text());
+    assert_eq!(rig.of_type("tool_call_done").len(), 1);
+}
+
+#[test]
+fn one_jev_request_per_tool_batch() {
+    let server = Typesafe::answering(fixture(3, false, 10));
+    let rig = push_rig(
+        &server,
+        &[PUSH, "npm publish", "git push origin dev"],
+        30_000,
+    );
+    rig.run();
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1, "{}", rig.rollout_text());
+    let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let items = body["state"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "{body}");
+    assert_eq!(items[1]["subject"], "npm publish");
+    assert_eq!(body["questions"].as_object().unwrap().len(), 12, "{body}");
+    assert_eq!(rig.of_type("tool_call_done").len(), 3);
 }
