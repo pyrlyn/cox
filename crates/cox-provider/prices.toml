@@ -87,11 +87,11 @@ source_url = "https://models.dev"
 
 [[model]]
 id = "deepseek-v4-pro"
-input = 0.435
-output = 0.87
+input = 0.66
+output = 1.98
 cache_write = 0.0
-cache_read = 0.003625
-verified_on = "2026-09-04"
+cache_read = 0.022
+verified_on = "2026-10-17"
 source_url = "https://models.dev"
 
 [[model]]
@@ -159,11 +159,11 @@ source_url = "https://models.dev"
 
 [[model]]
 id = "deepseek/deepseek-v4-pro"
-input = 0.783
-output = 1.566
+input = 0.2088
+output = 0.4176
 cache_write = 0.0
-cache_read = 0.06525
-verified_on = "2026-09-28"
+cache_read = 0.0174
+verified_on = "2026-10-17"
 source_url = "https://models.dev"
 
 [[model]]
@@ -220,11 +220,3 @@ cache_read = 0.0
 verified_on = "2026-09-04"
 source_url = "local inference, no billing"
 
-[[model]]
-id = "jev-latest"
-input = 0.042
-output = 0.0
-cache_write = 0.0
-cache_read = 0.0
-verified_on = "2026-09-20"
-source_url = "https://typesafe.ai/blog/introducing-system-one-models-and-jev"

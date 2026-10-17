@@ -27,9 +27,11 @@ takes (`["text", "image", "pdf"]`); whether it holds `"image"` is written as
 providers.
 
 Source of truth for *which* model ids to price or list is the two files
-themselves (plan.md T30.20) — this module never adds or drops an id. An id
+themselves (plan.md T30.20) — this module never adds an id, and drops only a
+`prices.toml` row that no `[providers.*].models` array lists any more
+(T33.40.15). An id
 cox already lists that models.dev does not have, or whose provider section
-has no models.dev counterpart (`local`, `typesafe` — no vendor row there),
+has no models.dev counterpart (`local` — no vendor row there),
 or whose `reasoning_options` shape this module does not recognise, is
 reported on stdout and left byte-for-byte unchanged. Anthropic's four native
 rows are cross-checked against models.dev's `anthropic` provider but never
@@ -77,8 +79,8 @@ API_URL = "https://models.dev/api.json"
 # always match (`moonshot` -> `moonshotai`, `z-ai` -> `zai`, `gemini` ->
 # `google`: models.dev's `google` provider names env `GEMINI_API_KEY`,
 # checked 2026-09-28). A section
-# absent here (`local`, `typesafe`: no vendor row on models.dev — local
-# inference and a gateway models.dev doesn't mirror) is never looked up;
+# absent here (`local`: no vendor row on models.dev — local inference) is
+# never looked up;
 # its `models` array is left completely untouched.
 PROVIDER_TO_MODELS_DEV = {
     "anthropic": "anthropic",
@@ -232,6 +234,13 @@ def build_prices_toml(
     if not rows:
         raise ValueError("prices.toml has no [[model]] rows")
 
+    # A row no `[providers.*].models` array lists prices a model cox no longer
+    # ships (T33.40.15: `jev-latest` moved to the jev plugin's own `[[models]]`
+    # table), so it goes instead of lingering as a "kept unchanged" exception.
+    for index in reversed([i for i, row in enumerate(rows) if row["id"] not in id_to_sections]):
+        report.append(f"prices.toml: `{rows[index]['id']}` is listed by no [providers.*] section, dropped")
+        del rows[index]
+
     for row in rows:
         mid = row["id"]
         section, dev_row = _resolve(mid, id_to_sections.get(mid, []), registry)
@@ -309,7 +318,7 @@ def build_default_toml(text: str, registry: dict, *, report: list[str], names_on
     for section, table in providers.items():
         dev_id = PROVIDER_TO_MODELS_DEV.get(section)
         if dev_id is None:
-            continue  # no models.dev counterpart (local, typesafe): untouched
+            continue  # no models.dev counterpart (local): untouched
         dev_provider = registry.get(dev_id)
         if dev_provider is None:
             report.append(
