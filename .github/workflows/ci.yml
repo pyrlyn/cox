@@ -426,6 +426,8 @@ jobs:
       # Which Swift packages desktop-macos may skip on a pull request (T63.2).
       - name: swift test selection
         run: python3 -m unittest discover -s scripts/desktop -p 'test_swift_test_select.py'
+      - name: sccache wiring
+        run: python3 -m unittest discover -s scripts -p 'test_sccache_config.py'
 
       - name: swiftlint fixtures
         working-directory: desktop/macos
@@ -489,6 +491,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: ./.github/actions/desktop-macos
+        with:
+          sccache-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          sccache-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          sccache-bucket: ${{ vars.SCCACHE_BUCKET }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-read-only: ${{ github.event_name == 'pull_request' }}
 
       # Pass markers (T63.2): `actions/cache` keys are immutable, so each run saves a new key and
       # restores the newest by prefix. A pull request reads its own and main's caches only.
