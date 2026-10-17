@@ -1,3 +1,38 @@
+#### T33.40.4 Jev plugin as a provider, end to end and offline
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T33.40.3, T33.7 · Size: ~180 (landed ~300 lines of code, see Not done) · Priority: P2 · Complexity: 4 · Files: `crates/cox/tests/plugins_jev.rs`, `crates/cox-plugin/src/{provider,advisor}.rs`, `crates/cox-session/src/{lib,provider}.rs`, `crates/cox-provider/src/retried.rs`, `crates/cox-models/src/{catalog,price}.rs`, `crates/cox-plugin-api/src/abi.rs`, `crates/cox/src/plugin_cmd.rs`, `plugins/jev/src/{decide,lib,provider}.rs`, `plugins/sdk/src/lib.rs`
+Goal: prove the provider path through the real binary with no network and no keychain (J§8).
+Plan (Claude Code / opus-5.5): the host gaps T33.40.3 left ("Not done") first, since the Check cannot pass without them: (1) `ProviderCall.base_url`; (2) `cox-session`: the `[providers.typesafe]` table's `base_url` and `max_retries` apply to the ABI section of that name, ABI providers retried and priced from the catalog; (3) `cox-plugin`: a JSON `AbiError` `transient` maps to a retryable `Overloaded`, and `PluginAdvisor` leaves one notice per failure run and disables `cox_decide` after three in a row (PL§10); (4) Jev guest: two-phase `cox_decide`/`cox_decide_resume` with one minimal `risk` question; SDK `decide_call`/`decide_resume` keys; (5) `cox plugin list --json` `providers`/`models`; (6) `crates/cox/tests/plugins_jev.rs`.
+What landed:
+- ABI: `ProviderCall.base_url` (optional, skipped when absent; schema and `docs/plugins.md` regenerated). `cox_plugin::provider::backends` takes a per-section base-URL lookup, binds `cox_http` to it and passes it to the guest; Jev sends to it and falls back to its manifest URL for an older host.
+- `cox-session`: `abi_transport` reads `[providers.typesafe]` for the ABI section `typesafe` only (`base_url`, `max_retries`). Every ABI provider is wrapped in the new `cox_provider::retried::Retried` (`retry::stream_with_retry` with the section's `max_retries`) and `Priced` with `Catalog::price_table()`, so a plugin `[[models]]` price is the ledger cost (`PriceTable::from_prices`).
+- `cox-plugin`: a trap whose text holds a JSON `AbiError` maps `transient` to `ProviderError::Overloaded` (retryable) and any other kind to `BadRequest`. `PluginAdvisor` counts failures in a row: the first leaves "decision skipped: …", the third "cox_decide disabled for this session after 3 failures in a row", and later questions never reach the guest; a success or silence resets the count.
+- Jev guest: `decide.rs` answers `risk` with a call-out on its own `typesafe` section (`jev-1.13.0`, one `severity` Score mirroring `Risk`) and reads the reply in `cox_decide_resume`; other points are silent. The manifest still declares no decision point (T33.40.6 adds it). The SDK gains `decide_call` (`cox_decide` → `DecideOut`) and `decide_resume`.
+- `cox plugin list --json` rows carry `providers` and `models`.
+- `crates/cox/tests/plugins_jev.rs`: the real binary, a scratch `COX_HOME`, the fixture package copied with `[capabilities] decide = ["risk"]` added (the test-only part), `COX_PROVIDER=scripted` writes in `auto` mode so `advise_risk` asks, and wiremock on 127.0.0.1 through `[providers.typesafe] base_url`.
+Not done:
+- Narrow reading: the card's "test-only scripted command" is a scripted `write` that triggers the `risk` point, with `decide = ["risk"]` added only in the test's copy of the package; the shipped manifest is unchanged until T33.40.6.
+- Only `base_url` and `max_retries` of `[providers.typesafe]` reach the plugin's section; the rest of the table (`timeout_s`, `api_key_env`, `model`) is T33.40.5.
+- No `tests/fixtures/jev/*.json`: the replies are built inline with `serde_json::json!`.
+- Size: about 300 lines of code against the card's ~180, because the host gaps above had to land first.
+- `cox::plain plain_transcript_snapshot` fails (`ctx 1%` vs `2%`) on the claim commit too, before any change here (checked with `git stash`); not touched.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox --test plugins_jev
+PASS plugin_list_json_shows_provider_and_model_contributions, jev_request_carries_host_injected_bearer, jev_401_is_one_notice_and_fail_open, jev_key_never_reaches_guest, jev_call_blocked_by_budget_falls_back, jev_call_writes_usage_row_with_plugin_job, three_failures_disable_decide_export, jev_529_retries_max_retries_times
+Summary: 8 tests run: 8 passed, 0 skipped
+$ mise exec -- cargo nextest run --no-fail-fast -p cox-plugin-api -p cox-plugin -p cox-models -p cox-provider -p cox-session -p cox
+Summary: 524 tests run: 523 passed, 1 failed, 2 skipped
+FAIL cox::plain plain_transcript_snapshot   (pre-existing, fails on 9a0add19 without this change)
+$ mise exec -- cargo clippy -p cox-plugin-api -p cox-plugin -p cox-models -p cox-provider -p cox-session -p cox --all-targets -- -D warnings
+clean
+$ (cd plugins && mise exec -- cargo test -p cox-plugin-jev -p cox-plugin-sdk --locked)
+jev: 19 passed (adds decide::tests::{risk_question_calls_out_to_the_own_section, other_points_are_silent, resume_reads_the_severity_score}, provider::tests::host_bound_base_url_overrides_the_manifest_one); sdk: 10 passed
+$ (cd plugins && mise exec -- cargo clippy -p cox-plugin-jev -p cox-plugin-sdk --all-targets --locked -- -D warnings; cargo clippy -p cox-plugin-jev --target wasm32-unknown-unknown --locked -- -D warnings)
+clean
+$ mise exec -- cargo fmt --check; (cd plugins && mise exec -- cargo fmt --check)
+clean
+
 #### T52.26 CoxUI: Merge in the best-of compare view
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T52.25 · Size: ~180 · Files: CoxUI `BestOfCompare` screen, the merge sheet (new molecule), `desktop/macos/App` wiring

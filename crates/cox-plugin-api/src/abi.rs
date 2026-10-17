@@ -561,6 +561,11 @@ pub struct ProviderCall {
     pub request: Value,
     /// The model id to send.
     pub model: String,
+    /// The section's base URL as the host bound it, which a user config may
+    /// override (T33.40.4); `cox_http` allows only this host. Absent from an
+    /// older host, so a guest falls back to its manifest's `base_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 }
 
 /// `cox_model_call` input (PL§7d), and what `DecideOut::Call` asks the host

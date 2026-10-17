@@ -44,7 +44,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | --- | --- | --- | --- | --- | --- |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.4 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
@@ -884,24 +883,6 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
-
-#### T33.40.4 Jev plugin as a provider, end to end and offline
-
-Depends: T33.40.3, T33.7 · Size: ~180 · Files: `tests/plugins_jev.rs` (+ `tests/fixtures/jev/*.json`, fixtures)
-Goal: prove the provider path through the real binary with no network and no keychain (J§8).
-Plan:
-1. A scratch `COX_HOME`. Install and enable the built fixture package from its local folder (C3) with `--yes`.
-2. Main turns come from `COX_PROVIDER=scripted`.
-3. Jev is wiremock on 127.0.0.1, reached through `[providers.typesafe] base_url` in the scratch config, with `TYPESAFE_API_KEY=test-key` in the env.
-4. A test-only scripted command makes one decision call. It reuses T33.40.1's WAT harness pattern.
-Check:
-- `jev_request_carries_host_injected_bearer` and `jev_key_never_reaches_guest`;
-- `jev_call_writes_usage_row_with_plugin_job` (provider `typesafe`, model `jev-1.13.0`, cost from the plugin catalog row);
-- `jev_call_blocked_by_budget_falls_back`;
-- `jev_401_is_one_notice_and_fail_open`;
-- `jev_529_retries_max_retries_times`;
-- `three_failures_disable_decide_export`;
-- `cox plugin list --json` shows the provider and model contributions.
 
 #### T33.40.5 Parity: the `typesafe` table configures the plugin's section
 

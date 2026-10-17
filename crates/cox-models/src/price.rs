@@ -91,6 +91,14 @@ impl PriceTable {
         })
     }
 
+    /// A table over rows already merged elsewhere (`Catalog::price_table`).
+    pub fn from_prices(prices: Vec<Price>) -> Self {
+        PriceTable {
+            prices,
+            warned_models: Mutex::new(HashSet::new()),
+        }
+    }
+
     /// All `[[model]]` rows, for staleness checks and diagnostics.
     pub fn prices(&self) -> &[Price] {
         &self.prices

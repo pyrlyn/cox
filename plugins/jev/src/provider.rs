@@ -118,7 +118,12 @@ pub fn stream(
     };
     let response = send(&HttpReq {
         method: "POST".into(),
-        url: format!("{BASE_URL}/v1/systemone"),
+        // The host's bound base URL (a user override) is the only one
+        // `cox_http` allows; the constant serves an older host.
+        url: format!(
+            "{}/v1/systemone",
+            call.base_url.as_deref().unwrap_or(BASE_URL)
+        ),
         headers: [("content-type".to_string(), "application/json".to_string())].into(),
         body: Some(body),
     })?;
@@ -277,6 +282,7 @@ mod tests {
                 "thinking": { "type": "off" }, "cache_breakpoints": [], "stop_sequences": [],
             }),
             model: "jev-1.13.0".into(),
+            base_url: None,
         }
     }
 
@@ -343,6 +349,18 @@ mod tests {
         );
         assert_eq!(events[3]["usage"]["output_tokens"], 3);
         assert_eq!(events[3]["usage"]["estimated"], false);
+    }
+
+    #[test]
+    fn host_bound_base_url_overrides_the_manifest_one() {
+        let warned = AtomicBool::new(false);
+        let mut overridden = call("plugin:jev", user(DECISION));
+        overridden.base_url = Some("http://127.0.0.1:9".into());
+        let (_, sent, _) = run(&overridden, &warned, 200, REPLY);
+        assert_eq!(
+            sent.expect("one request").url,
+            "http://127.0.0.1:9/v1/systemone"
+        );
     }
 
     #[test]
