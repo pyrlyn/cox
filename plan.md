@@ -55,7 +55,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
-| T33.45.10 | in progress | P2 | 2 | 10% | Claude Code / sonnet-5.5 |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T35.10 | todo | P3 | 2 | 0% | |
@@ -1055,14 +1054,6 @@ Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and a
 
 
 Plan (Claude Code / opus-5.5): (1) `plugin_ui.rs`: `PluginSlots` tracks the selected inspector tab and its area in cells; `Slot::DesktopInspector` is visible only while its plugin's tab is selected, so it renders only then; `select_tab` and `open_inspector` (for `CommandOut::OpenInspector`). `PluginUi::declare` takes `InitOut.desktop` in place of the keys: the tab and actions are sanitized, a symbol outside `is_symbol_name` becomes `puzzlepiece.extension`, the toolbar is capped at `MAX_TOOLBAR_ACTIONS`, and an action whose command is not among the plugin's granted commands is dropped with a notice; `action(id)` asks `cox_command` for `plugin:<id>:<command>`. The keys, `PluginKey` and `key` go. (2) `palette.rs`: `PaletteItem.symbol` (optional, serde and UniFFI default, so existing callers keep compiling). (3) `live.rs`: `plugin_tabs`, `plugin_toolbar`, `select_plugin_tab`, `plugin_action`; plugin palette actions join `palette`; `OpenInspector` selects the tab; declare notices are emitted once the session is open; `plugin_keys`/`plugin_key` removed (and their `cox-ffi` forwards, which no Swift view calls). Verify with `cargo nextest run -p cox-app -p cox-ffi`, clippy and fmt.
-#### T33.45.10 Docs: Russian and Ukrainian translations
-
-Depends: T33.45.9 · Files: `docs/ru/plugins.md`, `docs/uk/plugins.md` (new directories) · Design: `docs/design/plugins.md` §15, A134
-
-Check: both cover all three parts and every heading of the English page; `just test` green.
-
-Plan (Claude Code / sonnet-5.5): (1) `docs/ru/plugins.md` and `docs/uk/plugins.md`: full translations of `docs/plugins.md`, a top line naming the English page as authoritative, code, identifiers, keys and URLs verbatim, links adjusted with `../`. (2) `crates/cox/tests/docs.rs`: the relative-link test also covers `docs/ru` and `docs/uk`; a parity test per language compares the heading levels, the fenced code blocks, the generated field-index bullets and the in-page anchors with the English page, so a heading, block or index line added in English fails until both translations follow. (3) Run `cargo nextest run -p cox --test docs`, clippy on `-p cox --test docs`, `cargo fmt --check`.
-
 #### T33.47 Plugin canvas: a desktop pane of plugin-drawn pages
 
 Depends: T33.45.7 · Design: `docs/design/plugin-canvas.md`, A156
