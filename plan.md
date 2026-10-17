@@ -126,7 +126,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T66.12 | in progress | P2 | 4 | 0% | Claude Code / opus-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2619,40 +2618,6 @@ mise exec -- cargo fmt --check
 Done when, against `COX_HOME=/tmp/cox-scratch` with the scripted provider, a gate that fails once and then passes yields exactly two turns and `GatesPassed`.
 
 Out of scope: goals that persist across runs.
-
-#### T66.12 Design: resident sessions and a supervisor
-
-Model: opus-5.5 · Status: in progress · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
-
-Goal: settle the crate-boundary change before any code. Today the TUI owns `cox_core::Session` (`cox-tui/src/app.rs:18, 94`), and the session lock (`cox-store/src/lock.rs`) ends with the process.
-
-Files:
-- `docs/design/serve.md` (new)
-
-Steps (each question is answered with code references):
-1. Can the attach protocol be the existing app-server protocol (`docs/app-server.md`: `open`, `send`, `snapshot`, `patches`) instead of a second enum in cox-protocol? If not, why not?
-2. Does the TUI consume `cox_app` patches or raw `Event`s?
-3. `cox serve` runs one worker process per session under one supervisor. It restarts a failed worker after 250 ms, doubling up to 30 s, and gives up after 5 consecutive failures; a worker that lives 30 s resets the count (idea: `pa-daemon/src/supervisor.rs`, `supervisor/supervision.rs`).
-4. Where does the socket live under `COX_HOME`, with what mode, and who may attach?
-5. The session lock moves to the worker.
-6. Reattach replays the rollout from cox-store and never a second JSONL dialect.
-7. `docs/app-server.md` says a running turn keeps running on the host, but `cox app-server --stdio` exits when stdin closes (`cox-app/src/server.rs:145, 237-243`). Fix the doc or the behaviour.
-8. Acceptance test for the later cards: on a scratch `COX_HOME`, start serve, run one scripted turn, kill the client, and reattach. The rollout must grow only by that turn's events.
-
-Check:
-```bash
-test -s docs/design/serve.md
-```
-
-Done when the doc ends with the implementation cards (each within the size limit). The creator then approves them in a new §6 amendment, and only then does code start.
-
-Out of scope: any code.
-
-Execution plan:
-1. Read `docs/app-server.md`, `cox-app/src/server.rs`, `cox-store/src/lock.rs`, the open/resume path in `cox-session` and `cox-app`, and the TUI's ownership of `Session`; note file:line for every claim.
-2. Write `docs/design/serve.md`: answer steps 1–8 with code references, list alternatives, trust boundaries, failure modes and out-of-scope items; cite primary sources for other tools (checked 2026-10-17).
-3. End the doc with proposed implementation cards (title, files, size, Check); do not add them to `plan.md` — they wait for the creator's §6 amendment.
-4. Verify: `test -s docs/design/serve.md`, and any docs link test that covers `docs/design/`.
 
 #### T66.13 Heartbeat re-entry for a resident session
 
