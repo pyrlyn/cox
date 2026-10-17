@@ -32,6 +32,43 @@ Out of scope: a separate `task_output` tool; peer messages between children.
 Result: `tasks.rs` gains `TaskStatus` (`queued`, `running`, `done`, `error`, `cancelled`) and a per-session `Collect` record for each background subagent (name, status, the settled answer, the archive id), with `begin_collect`, `mark_running`, `settle_collect` and `collect_snapshot`, which waits on the existing `tasks_idle` notify up to `timeout_ms` and returns the records as they stand when time or the call's cancel token runs out. The record holds the answer `run_task` already capped (summary or cut, with `full answer: expand <id>` when T66.2 archived it), so `collect` adds no way around `result_cap_tokens`. A background spawn returns `structured` `{task_id, name, status: "queued"}` and no answer. `drive` marks each run `running` and settles it before the notice goes out: `cancelled` when the run was interrupted, `error` for a driver refusal or a failed run, else `done`; a woken finished child goes back to `running`, and a child that cannot resume is settled `error`. `pointer_line` takes a `collect` flag: a subagent's line ends with `| collect <task id>`, a detached `bash` line is unchanged. `agent(collect: [id or name, …], timeout_ms)` is checked before the concurrency slot is reserved; it takes at most 8 tasks and clamps the wait to 120 s, and an unknown id, an empty or non-string list, or `task` together with `collect` is denied. Its risk is `ReadOnly` and its subject `collect`. The input schema drops `required` (a top-level `anyOf` is refused by providers) and the description says `task` or `collect`. Foreground calls are unchanged. `docs/tools.md` names the new input. Tests (in `subagent.rs`, because a task id is unknown to a script): `background_spawn_returns_a_handle_and_no_answer`, `pointer_line_for_a_subagent_ends_with_collect_and_its_id`, `collect_returns_a_done_tasks_preview_by_id_and_by_name`, `collect_reports_queued_running_and_a_timeout_snapshot`, `collect_wakes_when_the_task_settles_before_the_timeout`, `collect_reports_error_for_a_refused_run_and_cancelled_for_an_interrupted_one`, `collect_preview_of_an_over_cap_answer_stays_within_the_cap_and_names_the_archive_row`, `collect_denies_unknown_tasks_mixed_calls_and_oversized_lists`, `collect_is_read_only_whatever_the_preset`; and `background_spawn_hands_out_a_collect_handle_and_the_pointer_names_it` through the loop in `tests/subagent.rs`. Not done: the macOS and TUI summary line for an `agent` call (`cox-app` `summary.rs`) still reads "Delegated to `collect`: " for a collect call, because that file is outside this card.
 Check output: `mise exec -- cargo nextest run -p cox-core` — 440 passed, 1 skipped; `mise exec -- cargo nextest run -p cox -E 'test(agent) or test(subagent)'` — 12 passed; `mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
+#### T66.12 Design: resident sessions and a supervisor
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
+
+Goal: settle the crate-boundary change before any code. Today the TUI owns `cox_core::Session` (`cox-tui/src/app.rs:18, 94`), and the session lock (`cox-store/src/lock.rs`) ends with the process.
+
+Files:
+- `docs/design/serve.md` (new)
+
+Steps (each question is answered with code references):
+1. Can the attach protocol be the existing app-server protocol (`docs/app-server.md`: `open`, `send`, `snapshot`, `patches`) instead of a second enum in cox-protocol? If not, why not?
+2. Does the TUI consume `cox_app` patches or raw `Event`s?
+3. `cox serve` runs one worker process per session under one supervisor. It restarts a failed worker after 250 ms, doubling up to 30 s, and gives up after 5 consecutive failures; a worker that lives 30 s resets the count (idea: `pa-daemon/src/supervisor.rs`, `supervisor/supervision.rs`).
+4. Where does the socket live under `COX_HOME`, with what mode, and who may attach?
+5. The session lock moves to the worker.
+6. Reattach replays the rollout from cox-store and never a second JSONL dialect.
+7. `docs/app-server.md` says a running turn keeps running on the host, but `cox app-server --stdio` exits when stdin closes (`cox-app/src/server.rs:145, 237-243`). Fix the doc or the behaviour.
+8. Acceptance test for the later cards: on a scratch `COX_HOME`, start serve, run one scripted turn, kill the client, and reattach. The rollout must grow only by that turn's events.
+
+Check:
+```bash
+test -s docs/design/serve.md
+```
+
+Done when the doc ends with the implementation cards (each within the size limit). The creator then approves them in a new §6 amendment, and only then does code start.
+
+Out of scope: any code.
+
+Execution plan:
+1. Read `docs/app-server.md`, `cox-app/src/server.rs`, `cox-store/src/lock.rs`, the open/resume path in `cox-session` and `cox-app`, and the TUI's ownership of `Session`; note file:line for every claim.
+2. Write `docs/design/serve.md`: answer steps 1–8 with code references, list alternatives, trust boundaries, failure modes and out-of-scope items; cite primary sources for other tools (checked 2026-10-17).
+3. End the doc with proposed implementation cards (title, files, size, Check); do not add them to `plan.md` — they wait for the creator's §6 amendment.
+4. Verify: `test -s docs/design/serve.md`, and any docs link test that covers `docs/design/`.
+
+Done: `docs/design/serve.md` answers steps 1–8 with `path:line` references and ends with nine proposed implementation cards (S1–S9). Decisions: the attach protocol is the app-server wire plus three additive calls (`attach`, `end`, `inbox`), with no second enum in cox-protocol; serve carries patches only and the TUI stays an in-process `Event` consumer (a TUI attach is a later design); `cox serve` supervises one re-executed worker process per session, each the existing `cox_app::server::serve` loop over pipes, with the 250 ms → 30 s backoff, give-up after 5 failures and reset after 30 s; the socket is `COX_HOME/run/serve.sock` (dir 0700, socket 0600, peer uid check, singleton lock), and remote clients reach it only through `ssh … cox attach --stdio`; the session lock lives in the worker; reattach answers from the live controller's snapshot and writes nothing, and a restart replays the rollout. Findings: `docs/app-server.md:20-21` and `:118-120` are false today (the runtime drop at `crates/cox/src/main.rs:172-176` cancels the turn); `app-server` can build two cores for one session (`open` with `resume` of an id it already holds) and closes rather than ends its sessions on EOF. The proposed cards are not in `plan.md`: they await the creator's approval in a new §6 amendment, after which T66.13 and T66.14 get their files and steps.
+Check: `test -s docs/design/serve.md` passed. No test covers `docs/design/` (`crates/cox/tests/docs.rs` reads only top-level `docs/*.md`), so no cargo run was needed.
+
 #### T61.1 Build-time baseline
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
