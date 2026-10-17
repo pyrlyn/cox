@@ -6,7 +6,7 @@
 //! allowlist, classification, and that a timeout or cancel kills the whole
 //! process group, not just the shell.
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};

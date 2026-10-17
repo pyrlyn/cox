@@ -9,7 +9,7 @@
 
 #![cfg(target_os = "macos")]
 
-mod common;
+use crate::common;
 
 use std::path::Path;
 
