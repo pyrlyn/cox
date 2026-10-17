@@ -257,7 +257,7 @@ def test_a_price_row_no_section_lists_is_dropped_and_reported(isolated_files, ca
 
 
 def test_dropping_an_orphan_row_is_stable_on_a_rerun(isolated_files):
-    prices, default = isolated_files
+    # The fixture is needed for its isolated copies, not its paths.
     models.run(fetch=fetching())
     assert models.run(check=True, fetch=fetching()) is False
 
