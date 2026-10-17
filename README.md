@@ -11,7 +11,7 @@
 
 **cox** is named for the coxswain: it steers the work while models, tools, and extensions row. It is being built as one reliable, testable agent core with several ways to use it: an interactive terminal UI, headless automation, editor integration through ACP, and MCP tools for other agents.
 
-[Getting started](docs/getting-started.md) · [Architecture](docs/architecture.md) · [Configuration](docs/config.md) · [Screens](docs/screens.md)
+[Getting started](docs/getting-started.md) · [Architecture](docs/architecture.md) · [Configuration](docs/config.md) · [Run targets](docs/targets.md) · [Screens](docs/screens.md)
 
 ## 60-second start
 
@@ -31,6 +31,10 @@ serves Zed and JetBrains. Costs land in `cox stats`; see
 [`docs/tools.md`](docs/tools.md) for the tool catalogue and
 [`docs/observability.md`](docs/observability.md) to send traces to Jaeger,
 Grafana, SigNoz or any OTLP backend.
+
+`cox --on <target>` and `cox run --on <target>` run a session on another
+machine or in a container, over ssh, Docker, Lima or Colima; see
+[`docs/targets.md`](docs/targets.md).
 
 ## Status
 

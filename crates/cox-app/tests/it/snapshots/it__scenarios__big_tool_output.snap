@@ -1,0 +1,17 @@
+---
+source: crates/cox-app/tests/it/scenarios.rs
+expression: "lines.join(\"\\n\")"
+---
+{"op":"upsert","block":{"id":"turn:#1","turn":1,"kind":{"type":"turn_meta","model":"claude-sonnet-5","tier":"code","usage":null,"stop":null}},"after":null}
+{"op":"upsert","block":{"id":"item:#2","turn":1,"kind":{"type":"user","text":"big_tool_output","attachments":[]}},"after":"turn:#1"}
+{"op":"upsert","block":{"id":"item:#3","turn":1,"kind":{"type":"assistant","text":"","doc":{"blocks":[]}}},"after":"item:#2"}
+{"op":"doc_tail","id":"item:#3","from":0,"blocks":[{"type":"text","kind":"paragraph","lines":[{"spans":[{"text":"listing"}]}]}]}
+{"op":"upsert","block":{"id":"turn:#1","turn":1,"kind":{"type":"turn_meta","model":"claude-sonnet-5","tier":"code","usage":{"input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"estimated":true,"cost_usd":0.0,"latency_ms":0},"stop":null}},"after":null}
+{"op":"upsert","block":{"id":"item:#3","turn":1,"kind":{"type":"assistant","text":"listing","doc":{"blocks":[{"type":"text","kind":"paragraph","lines":[{"spans":[{"text":"listing"}]}]}]}}},"after":"item:#2"}
+{"op":"upsert","block":{"id":"call:#4","turn":1,"kind":{"type":"tool","tool":"echo","summary":"echo `line 01`","icon":"tool","risk":"read_only","state":"running","tail":"","archive":null,"diff":null,"duration_ms":0}},"after":"item:#3"}
+{"op":"upsert","block":{"id":"call:#4","turn":1,"kind":{"type":"tool","tool":"echo","summary":"echo `line 01`","icon":"tool","risk":"read_only","state":"done","tail":"line 01\nline 02\n[… 1 KiB archived; expand ##5 lines 3–18]\nline 19\nline 20","archive":{"id":"#5","bytes":159},"diff":null,"duration_ms":0}},"after":"item:#3"}
+{"op":"upsert","block":{"id":"item:#6","turn":1,"kind":{"type":"assistant","text":"","doc":{"blocks":[]}}},"after":"call:#4"}
+{"op":"doc_tail","id":"item:#6","from":0,"blocks":[{"type":"text","kind":"paragraph","lines":[{"spans":[{"text":"done"}]}]}]}
+{"op":"upsert","block":{"id":"turn:#1","turn":1,"kind":{"type":"turn_meta","model":"claude-sonnet-5","tier":"code","usage":{"input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"estimated":true,"cost_usd":0.0,"latency_ms":0},"stop":null}},"after":null}
+{"op":"upsert","block":{"id":"item:#6","turn":1,"kind":{"type":"assistant","text":"done","doc":{"blocks":[{"type":"text","kind":"paragraph","lines":[{"spans":[{"text":"done"}]}]}]}}},"after":"call:#4"}
+{"op":"upsert","block":{"id":"turn:#1","turn":1,"kind":{"type":"turn_meta","model":"claude-sonnet-5","tier":"code","usage":{"input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"estimated":true,"cost_usd":0.0,"latency_ms":0},"stop":{"type":"end_turn"}}},"after":null}

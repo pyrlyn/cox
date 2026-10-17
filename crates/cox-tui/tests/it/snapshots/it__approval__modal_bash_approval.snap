@@ -1,0 +1,19 @@
+---
+source: crates/cox-tui/tests/it/approval.rs
+expression: "format!(\"{asked}\\n---\\n{editing}\")"
+---
+
+
+ approve bash git push --force?
+ rule Bash(git push:*) asks
+ [y]es  [s]ession  [n]o  [e]dit
+> Enter choose · Esc close · Up previous · Down next
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [default]
+---
+
+
+ approve bash git push --force?
+ rule Bash(git push:*) asks
+ edit> git push -n▏   Enter runs · Esc cancels
+> Enter choose · Esc close · Up previous · Down next
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [default]

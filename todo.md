@@ -14,7 +14,6 @@
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
 - T33.45. Design the plugin API: shared, terminal-only and desktop-only
 - T33.45.6. App core: notifications, links and images
-- T33.45.10. Docs: Russian and Ukrainian translations
 - T33.47. Plugin canvas: a desktop pane of plugin-drawn pages
 - T33.47.8. The pane, the shortcut and the composer chip
 - T35.10. Optional: live check against a real Cursor account (needs the creator's key)
@@ -73,16 +72,14 @@
 - T61.2. Fast profile for the XCFramework outside a release
 - T61.3. Bindings generator on the host dev profile, skipped when the library did not change
 - T61.4. CI: cache the XCFramework and SwiftPM
-- T61.5.1. One integration-test binary for `cox-core`
-- T61.5.2. One integration-test binary for `cox`
 - T61.5.3. One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
 - T61.6. CI: one feature set per target
 - T61.7. sccache for local builds and the in-repository CI jobs
 - T61.8. Optimized build scripts and proc macros in dev
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
-- T63.2. CI: re-run only the Swift packages a change can affect
 - T66.3. `agent` collect: a status and a capped preview by task id
+- T63.2. CI: re-run only the Swift packages a change can affect
 - T66.4. Store: the `refine_events` table
 - T66.5. Harness entries on disk: apply, backup, rollback, fingerprint
 - T66.6. Core: a refine proposal from one cheap call, with the base prompt fixed
@@ -95,10 +92,14 @@
 - T66.14. Archive old sessions without deleting them
 - T66.16. `docs/app-server.md` says what a dropped connection does
 - T66.17. App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
+- T66.16. `docs/app-server.md` says what a dropped connection does
 - T66.18. Worker mode in `cox-app`'s server: one session, ended on EOF
-- T66.19. New crate `cox-serve`: the restart policy
 - T66.20. `cox-serve`: run directory, singleton lock, socket and peer uid
 - T66.21. `cox-serve`: spawn workers, watch them, restart them, shut down
+- T66.22. `cox-serve`: the router and the `attach --stdio` bridge
+- T66.23. `cox serve` and `cox attach --stdio`
+- T66.24. End-to-end: kill the client, reattach, and the rollout grows only by the turn
+- T66.20. `cox-serve`: run directory, singleton lock, socket and peer uid
 - T67.3. Five more hook events
 - T67.4. `/goal`: a judged stop condition
 - T67.5. `/goal` in the TUI and stream-json
@@ -110,12 +111,6 @@
 - T67.11. `cox run -p --json-schema`
 - T67.12. Output styles
 - T67.13. Design: a GitHub Action and scheduled runs
-- T68.2. `[targets.<name>]` in config
-- T68.3. `hello` handshake and readable failures
-- T68.4. Desktop: connect to any target (Rust and FFI)
 - T68.5. Desktop: Connect to Target sheet (Swift)
-- T68.6. `--on <target>` for the TUI and `cox run`
-- T68.7. `agent` presets on a target
 - T68.8. Windows targets
-- T68.9. End-to-end tests with fake launchers
 - T68.10. Docs: targets

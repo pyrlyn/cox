@@ -738,7 +738,9 @@ pub struct Advice {
     /// In `[0, 1]`; absent when the model gives none (a yes/no, J11).
     #[serde(default)]
     pub confidence: Option<f64>,
-    /// A caution note, for `approve_hint`.
+    /// A caution note for `approve_hint`, or for `risk` the reasons behind
+    /// a raise (such as a model's probabilities). The core keeps it, cleaned
+    /// and clipped, only when it applies the advice of one of those points.
     #[serde(default)]
     pub note: Option<String>,
 }
