@@ -1,3 +1,26 @@
+#### T66.7 Session: apply a refine, record it, and render the digest after the cached prefix
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T66.5, T66.6 · Size: ~180 · Files: `crates/cox-session/src/refine.rs` (new), `crates/cox-session/src/lib.rs`, `crates/cox-core/src/session.rs`
+Goal: the session layer, not the core, writes the files and the store row. Prompt notes reach the model as a tail block in the volatile slot, so a refine never moves the cache breakpoint.
+- `Refiner::refine(text, scope)`: builds a one-line-per-entry digest of the scope's entries, calls `Session::propose_refine`, converts the edits and runs `harness::Scope::apply`, then `refine_insert` (`applied`, evidence from the model, `edits` with the before/after hashes, fingerprint after). A proposal the core rejects, or one the disk contradicts (create over an existing entry, update of a missing one), is a `rejected` row with a cox-written reason and no file change. An empty proposal, or one whose edits rewrite entries to the bytes they already have, returns `Unchanged` before any backup or row. If the row cannot be written the edits are rolled back.
+- `Refiner::undo(event_id)`: refuses an unknown event, one that was not `applied`, one already undone, and one whose entries changed after it (current hash differs from the recorded `after_sha`); otherwise `harness::Scope::rollback` and a `rolled_back` row with `rollback_of` and the reversed edits.
+- `prompt_notes` / `Refiner::refresh_notes`: the prompt-note entries of the global scope, then the session's own (`COX_HOME/sessions/<id>/harness`), rendered as one `<harness_notes>` block (16 KiB cap; the closing tag is stripped from file content) and installed with the new `Session::set_harness_notes`, which appends it to `system[3]`, the volatile block after the last cache breakpoint. It is re-rendered only when the scope fingerprints change. `open` installs the notes of earlier refines. Skills and subagents are read once at open, so they take effect in the next session.
+- New dependency `ulid` in `cox-session` (already a workspace dependency): event ids are lowercase ULIDs, which `harness::apply` accepts.
+Check: `refine_writes_a_local_note_records_it_and_keeps_the_cached_prefix` (`system[0..=2]` equal before and after, `system[3]` carries the note and is not cached), `refining_twice_against_the_same_store_changes_no_bytes`, `undo_restores_the_files_and_writes_a_rolled_back_row`, `a_local_note_reaches_its_own_session_and_not_another`, `a_global_note_reaches_every_session`, `a_proposal_aimed_at_the_base_prompt_is_recorded_as_rejected_and_writes_nothing`, `a_disk_conflict_is_a_rejection_not_an_error`; core: `harness_notes_reach_system_3_and_leave_the_prefix_byte_identical`.
+```text
+$ mise exec -- cargo nextest run -p cox-session refine
+     Summary [   0.107s] 7 tests run: 7 passed, 81 skipped
+$ mise exec -- cargo nextest run -p cox-session -p cox-core
+     Summary [   2.228s] 526 tests run: 526 passed, 1 skipped
+$ mise exec -- cargo nextest run -p cox --test deps
+     Summary [   1.500s] 11 tests run: 11 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-session -p cox-core --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Not run: the workspace-wide clippy (only `cox-session` and `cox-core` changed).
+Out of scope: the commands, which are T66.8.
+
 #### T66.5 Harness entries on disk: apply, backup, rollback, fingerprint
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17

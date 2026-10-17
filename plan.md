@@ -135,7 +135,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | todo | P2 | 3 | 0% |  |
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | todo | P2 | 1 | 0% |  |
-| T66.7 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 
 ## Reference
 
@@ -2354,40 +2353,6 @@ Done when a scripted-provider test shows:
 - `expand` returns the full body.
 
 Out of scope: a separate `task_output` tool; peer messages between children.
-
-#### T66.7 Session: apply a refine, record it, and render the digest after the cached prefix
-
-Model: sonnet · Status: open · Depends: T66.5, T66.6 · Size: ~180 · Priority: P2 · Complexity: 3
-
-Goal: the session layer, not the core, writes the files and the store row. Prompt notes reach the model as a tail block in the volatile slot, so a refine never moves the cache breakpoint.
-
-Execution plan:
-1. `cox-core`: `Session::set_harness_notes` appends the rendered notes to `system[3]` (the volatile block already used by the memory index), shared with children.
-2. `cox-session/src/refine.rs`: `Refiner::refine` (digest of the scope's entries, `propose_refine`, `Scope::apply`, `refine_insert`; a refused proposal is a `rejected` row; no-op edits return `Unchanged` before any backup), `Refiner::undo` (refuses when a touched entry changed since; `rollback`, then a `rolled_back` row), `prompt_notes`/`refresh_notes` (rebuilt only when the scope fingerprints change); `open` installs the notes of earlier refines.
-3. Verify: `cargo nextest run -p cox-session refine`, `-p cox-core`, clippy, fmt, `-p cox --test deps`.
-
-Files:
-- `crates/cox-session/src/refine.rs` (new): proposal → `harness::apply` → `refine_insert`, and undo through `harness::rollback`
-- `crates/cox-core/src/context.rs`: the digest goes into `system[3]`, after the last cache breakpoint (`context.rs:194-214`)
-- the cox-session refine test file
-
-Steps:
-1. `refine(text, scope)` and `undo(event id)` record each outcome in `refine_events`. A proposal whose fingerprint equals the stored one writes no new backup and returns `unchanged`.
-2. The digest is built from the stored entries and rebuilt only when the fingerprint changes. Changes to skills and subagents take effect in the next session, because the skills index sits in the cached `system[2]`.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-session refine
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when tests show that:
-- refining twice against the same store leaves the cached prefix bytes and the digest bytes unchanged;
-- an undo restores the files and writes a `rolled_back` row;
-- a local note shows up in its own session's `system[3]` and not in another session's.
-
-Out of scope: the commands, which are T66.8.
 
 #### T66.8 `/refine` and `cox refine`
 

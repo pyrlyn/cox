@@ -85,7 +85,6 @@
 - T61.11. No feature-unification rebuilds between `just test` and `just check-all`
 - T63.2. CI: re-run only the Swift packages a change can affect
 - T66.3. `agent` collect: a status and a capped preview by task id
-- T66.7. Session: apply a refine, record it, and render the digest after the cached prefix
 - T66.8. `/refine` and `cox refine`
 - T66.9. A pure autonomous driver beside the USD cap
 - T66.10. `[autonomous]` config, which a project cannot set
