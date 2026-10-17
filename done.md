@@ -207,6 +207,24 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox-app server
+#### T66.19 New crate `cox-serve`: the restart policy
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~120 · Priority: P2 · Complexity: 2
+
+Goal: a pure policy decides what the supervisor does when a worker exits. `docs/design/serve.md` S4 and D3. `cox-serve` is its own crate because it will own a trust boundary (who may connect) and process supervision, which must stay out of `cox-app` (linked into the macOS app through `cox-ffi`) and out of `crates/cox` (clap and dispatch only).
+
+Files:
+- `crates/cox-serve/Cargo.toml`, `crates/cox-serve/src/lib.rs`, `crates/cox-serve/src/restart.rs`
+- Docs: the workspace `Cargo.toml` members line, an `AGENTS.md` layout row, a `docs/design/crates.md` row
+
+Steps:
+1. `restart.rs` is pure: `Policy::on_exit(uptime, clean) -> Restart(Duration) | GiveUp | Done`.
+2. Delays start at 250 ms and double to a 30 s cap; the supervisor gives up after 5 consecutive failures; 30 s of life resets the count; a clean exit is never restarted.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve restart
+mise exec -- cargo nextest run -p cox --test deps
 mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo fmt --check
 ```
@@ -406,6 +424,18 @@ Done when these tests pass: `close_then_attach_streams_from_the_snapshot`, `open
 
 Out of scope: the supervisor, the socket and worker mode (T66.18 and later cards).
 
+Done when these tests pass: `delays_double_from_250ms_to_a_30s_cap`, `gives_up_after_five_consecutive_failures`, `thirty_seconds_of_life_resets_the_count`, `a_clean_exit_is_never_restarted`.
+
+Execution plan: add `crates/cox-serve` (std only, `publish = false`, workspace lints); `restart.rs` holds named consts, `Policy` and `Decision`; the fifth consecutive failure gives up, so the 30 s cap is reachable only through the pure `delay` function and is tested there. Register the AGENTS.md row, the crates.md row and a `deps.rs` rule that `cox-serve` has no workspace dependency (the members line is the `crates/*` glob, so it needed no edit).
+
+Out of scope: spawning processes and the socket (T66.20, T66.21).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve restart: 4 passed (delays_double_from_250ms_to_a_30s_cap, gives_up_after_five_consecutive_failures, thirty_seconds_of_life_resets_the_count, a_clean_exit_is_never_restarted)
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy --workspace --all-targets -- -D warnings: clean
+cargo fmt --check: clean
 ```
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`

@@ -2363,6 +2363,28 @@ Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size:
 
 Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
 
+#### T66.16 `docs/app-server.md` says what a dropped connection does
+
+Model: haiku · Status: open · Depends: T66.12 · Size: ~10 (docs only) · Priority: P2 · Complexity: 1
+
+Goal: the doc stops promising that a running turn survives a dropped client. `docs/design/serve.md` S1 and D8: today the turn stops, the session can be resumed, and resident sessions are planned.
+
+Files:
+- `docs/app-server.md`
+
+Steps:
+1. Replace "A running turn keeps running on the host" and "the session itself keeps running on the host" with today's behaviour.
+
+Check:
+```bash
+! grep -n "keeps running on the host" docs/app-server.md
+mise exec -- cargo nextest run -p cox --test docs
+```
+
+Done when the Check passes.
+
+Out of scope: any code.
+
 #### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
 
 Model: sonnet · Status: open · Depends: T66.16 · Size: ~140 · Priority: P2 · Complexity: 3
@@ -2434,32 +2456,6 @@ mise exec -- cargo fmt --check
 Done when `eof_ends_every_session` and `a_worker_refuses_a_second_session` pass.
 
 Out of scope: the `cox serve --worker` flag and the supervisor that spawns workers (later cards).
-
-#### T66.19 New crate `cox-serve`: the restart policy
-
-Model: sonnet · Status: open · Depends: T66.12 · Size: ~120 · Priority: P2 · Complexity: 2
-
-Goal: a pure policy decides what the supervisor does when a worker exits. `docs/design/serve.md` S4 and D3. `cox-serve` is its own crate because it will own a trust boundary (who may connect) and process supervision, which must stay out of `cox-app` (linked into the macOS app through `cox-ffi`) and out of `crates/cox` (clap and dispatch only).
-
-Files:
-- `crates/cox-serve/Cargo.toml`, `crates/cox-serve/src/lib.rs`, `crates/cox-serve/src/restart.rs`
-- Docs: the workspace `Cargo.toml` members line, an `AGENTS.md` layout row, a `docs/design/crates.md` row
-
-Steps:
-1. `restart.rs` is pure: `Policy::on_exit(uptime, clean) -> Restart(Duration) | GiveUp | Done`.
-2. Delays start at 250 ms and double to a 30 s cap; the supervisor gives up after 5 consecutive failures; 30 s of life resets the count; a clean exit is never restarted.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-serve restart
-mise exec -- cargo nextest run -p cox --test deps
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when these tests pass: `delays_double_from_250ms_to_a_30s_cap`, `gives_up_after_five_consecutive_failures`, `thirty_seconds_of_life_resets_the_count`, `a_clean_exit_is_never_restarted`.
-
-Out of scope: spawning processes and the socket (T66.20, T66.21).
 
 #### T66.20 `cox-serve`: run directory, singleton lock, socket and peer uid
 
