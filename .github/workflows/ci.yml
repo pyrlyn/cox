@@ -97,7 +97,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: ./.github/actions/sccache
+      - uses: pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
         with:
           access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -183,7 +183,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: ./.github/actions/sccache
+      - uses: pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
         with:
           access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -233,7 +233,7 @@ jobs:
       - name: pin Go and TinyGo globally
         run: mise use -g go@1.27.2 tinygo@0.43.0
 
-      - uses: ./.github/actions/sccache
+      - uses: pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
         with:
           access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
