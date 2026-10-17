@@ -28,6 +28,8 @@ mod record;
 mod resume;
 mod run;
 mod self_update;
+#[cfg(feature = "app-server")]
+mod serve_cmd;
 mod session;
 mod sessions;
 mod stats;
@@ -176,6 +178,16 @@ fn main() -> anyhow::Result<()> {
                 cox_app::server::ServeMode::Client,
             ))?;
             Ok(())
+        }
+        #[cfg(feature = "app-server")]
+        Some(Command::Serve(args)) => {
+            let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
+            serve_cmd::serve(&home, args.worker)
+        }
+        #[cfg(feature = "app-server")]
+        Some(Command::Attach(_)) => {
+            let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
+            serve_cmd::attach(&home)
         }
         Some(Command::Init(args)) => {
             let code = session::run_init(&cli, &cwd, args.force)?;

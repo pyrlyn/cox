@@ -127,8 +127,7 @@ A session opened from a host streams through that host's connection. When the
 connection drops, the session's stream ends and its running turn stops. The
 session and its rollout stay on the host, and `open` with `resume` brings it
 back (see *What crosses the wire*). Resident sessions, which would keep running
-with no client attached, are planned in `docs/design/serve.md` (T66.12). They
-are not built yet.
+with no client attached, are `cox serve`'s (see *Resident sessions*).
 
 A remote session in the app does not yet have:
 
@@ -140,3 +139,43 @@ A remote session in the app does not yet have:
 
 The protocol has no message for these yet, or the app asks for them
 synchronously.
+
+## Resident sessions
+
+`cox app-server --stdio` ends its sessions when the connection closes. To keep
+a session running with no client attached, run a supervisor on the host:
+
+```sh
+cox serve
+```
+
+It runs in the foreground and does not daemonize; keep it alive with your
+terminal, `nohup`, launchd or systemd. It listens on `COX_HOME/run/serve.sock`,
+a socket only your user can open, and refuses a second `cox serve` on the same
+`COX_HOME`. Each session it opens runs in a worker process of its own (the
+hidden `cox serve --worker`, which the supervisor starts and nobody runs by
+hand), so a crash takes down one session, which the supervisor restarts idle.
+At most 16 sessions are resident at once.
+
+A session is resident until a client sends `end`: closing the connection only
+stops its stream, and a client that connects later with `open` and `resume`
+(or `attach`) gets the session as it is, mid-turn included. One client is
+attached to a session at a time. Stopping `cox serve` ends every session.
+
+A session you start in the TUI (`cox`) is never resident: it belongs to that
+terminal and ends with it.
+
+To reach resident sessions from another machine, run the bridge over ssh:
+
+```sh
+ssh devbox cox attach --stdio
+```
+
+`cox attach --stdio` copies stdin and stdout to the supervisor's socket, so
+ssh decides who gets in and cox opens no port. It never starts a supervisor:
+with no `cox serve` running it exits with an error that names the socket.
+Both commands are behind the `app-server` cargo feature and are not supported
+on Windows yet.
+
+The desktop app's ssh command stays `cox app-server --stdio`; choosing
+`cox attach --stdio` for a host that runs `cox serve` is a later app change.

@@ -39,6 +39,51 @@ cargo clippy -p cox-serve --all-targets -- -D warnings: clean
 cargo fmt --check -p cox-serve: clean
 ```
 
+#### T66.23 `cox serve` and `cox attach --stdio`
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the supervisor and the bridge are commands a person can run. `docs/design/serve.md` S8, D3, D4 item 7 and D8. `crates/cox` stays clap and dispatch only.
+
+Files:
+- `crates/cox/src/cli.rs`, `crates/cox/src/main.rs`
+- `crates/cox/Cargo.toml` (`cox-serve` as an optional workspace path dependency behind the existing `app-server` feature; the `deps.rs` rule T66.19 adds lists `crates/cox` as an allowed dependent)
+- `docs/app-server.md` (a "Resident sessions" section that names both commands, which `docs_name_every_subcommand` requires)
+
+Steps:
+1. `cox serve` runs the supervisor in the foreground; it does not daemonize. The hidden `--worker` flag, not shown in `--help`, runs `cox_app::server::serve` in worker mode over stdin and stdout, and is the argv T66.21's supervisor spawns through `current_exe()`.
+2. `cox attach --stdio` runs T66.22's bridge. It never starts a supervisor: with no `cox serve` running it fails, naming the socket path.
+3. On Windows both commands refuse with "not supported yet".
+4. The docs section states what is resident (a session lives in its worker until `end`), that a TUI session is never resident, and that the desktop app's ssh command stays `cox app-server --stdio` (D8).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test docs
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- serve --help
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- attach --stdio
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+The last `attach` run exits non-zero and names `COX_HOME/run/serve.sock`; `COX_HOME` is a scratch tree, never `~/.cox`.
+
+Done when `docs_name_every_subcommand` passes, `serve --help` does not list `--worker`, and `cox attach --stdio` with no supervisor fails naming the socket path.
+
+Out of scope: the end-to-end test (T66.24), the desktop app choosing `cox attach --stdio` for a host that runs `cox serve` (a P52 desktop card), and heartbeat (T66.13).
+
+Where the `Workspace` impl lives: `cox-serve` may depend on `cox-store` alone, so the router takes `projects`, `sessions` and `search` through `cox_serve::Workspace`. `cox_app::server::workspace_reply` (the wire is `cox-app`'s) decodes the call and encodes the `Reply`, and `cox_app::server::workspace_app` builds the supervisor's `App`; `crates/cox/src/serve_cmd.rs` holds the three-line `impl Workspace` over them, the only place the two crates meet. `deps.rs` gained a rule that only `crates/cox` depends on `cox-serve`. The supervisor reads the login shell environment once; each worker is `current_exe() serve --worker --home <home>`.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox --test serve_cmd --test docs --test deps: 19 passed (serve_help_hides_the_worker_flag, attach_needs_stdio, attach_without_a_supervisor_fails_naming_the_socket, docs_name_every_subcommand)
+cargo nextest run -p cox --bin cox / -p cox-app: the_workspace_impl_answers_workspace_calls_and_refuses_the_rest, workspace_reply_answers_the_three_workspace_calls_and_refuses_the_rest passed
+COX_HOME=/tmp/cx23 cox serve --help: lists no --worker
+COX_HOME=<long scratch path> cox attach --stdio: exit 1, "Error: cox serve is not reachable at <COX_HOME>/run/serve.sock: ..."
+COX_HOME=/tmp/cx23 cox serve & ; a projects request through cox attach --stdio answered {"kind":"projects","value":[]}; a second cox serve refused naming the holder; SIGTERM stopped the supervisor
+cargo clippy -p cox -p cox-app -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+
 #### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4

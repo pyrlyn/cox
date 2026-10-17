@@ -2582,45 +2582,6 @@ Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size:
 
 Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
 
-#### T66.23 `cox serve` and `cox attach --stdio`
-
-Model: Claude Code / sonnet · Status: in progress · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
-
-Goal: the supervisor and the bridge are commands a person can run. `docs/design/serve.md` S8, D3, D4 item 7 and D8. `crates/cox` stays clap and dispatch only.
-
-Files:
-- `crates/cox/src/cli.rs`, `crates/cox/src/main.rs`
-- `crates/cox/Cargo.toml` (`cox-serve` as an optional workspace path dependency behind the existing `app-server` feature; the `deps.rs` rule T66.19 adds lists `crates/cox` as an allowed dependent)
-- `docs/app-server.md` (a "Resident sessions" section that names both commands, which `docs_name_every_subcommand` requires)
-
-Steps:
-1. `cox serve` runs the supervisor in the foreground; it does not daemonize. The hidden `--worker` flag, not shown in `--help`, runs `cox_app::server::serve` in worker mode over stdin and stdout, and is the argv T66.21's supervisor spawns through `current_exe()`.
-2. `cox attach --stdio` runs T66.22's bridge. It never starts a supervisor: with no `cox serve` running it fails, naming the socket path.
-3. On Windows both commands refuse with "not supported yet".
-4. The docs section states what is resident (a session lives in its worker until `end`), that a TUI session is never resident, and that the desktop app's ssh command stays `cox app-server --stdio` (D8).
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox --test docs
-COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- serve --help
-COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- attach --stdio
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-The last `attach` run exits non-zero and names `COX_HOME/run/serve.sock`; `COX_HOME` is a scratch tree, never `~/.cox`.
-
-Done when `docs_name_every_subcommand` passes, `serve --help` does not list `--worker`, and `cox attach --stdio` with no supervisor fails naming the socket path.
-
-Execution plan:
-1. The router takes `projects`, `sessions` and `search` through `cox_serve::Workspace`, and `cox-serve` may not link `cox-app`. The impl is a thin pair: `cox_app::server::workspace_reply` (cox-app owns the wire, so it decodes the call and encodes the `Reply`; `Server::answer` reuses it for the same three calls) and a three-line `impl Workspace` over `Arc<App>` in `crates/cox/src/serve_cmd.rs`, the only place both crates meet.
-2. `cli.rs`: `Serve(ServeArgs)` with a hidden `--worker` and `Attach(AttachArgs)` with a required `--stdio`, both behind `app-server`. `main.rs` dispatches to `serve_cmd`, which holds the Windows refusal.
-3. `serve_cmd.rs`: `serve` reads the login environment once, builds `App`, binds the socket, and runs `cox_serve::router::serve` until `terminated()`; workers are `current_exe() --home <home> serve --worker`. `--worker` runs `serve_stdio(Worker)`. `attach` runs `cox_serve::attach::stdio`.
-4. `docs/app-server.md` "Resident sessions"; a `deps.rs` rule that only `crates/cox` depends on `cox-serve`.
-5. Verify: tests for `workspace_reply`, `tests/serve_cmd.rs` (help hides `--worker`, `attach --stdio` without a supervisor fails naming the socket), `--test docs --test deps`, clippy, fmt.
-
-Out of scope: the end-to-end test (T66.24), the desktop app choosing `cox attach --stdio` for a host that runs `cox serve` (a P52 desktop card), and heartbeat (T66.13).
-
 #### T66.24 End-to-end: kill the client, reattach, and the rollout grows only by the turn
 
 Model: sonnet · Status: open · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3

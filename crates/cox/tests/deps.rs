@@ -295,6 +295,16 @@ fn no_crate_below_cox_depends_on_core() {
         deps["cox-serve"]
     );
 
+    // The supervisor's socket and process plumbing is linked by the CLI alone,
+    // behind `app-server` (T66.23): the macOS app's FFI and the app core must
+    // not reach it.
+    for (crate_name, crate_deps) in &all_deps() {
+        assert!(
+            crate_name == "cox" || !crate_deps.contains("cox-serve"),
+            "{crate_name} must not depend on cox-serve; only crates/cox does"
+        );
+    }
+
     // cox-sandbox (T32.3) is a trust guard that depends only on
     // cox-protocol among workspace crates (SandboxPolicy, SandboxMode,
     // LinuxBackend, ToolError).
