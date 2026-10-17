@@ -1,3 +1,44 @@
+#### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
+
+Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Plan: `deps.rs` lets `cox-serve` depend on `cox-store` alone, so the supervisor's `App` is injected: `router::Workspace` answers `projects`/`sessions`/`search` as JSON, and T66.23 implements it over `cox_app`. `router.rs` owns one run loop (accept → `admit_peer` before the first line, the supervisor's events, `open` through `Supervisor::open`) and one task per connection that decodes each line as the app-server does (id 0 for a refused line), rewrites the request id per worker, and waits for its answer, so calls stay sequential per client. `worker.rs` writes stdin through a channel and, once the `open` reply names the session, hands every later stdout line to the router: responses go back to the caller under its own id, notifications to the session's one attached client. `open` is `Supervisor::open` (which already returns a live resume's id) then `attach`, so a live session never gets a second core; a successful `attach` takes the stream over and sends the previous client `ended`. `inbox` asks every worker and joins the lists. A client that disconnects gets `close` sent for its sessions (pump stops, controller keeps folding). `attach.rs`: connect to `COX_HOME/run/serve.sock`, check the server's uid with the same `admit_peer`, then `copy_bidirectional` with stdio. Tests run a fake worker through `/bin/sh`, as `supervisor`'s do, against a real socket in a tempdir.
+
+Goal: a client that connects to the supervisor's socket reaches the right worker, and exactly one client is attached to a session at a time. `docs/design/serve.md` S7, D1, D4 (the bridge), D6 and the trust boundaries. T66.18 supplies worker mode and T66.17's `attach`; T66.20 supplies the socket and `admit`; T66.21 supplies the workers.
+
+Files:
+- `crates/cox-serve/src/router.rs`
+- `crates/cox-serve/src/attach.rs`
+- `crates/cox-serve/src/lib.rs`
+
+Steps:
+1. The accept loop runs `admit(peer_uid, own_uid)` on every connection before its first line is read; a mismatch is dropped and logged.
+2. Workspace calls (`projects`, `sessions`, `search`) are answered by the supervisor's own `App`, which opens SQLite and nothing else; the supervisor never owns a `Session` and never claims a session lock.
+3. A call that names a session is routed by session id to that session's worker. An `open` whose `resume` names a live worker becomes `attach`, never a second core (F1, D6).
+4. One attached client per session: a new `attach` takes the stream over and the previous client gets `ended` for that session. A detach stops only the worker's pump, never its controller, so approvals and questions wait in the worker's inbox and `inbox` returns them on the next attach.
+5. Worker notifications are forwarded to the attached client. Every line from the socket is decoded and refused like any other app-server line.
+6. `attach.rs` is the `--stdio` bridge: `tokio::io::copy_bidirectional` between stdio and the socket, so ssh's own authentication decides who reaches the socket and cox opens no inbound port.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve router
+mise exec -- cargo nextest run -p cox --test deps
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `workspace_calls_need_no_worker`, `session_calls_reach_their_worker`, `a_second_attach_ends_the_first_stream`, `open_resume_of_a_live_worker_attaches`.
+
+Out of scope: the `cox serve` and `cox attach` commands and the hidden `--worker` flag (T66.23), the end-to-end test (T66.24), a TUI that attaches (D2: a separate later design), and Windows.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve: 25 passed (router: workspace_calls_need_no_worker, session_calls_reach_their_worker, a_second_attach_ends_the_first_stream, open_resume_of_a_live_worker_attaches, decode_reads_the_routing_fields; attach: the_bridge_copies_both_ways, no_supervisor_names_the_socket; the 18 earlier tests unchanged), 5 runs in a row
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check -p cox-serve: clean
+```
+
 #### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4

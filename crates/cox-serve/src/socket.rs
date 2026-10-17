@@ -88,8 +88,8 @@ pub struct Bound {
 
 /// Takes the singleton and binds `COX_HOME/run/serve.sock`, owner-only.
 pub fn bind(home: &Path) -> Result<Bound, SocketError> {
+    let path = path(home);
     let run = home.join("run");
-    let path = run.join("serve.sock");
     // Before anything is created, so a refusal leaves no trace.
     check_len(&path)?;
     let uid = own_uid();
@@ -119,6 +119,11 @@ pub fn bind(home: &Path) -> Result<Bound, SocketError> {
         uid,
         _lock: lock,
     })
+}
+
+/// Where the supervisor of `home` (`COX_HOME`) listens.
+pub fn path(home: &Path) -> PathBuf {
+    home.join("run").join("serve.sock")
 }
 
 /// The effective uid of this process.
