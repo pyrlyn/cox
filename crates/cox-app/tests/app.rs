@@ -20,7 +20,7 @@ use cox_app::TimelinePatch;
 use cox_app::app::{App, AppError, Host};
 use cox_app::diffmodel::DiffLineKind;
 use cox_app::live::LiveSession;
-use cox_app::server::{ServerHost, serve};
+use cox_app::server::{ServeMode, ServerHost, serve};
 use cox_app::wire::{self, Call, Line, Outcome, Reply, Request, ServerEvent};
 use cox_app::{
     Block, BlockId, BlockKind, CheckId, CheckStatus, FileChange, InboxItem, Intent, Layer, Need,
@@ -1293,7 +1293,10 @@ async fn app_server_serves_a_scripted_turn() {
         drop(to_server);
         while lines.next_line().await.ok().flatten().is_some() {}
     };
-    let ((), served) = tokio::join!(client, serve(app, events, server_in, server_out));
+    let ((), served) = tokio::join!(
+        client,
+        serve(app, ServeMode::Client, events, server_in, server_out)
+    );
     served.expect("served");
 }
 
@@ -1314,7 +1317,10 @@ async fn app_server_never_answers_a_secret() {
         drop(to_server);
         while lines.next_line().await.ok().flatten().is_some() {}
     };
-    let ((), served) = tokio::join!(client, serve(app, events, server_in, server_out));
+    let ((), served) = tokio::join!(
+        client,
+        serve(app, ServeMode::Client, events, server_in, server_out)
+    );
     served.expect("served");
 }
 
@@ -1352,7 +1358,13 @@ async fn app_server_stalled_client_does_not_delay_the_turn() {
     };
     let (waiting, _served) = tokio::join!(
         client,
-        serve(Arc::clone(&app), events, server_in, server_out)
+        serve(
+            Arc::clone(&app),
+            ServeMode::Client,
+            events,
+            server_in,
+            server_out
+        )
     );
     assert!(
         waiting.is_ok(),
@@ -1505,7 +1517,13 @@ async fn close_then_attach_streams_from_the_snapshot() {
     };
     let ((), served) = tokio::join!(
         client,
-        serve(Arc::clone(&app), events, server_in, server_out)
+        serve(
+            Arc::clone(&app),
+            ServeMode::Client,
+            events,
+            server_in,
+            server_out
+        )
     );
     served.expect("served");
 }
@@ -1570,7 +1588,10 @@ async fn open_of_an_open_session_attaches_instead_of_a_second_core() {
         drop(to_server);
         while lines.next_line().await.ok().flatten().is_some() {}
     };
-    let ((), served) = tokio::join!(client, serve(app, events, server_in, server_out));
+    let ((), served) = tokio::join!(
+        client,
+        serve(app, ServeMode::Client, events, server_in, server_out)
+    );
     served.expect("served");
 }
 
@@ -1606,7 +1627,10 @@ async fn end_ends_the_session() {
         drop(to_server);
         while lines.next_line().await.ok().flatten().is_some() {}
     };
-    let ((), served) = tokio::join!(client, serve(app, events, server_in, server_out));
+    let ((), served) = tokio::join!(
+        client,
+        serve(app, ServeMode::Client, events, server_in, server_out)
+    );
     served.expect("served");
 }
 
@@ -1656,7 +1680,13 @@ async fn inbox_returns_an_item_that_arrived_while_detached() {
     };
     let ((), served) = tokio::join!(
         client,
-        serve(Arc::clone(&app), events, server_in, server_out)
+        serve(
+            Arc::clone(&app),
+            ServeMode::Client,
+            events,
+            server_in,
+            server_out
+        )
     );
     served.expect("served");
 }
@@ -1707,4 +1737,120 @@ async fn a_turn_intent_is_refused_while_the_provider_is_not_ready() {
         );
     }
     assert!(texts(&session).is_empty(), "no turn started");
+}
+
+/// A background shell that records its pid and then sleeps for good.
+const DETACHED_SLEEP: &str = r#"
+[[turn]]
+text = "Starting."
+tool_calls = [{ name = "bash", input = { command = "echo $$ > shell.pid && exec sleep 300", background = true } }]
+
+[[turn]]
+text = "Done."
+"#;
+
+fn alive(pid: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[tokio::test]
+async fn eof_ends_every_session() {
+    let dir = scratch(Some(DETACHED_SLEEP));
+    std::fs::create_dir_all(dir.path().join("user/.cox")).expect("home");
+    let config = "[permissions]\nallow = [\"bash\"]\n";
+    std::fs::write(dir.path().join("user/.cox/config.toml"), config).expect("config");
+    let (app, events) = server_app(dir.path());
+    let (mut to_server, mut lines, server_in, server_out) = pipes(64 * 1024);
+    let pid_file = dir.path().join("project/shell.pid");
+    let client = async {
+        let session = open_over_wire(&mut to_server, &mut lines, dir.path()).await;
+        request(
+            &mut to_server,
+            2,
+            Call::Send {
+                session,
+                intent: send("start it"),
+            },
+        )
+        .await;
+        turn_ends(&mut lines, session).await;
+        let pid = loop {
+            if let Some(pid) = std::fs::read_to_string(&pid_file)
+                .ok()
+                .filter(|text| text.ends_with('\n'))
+            {
+                break pid.trim().to_owned();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        assert!(alive(&pid), "the detached shell is running before EOF");
+        drop(to_server);
+        while lines.next_line().await.ok().flatten().is_some() {}
+        pid
+    };
+    let (pid, served) = tokio::join!(
+        client,
+        serve(app, ServeMode::Client, events, server_in, server_out)
+    );
+    served.expect("served");
+    // Ending cancels the turn tokens, which kills the group asynchronously.
+    let mut gone = false;
+    for _ in 0..250 {
+        if !alive(&pid) {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    if !gone {
+        // Leave nothing behind when the assertion below fails.
+        let _ = std::process::Command::new("kill").arg(&pid).status();
+    }
+    assert!(gone, "EOF ended the session, so its detached shell died");
+}
+
+#[tokio::test]
+async fn a_worker_refuses_a_second_session() {
+    let dir = scratch(Some(TWO_REPLIES));
+    let (app, events) = server_app(dir.path());
+    let (mut to_server, mut lines, server_in, server_out) = pipes(64 * 1024);
+    let client = async {
+        let session = open_over_wire(&mut to_server, &mut lines, dir.path()).await;
+
+        request(&mut to_server, 2, open_call(dir.path())).await;
+        let Outcome::Err(refused) = response(&mut lines, 2).await else {
+            panic!("a second open must fail");
+        };
+        assert!(refused.contains("one session"), "{refused}");
+
+        // Resuming the held id attaches; it is the same session, not a second.
+        let resume = Call::Open {
+            cwd: dir.path().join("project"),
+            resume: Some(session),
+            theme: "base16-ocean.dark".into(),
+        };
+        request(&mut to_server, 3, resume).await;
+        let Outcome::Ok(Reply::Opened { session: again, .. }) = response(&mut lines, 3).await
+        else {
+            panic!("the held id attaches");
+        };
+        assert_eq!(again, session);
+
+        request(&mut to_server, 4, Call::Snapshot { session }).await;
+        assert!(matches!(
+            response(&mut lines, 4).await,
+            Outcome::Ok(Reply::Snapshot(_))
+        ));
+        drop(to_server);
+        while lines.next_line().await.ok().flatten().is_some() {}
+    };
+    let ((), served) = tokio::join!(
+        client,
+        serve(app, ServeMode::Worker, events, server_in, server_out)
+    );
+    served.expect("served");
 }
