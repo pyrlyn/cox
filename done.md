@@ -1,3 +1,11 @@
+#### T61.6 CI: one feature set per target
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
+Depends: T61.1 · Size: ~5 · Files: `.github/workflows/ci.yml`, `justfile`, `research.md`
+Goal: the `rust` matrix compiles the workspace once per target: `build-command`, clippy and nextest use the same features, so nextest reuses the build.
+Check: pending the first CI run of this change (job log of `rust / aarch64-apple-darwin`: no `Compiling` line for a workspace crate after the build step). Local: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 mise exec -- cargo nextest run --workspace --all-features --no-run` finished with no errors; the all-features run passed except `plain_transcript_snapshot`.
+Done: `test-command` in `ci.yml` and `just check-all` now use `--all-features`, the feature set `build-command` already used (clippy already got it from the shared workflow's `feature-args` default), so nextest no longer compiles the default feature set a second time. Local `--all-features` run: 2566 of 2567 tests passed. `plain_transcript_snapshot` (crate `cox`) fails under the default features too (context percentage 1% in the snapshot, 2% in the output); not fixed here. `actionlint` reports only the existing `if: false` on the Windows job. §4.3.9 has a T61.6 table with the before CI times (PR run 38933123898: x86_64 Linux 1294 s, aarch64 Linux 1025 s, aarch64 macOS 1482 s); the after times are pending the first CI run of this change, so the card's "before and after" condition is not met until then.
+
 #### T61.1 Build-time baseline
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
