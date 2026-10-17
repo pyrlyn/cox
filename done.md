@@ -31,6 +31,7 @@ $ cargo nextest run -p cox -p cox-tui -E 'binary(docs) | binary(doc_examples) | 
 $ cargo clippy -p cox -p cox-tui --all-targets -- -D warnings   clean
 $ cargo fmt --check   clean
 $ cox plugin new demo-kt --lang kotlin --with status,command; just smoke   demo-kt loaded
+```
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
