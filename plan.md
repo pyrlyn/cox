@@ -115,7 +115,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
-| T61.5.3 | todo | P2 | 3 | 0% | |
+| T61.5.3 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T61.6 | todo | P2 | 2 | 0% | |
 | T61.7 | todo | P2 | 2 | 0% | |
 | T61.8 | todo | P3 | 1 | 0% | |
@@ -1920,6 +1920,8 @@ Goal: as T61.5.1 for the remaining crates with more than one test file; `cox-tui
 Files: as T61.5.1, for each crate.
 
 Steps: as T61.5.1, one commit per crate.
+
+Execution plan (claimed 2026-10-17): count `nextest list -p <crate>` and time `-p <crate> --no-run` before, per crate. Merge into `tests/it/` every file no command names and none that sets process environment variables. `cox-tui`: all but `screenshots` (`just` names it); `cox-tools`: all seven; `cox-ext`: all six; `cox-app`: `intents` and `scenarios` only, because `app`, `best_of`, `external` and `mcp_login` call `set_var`/`remove_var`, which would leak under a runner that shares one process (as `remote` in T61.5.2). `git mv` the files and snapshots, point `mod common` at `../common/mod.rs`, add `../` to fixture-relative paths, and confirm each moved snapshot differs only in its `source:` line. Grep `justfile`, `.github`, `scripts`, `docs`, `AGENTS.md`, `research.md` and `plan.md` for `--test <name>` and update them. Re-count per crate, run `nextest run`, clippy and `fmt --check` per crate, record both timings in `research.md` 4.3.9, close the card.
 
 Check:
 ```bash
