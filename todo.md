@@ -91,7 +91,6 @@
 - T66.8. `/refine` and `cox refine`
 - T66.10. `[autonomous]` config, which a project cannot set
 - T66.11. `cox run -p --autonomous`: shell gates and the headless loop
-- T66.12. Design: resident sessions and a supervisor
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
 - T67.3. Five more hook events
