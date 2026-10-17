@@ -1060,6 +1060,8 @@ pub fn run_tui(cli: &Cli, cwd: &Path) -> anyhow::Result<()> {
             let home = home.clone();
             let project = project.clone();
             let me = session.id();
+            // T66.8: `None` leaves `/refine` answering that it is unavailable.
+            let refine = crate::refine_cmd::TuiRefine::open(session.clone(), &home, config, cwd);
             let git = config.tui.git;
             let dir = cwd.to_path_buf();
             rt.spawn(async move {
@@ -1128,6 +1130,22 @@ pub fn run_tui(cli: &Cli, cwd: &Path) -> anyhow::Result<()> {
                                 if feed.send(msg).await.is_err() {
                                     break;
                                 }
+                            }
+                            // T66.8: the proposal is a model call, so it is
+                            // answered off the poll loop; the answer rides
+                            // the same feed.
+                            Some(Ask::Refine(request)) => {
+                                let feed = feed.clone();
+                                let refine = refine.clone();
+                                tokio::spawn(async move {
+                                    let msg = match refine {
+                                        Some(r) => r.answer(request).await,
+                                        None => cox_tui::refine::Msg::Notice(Err(
+                                            "refine: the session store is unavailable".into(),
+                                        )),
+                                    };
+                                    let _ = feed.send(Msg::Refine(msg)).await;
+                                });
                             }
                             None => break,
                         },

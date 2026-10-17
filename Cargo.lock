@@ -1112,6 +1112,7 @@ dependencies = [
  "cox-sanitize",
  "cox-session",
  "cox-store",
+ "cox-target",
  "cox-telemetry",
  "cox-tools",
  "cox-tui",
@@ -1266,6 +1267,7 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -1566,6 +1568,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cox-serve"
+version = "0.1.2"
+dependencies = [
+ "cox-store",
+ "nix 0.31.3",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
 name = "cox-session"
 version = "0.1.2"
 dependencies = [
@@ -1584,16 +1600,19 @@ dependencies = [
  "cox-provider",
  "cox-sanitize",
  "cox-store",
+ "cox-target",
  "cox-tools",
  "futures",
  "nix 0.31.3",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "similar 3.2.0",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "ulid",
  "wiremock",
  "workspace-hack",
 ]
@@ -1635,6 +1654,7 @@ name = "cox-target"
 version = "0.1.2"
 dependencies = [
  "insta",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "workspace-hack",

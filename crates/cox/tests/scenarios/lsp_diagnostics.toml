@@ -1,5 +1,5 @@
 # T41.8: discover the deferred `diagnostics` tool, ask it about one file,
-# then answer. `tests/lsp.rs` points the rust server at `fake_lsp`.
+# then answer. `tests/it/lsp.rs` points the rust server at `fake_lsp`.
 [[turn]]
 text = "looking for a checker"
 tool_calls = [{ name = "tool_search", input = { query = "diagnostics" } }]

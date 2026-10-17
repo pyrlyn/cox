@@ -1,0 +1,6 @@
+---
+source: crates/cox-tui/tests/it/cells.rs
+expression: "text(&s, cell(&s, |c| matches!(c, Cell::User { .. })))"
+---
+› explain the loop and read main
+  📎 notes.txt
