@@ -14,3 +14,9 @@ dart = "3.13.4"
 java = "27.0.0"
 gradle = "9.8.0"
 kotlin = "2.4.20"
+# T33.34: the Go SDK (sdk-go/), the example in examples/go and templates/go.
+# TinyGo builds the module (`-target wasip1 -buildmode=c-shared`) and needs
+# a Go it supports as its GOROOT: 0.43.0 takes Go 1.25 through 1.27
+# (builder/config.go at v0.43.0). Latest stable of each on 2026-10-17.
+go = "1.27.2"
+tinygo = "0.43.0"

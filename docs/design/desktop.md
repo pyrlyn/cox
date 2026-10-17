@@ -317,6 +317,42 @@ client draws the same column from the same fields.
   files worth a look, an empty one has nothing to open). Both are disabled on
   a failed candidate with no changes.
 
+#### 3.3.4 Best of n: the merge a client carries (T52.24, T52.25, A142)
+
+A client merges finished candidates through two calls on the same owner as
+`best_of`: `mergeable(group) -> [index]` lists the candidates a merge may take
+(finished, still holding a worktree, group not picked), so no client decides
+that on its own, and `best_of_merge(BestOfMerge { id, from, by }, theme)`
+returns the same `Launch` as `best_of`: the merger's session, a new candidate
+row (`Launched.merged_from` names the candidates it took) that `compare` and
+`pick` handle like any other. `by` is the existing `Candidate`: cox on a model,
+or an external agent. The core refuses before anything starts for fewer than
+two candidates, one not finished, or a picked group.
+
+The client keeps only the person's choice: the ticked candidates (a subset of
+`mergeable`, trimmed whenever the comparison is read again), the chosen merger,
+and the request built from them once two or more are ticked and a merger is
+set. After the call it reads the comparison again so the merge candidate shows
+at once, clears the ticks when the merge started and keeps them when the core
+refused it, with the refusal as the visible failure. macOS: `BestOfStore`
+(`CoxModel`) over `BestOfClient.merge`/`mergeable`; a Windows or Linux client
+repeats the same store logic over the same two exports.
+
+The compare view shows the screen for it (T52.26). A **Merge** button sits
+beside Done only when `mergeable` lists more than one candidate. It opens a
+sheet with one checkbox per mergeable candidate (all checked at first;
+label, diffstat, cost), a "Merge with" picker over the models and external
+agents the Best of control offers (models first, then agents; an option that
+cannot start here is listed with why and cannot be chosen), and Merge, which
+stays blocked, with the not-allowed pointer (T37.50), until two or more are
+checked and a merger that can start is set. The app presets the first merger
+that can start. A refusal from the core is shown in the sheet; a started merge
+closes it and its session joins the window like a launch's. `CandidateView`
+carries `merged_from`, so the merge's column is headed "Merge by <merger>" with
+"Merges <labels>" under it and is then kept, reviewed or pruned like any other
+column. The picker's list is drawn by the view, not a system menu, so a
+snapshot can show it open.
+
 ## 4. Architecture
 
 ### 4.1 Layers
@@ -697,6 +733,14 @@ Default window 1 440 × 900, minimum 900 × 600. A three-column
     stops it rendering. A plugin command's `OpenInspector` switches to the tab
     and shows the inspector. The strip scrolls sideways when the tabs outgrow
     the inspector's width.
+- **Plugin canvas** (⌘⇧D, plugin-canvas §3, T33.47.8): a plugin that declares
+  a canvas draws HTML frames into a pane beside the column, in the inspector's
+  or the browser pane's place, since with two the panes outgrow the window.
+  A bar holds the plugin's symbol and title, a picker when several plugins
+  declare one, and the zoom; the frames sit side by side at each one's
+  width and its content's height. A click on an element that carries the
+  plugin's selection attribute asks the plugin for an attachment, which
+  lands in the composer as one chip per canvas, replaced by the next click.
 
 ### 5.2 Transcript blocks
 
@@ -904,7 +948,9 @@ within each group and at most five of each, with the matched characters for the
 row to draw bold; commands and files join only once something is typed. A
 plugin's palette action (PL§15.4) is an action row with id
 `plugin:<id>:<command>` and the plugin's symbol in its well; ⏎ hands it to
-`plugin_action` (T33.45.7). ⏎ runs the selected row: an action runs, a session shows in the window, a command or
+`plugin_action` (T33.45.7). A declared canvas adds a "Show <title>" row,
+`canvas:<plugin>`, which opens the canvas pane on that plugin's canvas, or
+"Hide <title>" while it shows; a plugin cannot open the pane itself. ⏎ runs the selected row: an action runs, a session shows in the window, a command or
 file lands at the end of the composer's draft. Esc or a click on the scrim
 closes it. The whole app is keyboard-drivable:
 
@@ -922,9 +968,10 @@ closes it. The whole app is keyboard-drivable:
 | ⌘⌥A | Appearance popover |
 | ⌃` | Terminal pane under the transcript: show / hide; the first show opens the session's shell (T51.6) |
 | ⌘⇧B | Browser pane beside the transcript: show / hide; the page the agent's `browser_*` tools drive (T51.10) |
+| ⌘⇧D | Plugin canvas pane beside the transcript: show / hide (plugin-canvas §3, T33.47.8) |
 | ⌘⇧F | Search all sessions |
 | ⌘[ / ⌘] | Previous / next turn in the transcript |
-| ⌘+ / ⌘− | Text size |
+| ⌘+ / ⌘− | Text size; the canvas's zoom while the canvas pane has focus |
 
 ### 5.6 Notifications, Dock, menu bar
 
@@ -1108,7 +1155,12 @@ only answers the question the engine asked. Paths still go through
 `cox_sandbox::path::confine`; shell commands still run under
 `cox_sandbox::sandbox::Policy` — the desktop adds no "run in the app's own
 context" path. The M2 browser pane is a separate `WebPage` with no
-JavaScript bridge to the app.
+JavaScript bridge to the app. A plugin canvas's frames are untrusted HTML in a
+`CanvasPage` each (plugin-canvas §4): page script off, every load but the
+frame's own `cox-canvas:` document blocked by a content rule list, a
+`default-src 'none'` CSP on that document, no navigation, a non-persistent
+store, and the only message handler in the host's own content world; a
+click's value is checked in Rust before the plugin sees it.
 
 ## 11. Open questions for the creator
 

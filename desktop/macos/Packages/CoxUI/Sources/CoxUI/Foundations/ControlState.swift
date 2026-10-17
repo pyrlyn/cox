@@ -43,6 +43,9 @@ enum ControlState: CaseIterable, Sendable {
 /// Resolves a style's press, the pointer and `isEnabled` into a `ControlState` for `face`.
 struct ControlStateReader<Face: View>: View {
   let isPressed: Bool
+  /// Already chosen (an open capsule, the selected row): a click would change nothing, so the
+  /// pointer stays the arrow (`coxPointer`).
+  var isChosen = false
   @ViewBuilder let face: (ControlState) -> Face
   @Environment(\.isEnabled) private var isEnabled
   @State private var isHovered = false
@@ -51,6 +54,8 @@ struct ControlStateReader<Face: View>: View {
     let state = ControlState(isEnabled: isEnabled, isPressed: isPressed, isHovered: isHovered)
     face(state)
       .onHover { isHovered = $0 }
+      // Every catalogue style reads its state here, so none has to ask for a pointer itself.
+      .coxPointer(state.interaction(isChosen: isChosen))
       .animation(.cox(Motion.durationFast), value: state)
   }
 }

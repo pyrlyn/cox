@@ -27,6 +27,8 @@ sha2 = { workspace = true }
 keyring = { workspace = true }
 # rmcp 3.4 implements its HTTP client trait for reqwest 0.13, which it already
 # pulls in; the workspace row (0.12, for the providers) is a different type.
+# T64.13: reads `state` out of the callback query and the authorization URL.
+url = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["default-tls", "system-proxy"] }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 

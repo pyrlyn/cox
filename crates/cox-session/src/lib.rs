@@ -28,6 +28,7 @@ use cox_tools::send_message::SendMessageTool;
 
 #[cfg(feature = "plugins")]
 pub mod acp_session;
+pub mod allow_rules;
 #[cfg(feature = "plugins")]
 mod cloud_agents;
 pub mod doctor;
@@ -288,6 +289,7 @@ pub async fn open_reporting(
     // T45.4: taken now, before `catalog_rows` borrows `plugins`; merged
     // into the discovered definitions below.
     let plugin_agent_defs = std::mem::take(&mut plugins.agent_defs);
+    let plugin_skills = std::mem::take(&mut plugins.skill_defs);
     config.providers.custom.extend(plugins.providers.clone());
     // T33.44: granted plugins' `[[models]]` join the catalog the provider
     // reads its context window from (PL§7b).
@@ -307,7 +309,8 @@ pub async fn open_reporting(
             Some(keys) => cox_provider::http::resolve_key_with(var, section, |s| keys(s)),
             None => cox_provider::http::resolve_key(var, section),
         };
-        cox_plugin::provider::backends(&plugins.live, &resolve, estimate)
+        let table = |section: &str| provider::abi_section(&config, section);
+        cox_plugin::provider::backends(&plugins.live, &resolve, &table, estimate)
     };
     #[cfg(not(feature = "plugins"))]
     let abi_raw = std::collections::HashMap::new();
@@ -353,11 +356,16 @@ pub async fn open_reporting(
     // `skill` tool hands bodies out on demand, and a broken skill is a
     // warning and skipped, never fatal (D14).
     let claude_home = cox_config::load::home_dir().join(".claude");
-    let found = cox_ext::skills::discover(&cox_ext::skills::skill_dirs(
+    let mut found = cox_ext::skills::discover(&cox_ext::skills::skill_dirs(
         Some(&home),
         Some(&claude_home),
         Some(&project),
     ));
+    // T33.46: granted plugins' skills join after the files, so a local skill
+    // of the same name wins (PL§14 decision 16).
+    for (id, skills) in plugin_skills {
+        cox_ext::skills::merge(&mut found, skills, &id);
+    }
     warnings.extend(found.notices.into_iter().map(Warning::Skill));
     // T34.1: subagent definitions are discovered once here, at session
     // build, the same roots `cox ext list` reads — never inside `cox-core`,
@@ -551,6 +559,8 @@ pub async fn open_reporting(
     session.set_checkpointer(Arc::new(cox_tools::checkpoint::GitCheckpointer::new(
         home.clone(),
     )));
+    // T69.2: `permissions.allow_for_session_persists` writes the user config.
+    session.set_allow_rule_store(Arc::new(allow_rules::UserConfigRules::user()));
     // T27.3: `agent(isolation: "worktree")` gets real worktrees on every surface.
     session.set_worktrees(Arc::new(cox_tools::git::GitWorktrees));
     // P43: the repo map, built once on the first submit when

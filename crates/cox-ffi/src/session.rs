@@ -13,11 +13,13 @@ use cox_app::Readiness;
 use cox_app::TerminalHandle as Terminal;
 use cox_app::diffmodel::DiffModel;
 use cox_app::live::LiveSession;
+use cox_app::plugin_ui::{CanvasUpdate, PluginCanvas};
 use cox_app::{
     Block, Changes, Completion, Info, Intent, LinkClick, PaletteHit, PaletteItem, PluginAction,
     PluginTab, TaskTarget, TimelinePatch, TurnCosts,
 };
 use cox_protocol::ids::{ArchiveId, SessionId, TaskId};
+use cox_protocol::plugin::CanvasAttach;
 use cox_protocol::types::TodoItem;
 
 use crate::{AppError, on_runtime};
@@ -178,6 +180,48 @@ impl SessionHandle {
     /// Esc on a plugin overlay.
     pub fn close_plugin_overlay(&self) {
         self.live.close_plugin_overlay();
+    }
+
+    /// The canvases plugins declared (plugin-canvas §3), for the pane.
+    pub fn plugin_canvases(&self) -> Vec<PluginCanvas> {
+        self.live.plugin_canvases()
+    }
+
+    /// The pane shows `plugin`'s canvas at this size, newly or resized;
+    /// what it draws arrives through `next_canvas`.
+    pub async fn show_canvas(
+        self: Arc<Self>,
+        plugin: String,
+        width_pt: u32,
+        height_pt: u32,
+    ) -> Result<(), AppError> {
+        on_runtime(async move { self.live.show_canvas(&plugin, width_pt, height_pt) }).await
+    }
+
+    /// The pane hid `plugin`'s canvas.
+    pub fn hide_canvas(&self, plugin: String) {
+        self.live.hide_canvas(&plugin);
+    }
+
+    /// The next canvas update; `None` once the session is gone.
+    pub async fn next_canvas(self: Arc<Self>) -> Option<CanvasUpdate> {
+        on_runtime(async move { self.live.next_canvas().await })
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// A click on a frame (§5): the composer's attachment, if any.
+    pub async fn select_canvas(
+        self: Arc<Self>,
+        plugin: String,
+        frame: String,
+        value: String,
+    ) -> Option<CanvasAttach> {
+        on_runtime(async move { self.live.select_canvas(&plugin, &frame, &value).await })
+            .await
+            .ok()
+            .flatten()
     }
 
     /// Stops the pull; the session keeps running (DT§4.5).

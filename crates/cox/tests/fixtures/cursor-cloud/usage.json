@@ -1,0 +1,21 @@
+{
+  "totalUsage": {
+    "inputTokens": 900,
+    "outputTokens": 900,
+    "cacheWriteTokens": 0,
+    "cacheReadTokens": 0,
+    "totalTokens": 1800
+  },
+  "runs": [
+    {
+      "id": "run-e2e",
+      "usage": {
+        "inputTokens": 120,
+        "outputTokens": 45,
+        "cacheWriteTokens": 30,
+        "cacheReadTokens": 60,
+        "totalTokens": 255
+      }
+    }
+  ]
+}

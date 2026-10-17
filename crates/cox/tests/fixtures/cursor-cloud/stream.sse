@@ -1,0 +1,24 @@
+id: 1
+event: status
+data: {"runId":"run-e2e","status":"RUNNING"}
+
+id: 2
+event: assistant
+data: {"text":"The race is in "}
+
+id: 3
+event: thinking
+data: {"text":"private reasoning"}
+
+id: 4
+event: assistant
+data: {"text":"the retry loop."}
+
+id: 5
+event: result
+data: {"runId":"run-e2e","status":"FINISHED","durationMs":4200}
+
+id: 6
+event: done
+data: {}
+

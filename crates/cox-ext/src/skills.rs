@@ -132,6 +132,30 @@ fn valid_name(name: &str, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// One `SKILL.md`, parsed and checked by the same code `discover` uses;
+/// `pub` for a granted plugin's `[[skills]]` folders (T33.46), which live
+/// outside the skill dirs.
+pub fn parse_file(path: &Path) -> Result<Skill, String> {
+    parse_skill(path)
+}
+
+/// Adds one plugin's skills to `local` (T33.46, PL§14 decision 16): a name
+/// already loaded — a user or project skill, or an earlier plugin's — is
+/// kept, and the plugin's is skipped with a notice, so installing a plugin
+/// never silently replaces a skill the user wrote.
+pub fn merge(local: &mut Discovered, plugin: Vec<Skill>, plugin_id: &str) {
+    for skill in plugin {
+        if local.skills.iter().any(|s| s.name == skill.name) {
+            local.notices.push(format!(
+                "plugin {plugin_id}: skill {} skipped; a skill with that name is already loaded",
+                skill.name
+            ));
+        } else {
+            local.skills.push(skill);
+        }
+    }
+}
+
 fn parse_skill(path: &Path) -> Result<Skill, String> {
     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
     let (header, body): (Header, &str) = frontmatter::parse(&text).map_err(|e| e.to_string())?;
@@ -215,12 +239,23 @@ impl Tool for SkillTool {
             .iter()
             .find(|s| s.name == name)
             .ok_or(ToolError::NotFound)?;
+        // A skill may refer to files beside its `SKILL.md` (T33.46); the
+        // model can only read them if it knows where the folder is.
+        let dir = skill
+            .path
+            .parent()
+            .map(|d| d.display().to_string())
+            .unwrap_or_default();
         Ok(ToolOutput {
-            text: format!("# Skill: {}\n\n{}", skill.name, skill.body),
+            text: format!(
+                "# Skill: {}\n\nBase directory: {dir}\n\n{}",
+                skill.name, skill.body
+            ),
             is_error: false,
             diff: None,
             structured: Some(json!({
                 "name": skill.name,
+                "dir": dir,
                 "allowed_tools": skill.allowed_tools,
             })),
         })

@@ -50,19 +50,6 @@ pub struct AgentDef {
     pub permission_mode: Option<PermissionMode>,
 }
 
-impl AgentDef {
-    /// The parent's tools the child may keep, in the parent's order. A
-    /// listed tool the parent lacks is silently absent — a child can never
-    /// gain a tool by naming it.
-    pub fn restrict<T: Clone>(&self, tools: &[(String, T)]) -> Vec<T> {
-        tools
-            .iter()
-            .filter(|(name, _)| self.tools.is_empty() || self.tools.contains(name))
-            .map(|(_, t)| t.clone())
-            .collect()
-    }
-}
-
 /// How a `model:` value picks a tier: tier names, Claude's aliases
 /// (`haiku` → cheap, `sonnet` → code, `opus` → think), a model id by its
 /// family, `inherit`/absent → the parent's tier (`None`).
@@ -96,25 +83,5 @@ mod tests {
         assert_eq!(tier_for(Some("gpt-5")), Some(Tier::Code));
         assert_eq!(tier_for(Some("inherit")), None);
         assert_eq!(tier_for(None), None);
-    }
-
-    #[test]
-    fn agent_def_restrict_keeps_only_named_tools_in_parent_order() {
-        let def = AgentDef {
-            name: "reviewer".into(),
-            description: "d".into(),
-            tools: vec!["read".into(), "grep".into()],
-            model: None,
-            path: PathBuf::from("<test>"),
-            body: String::new(),
-            disabled: false,
-            permission_mode: None,
-        };
-        let parent = [
-            ("read".to_string(), 0),
-            ("bash".to_string(), 1),
-            ("grep".to_string(), 2),
-        ];
-        assert_eq!(def.restrict(&parent), [0, 2]);
     }
 }

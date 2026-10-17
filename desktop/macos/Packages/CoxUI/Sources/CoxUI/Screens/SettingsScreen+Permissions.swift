@@ -161,6 +161,7 @@ private struct AddRuleRow: View {
           .textStyle(.caption)
           .foregroundStyle(Color(.statusDanger))
           .textSelection(.enabled)
+          .coxPointer(.selectableText)
       }
     }
     .padding(.horizontal, Space.l)

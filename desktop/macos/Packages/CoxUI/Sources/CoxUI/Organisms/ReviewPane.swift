@@ -139,6 +139,7 @@ public struct ReviewPane: View {
           ForEach(turn.files, id: \.path) { file in
             ChangedFileRow(file, isSelected: file.path == state.selection)
               .onTapGesture { send(.open(path: file.path)) }
+              .coxPointer(.control(isChosen: file.path == state.selection))
               .accessibilityAction { send(.open(path: file.path)) }
           }
         }

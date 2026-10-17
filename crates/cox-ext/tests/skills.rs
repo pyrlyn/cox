@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cox_ext::skills::{SkillTool, discover, index, skill_dirs};
+use cox_ext::skills::{Discovered, SkillTool, discover, index, merge, parse_file, skill_dirs};
 use cox_protocol::errors::{StoreError, ToolError};
 use cox_protocol::ids::{ArchiveId, CallId, SessionId};
 use cox_protocol::traits::{Archive, ArchivePut, Tool, ToolCx};
@@ -87,8 +87,11 @@ async fn skills_invoke_returns_the_body_and_allowed_tools() {
         .call(json!({ "name": "greeting" }), &cx())
         .await
         .unwrap();
+    let dir = fixtures().join("greeting").display().to_string();
     assert!(
-        out.text.starts_with("# Skill: greeting\n\n# Greeting\n"),
+        out.text.starts_with(&format!(
+            "# Skill: greeting\n\nBase directory: {dir}\n\n# Greeting\n"
+        )),
         "{}",
         out.text
     );
@@ -185,4 +188,60 @@ fn skills_later_directories_override_earlier_same_names() {
     let found = discover(&dirs);
     assert_eq!(found.skills.len(), 1);
     assert_eq!(found.skills[0].description, "from project");
+}
+
+/// T33.46: a plugin's skill is read with `discover`'s own parser, and a
+/// local skill of the same name keeps its place.
+#[test]
+fn skills_plugin_skill_loses_to_a_local_one_with_a_notice() {
+    let mut local = discover(&[fixtures()]);
+    let greeting = parse_file(&fixtures().join("greeting/SKILL.md")).unwrap();
+    let creator = parse_file(&fixtures().join("skill-creator/SKILL.md")).unwrap();
+    // Only the local `greeting`: the plugin's `skill-creator` joins, its
+    // `greeting` does not.
+    let mut some = Discovered {
+        skills: local
+            .skills
+            .iter()
+            .filter(|s| s.name == "greeting")
+            .cloned()
+            .collect(),
+        notices: Vec::new(),
+    };
+    merge(&mut some, vec![greeting.clone(), creator], "kit");
+    let names: Vec<&str> = some.skills.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["greeting", "skill-creator"]);
+    assert_eq!(
+        some.notices,
+        ["plugin kit: skill greeting skipped; a skill with that name is already loaded"]
+    );
+    let before = local.skills.clone();
+    merge(&mut local, vec![greeting], "kit");
+    assert_eq!(local.skills, before);
+}
+
+/// T33.46: a file outside a skill dir still has to be named for its folder.
+#[test]
+fn skills_parse_file_applies_the_name_rule() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("other/SKILL.md");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "---\nname: greeting\ndescription: x\n---\nbody\n").unwrap();
+    let err = parse_file(&path).unwrap_err();
+    assert!(err.contains("does not match its directory"), "{err}");
+}
+
+#[tokio::test]
+async fn skills_invoke_names_the_skill_folder() {
+    let tool = SkillTool::new(discover(&[fixtures()]).skills);
+    let out = tool
+        .call(json!({ "name": "skill-creator" }), &cx())
+        .await
+        .unwrap();
+    let dir = fixtures().join("skill-creator");
+    assert_eq!(
+        out.structured.unwrap()["dir"],
+        json!(dir.display().to_string())
+    );
+    assert!(dir.join("SKILL.md").is_file());
 }

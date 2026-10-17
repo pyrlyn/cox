@@ -59,6 +59,7 @@ private struct Switch: View {
     .insetWell(Color(isOn && isEnabled ? .accent : .fillSecondary), cornerRadius: Self.height / 2)
     .contentShape(Capsule())
     .onTapGesture { isOn.toggle() }
+    .coxPointer(.control(isEnabled: isEnabled))
     .animation(.cox(Motion.durationFast), value: isOn)
   }
 

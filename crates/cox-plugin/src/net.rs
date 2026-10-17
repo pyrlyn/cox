@@ -30,7 +30,14 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 struct Bound {
     host: String,
     auth: Option<(HeaderName, HeaderValue)>,
+    /// The section's `timeout_s` (T33.40.5); the shared client's own
+    /// [`TIMEOUT`] applies when the user's table did not set one.
+    timeout: Option<Duration>,
 }
+
+/// What the host adds to a request to the active section: the auth header
+/// and the section's timeout.
+type Injected = (Option<(HeaderName, HeaderValue)>, Option<Duration>);
 
 /// One plugin's network rule: its granted `net:<host>` lines, plus the
 /// ABI provider sections whose hosts are reachable only during their own
@@ -63,13 +70,15 @@ impl Net {
     }
 
     /// Remembers an ABI section. `header` is attached to outgoing requests
-    /// for this host and never handed to the guest. `false` means
-    /// `base_url` or the header could not be used.
+    /// for this host and never handed to the guest; `timeout` replaces the
+    /// client's default for them. `false` means `base_url` or the header
+    /// could not be used.
     pub(crate) fn bind_section(
         &self,
         name: &str,
         base_url: &str,
         header: Option<(String, String)>,
+        timeout: Option<Duration>,
     ) -> bool {
         let Ok(url) = Url::parse(base_url) else {
             return false;
@@ -97,6 +106,7 @@ impl Net {
                 Bound {
                     host: host.to_string(),
                     auth,
+                    timeout,
                 },
             );
         true
@@ -175,9 +185,9 @@ impl Net {
             .any(|bound| bound.host.eq_ignore_ascii_case(host))
     }
 
-    /// The auth header for the active section when `host` is that
-    /// section's host. Copied out of the mutex before any await.
-    fn auth_header(&self, host: &str) -> Option<(HeaderName, HeaderValue)> {
+    /// The auth header and timeout for the active section when `host` is
+    /// that section's host. Copied out of the mutex before any await.
+    fn active_section(&self, host: &str) -> Option<Injected> {
         let active = self
             .active
             .lock()
@@ -188,14 +198,17 @@ impl Net {
             .unwrap_or_else(PoisonError::into_inner)
             .get(&active)
             .filter(|bound| bound.host.eq_ignore_ascii_case(host))
-            .and_then(|bound| bound.auth.clone())
+            .map(|bound| (bound.auth.clone(), bound.timeout))
     }
 
     /// Sends `request` to `url` (already through [`Net::target`]).
     pub(crate) async fn send(&self, request: HttpReq, url: Url) -> Result<HttpResp, AbiError> {
         let method =
             Method::from_bytes(request.method.as_bytes()).map_err(|_| failed("bad http method"))?;
-        let injected = url.host_str().and_then(|host| self.auth_header(host));
+        let (injected, timeout) = url
+            .host_str()
+            .and_then(|host| self.active_section(host))
+            .unwrap_or_default();
         let mut headers = HeaderMap::new();
         for (name, value) in &request.headers {
             let name = HeaderName::from_bytes(name.as_bytes())
@@ -225,6 +238,9 @@ impl Net {
             .as_ref()
             .map_err(|e| failed(e))?;
         let mut builder = client.request(method, url).headers(headers);
+        if let Some(timeout) = timeout {
+            builder = builder.timeout(timeout);
+        }
         if let Some(body) = request.body {
             builder = builder.body(body);
         }
@@ -408,7 +424,8 @@ mod tests {
         assert!(net.bind_section(
             "acme",
             "https://llm.example.com/v1",
-            Some(("authorization".into(), "Bearer secret".into()))
+            Some(("authorization".into(), "Bearer secret".into())),
+            None
         ));
         assert_eq!(
             net.target("https://llm.example.com/v1", false).err(),
@@ -435,5 +452,36 @@ mod tests {
             net.target("https://llm.example.com/v1", false).err(),
             Some(AbiError::NotInThisContext)
         );
+    }
+
+    #[tokio::test]
+    async fn section_timeout_cuts_a_slow_provider_reply_short() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(5)))
+            .mount(&server)
+            .await;
+        let net = Net::new(&BTreeSet::new());
+        assert!(net.bind_section(
+            "acme",
+            &server.uri(),
+            None,
+            Some(Duration::from_millis(100))
+        ));
+        net.activate("acme");
+        let url = net.target(&server.uri(), true).expect("provider host");
+        let request = HttpReq {
+            method: "POST".into(),
+            url: server.uri(),
+            headers: Default::default(),
+            body: None,
+        };
+        let started = std::time::Instant::now();
+        let outcome = net.send(request, url).await;
+        assert_eq!(outcome.err(), Some(AbiError::Timeout));
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 }

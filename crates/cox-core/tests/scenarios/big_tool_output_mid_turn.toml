@@ -11,7 +11,7 @@ text = "reading"
 tool_calls = [{ name = "big", input = {} }]
 
 [[turn]]
-text = "## Goal\nread big\n## Decisions\nnone\n## Files touched\nnone\n## Open todo\nnone\n## Errors seen\nnone\n## Next step\nfinish"
+text = "## Goal\nread big\n## Decisions\nKeep the big result in the last two turns verbatim and summarise only the first turn, whose prompt is large. Keep the big result in the last two turns verbatim and summarise only the first turn, whose prompt is large. Keep the big result in the last two turns verbatim and summarise only the first turn, whose prompt is large. Keep the big result in the last two turns verbatim and summarise only the first turn, whose prompt is large. Keep the big result in the last two turns verbatim and summarise only the first turn, whose prompt is large.\n## Files touched\nnone\n## Open todo\nnone\n## Errors seen\nnone\n## Next step\nfinish"
 
 [[turn]]
 text = "done"

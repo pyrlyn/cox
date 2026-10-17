@@ -19,8 +19,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use cox_plugin_api::{
-    AbiError, CallTarget, DesktopNotice, HttpReq, InitIn, MAX_NOTICE_ACTIONS, ModelCall,
-    ModelTier, NoticeLevel, PluginManifest, SessionInfo, Surface, ToolCallIn,
+    AbiError, CallTarget, DesktopNotice, HttpReq, InitIn, MAX_NOTICE_ACTIONS, ModelCall, ModelTier,
+    NoticeLevel, PluginManifest, SessionInfo, Surface, ToolCallIn,
 };
 use cox_protocol::config::PluginsConfig;
 use cox_protocol::errors::CoreError;
@@ -269,8 +269,9 @@ impl HostEnv {
         name: &str,
         base_url: &str,
         header: Option<(String, String)>,
+        timeout: Option<Duration>,
     ) -> bool {
-        self.net.bind_section(name, base_url, header)
+        self.net.bind_section(name, base_url, header, timeout)
     }
 
     /// Whether `name` is an ABI section bound to this plugin: one of its own
@@ -464,7 +465,10 @@ impl HostEnv {
     /// `cox_render` has a strict time cap, so it may only read (PL§4).
     fn outside_render(&self) -> Result<(), AbiError> {
         match lock(&self.export).as_str() {
-            "cox_render" | "cox_render_item" => Err(AbiError::NotInThisContext),
+            // The canvas exports draw and read, like a render (canvas design §2).
+            "cox_render" | "cox_render_item" | "cox_canvas" | "cox_canvas_select" => {
+                Err(AbiError::NotInThisContext)
+            }
             _ => Ok(()),
         }
     }
@@ -850,7 +854,9 @@ pub(crate) mod tests {
               (export "cox_key" (func $relay))
               (export "cox_on_event" (func $relay))
               (export "cox_tool_call" (func $relay))
-              (export "cox_render" (func $relay)))"#
+              (export "cox_render" (func $relay))
+              (export "cox_canvas" (func $relay))
+              (export "cox_canvas_select" (func $relay)))"#
         )
         .into_bytes()
     }
@@ -1052,6 +1058,30 @@ pub(crate) mod tests {
         );
     }
 
+    /// The canvas exports run in render context (canvas design §2): they may
+    /// read the context but not write, notify or reach kv.
+    #[test]
+    fn canvas_exports_are_render_context() {
+        let store = Arc::new(MemKv::default());
+        let env = Arc::new(
+            HostEnv::new("t").with_grant(vec!["kv".into(), "context".into()], store.clone()),
+        );
+        let refused = json!({ "Err": { "kind": "not_in_this_context" } });
+        for export in ["cox_canvas", "cox_canvas_select"] {
+            let put = json!({ "key": "k", "value": 1 });
+            assert_eq!(call(&env, "cox_kv_put", export, put), refused, "{export}");
+            let notice = json!({ "level": "info", "text": "hi" });
+            assert_eq!(
+                call(&env, "cox_notify", export, notice),
+                refused,
+                "{export}"
+            );
+            let reply = call(&env, "cox_context", export, Value::Null);
+            assert!(reply["Ok"]["items"].is_array(), "{export}: {reply}");
+        }
+        assert!(lock(&store.0).is_empty());
+    }
+
     #[test]
     fn context_needs_its_capability_and_is_allowed_in_render() {
         let store = Arc::new(MemKv::default());
@@ -1213,7 +1243,7 @@ pub(crate) mod tests {
         env.runtime = Some(rt.handle().clone());
         let env = Arc::new(env);
         let header = Some(("authorization".to_owned(), "Bearer k".to_owned()));
-        assert!(env.bind_provider("own", &server.uri(), header));
+        assert!(env.bind_provider("own", &server.uri(), header, None));
         let _active = env.activate_provider("own");
         for export in ["cox_on_event", "cox_command", "cox_hook", "cox_tool_call"] {
             let reply = call(
@@ -1303,6 +1333,7 @@ pub(crate) mod tests {
             external_agents: Vec::new(),
             cloud_agents: Vec::new(),
             agents: Vec::new(),
+            skills: Vec::new(),
         };
         manifest.capabilities.desktop.notify = true;
         manifest.capabilities.terminal.keys = true;

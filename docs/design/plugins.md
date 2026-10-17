@@ -167,6 +167,10 @@ args = ["--stdio"]
 [[agents]]                       # T45.3: a subagent definition, same format as .cox/agents/*.md
 name = "reviewer"                # dispatched as agent(preset: "reviewer")
 file = "agents/reviewer.md"
+
+[[skills]]                       # T33.46: an Agent Skills folder, same format as .cox/skills/<name>/
+name = "release-notes"           # its SKILL.md frontmatter name, and the folder's name
+dir = "skills/release-notes"
 ```
 
 Validation (T33.1 and T33.4):
@@ -177,7 +181,8 @@ Validation (T33.1 and T33.4):
 - `fs` roots are `$WORKSPACE`, `$PLUGIN_DATA` or paths inside them;
 - a `ui.render` target outside the plugin's own tools needs an explicit `tool:<name>`, which approval shows as "changes how <name> looks";
 - an `[[agents]]` `file` is a relative `.md` path with no `..`, `\` or `:` component, and names are unique (T45.3);
-- `wasm` may be omitted only by a data-only package: `[[mcp]]` and/or `[[agents]]`, nothing else;
+- a `[[skills]]` `name` is 1–64 lowercase letters, digits and `-`; its `dir` is a relative path with no `..`, `\` or `:` component whose last component is the name (the folder `cox-ext` requires); names are unique (T33.46);
+- `wasm` may be omitted only by a data-only package: `[[mcp]]`, `[[agents]]` and/or `[[skills]]`, nothing else;
 - unknown keys are an error. The manifest is ours, so `deny_unknown_fields` applies, as in `Config` (`crates/cox-protocol/src/config.rs:35`);
 - `surfaces` and the surface tables `[capabilities.terminal]` and `[capabilities.desktop]` follow §15.5; `ui.keys` is an alias of `terminal.keys`.
 
@@ -200,7 +205,7 @@ There is no general kv table today (`schema.rs:13-87`). A narrow `PluginStore` t
 - `NeedsApproval { added, removed }`: a new digest, or wider capabilities.
 - `Disabled`.
 
-The granted list (T33.6) is a sorted JSON array of strings, one line per capability: `events:<tag>`, `hooks:<name>`, `tools:<name>`, `invoke:<name>`, `net:<host>`, `fs.read:<root>`, `fs.write:<root>`, `decide:<point>`, `ui.render:<target>`, the flags `wasi`, `context`, `kv`, `ui.status`, `ui.panel`, `ui.overlay`, `ui.commands`, `ui.keys`, `model:cheap` or `model:code`, plus one line per `[[provider]]` (`provider:<name> <base_url> key=<env>`), `[[mcp]]` (`mcp:<name> <command args | url>`) `[[external_agents]]` entry (`agent:<name> <argv> key=<env>`) and `[[agents]]` entry (`subagent:<name> <file>`, T45.3). The model tier is the one ordered entry: a `model:code` grant covers a `model:cheap` request. A row whose `capabilities` is not such an array grants nothing, and a store read error counts as no grant. `Disabled` wins over the digest check. A project `.cox/config.toml` may turn `plugins.enabled` off but never on (the project-config guard list).
+The granted list (T33.6) is a sorted JSON array of strings, one line per capability: `events:<tag>`, `hooks:<name>`, `tools:<name>`, `invoke:<name>`, `net:<host>`, `fs.read:<root>`, `fs.write:<root>`, `decide:<point>`, `ui.render:<target>`, the flags `wasi`, `context`, `kv`, `ui.status`, `ui.panel`, `ui.overlay`, `ui.commands`, `ui.keys`, `model:cheap` or `model:code`, plus one line per `[[provider]]` (`provider:<name> <base_url> key=<env>`), `[[mcp]]` (`mcp:<name> <command args | url>`) `[[external_agents]]` entry (`agent:<name> <argv> key=<env>`), `[[agents]]` entry (`subagent:<name> <file>`, T45.3) and `[[skills]]` entry (`skill:<name> <dir>`, T33.46). The model tier is the one ordered entry: a `model:code` grant covers a `model:cheap` request. A row whose `capabilities` is not such an array grants nothing, and a store read error counts as no grant. `Disabled` wins over the digest check. A project `.cox/config.toml` may turn `plugins.enabled` off but never on (the project-config guard list).
 
 By surface:
 
@@ -222,7 +227,7 @@ Every payload is JSON through extism's `Json<T>` conversion. The types sit in `c
 | `cox_decide` | `Question` → `DecideOut { Advice(Option<Advice>) \| Call(ModelCall) }` | §6b; `ModelCall.target = Tier(t) \| OwnProvider { name, model }` (2026-09-26, T33.40.1). On the wire `DecideOut` is untagged: `{"call": ModelCall}` or a bare `Option<Advice>`, so a guest written before the call-out still parses; the target is flattened, so a tier call stays `{"tier", "request"}` and an own-provider call is `{"own_provider": {"name", "model"}, "request"}`. A `Call` must name an `OwnProvider` section bound to this plugin (one whose name it won, §7a); anything else is silence |
 | `cox_decide_resume` (optional) | `DecideResume { question, events }` → `Option<Advice>` | §6b; called after the host runs a `Call`'s `ModelCall` through the plugin's own provider, budget-gated and ledgered (2026-09-26, T33.40.1) |
 | `cox_tool_subject` / `cox_tool_risk` / `cox_tool_call` | the `Tool` trait, serialised (`traits.rs:212-234`) | §7 |
-| `cox_provider_stream` | `ProviderCall { request: Request, model }` → `Vec<ProviderEvent>` | §7a |
+| `cox_provider_stream` | `ProviderCall { request: Request, model, base_url }` → `Vec<ProviderEvent>` (`base_url`: the section as bound, after a user override, T33.40.4) | §7a |
 | `cox_command` / `cox_key` | `CommandIn { name, args }` → `CommandOut` | §8 |
 | `cox_render` | `RenderIn { slot, width, height }` → `Widget` | §8 |
 | `cox_render_item` | `RenderItemIn { target, call, result, width }` → `Option<Widget>` | §8 |
@@ -243,7 +248,7 @@ Every payload is JSON through extism's `Json<T>` conversion. The types sit in `c
 | `cox_http(HttpReq)` to a `net`-listed host | `net` | all but render | host-side reqwest; host must match the allow-list; body cap `max_http_response_bytes` |
 | `cox_http(HttpReq)` to a provider section's `base_url` host | that `[[provider]]` section | `cox_provider_stream` only (2026-09-26; `NotInThisContext` everywhere else, including `cox_decide`). Keyed on the calling export as well as the active section, because the section is activated before its call is queued and another export may still be running | host-side reqwest; the host injects the provider's auth header (§7a); the only path a decision plugin may reach its own paid provider from (T33.40.1) |
 | `cox_output(line)` / `cox_cancelled()` | inside `tool_call` | `tool_call` | `ToolCx.output` / `ToolCx.cancel` (`traits.rs:187`) |
-| `cox_redraw()` | any `ui` | all | marks the plugin's slots dirty (§8) |
+| `cox_redraw()` | any `ui`, or `desktop.canvas` | all | marks the plugin's slots and its canvas dirty (§8, §15.4) |
 
 Configuration comes in `InitIn.config`. That is the plugin's `[plugins.<id>]` table from `Config`, which gains `plugins: PluginsConfig { enabled, decide, #[serde(flatten)] entries }`, the same flatten pattern as `HooksConfig` and `McpConfig` (`config.rs:844,876`). The plugin validates its own table.
 
@@ -336,7 +341,7 @@ For both forms:
 - **A stdio server must be a real process.** rmcp's stdio transport speaks to a child process (`crates/cox-mcp/src/client.rs:91-100`), and a wasm plugin that wants tools already has the in-process `tools` capability, which is cheaper.
 - A command inside the package is covered by the digest. A PATH program (`npx`, `uvx`) is shown verbatim at approval.
 - `crates/cox` wraps the argv with the platform sandbox (`sandbox::Policy`, `cox-sandbox` after T32.3) before `cox-mcp` spawns it, so `cox-mcp` keeps depending on `cox-protocol` only. `client.rs:92` already clears the environment.
-- **Every MCP stdio server is sandboxed, not only a plugin's (resolved 2026-09-26, §14 decision 4).** `client.rs:91-98`'s existing, user-configured servers get the same `sandbox::Policy` wrap as a plugin's, with a per-server `sandbox = false` opt-out in config for setups that need it (T33.42 — its own card, so this behaviour change does not ride in on T33.19's landing).
+- **Every MCP stdio server is sandboxed, not only a plugin's (resolved 2026-09-26, §14 decision 4).** `client.rs:91-98`'s existing, user-configured servers get the same `sandbox::Policy` wrap as a plugin's, with a per-server `sandbox = false` opt-out in config for setups that need it (T33.42 — its own card, so this behaviour change does not ride in on T33.19's landing). Where the host cannot wrap a server's argv (Landlock-only, or no backend), the server is skipped with one notice and the session still opens; it is never spawned bare (T64.10). `sandbox = false` or `danger-full-access` are the explicit ways to run one without a wrap.
 - An HTTP `url` needs its host in `net`.
 
 **7d. Model calls by plugins.** A plugin that wants a model answer, for example a hook asking Jev, uses `cox_model_call`, never raw HTTP to a provider:
@@ -408,7 +413,7 @@ The desktop app draws the same slots, renderers and commands. Keys are terminal-
   - Per-call deadlines: render 20 ms, event batch 50 ms, hook ≤ `hooks.timeout_s`, tool ≤ the tool timeout, decide ≤ its point budget.
   - Queue depths as in §4, a kv quota, and vars off.
   - No fuel metering: epoch interruption (P13) is cheaper and enough.
-- **Filesystem.** Only WASI preopens from `fs`. Each root passes `cox_tools::path::confine` at load. `.git` and `.cox` are never writable (D7), and read grants mount `ro:` (P11). WASI is on only when `wasi = true` or `fs` is set. The `WasiCtx` has no environment and no arguments (P16).
+- **Filesystem.** Only WASI preopens from `fs`. Each root passes `cox_tools::path::confine` at load. `.git` and `.cox` are never writable (D7), and read grants mount `ro:` (P11). WASI is on only when `wasi = true` or `fs` is set. The `WasiCtx` has no environment and no arguments (P16). Implemented in `crates/cox-plugin/src/fs.rs` (T33.14.2): `cox-plugin` may not depend on `cox-sandbox`, so the session injects `confine`. `$WORKSPACE` mounts at `/workspace` and `$PLUGIN_DATA` (`<home>/plugin-data/<id>/`, created on demand) at `/data`, each with the manifest's sub-path appended. A WASI mount cannot hide a subdirectory, so an `fs.write` root is refused when it is inside `.git`/`.cox` or any of them exists anywhere beneath it (a walk capped at 50 000 entries; a larger tree is refused too): write `$WORKSPACE/out`, not `$WORKSPACE`, in a repository. A root also granted for write is not mounted a second time as `ro:`. A grant with no session roots fails the load.
 - **Network.** Only `cox_http`, only to allow-listed hosts, capped by `max_http_response_bytes`. extism's own `http_request` is compiled out (P5), and a test proves it refuses.
 - **No bypass.** No host function spawns a process, opens a file, writes the terminal, reads the keyring or decides a permission. MCP stdio servers (§7c) and external-agent CLI processes (`[[external_agents]]`, P35, `docs/design/external-agents.md`) are the only processes a plugin brings, and both run under the same sandbox wrap, spawned by the host, never by a WASM guest.
 - **Untrusted output.** Everything a plugin returns is untrusted like MCP output: tool descriptions and results go to the model through the normal archive and truncate path, and everything shown in the terminal is sanitized.
@@ -447,7 +452,7 @@ The compilation cache uses `with_cache_config` (P7), pointed at `~/.cox/cache/wa
 - Signatures.
 - The component model and WIT.
 - Plugin-to-plugin calls.
-- Plugins adding text to the system prompt (skills do that).
+- Plugins adding text to the system prompt, other than a granted `[[skills]]` entry's index line (decision 16).
 - A sidebar in the inline viewport.
 - Changing tool schemas within a running session.
 - Loading Claude Code plugin bundles as cox plugins.
@@ -474,7 +479,7 @@ The compilation cache uses `with_cache_config` (P7), pointed at `~/.cox/cache/wa
 | Lang | PDK | Target | Loads in extism today? | Plan |
 | --- | --- | --- | --- | --- |
 | Rust | `extism-pdk` 1.4.1, official | `wasm32-unknown-unknown` | yes (P17) | the reference: SDK, example and template first |
-| Go | `github.com/extism/go-pdk` v1.1.3, official (maintained, pushed 2026-01-22) | TinyGo `-target wasip1 -buildmode=c-shared`, or Go ≥ 1.24 `GOOS=wasip1` with `//go:wasmexport` | yes by the PDK's docs, with WASI on | SDK wrapper, example and template, built in the `plugins` CI job |
+| Go | `github.com/extism/go-pdk` v1.1.3, official (maintained, pushed 2026-01-22) | TinyGo `-target wasip1 -buildmode=c-shared`, or Go ≥ 1.24 `GOOS=wasip1` with `//go:wasmexport` | **yes (T33.34)**: TinyGo 0.43.0 `-target wasip1 -buildmode=c-shared` with `wasi = true` loads and runs the example | `plugins/sdk-go` over go-pdk, `plugins/examples/go`, `plugins/templates/go`; built and tested in the `plugin-examples` CI job |
 | Kotlin | none maintained (`LizAinslie/extism-kotlin-pdk`, last push 2023-11-30) | Kotlin/Wasm `wasmWasi`, Beta, WASI preview 1, needs GC and exception handling; `@WasmImport`/`@WasmExport` are experimental | **refuted (T33.35, 2026-09-26, R§4.3.5 P40–P43)**: a minimal `cox_init` module (Kotlin 2.4.20) fails to *parse* under extism 1.30.0's default engine config — `exceptions proposal not enabled` — regardless of WASI; Kotlin's `wasmWasi` output unconditionally uses the wasm exception-handling proposal, which extism enables only behind its non-default `wasmtime-exceptions` feature. With that feature on it instantiates and calls `cox_init` cleanly, with WASI off exactly as the real host runs today (A55/T33.43 is not the blocker here) | `wasmtime-exceptions` approved and on (A61), but any real module also imports `wasi_snapshot_preview1::random_get` from Kotlin's stdlib (R§4.3.5 P45), so Kotlin waits for WASI (T33.43, A63); the draft PDK and example are on branch `wip/t33.36-kotlin` |
 | Dart | none | `dart2wasm` targets JS environments only: "doesn't support execution in standard Wasm run-times like wasmtime" (dart.dev, Dart 3.13) | **no — refuted again 2026-09-26** (T33.37, R§4.3.5 P44): Dart 3.13.4's `dart compile wasm` still emits a JS bootstrap, and the module fails to parse under the workspace's pinned extism/wasmtime 43 (`exceptions proposal not enabled`) before even reaching its `wasm:js-string`/`dart2wasm` JS imports | documented exception: the Dart template scaffolds a plugin whose only capability is an `[[mcp]]` stdio server (`dart compile exe`, `dart_mcp` 0.5.2), so `--with` accepts only `tool` and `mcp` for Dart; dart-lang/sdk#56366 (WASI support) is still open — re-run the spike when it closes |
 
@@ -505,6 +510,8 @@ The creator resolved every open question this design and the Jev use case (A25/A
 13. **The ABI fix from the Jev research.** Writing the Jev plugin against `api = 1` as first drafted exposed a deadlock/ledger-bypass gap (T33.40.1, §4 above): `cox_decide` now returns either an `Advice` or a `ModelCall`, the host runs the call through the plugin's own provider with the budget gate and ledger, then calls `cox_decide_resume`; `cox_http` to a provider host is allowed only inside `cox_provider_stream`; `Question` is batched. The example provider throughout this document is named `typesafe`, not `jev` — the plugin id stays `jev`, the provider section it declares is `typesafe` (§2).
 14. **No prebuilt Jev plugin archive ships with the release.** Users build it from `plugins/jev` (`just plugin jev`) and install it with `cox plugin install <dir>` (§1).
 15. **Plugin agent definitions are grant-gated, local definitions win** (T45.3, 2026-09-29). An `[[agents]]` file is loaded only for a `Granted` plugin, and each file is its own approval line, so an update that adds or renames one asks again. A `.cox/agents/*.md` or `~/.cox/agents/*.md` definition of the same name wins over the plugin's, with a notice (T45.4). The definition's `permissionMode` can only narrow the parent's mode (T45.2).
+16. **Plugin skills are grant-gated, local skills win** (T33.46, A155, 2026-10-14). A `[[skills]]` folder is read only for a `Granted` plugin, only through the package (no `..`, no symlink, a regular `SKILL.md`), and only when its frontmatter `name` is the approved one; each folder is its own approval line. Its index line joins `system[2]`, which is built once per session, so the cache-stable prefix holds; the body stays out of the prompt until the `skill` tool loads it, as for any skill. A user or project skill of the same name wins, with a notice. The `skill` tool's output names the skill's folder, so a skill can point at files it bundles.
+17. **A plugin canvas shows static HTML, isolated by WebKit** (T33.47, A156, 2026-10-14). The one exception to "no plugin web views" (§15.4): a desktop pane of pages a plugin draws, behind `desktop.canvas`, with page JavaScript off, every load blocked, every navigation but the first refused and no bridge from the page; only the app's script, in its own content world, reports a click. A selection reaches the model only as an attachment the person sends. Approved by the creator through Weft's T106.6 on those guards; the design and its sources are `plugin-canvas.md`.
 
 ## 15. Surfaces: shared, terminal-only and desktop-only (T33.45, A134)
 
@@ -556,6 +563,7 @@ Each contribution is drawn natively by the app from declarative data; a plugin n
 | Palette actions | `palette = true` | `InitOut.desktop.palette: Vec<ActionDecl>` | DS§6.4 `CommandPalette`, Actions group: a `PaletteKind::Action` row (`crates/cox-app/src/palette.rs`) with id `plugin:<id>:<command>` and the symbol in its well | the same command is already in the TUI palette as `/<id>:<name>` |
 | Actionable notifications | `notify = true` | host function `cox_desktop_notify(DesktopNotice { level, title, body, actions })` in `cox:desktop/v1`; at most 2 actions `{ label, command }`; allowed in every export but render; level capped at `warn`; at most one per 10 s per plugin | DT§5.6: posted through `cox_app::app::Host` like an inbox item, its actions mapped back by CoxPlatform's `NotificationActions` (T37.27); posted only when the app is not frontmost or the session is not visible, otherwise shown as a notice | `Err(NotOnThisSurface)`; `cox_notify` is the shared notice |
 | Images in widgets | none (shows only bytes the digest covers) | `Widget::Image { path, alt }`: a package-relative PNG path (no `..`, `\` or `:` component, as an `[[agents]]` file), at most 256 KiB, counted by §8's node cap; never a URL, so the app never fetches for a plugin | DS§6.3 `PluginWidgetView` draws the image, `alt` as its accessibility label | the `alt` text as one dim line |
+| Canvas (A156, `plugin-canvas.md`) | `canvas = true` | `InitOut.desktop.canvas: Option<CanvasDecl { title, symbol, select_attr }>`; exports `cox_canvas(CanvasIn) -> CanvasOut { frames }` (at most 12 frames, 1 MiB each, 4 MiB in all) and `cox_canvas_select(CanvasSelect { frame, value }) -> Option<CanvasAttach { name, text }>` (at most 8 KiB); render-context host functions; redrawn by §8's model while the pane shows | a pane beside the transcript like the browser pane (⌘⇧D), one isolated WebKit page per frame; a selection lands in the composer as a `text/plain` attachment | not offered |
 
 Rules for all of them:
 
@@ -563,7 +571,8 @@ Rules for all of them:
 - `symbol` is an SF Symbol name matching `[a-z0-9.]{1,64}`. A name the system does not know draws `puzzlepiece.extension`. That `NSImage(systemSymbolName:accessibilityDescription:)` returns nil for an unknown name is verified by test, not by Apple's page (https://developer.apple.com/documentation/appkit/nsimage/init(systemsymbolname:accessibilitydescription:)), which did not render its text to a fetch on 2026-10-03: CoxUI's `PluginSymbolTests.anUnknownSymbolDrawsTheExtensionGlyph` (T33.45.7) passes on macOS 27 (2026-10-13), and CI runs it on its macOS runner.
 - `CommandOut` gains `OpenInspector`, the desktop counterpart of `OpenOverlay`.
 - Every string passes `cox_sanitize::sanitize` in `cox-app` before Swift sees it, as `WidgetView` does today.
-- **Not offered (open: the creator has not confirmed this, A134):** a sidebar section — the sidebar lists the window's sessions across projects (DS§6.4 `Sidebar`), while a plugin instance lives in one session (T33.44), so it would need a window-scoped plugin lifetime the host does not have; menu-bar items — the palette covers them and the menu bar is app-wide; plugin-supplied SwiftUI, HTML or web views — never; HTML from MCP servers is `v0.3-mcp-apps.md`'s separate path.
+- The canvas is the one contribution with exports of its own, `cox_canvas` and `cox_canvas_select`, and the one whose content is not a widget tree: static HTML the app shows with page script, every load and every navigation but the first off, and only the app's own script in its own content world, which reports a click (`plugin-canvas.md` §4). The HTML is untrusted and not filtered; WebKit's isolation is the boundary. A selection becomes a composer attachment the person sends or removes, never a turn of its own, and the plugin cannot open the pane.
+- **Not offered (open: the creator has not confirmed this, A134):** a sidebar section — the sidebar lists the window's sessions across projects (DS§6.4 `Sidebar`), while a plugin instance lives in one session (T33.44), so it would need a window-scoped plugin lifetime the host does not have; menu-bar items — the palette covers them and the menu bar is app-wide; plugin-supplied SwiftUI or scripted web views — never; static HTML only through the canvas above; HTML from MCP servers is `v0.3-mcp-apps.md`'s separate path.
 
 ### 15.5 Declaring surfaces
 
@@ -583,12 +592,13 @@ inspector = true
 toolbar = true
 palette = true
 notify = true
+canvas = true
 ```
 
 - `surfaces` takes `terminal`, `desktop`, `headless` and `acp`; absent means all four, so every existing manifest loads where it loads today. An empty list is an error. A UI-only plugin lists the two UI surfaces and skips `cox_init` in headless and ACP runs.
 - A surface table whose surface `surfaces` excludes is an error: it asks for something that can never run.
 - `ui.keys` stays accepted under `api = 1` as an alias of `terminal.keys` (the loader ORs them). `cox plugin new` and the docs write the new spelling; the alias goes at the next ABI major.
-- **Grant lines** (T33.6) gain `terminal.keys`, `desktop.inspector`, `desktop.toolbar`, `desktop.palette` and `desktop.notify`. A stored `ui.keys` line reads as `terminal.keys`, so nobody is asked again. `surfaces` adds no line: it only narrows.
+- **Grant lines** (T33.6) gain `terminal.keys`, `desktop.inspector`, `desktop.toolbar`, `desktop.palette`, `desktop.notify` and `desktop.canvas` (A156). A stored `ui.keys` line reads as `terminal.keys`, so nobody is asked again. `surfaces` adds no line: it only narrows.
 - **One grant covers both surfaces.** A grant stays per digest. The TUI modal and the CLI prompt (§3) list every line, the surface parts marked "terminal only" or "desktop only"; the app has no grant dialog and loads only `Granted` plugins, like headless (§3), so a grant given in the terminal or the CLI covers the app too, and nobody is asked twice.
 - `cox plugin list` (text and `--json`) and `cox doctor` show each plugin's surfaces.
 

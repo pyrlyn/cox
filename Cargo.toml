@@ -160,15 +160,15 @@ agent-client-protocol = "2.0"
 # `wasmtime-exceptions` turns on the Wasm exception-handling proposal
 # (`Config::wasm_exceptions`) and nothing else; Kotlin/Wasm output needs it
 # to parse (R§4.3.5 P42-P43). Approved by the creator for every plugin (A61).
-extism = { version = "1.30.0", default-features = false, features = ["wasmtime-exceptions"] }
-# extism 1.30.0 does not build with its default features off: it relies on
-# wasmtime 43's `anyhow` feature (`wasmtime::Error` -> `anyhow::Error`), which
+extism = { version = "1.41.0", default-features = false, features = ["wasmtime-exceptions"] }
+# extism 1.41.0 does not build with its default features off: it relies on
+# wasmtime 49's `anyhow` feature (`wasmtime::Error` -> `anyhow::Error`), which
 # only its `wasmtime-default-features` turns on, together with the whole
 # wasmtime default set (component model, async, threads, ...). This enables
 # that one feature by feature unification; the version follows extism's pin.
 # It must stay on extism's wasmtime major: any other major resolves to a second
 # wasmtime that extism never sees, and extism stops compiling (#68, 49.0.1).
-wasmtime = { version = "43", default-features = false, features = ["anyhow"] }
+wasmtime = { version = "49", default-features = false, features = ["anyhow"] }
 
 # cox-voice
 # T54.2 (A123): whisper.cpp bindings for local push-to-talk transcription.
@@ -208,8 +208,8 @@ async-trait = "0.1"
 # Lints every member inherits through `[lints] workspace = true`. CI runs
 # clippy with `-D warnings`, so `warn` here fails CI just like `deny`.
 # `unsafe_code` is denied; the few places that need it (edition-2024 env
-# mutation, fork/exec hooks, libproc and Landlock FFI, the uniffi glue) carry
-# a targeted `allow` with a `// why:` comment.
+# mutation, fork/exec hooks, libproc, Landlock and SQLite progress-handler FFI,
+# the uniffi glue) carry a targeted `allow` with a `// why:` comment.
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"

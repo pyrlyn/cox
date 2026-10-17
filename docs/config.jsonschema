@@ -167,7 +167,10 @@
         "readonly_in_workspace": [
           ".git",
           ".cox",
-          ".claude"
+          ".claude",
+          ".agents",
+          ".codex",
+          ".aws"
         ],
         "linux_backend": "auto"
       }
@@ -1210,12 +1213,12 @@
       "type": "object",
       "properties": {
         "mode": {
-          "description": "`permissions.mode`; project config may not set this to `bypass`.",
+          "description": "`permissions.mode`; project config may not widen it beyond the user's mode.",
           "$ref": "#/$defs/PermissionMode",
           "default": "default"
         },
         "approval": {
-          "description": "`permissions.approval`.",
+          "description": "`permissions.approval`; project config may not loosen it beyond the user's policy.",
           "$ref": "#/$defs/ApprovalPolicy",
           "default": "on-request"
         },
@@ -1320,12 +1323,12 @@
           "default": "workspace-write"
         },
         "network": {
-          "description": "Whether network access is allowed.",
+          "description": "Whether network access is allowed; project config may not turn it on.",
           "type": "boolean",
           "default": false
         },
         "writable": {
-          "description": "Extra writable roots beyond the workspace.",
+          "description": "Extra writable roots beyond the workspace; project config may only\nkeep roots the user layer already lists.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1341,7 +1344,10 @@
           "default": [
             ".git",
             ".cox",
-            ".claude"
+            ".claude",
+            ".agents",
+            ".codex",
+            ".aws"
           ]
         },
         "linux_backend": {
@@ -1594,7 +1600,7 @@
           "default": null
         },
         "command": {
-          "description": "The command to run.",
+          "description": "The shell line, the prompt text, or the URL, depending on `kind`.",
           "type": "string",
           "default": ""
         },
@@ -1607,9 +1613,34 @@
           "format": "uint32",
           "minimum": 0,
           "default": null
+        },
+        "kind": {
+          "description": "`command` (default), `prompt` or `http`. Absent on an old config.",
+          "$ref": "#/$defs/HookKind",
+          "default": "command"
         }
       },
       "additionalProperties": false
+    },
+    "HookKind": {
+      "description": "How a `[[hooks.<Event>]]` entry runs (T67.1). `command` is a shell line;\n`prompt` and `http` are stored here and run by T67.2, never as a shell.",
+      "oneOf": [
+        {
+          "description": "Run `command` as a shell line. The default, so a config written\nbefore `kind` existed stays a command hook.",
+          "type": "string",
+          "const": "command"
+        },
+        {
+          "description": "`command` is the prompt text a cheap-tier judge answers.",
+          "type": "string",
+          "const": "prompt"
+        },
+        {
+          "description": "`command` is the URL an HTTP hook POSTs the payload to.",
+          "type": "string",
+          "const": "http"
+        }
+      ]
     },
     "McpConfig": {
       "description": "`[mcp]` (plan.md §1.6/§1.1). `deny_unknown_fields` is not set for the\nsame reason as `HooksConfig`: `servers` is a flattened catch-all for\narbitrary server names.",
@@ -1633,7 +1664,7 @@
           "default": true
         },
         "servers": {
-          "description": "`[mcp.servers.<name>]` entries.",
+          "description": "`[mcp.servers.<name>]` entries. User config only: a project config\ncannot add or change a server (T64.7); `.mcp.json` is a separate surface.",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/McpServerConfig"
@@ -2030,7 +2061,7 @@
           "default": false
         },
         "dir": {
-          "description": "Override for `~/.cox/projects/<slug>/memory`; empty means default.",
+          "description": "Override for `~/.cox/projects/<slug>/memory`; empty means default. A project config may only name an existing absolute directory inside its own git root (T64.17).",
           "type": "string",
           "default": ""
         },

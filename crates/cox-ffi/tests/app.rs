@@ -148,6 +148,23 @@ fn models_reach_swift_with_the_code_tiers_model_first() {
 }
 
 #[tokio::test]
+async fn best_of_merge_and_mergeable_cross_and_refuse_an_unknown_group() {
+    use cox_app::best_of::{BestOfId, BestOfMerge, Candidate};
+    let dir = scratch(None);
+    let app = ffi_app(dir.path(), Arc::default());
+    let id = BestOfId("no-such-group".into());
+    let err = app.mergeable(id.clone()).err();
+    assert!(matches!(err, Some(AppError::Workspace { .. })), "{err:?}");
+    let merge = BestOfMerge {
+        id,
+        from: vec![0, 1],
+        by: Candidate::Cox { model: None },
+    };
+    let refused = app.best_of_merge(merge, "dark".into()).await.err();
+    assert!(refused.is_some(), "an unknown group must not start a merge");
+}
+
+#[tokio::test]
 async fn usable_providers_ask_the_host_keychain() {
     let dir = scratch(None);
     let mut keyed = MemoryHost::default();
@@ -224,4 +241,31 @@ fn a_blocked_send_and_a_locked_provider_cross_as_their_own_errors() {
         matches!(&locked, AppError::ProviderLocked { message } if message.contains("new session")),
         "{locked:?}"
     );
+}
+
+/// plugin-canvas §5, §8: the canvas calls cross the FFI. A session with no
+/// canvas plugin declares none, shows nothing and drops a click.
+#[tokio::test]
+async fn canvas_calls_cross_the_ffi_and_fail_open() {
+    let dir = scratch(Some(&scenario("read-and-reply")));
+    let session = open(dir.path(), Arc::default()).await.expect("open");
+    assert!(session.plugin_canvases().is_empty());
+    let shown = Arc::clone(&session).show_canvas("weft".into(), 800, 600);
+    assert!(shown.await.is_ok());
+    let click = Arc::clone(&session).select_canvas("weft".into(), "home".into(), "hero".into());
+    assert_eq!(click.await, None);
+    session.hide_canvas("weft".into());
+}
+
+/// T33.47.10: closing the session ends a canvas pull that is waiting, as
+/// it ends the patch pull; otherwise the pull holds the session for ever.
+#[tokio::test]
+async fn closing_the_session_ends_the_canvas_pull() {
+    let dir = scratch(Some(&scenario("read-and-reply")));
+    let session = open(dir.path(), Arc::default()).await.expect("open");
+    let pull = tokio::spawn(Arc::clone(&session).next_canvas());
+    tokio::task::yield_now().await;
+    session.close();
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(5), pull).await;
+    assert_eq!(ended.expect("the pull ends").expect("joined"), None);
 }

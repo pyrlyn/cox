@@ -143,7 +143,7 @@ struct RewindMenuRow: View {
       .background { if isHighlighted { shape.fill(Color(.accent)) } }
       .contentShape(shape)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
     .accessibilityAddTraits(isHighlighted ? .isSelected : [])
   }
 }

@@ -151,6 +151,19 @@ pub fn keyring_enabled(value: Option<&str>) -> bool {
     )
 }
 
+/// [`keyring_enabled`] applied to the live [`KEYRING_ENV`] value. The one
+/// place the env var is read, so the provider key lookup and the MCP OAuth
+/// store cannot drift apart on what "off" means (T64.22); they live in
+/// crates that may not depend on each other, so the shared policy sits in
+/// the contract crate both already depend on.
+pub fn keyring_enabled_in_env() -> bool {
+    keyring_enabled(std::env::var(KEYRING_ENV).ok().as_deref())
+}
+
+/// Keyring service every cox credential is filed under: entries are
+/// `cox/<account>` (`cox/anthropic`, `cox/mcp/<server>`, ...).
+pub const KEYRING_SERVICE: &str = "cox";
+
 /// `[core]` (plan.md §1.6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -860,9 +873,9 @@ pub enum CompactionStrategy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct PermissionsConfig {
-    /// `permissions.mode`; project config may not set this to `bypass`.
+    /// `permissions.mode`; project config may not widen it beyond the user's mode.
     pub mode: PermissionMode,
-    /// `permissions.approval`.
+    /// `permissions.approval`; project config may not loosen it beyond the user's policy.
     pub approval: ApprovalPolicy,
     /// `allow` rule strings (plan.md §1.8 grammar).
     pub allow: Vec<String>,
@@ -901,9 +914,10 @@ impl Default for PermissionsConfig {
 pub struct SandboxConfig {
     /// `sandbox.mode`; project config may not set this to `danger-full-access`.
     pub mode: SandboxMode,
-    /// Whether network access is allowed.
+    /// Whether network access is allowed; project config may not turn it on.
     pub network: bool,
-    /// Extra writable roots beyond the workspace.
+    /// Extra writable roots beyond the workspace; project config may only
+    /// keep roots the user layer already lists.
     pub writable: Vec<PathBuf>,
     /// Paths inside the workspace that stay read-only even in `workspace-write`.
     pub readonly_in_workspace: Vec<PathBuf>,
@@ -917,10 +931,16 @@ impl Default for SandboxConfig {
             mode: SandboxMode::WorkspaceWrite,
             network: false,
             writable: Vec::new(),
+            // Repo-local agent and cloud-credential dirs stay read-only in a
+            // writable workspace; the set follows codex
+            // `codex-rs/protocol/src/permissions.rs` L40-51 at f0c5077c, implemented independently.
             readonly_in_workspace: vec![
                 PathBuf::from(".git"),
                 PathBuf::from(".cox"),
                 PathBuf::from(".claude"),
+                PathBuf::from(".agents"),
+                PathBuf::from(".codex"),
+                PathBuf::from(".aws"),
             ],
             linux_backend: LinuxBackend::Auto,
         }
@@ -1060,16 +1080,33 @@ impl Default for TuiConfig {
     }
 }
 
+/// How a `[[hooks.<Event>]]` entry runs (T67.1). `command` is a shell line;
+/// `prompt` and `http` are stored here and run by T67.2, never as a shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HookKind {
+    /// Run `command` as a shell line. The default, so a config written
+    /// before `kind` existed stays a command hook.
+    #[default]
+    Command,
+    /// `command` is the prompt text a cheap-tier judge answers.
+    Prompt,
+    /// `command` is the URL an HTTP hook POSTs the payload to.
+    Http,
+}
+
 /// One `[[hooks.<Event>]]` entry.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct HookConfig {
     /// Tool/subject matcher (Claude Code hook matcher syntax), if any.
     pub matcher: Option<String>,
-    /// The command to run.
+    /// The shell line, the prompt text, or the URL, depending on `kind`.
     pub command: String,
     /// Per-hook timeout override, in seconds; falls back to `hooks.timeout_s`.
     pub timeout_s: Option<u32>,
+    /// `command` (default), `prompt` or `http`. Absent on an old config.
+    pub kind: HookKind,
 }
 
 /// `[hooks]` (plan.md §1.6/§1.10/D14). The fixed `timeout_s`/`fail_open`
@@ -1148,7 +1185,8 @@ pub struct McpConfig {
     pub deferred: bool,
     /// `--no-mcp` sets this to `false`; not a `default.toml` key.
     pub enabled: bool,
-    /// `[mcp.servers.<name>]` entries.
+    /// `[mcp.servers.<name>]` entries. User config only: a project config
+    /// cannot add or change a server (T64.7); `.mcp.json` is a separate surface.
     pub servers: HashMap<String, McpServerConfig>,
 }
 
@@ -1421,7 +1459,7 @@ pub struct MemoryConfig {
     pub enabled: bool,
     /// Whether end-of-session extraction runs (on the `memory` job's tier).
     pub extract: bool,
-    /// Override for `~/.cox/projects/<slug>/memory`; empty means default.
+    /// Override for `~/.cox/projects/<slug>/memory`; empty means default. A project config may only name an existing absolute directory inside its own git root (T64.17).
     pub dir: String,
     /// The bar a `salience` `Score` must clear to keep an extracted item
     /// (T33.21.1); fixed here, never moved by the plugin's answer.
@@ -2029,6 +2067,41 @@ mod tests {
         );
     }
 
+    /// T69.3: repo-local metadata dirs (`.aws` holds credentials that
+    /// `Read(~/.aws/**)` misses when the repo carries its own) stay read-only
+    /// in a writable workspace by default, in the hand-written default and in
+    /// `default.toml` alike.
+    #[test]
+    fn sandbox_readonly_defaults_cover_metadata_dirs() {
+        use figment::providers::Format as _;
+        let expected = [".git", ".cox", ".claude", ".agents", ".codex", ".aws"];
+        let from_toml: Config =
+            figment::Figment::from(figment::providers::Toml::string(DEFAULT_CONFIG_TOML))
+                .extract()
+                .expect("default.toml parses");
+        assert_eq!(
+            Config::default().sandbox.readonly_in_workspace,
+            expected.map(PathBuf::from).to_vec()
+        );
+        assert_eq!(from_toml.sandbox, SandboxConfig::default());
+    }
+
+    /// T69.3: a user who sets `readonly_in_workspace` keeps exactly their own
+    /// list; the default metadata dirs are not appended to it.
+    #[test]
+    fn user_sandbox_readonly_list_is_kept() {
+        use figment::providers::Format as _;
+        let user: Config = figment::Figment::from(figment::providers::Toml::string(
+            "[sandbox]\nreadonly_in_workspace = [\"vendor\"]\n",
+        ))
+        .extract()
+        .expect("user layer parses");
+        assert_eq!(
+            user.sandbox.readonly_in_workspace,
+            vec![PathBuf::from("vendor")]
+        );
+    }
+
     /// T41.1: the hand-written `LspConfig::default()` and the `[lsp]` rows
     /// of `default.toml` carry the same matrix, so a layer that omits a
     /// server table or key falls back to what the docs say.
@@ -2158,6 +2231,33 @@ mod tests {
         }"#;
         let cfg: HooksConfig = serde_json::from_str(with_event).expect("flatten captures it");
         assert_eq!(cfg.events["PreToolUse"][0].command, "echo hi");
+        assert_eq!(cfg.events["PreToolUse"][0].kind, HookKind::Command);
+    }
+
+    /// An entry written before `kind` existed is a command hook. A named
+    /// kind round-trips, and an unknown kind is rejected rather than run.
+    #[test]
+    fn old_hook_config_without_kind_parses_as_command() {
+        let old: HookConfig = serde_json::from_str(r#"{"command":"echo hi"}"#).expect("old entry");
+        assert_eq!(old.kind, HookKind::Command);
+        assert_eq!(old.command, "echo hi");
+
+        let prompt: HookConfig =
+            serde_json::from_str(r#"{"command":"is this safe?","kind":"prompt"}"#)
+                .expect("prompt entry");
+        assert_eq!(prompt.kind, HookKind::Prompt);
+        assert_eq!(prompt.command, "is this safe?");
+
+        let http: HookConfig =
+            serde_json::from_str(r#"{"command":"https://hooks.example/pre","kind":"http"}"#)
+                .expect("http entry");
+        assert_eq!(http.kind, HookKind::Http);
+
+        let unknown = serde_json::from_str::<HookConfig>(r#"{"command":"x","kind":"agent"}"#);
+        assert!(
+            unknown.is_err(),
+            "an unknown kind must not parse as a command"
+        );
     }
 
     #[test]
@@ -2235,6 +2335,25 @@ mod tests {
         for on in [None, Some(""), Some("on"), Some("1"), Some("of")] {
             assert!(keyring_enabled(on), "{on:?} keeps it");
         }
+    }
+
+    /// The provider lookup and the MCP store both call this instead of
+    /// reading the env var themselves (T64.22), so the live variable must map
+    /// through `keyring_enabled` exactly. Only the switch is read; no keychain
+    /// is touched.
+    #[test]
+    // why: env::set_var/remove_var are unsafe in edition 2024; one test owns
+    // this variable and nextest runs each test in its own process.
+    #[allow(unsafe_code)]
+    fn keyring_enabled_in_env_follows_the_live_variable() {
+        unsafe { std::env::set_var(KEYRING_ENV, "off") };
+        assert!(!keyring_enabled_in_env());
+        unsafe { std::env::set_var(KEYRING_ENV, " False ") };
+        assert!(!keyring_enabled_in_env());
+        unsafe { std::env::set_var(KEYRING_ENV, "on") };
+        assert!(keyring_enabled_in_env());
+        unsafe { std::env::remove_var(KEYRING_ENV) };
+        assert!(keyring_enabled_in_env());
     }
 
     #[test]

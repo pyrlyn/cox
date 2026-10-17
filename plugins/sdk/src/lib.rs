@@ -235,6 +235,8 @@ where
 /// | `on_event` | `cox_on_event` | `EventBatch` → `Effects` |
 /// | `hook` | `cox_hook` | `HookCall` → `Value` (`HookOutcome`) |
 /// | `decide` | `cox_decide` | `Question` → `Advice` |
+/// | `decide_call` | `cox_decide` | `Question` → `DecideOut` (two-phase) |
+/// | `decide_resume` | `cox_decide_resume` | `DecideResume` → `Option<Advice>` |
 /// | `tool_subject` | `cox_tool_subject` | `ToolCallIn` → `String` |
 /// | `tool_risk` | `cox_tool_risk` | `ToolCallIn` → `Value` (`Risk`) |
 /// | `tool_call` | `cox_tool_call` | `ToolCallIn` → `Value` (`ToolOutput`) |
@@ -242,6 +244,8 @@ where
 /// | `command` / `key` | `cox_command` / `cox_key` | `CommandIn` → `CommandOut` |
 /// | `render` | `cox_render` | `RenderIn` → `Widget` |
 /// | `render_item` | `cox_render_item` | `RenderItemIn` → `Option<Widget>` |
+/// | `canvas` | `cox_canvas` | `CanvasIn` → `CanvasOut` |
+/// | `canvas_select` | `cox_canvas_select` | `CanvasSelect` → `Option<CanvasAttach>` |
 /// | `shutdown` | `cox_shutdown` | `()` → `()` |
 #[macro_export]
 macro_rules! register {
@@ -259,6 +263,13 @@ macro_rules! __export_fn {
     (on_event, $f:path) => { $crate::__export_fn!(@ cox_on_event, $crate::EventBatch, $crate::Effects, $f); };
     (hook, $f:path) => { $crate::__export_fn!(@ cox_hook, $crate::HookCall, $crate::Value, $f); };
     (decide, $f:path) => { $crate::__export_fn!(@ cox_decide, $crate::Question, $crate::Advice, $f); };
+    // The two-phase form (T33.40.1): `cox_decide` may hand the host a model
+    // call, whose events come back through `cox_decide_resume`. A separate
+    // key because both forms export `cox_decide` with different outputs.
+    (decide_call, $f:path) => { $crate::__export_fn!(@ cox_decide, $crate::Question, $crate::DecideOut, $f); };
+    (decide_resume, $f:path) => {
+        $crate::__export_fn!(@ cox_decide_resume, $crate::DecideResume, Option<$crate::Advice>, $f);
+    };
     (tool_subject, $f:path) => { $crate::__export_fn!(@ cox_tool_subject, $crate::ToolCallIn, String, $f); };
     (tool_risk, $f:path) => { $crate::__export_fn!(@ cox_tool_risk, $crate::ToolCallIn, $crate::Value, $f); };
     (tool_call, $f:path) => { $crate::__export_fn!(@ cox_tool_call, $crate::ToolCallIn, $crate::Value, $f); };
@@ -270,6 +281,10 @@ macro_rules! __export_fn {
     (render, $f:path) => { $crate::__export_fn!(@ cox_render, $crate::RenderIn, $crate::Widget, $f); };
     (render_item, $f:path) => {
         $crate::__export_fn!(@ cox_render_item, $crate::RenderItemIn, Option<$crate::Widget>, $f);
+    };
+    (canvas, $f:path) => { $crate::__export_fn!(@ cox_canvas, $crate::CanvasIn, $crate::CanvasOut, $f); };
+    (canvas_select, $f:path) => {
+        $crate::__export_fn!(@ cox_canvas_select, $crate::CanvasSelect, Option<$crate::CanvasAttach>, $f);
     };
     (shutdown, $f:path) => { $crate::__export_fn!(@ cox_shutdown, (), (), $f); };
     (@ $name:ident, $in:ty, $out:ty, $f:path) => {
@@ -408,6 +423,9 @@ mod tests {
             let _ = q;
             Err(SdkError::Wire("abstain".into()))
         }
+        fn decide_resume(_: DecideResume) -> R<Option<Advice>> {
+            Ok(None)
+        }
         fn subject(c: ToolCallIn) -> R<String> {
             Ok(c.name)
         }
@@ -423,6 +441,12 @@ mod tests {
         fn render_item(_: RenderItemIn) -> R<Option<Widget>> {
             Ok(None)
         }
+        fn canvas(_: CanvasIn) -> R<CanvasOut> {
+            Ok(CanvasOut::default())
+        }
+        fn canvas_select(_: CanvasSelect) -> R<Option<CanvasAttach>> {
+            Ok(None)
+        }
         fn shutdown(_: ()) -> R<()> {
             Ok(())
         }
@@ -432,6 +456,7 @@ mod tests {
             on_event => on_event,
             hook => hook,
             decide => decide,
+            decide_resume => decide_resume,
             tool_subject => subject,
             tool_risk => value,
             tool_call => value,
@@ -440,6 +465,8 @@ mod tests {
             key => command,
             render => render,
             render_item => render_item,
+            canvas => canvas,
+            canvas_select => canvas_select,
             shutdown => shutdown,
         );
     }

@@ -8,8 +8,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
-# Build and test jobs need only to read the repository; a job that needs more
-# (revert-on-failure) declares its own.
+# Build and test jobs need only to read the repository; a job that needs more declares its own.
 permissions:
   contents: read
 
@@ -115,7 +114,7 @@ jobs:
 
   # P57 (T57.1): `cargo check` and clippy for x64 and ARM64 Windows over the
   # crates that build there, listed once in the justfile (`windows_crates`);
-  # each P57 card adds its crates. Not in revert-on-failure's `needs`: it is
+  # each P57 card adds its crates. It is
   # required for a merge only once T57.11 builds the whole workspace.
   # Off until the Windows work is built and tested on a Windows host (creator,
   # 2026-09-29); CI comes after that.
@@ -197,8 +196,8 @@ jobs:
   # Guest-language examples that need a toolchain of their own (PL§13):
   # each is `#[ignore]`d in the main `rust` job with a reason naming
   # `just plugin-examples <lang>`, so a missing toolchain here is a CI
-  # failure rather than a silently skipped test. Dart (T33.38) today;
-  # go/kotlin join this job once T33.34/T33.36 land.
+  # failure rather than a silently skipped test. Dart (T33.38) and Go
+  # (T33.34) today; kotlin joins this job once T33.36 lands.
   plugin-examples:
     needs: config
     if: >-
@@ -213,6 +212,16 @@ jobs:
       - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      # Go and TinyGo at the versions plugins/mise.toml pins. Before the
+      # sccache step, which sets RUSTC_WRAPPER after mise's [env] does. No
+      # shims: the template test runs `go` from a scratch dir, where a shim
+      # finds no config; the real bin dirs go on PATH instead.
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          working_directory: plugins
+          install_args: go tinygo
+          add_shims_to_path: false
 
       - uses: ./.github/actions/sccache
         with:
@@ -242,6 +251,17 @@ jobs:
 
       - name: dart plugin example e2e
         run: cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_dart)'
+
+      - name: build the Go example
+        run: |
+          (cd plugins/sdk-go && go test ./... && tinygo test .)
+          cd plugins/examples/go
+          go test ./...
+          tinygo build -o example_go.wasm -target wasip1 -buildmode=c-shared .
+
+      # Also scaffolds `cox plugin new --lang go` and builds it with TinyGo.
+      - name: go plugin example e2e
+        run: cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
 
   deny:
     needs: config
@@ -563,26 +583,3 @@ jobs:
 
       - name: docs check
         run: just docs-check
-
-  revert-on-failure:
-    name: revert-on-failure
-    needs:
-      [
-        rust, sandbox-landlock, plugins, plugin-examples, deny, audit,
-        footprint-macos, footprint-linux, docs,
-      ]
-    if: >-
-      always()
-      && github.event_name == 'push'
-      && github.ref == 'refs/heads/main'
-      && contains(join(needs.*.result, ','), 'failure')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      # The shared action skips new branches, bot and earlier auto-revert commits, bases
-      # missing locally and pushes touching .github/ (GITHUB_TOKEN cannot push workflow
-      # files). No re-apply PR, as before (that would need pull-requests: write).
-      - uses: pyrlyn/ci/.github/actions/revert-on-failure@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
-        with:
-          reapply-pr: "false"

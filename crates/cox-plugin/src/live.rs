@@ -28,6 +28,7 @@ use crate::PluginError;
 use crate::advisor::PluginAdvisor;
 use crate::context::Context;
 use crate::events::{PluginTap, Redraw, subscriptions};
+use crate::fs::{self, FsRoots};
 use crate::grant;
 use crate::hooks::PluginHooks;
 use crate::host::PluginHost;
@@ -239,12 +240,20 @@ pub struct LivePlugins {
     invoker: Arc<Late<dyn ToolInvoker>>,
     plugins: Vec<Live>,
     surface: Option<Surface>,
+    fs: Option<FsRoots>,
 }
 
 impl LivePlugins {
     /// Fixed by session assembly before any plugin is loaded.
     pub fn set_surface(&mut self, surface: Surface) {
         self.surface = Some(surface);
+    }
+
+    /// Fixed by session assembly before any plugin is loaded: the workspace
+    /// and the `confine` guard `capabilities.fs` resolves against (T33.14.2).
+    /// Unset, a plugin that asks for `fs` is not loaded.
+    pub fn set_fs(&mut self, roots: FsRoots) {
+        self.fs = Some(roots);
     }
 
     fn surface(&self) -> Surface {
@@ -296,7 +305,14 @@ impl LivePlugins {
                 .with_tool_invoker(self.invoker.clone(), runtime);
         }
         let env = Arc::new(env);
-        let host = PluginHost::load_with(wasm, &manifest.limits, env.clone())?;
+        let mounts = fs::mounts(
+            manifest.id.as_str(),
+            manifest.wasi,
+            &manifest.capabilities.fs,
+            self.fs.as_ref(),
+        )
+        .map_err(|e| PluginError::Load(e.to_string()))?;
+        let host = PluginHost::load_with_fs(wasm, &manifest.limits, env.clone(), &mounts)?;
         self.plugins.push(Live {
             manifest: manifest.clone(),
             host: Arc::new(host),
@@ -382,6 +398,9 @@ impl LivePlugins {
                             out.desktop.palette.clear();
                             dropped.push("desktop.palette");
                         }
+                        if out.desktop.canvas.take().is_some() {
+                            dropped.push("desktop.canvas");
+                        }
                         let before = out.status.len() + out.panels.len();
                         out.status.retain(|slot| *slot != Slot::DesktopInspector);
                         out.panels.retain(|slot| *slot != Slot::DesktopInspector);
@@ -401,6 +420,9 @@ impl LivePlugins {
                         }
                         if !p.granted.iter().any(|g| g == "desktop.palette") {
                             out.desktop.palette.clear();
+                        }
+                        if !p.granted.iter().any(|g| g == "desktop.canvas") {
+                            out.desktop.canvas = None;
                         }
                     }
                     if !dropped.is_empty() {
@@ -594,6 +616,34 @@ mod tests {
             assert_eq!(notices.len(), 1, "{notices:?}");
             assert_eq!(notices[0].0, Level::Info);
             assert!(notices[0].1.contains(missing), "{notices:?}");
+        }
+    }
+
+    /// The canvas is a desktop part with its own grant line
+    /// (`docs/design/plugin-canvas.md` §1): kept only on the desktop and only
+    /// when `desktop.canvas` was granted.
+    #[test]
+    fn canvas_is_kept_only_on_the_desktop_with_its_grant() {
+        let wasm = init_module(
+            r#"{"desktop":{"canvas":{"title":"Weft","symbol":"square.on.square","select_attr":"data-weft-path"}}}"#,
+        );
+        let granted = json!({ "desktop": { "canvas": true } });
+        let ungranted = json!({ "desktop": { "inspector": true } });
+        for (surface, caps, kept) in [
+            (Surface::Desktop, &granted, true),
+            (Surface::Desktop, &ungranted, false),
+            (Surface::Terminal, &granted, false),
+        ] {
+            let mut live = LivePlugins::default();
+            live.set_surface(surface);
+            live.load(&manifest("canvas", caps.clone()), &wasm, store())
+                .expect("loads");
+            live.start(&PluginsConfig::default(), SessionId::new(), Path::new("/w"));
+            let init = live.plugins()[0].init_out().expect("init");
+            assert_eq!(init.desktop.canvas.is_some(), kept, "{surface:?} {caps}");
+            if surface == Surface::Terminal {
+                assert!(live.take_notices()[0].1.contains("desktop.canvas"));
+            }
         }
     }
 

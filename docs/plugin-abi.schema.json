@@ -156,7 +156,8 @@
           "default": {
             "inspector": null,
             "toolbar": [],
-            "palette": []
+            "palette": [],
+            "canvas": null
           }
         }
       },
@@ -263,6 +264,18 @@
           },
           "description": "Command-palette actions.",
           "default": []
+        },
+        "canvas": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CanvasDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The canvas pane, filled by `cox_canvas`\n(`docs/design/plugin-canvas.md`).",
+          "default": null
         }
       },
       "description": "What `InitOut.desktop` carries (PL§15.4). The app draws each one natively\nfrom this data; a plugin never supplies UI code."
@@ -307,6 +320,29 @@
         "symbol"
       ],
       "description": "A toolbar item or palette action. A click goes through `cox_command`, so\nit cannot submit anything a command could not."
+    },
+    "CanvasDecl": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The pane's title, 1–64 characters."
+        },
+        "symbol": {
+          "type": "string",
+          "description": "An SF Symbol name; see [`is_symbol_name`]."
+        },
+        "select_attr": {
+          "type": "string",
+          "description": "The attribute a click reports, from the nearest element carrying it:\n`data-` and 1–48 of `[a-z0-9-]`."
+        }
+      },
+      "required": [
+        "title",
+        "symbol",
+        "select_attr"
+      ],
+      "description": "The canvas pane a plugin adds. Its pages are static HTML the app shows\nwith page script, loads and navigation off; only the app's own script\nreports a click (`docs/design/plugin-canvas.md` §4)."
     },
     "EventBatch": {
       "type": "object",
@@ -621,6 +657,13 @@
         "model": {
           "type": "string",
           "description": "The model id to send."
+        },
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The section's base URL as the host bound it, which a user config may\noverride (T33.40.4); `cox_http` allows only this host. Absent from an\nolder host, so a guest falls back to its manifest's `base_url`."
         }
       },
       "required": [
@@ -1575,6 +1618,108 @@
         "command"
       ],
       "description": "A button on a [`DesktopNotice`]."
+    },
+    "CanvasIn": {
+      "type": "object",
+      "properties": {
+        "width_pt": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "The pane's width."
+        },
+        "height_pt": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "The pane's height."
+        }
+      },
+      "required": [
+        "width_pt",
+        "height_pt"
+      ],
+      "description": "`cox_canvas` input: the pane's size, in points."
+    },
+    "CanvasOut": {
+      "type": "object",
+      "properties": {
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Frame"
+          },
+          "description": "At most [`MAX_CANVAS_FRAMES`].",
+          "default": []
+        }
+      },
+      "description": "`cox_canvas` output: the frames, in the order the pane shows them."
+    },
+    "Frame": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique on the canvas: 1–64 of `[a-z0-9_.-]`."
+        },
+        "title": {
+          "type": "string",
+          "description": "Shown above the frame; cut to 80 characters."
+        },
+        "width_pt": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "The frame's width; see [`FRAME_WIDTHS`]."
+        },
+        "html": {
+          "type": "string",
+          "description": "The page. Untrusted: the app isolates it, so it is not filtered."
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "width_pt",
+        "html"
+      ],
+      "description": "One page on the canvas."
+    },
+    "CanvasSelect": {
+      "type": "object",
+      "properties": {
+        "frame": {
+          "type": "string",
+          "description": "The frame's id."
+        },
+        "value": {
+          "type": "string",
+          "description": "The `select_attr` value of the clicked element or its nearest\nancestor: 1–256 characters, no control characters."
+        }
+      },
+      "required": [
+        "frame",
+        "value"
+      ],
+      "description": "`cox_canvas_select` input: a click on a frame. The output is an\n`Option<CanvasAttach>`."
+    },
+    "CanvasAttach": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The chip's label; cut to 80 characters."
+        },
+        "text": {
+          "type": "string",
+          "description": "At most [`MAX_ATTACH_TEXT`] bytes."
+        }
+      },
+      "required": [
+        "name",
+        "text"
+      ],
+      "description": "What a selection adds to the composer: a `text/plain` attachment the\nperson sends with their next turn or removes."
     }
   }
 }

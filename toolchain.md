@@ -25,6 +25,8 @@ Programs the project uses and the direct packages from its manifests.
 | colima | global (mise) | Docker runtime for Terminal-Bench (the creator's choice) | https://github.com/abiosoft/colima |
 | LM Studio (`lms`) | desktop app | Local model server for the eval matrix (`cox-bench`, provider `lmstudio`): OpenAI Chat and Anthropic Messages endpoints on :1234 | https://lmstudio.ai/docs/developer |
 | docker-cli, docker-compose, docker-buildx | global (mise) | Harbor drives task containers through `docker compose` and `docker buildx build` | https://github.com/docker/cli , https://github.com/docker/compose , https://github.com/docker/buildx |
+| go | mise (`plugins/mise.toml`) | T33.34: the Go plugin SDK (`plugins/sdk-go`), `plugins/examples/go` and `plugins/templates/go`; TinyGo's GOROOT, and `go test` for the pure parts | https://github.com/golang/go |
+| tinygo | mise (`plugins/mise.toml`) | T33.34: builds a Go plugin as a `wasip1` module extism loads (`-target wasip1 -buildmode=c-shared`); 0.43.0 takes Go 1.25–1.27 | https://github.com/tinygo-org/tinygo |
 | dart | mise (`plugins/mise.toml`) | Builds `plugins/templates/dart` and `plugins/examples/dart` (T33.38): Dart cannot emit a wasm module extism can load (research.md §4.3.5 P44), so its only plugin capability is an `[[mcp]]` stdio server, `dart compile exe` | https://github.com/dart-lang/sdk |
 | node | mise (`mise.toml`) | Runs Style Dictionary, the desktop token build (`just desktop-tokens`, T37.17, DS§2) | https://github.com/nodejs/node |
 | SwiftLint | mise (`mise.toml`, aqua) | Lints the macOS app (T37.18): default rules plus DS§9's no-literal custom rules in `desktop/macos/.swiftlint.yml`; CI's `desktop-macos-lint` job; packages run the same version through the SwiftLintPlugins build-tool plugin | https://github.com/realm/SwiftLint |
@@ -96,7 +98,7 @@ Programs the project uses and the direct packages from its manifests.
 | pulldown-cmark | local | https://crates.io/crates/pulldown-cmark | T5.3: plan.md says pulldown-cmark 0.10; 0.13 is the current line with the same Tag/TagEnd API. syntect without onig (pure-Rust fancy-regex engine). Lives in `cox-render` (T32.2). |
 | ratatui | local | https://crates.io/crates/ratatui | cox-tui |
 | reqwest | local | https://crates.io/crates/reqwest | cox-provider; cox-plugin: the host side of `cox_http` (T33.14.1) |
-| url | local | https://crates.io/crates/url | cox-tools: LSP `file://` URI ↔ path (T41.3); `cox-app`'s browser tools parse a URL and pass only http/https (T51.7). 2.5.8, the latest release, 2026-01-05 |
+| url | local | https://crates.io/crates/url | cox-mcp: reads `state` from the OAuth callback query (T64.13); cox-tools: LSP `file://` URI ↔ path (T41.3); `cox-app`'s browser tools parse a URL and pass only http/https (T51.7). 2.5.8, the latest release, 2026-01-05 |
 | rmcp | local | https://crates.io/crates/rmcp | cox-mcp |
 | rubato | local | https://github.com/HEnquist/rubato | cox-voice: the microphone's rate (often 44.1 or 48 kHz) to whisper's 16 kHz (T54.3, A123) |
 | rstest | local | https://crates.io/crates/rstest | Rust dependency |
@@ -135,7 +137,7 @@ Programs the project uses and the direct packages from its manifests.
 | unic-langid | local | https://crates.io/crates/unic-langid | cox-i18n: BCP 47 language identifiers for locale negotiation |
 | unicode-width | local | https://crates.io/crates/unicode-width | Rust dependency |
 | vt100 | local | https://crates.io/crates/vt100 | Rust dependency |
-| wasmtime | local (`anyhow` feature only) | https://github.com/bytecodealliance/wasmtime | cox-plugin: the runtime under extism; declared only to enable the `anyhow` feature extism 1.30.0 needs with its default features off (T33.3) |
+| wasmtime | local (`anyhow` feature only) | https://github.com/bytecodealliance/wasmtime | cox-plugin: the runtime under extism; declared only to enable the `anyhow` feature extism 1.41.0 needs with its default features off (T33.3) |
 | whisper-rs | local (`tracing_backend`) | https://codeberg.org/tazz4843/whisper-rs | cox-voice: local push-to-talk transcription through whisper.cpp (MIT, built with cmake), behind `crates/cox`'s `voice` feature, off by default (T54.2, A123) |
 | wiremock | local | https://crates.io/crates/wiremock | Rust dependency |
 | trycmd | local | https://github.com/assert-rs/trycmd | dev-dep: `cox run -p` output fixtures (P48) |
@@ -145,6 +147,12 @@ Programs the project uses and the direct packages from its manifests.
 | Package | Where | Source | Why here |
 | --- | --- | --- | --- |
 | dart_mcp | local | https://pub.dev/packages/dart_mcp | T33.38: the official Dart MCP server/client SDK (`ToolsSupport`, `stdioChannel`) a Dart plugin's `[[mcp]]` server is built on, since Dart cannot emit a wasm module extism can load |
+
+## go (`plugins/sdk-go`, `plugins/examples/go`, `plugins/templates/go`)
+
+| Package | Where | Source | Why here |
+| --- | --- | --- | --- |
+| github.com/extism/go-pdk | local | https://github.com/extism/go-pdk | T33.34: extism's official Go PDK (v1.1.3), the memory and I/O under the Go SDK's `cox:host/v1` wrappers |
 
 ## uv (`evals/`)
 
