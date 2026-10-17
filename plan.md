@@ -120,7 +120,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
 | T61.7 | todo | P2 | 2 | 0% | |
-| T61.8 | todo | P3 | 1 | 0% | |
+| T61.8 | in progress | P3 | 1 | 0% | Claude Code / haiku-5.5 |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
@@ -2027,9 +2027,11 @@ Out of scope: the shared `rust` matrix (lives in `pyrlyn/ci`; proposed there sep
 
 #### T61.8 Optimized build scripts and proc macros in dev
 
-Model: haiku · Status: open · Depends: T61.1 · Size: ~5 · Priority: P3 · Complexity: 1
+Model: haiku · Status: in progress · Depends: T61.1 · Size: ~5 · Priority: P3 · Complexity: 1
 
 Goal: decide by measurement whether `[profile.dev.build-override] opt-level = 3` speeds the dev build (diesel, serde, schemars, uniffi and clap macros; typify's `build.rs`).
+
+Plan (Claude Code / haiku-5.5): (1) claim commit; (2) on the worktree's own `target/`, with sccache bypassed (`MISE_SCCACHE_PROBE=1`) and `CARGO_BUILD_JOBS=4`, measure the baseline without the override and with it, interleaved A, B, A, B: clean `cargo build --workspace` under `/usr/bin/time -p`, and incremental after `touch crates/cox-tui/src/lib.rs`; record `uptime` load before each run; (3) keep the override only if neither the clean nor the incremental build is slower, else revert; (4) run the Check once with `--timings` for the kept variant and note the top build-script and proc-macro units; (5) write the rows and verdict into `research.md` §4.3.9; (6) close the card, PR stacked on #312.
 
 Files:
 - `Cargo.toml`
