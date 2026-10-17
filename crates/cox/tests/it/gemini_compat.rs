@@ -17,8 +17,8 @@ use serde_json::Value;
 use wiremock::matchers::{method, path};
 use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 
-const ROUND1: &str = include_str!("fixtures/gemini/round1.sse");
-const ROUND2: &str = include_str!("fixtures/gemini/round2.sse");
+const ROUND1: &str = include_str!("../fixtures/gemini/round1.sse");
+const ROUND2: &str = include_str!("../fixtures/gemini/round2.sse");
 
 /// Tells the two rounds apart by what the request carries rather than by
 /// arrival order: only the second one holds a `role: "tool"` result.

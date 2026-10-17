@@ -1,5 +1,5 @@
 ---
-source: crates/cox/tests/plain.rs
+source: crates/cox/tests/it/plain.rs
 assertion_line: 126
 expression: transcript()
 ---

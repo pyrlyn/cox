@@ -73,7 +73,6 @@
 - T61.2. Fast profile for the XCFramework outside a release
 - T61.3. Bindings generator on the host dev profile, skipped when the library did not change
 - T61.4. CI: cache the XCFramework and SwiftPM
-- T61.5.2. One integration-test binary for `cox`
 - T61.5.3. One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
 - T61.6. CI: one feature set per target
 - T61.7. sccache for local builds and the in-repository CI jobs

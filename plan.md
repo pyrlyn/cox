@@ -115,7 +115,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
-| T61.5.2 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
 | T61.7 | todo | P2 | 2 | 0% | |
@@ -872,7 +871,7 @@ Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). The
 
 #### T33.40.6 `risk` advisor: raise only
 
-Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `tests/plugins_jev.rs`
+Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/it/plugins_jev.rs`
 Goal: J§5.1. There is one request per tool batch. The state is the task, the cwd, the sandbox mode and, for each call, `tool`, `subject`, `input` and `classifier_risk`, never tool output. The questions are the `severity` Score and the `irreversible`, `external_effect` and `exfiltration` Nouls. The thresholds sit in `[plugins.jev.risk]` with the J§5.1 defaults. The advice is "raise to Destructive" or none, and the core keeps `max(builtin, advised)`. `capabilities.decide` gains `risk`.
 Check:
 - guest tests:
@@ -910,7 +909,7 @@ Check: `just test-evals` is green offline (corpus schema, metric maths, budget s
 
 #### T33.40.9 `route` advisor: downgrade only
 
-Depends: T33.40.8, T33.40.1, T33.40.4 · Size: ~170 · Files: `plugins/jev/src/route.rs`, `plugins/jev/src/lib.rs`, `tests/plugins_jev.rs`
+Depends: T33.40.8, T33.40.1, T33.40.4 · Size: ~170 · Files: `plugins/jev/src/route.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/it/plugins_jev.rs`
 Goal: J§5.2, plugin side.
 - The state is the prompt, the todo list, a summary of the last turn and the number of files touched.
 - The questions are the `tier` Choice over the offered tiers (with the plugin's descriptions and `other` → `code`) and the `wants_depth` Noul.
@@ -947,7 +946,7 @@ Check: `just test-evals` is green offline (preset expansion, cap stop, the paire
 
 #### T33.40.11 User guide: the Jev plugin
 
-Depends: T33.40.6, T33.40.9 · Size: ~150 · Files: `docs/plugins/jev.md`, `docs/plugins.md` (link), `crates/cox/tests/doc_examples.rs`
+Depends: T33.40.6, T33.40.9 · Size: ~150 · Files: `docs/plugins/jev.md`, `docs/plugins.md` (link), `crates/cox/tests/it/doc_examples.rs`
 Goal: one page for users. It covers:
 - what Jev is and is not (J13);
 - building it from `plugins/jev` (`just plugin jev`) and `cox plugin install <dir>` (C3);
@@ -1151,7 +1150,7 @@ Every card in this phase:
 - Check:
   ```bash
   cd scripts/vendor && mise exec -- uv run pytest -q -k gemini_live && cd ../..
-  mise exec -- cargo nextest run -p cox --test gemini_compat
+  mise exec -- cargo nextest run -p cox -E 'test(/^gemini_compat::/)'
   ```
 - Done when: the fixture comes from a real response dated in research.md, or the card goes back to the creator with the mismatch.
 - Out of scope: any code change to the wire. A mismatch becomes a new card.
@@ -1575,9 +1574,9 @@ Check: `dist plan` lists the Windows artifacts; `dist build --artifacts=local --
 
 #### T57.13 End to end: the real binary on Windows
 
-Depends: T57.8, T57.11 · Size: ~150 · Files: `crates/cox/tests/windows_e2e.rs` (new), `crates/cox/tests/scenarios/windows-*.toml` (data)
+Depends: T57.8, T57.11 · Size: ~150 · Files: `crates/cox/tests/it/windows_e2e.rs` (new), `crates/cox/tests/scenarios/windows-*.toml` (data)
 Goal: `cox run -p` against a scratch `COX_HOME` and the scripted provider on the Windows runner: one turn that reads, edits and runs a shell command, asserting the D7 security notice, that the command asked under the forced `on-request`, the rollout on disk and a `usage` row. No network, no key.
-Check: in the Windows job, `cargo nextest run -p cox --test windows_e2e`.
+Check: in the Windows job, `cargo nextest run -p cox -E 'test(/^windows_e2e::/)'`.
 
 **Order.** T57.1, T57.3 and T57.7 start at once; T57.2 waits on the creator. Then T57.4 and T57.5 (after the process-wrap approval) → T57.6, T57.8, T57.9 → T57.10 and T57.11 → T57.12 and T57.13.
 
@@ -1911,28 +1910,6 @@ Check: two runs of `desktop-macos` on one pull request, the second after a Swift
 Done when: §4.3.9 has both job times; the desktop build workflow, which shares the action, still builds `dist`.
 
 Out of scope: sccache (T61.7).
-
-#### T61.5.2 One integration-test binary for `cox`
-
-Model: sonnet · Status: open · Depends: T61.5.1 · Size: ~60 · Priority: P2 · Complexity: 3
-
-Goal: as T61.5.1 for `crates/cox/tests/` (19 files), except the binaries a command names by itself: `docs` and `ide` (`just docs-check`, CI's docs job), `deps` (named in `AGENTS.md`), `trycmd` and `tui_e2e` (own fixtures and terminal) stay separate.
-
-Files: as T61.5.1, for `crates/cox`.
-
-Steps: as T61.5.1. `plugin_example_dart` keeps its test name, which `just plugin-examples` filters on.
-
-Execution plan (claimed 2026-10-17): count `nextest list -p cox` and time the build phase before. Merge into `crates/cox/tests/it/` the 16 files no command names by itself: `cloud_agents`, `doc_examples`, `external_agents_cursor`, `gemini_compat`, `lsp`, `mcp_serve`, `no_real_keychain_in_tests`, `plain`, `plugin_cli`, `plugin_example_dart`, `plugin_example_go`, `plugin_new_cli`, `plugins`, `plugins_jev`, `run_cli`, `subagent_messaging`. Keep separate `docs`, `ide`, `deps`, `trycmd`, `tui_e2e` and also `remote`, which calls `env::set_var` (`HOME`, a key) and must not share a process with other tests. Fix relative `include_str!` paths, rename the `plain` snapshot to `it__plain__plain_transcript.snap`, update references to the merged binaries, then compare counts and names and run the Check.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox
-just docs-check
-```
-
-Done when: equal test counts; §4.3.9 has the before/after.
-
-Out of scope: `cox-tui` and the rest.
 
 #### T61.5.3 One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
 
@@ -2863,7 +2840,7 @@ Goal: `cox app-server --stdio` and `cox run` serve over Windows OpenSSH: binary 
 
 Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.1 · Size: ~60 + tests · Priority: P1 · Complexity: 2
 
-Goal: test-support scripts named `ssh`, `docker`, `limactl` and `colima` that check their argv and exec the local `cox app-server --stdio` against a scratch `COX_HOME`, used by every P68 card; one `#[ignore]` test per real backend (`colima`, `lima`, `docker` under Colima) for a manual run. Done when `crates/cox/tests/targets.rs` runs a turn through each fake launcher with the scripted provider.
+Goal: test-support scripts named `ssh`, `docker`, `limactl` and `colima` that check their argv and exec the local `cox app-server --stdio` against a scratch `COX_HOME`, used by every P68 card; one `#[ignore]` test per real backend (`colima`, `lima`, `docker` under Colima) for a manual run. Done when `crates/cox/tests/it/targets.rs` runs a turn through each fake launcher with the scripted provider.
 
 #### T68.10 Docs: targets
 
