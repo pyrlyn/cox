@@ -1589,6 +1589,7 @@ pub struct CandidateView {
     pub removed: u32,
     pub cost_usd: f64,
     pub duration_ms: u64,
+    pub merged_from: Option<Vec<u32>>,
 }
 
 #[uniffi::remote(Record)]

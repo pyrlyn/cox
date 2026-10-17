@@ -100,6 +100,28 @@ struct BestOfStoreTests {
     #expect(store.failure == nil)
   }
 
+  @Test func bestOfMergeSheetOpensWithEveryMergeableCandidateChecked() async {
+    let store = BestOfStore(id: "1", client: FixtureBestOf(three))
+    await store.refresh()
+    store.toggle(1)
+    store.chooseAll()
+    #expect(store.chosen == [0, 1], "the running candidate is not mergeable, so not checked")
+  }
+
+  @Test func bestOfMergeColumnNamesWhatItMergedAndOnlyThat() async {
+    let store = BestOfStore(id: "1", client: FixtureBestOf(three))
+    await store.refresh()
+    store.toggle(1)
+    store.toggle(0)
+    store.merger = .agent(name: "claude")
+    await store.merge(theme: "dark")
+    let merge = store.columns[3]
+    #expect(merge.mergedFrom == [0, 1], "ascending, as the request carries them")
+    #expect(store.merged(by: merge) == [store.columns[0].label, store.columns[1].label])
+    #expect(store.merged(by: store.columns[0]).isEmpty, "a launched candidate merged nothing")
+    #expect(store.columns[0].mergedFrom == nil)
+  }
+
   @Test func bestOfMergeOfAPickedGroupIsOfferedNothingAndRefused() async {
     var columns = three
     columns[1].state = .kept

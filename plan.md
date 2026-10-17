@@ -26,7 +26,7 @@ New bugs, dead code and moves from a read-only Cursor cloud review of clean `mai
 | T64.14 | P2 | bug | done | `cox-store/src/lock.rs:100-105` | An unreadable or corrupt session lock file becomes `Holder::default()` (pid 0). Treat it as busy with an unknown holder. |
 | T64.15.1 | P2 | bug | done | `cox-sandbox/src/open.rs` | `confine` then `std::fs::read`/`write` leaves a symlink-swap window. Part A: `open_confined` opens with `O_NOFOLLOW` and checks the descriptor's real path against the canonical roots; tests show `std::fs::read` follows a leaf or parent swap and the helper refuses both. |
 | T64.15.2 | P2 | bug | done | `cox-tools/src/read.rs:103`; `edit.rs:107`; `write.rs:191`; `v4a/tool.rs:131` | Part B: open through `cox_tools::open::open_confined` at the read side — `read`, `edit`, `write`'s prior-content read and `apply_patch`. Deferred, not in this task: the `lsp`, `repomap` and checkpoint reads. |
-| T64.15.3 | P2 | bug | confirmed | `cox-tools/src/write.rs:46-76` (`stage`, `atomic_write`) | Part C: a swapped parent directory still redirects `create_dir_all`, the temp file and the rename. Open the parent with `O_DIRECTORY`/`O_NOFOLLOW`, check its real path, then `openat`/`renameat` relative to that descriptor. |
+| T64.15.3 | P2 | bug | done | `cox-tools/src/write.rs:46-76` (`stage`, `atomic_write`) | Part C: a swapped parent directory still redirects `create_dir_all`, the temp file and the rename. Open the parent with `O_DIRECTORY`/`O_NOFOLLOW`, check its real path, then `openat`/`renameat` relative to that descriptor. |
 | T64.16 | P2 | bug | done | `cox-permission/src/lib.rs:256-268` | The Bash read-deny skips relative tokens: `deny Read(~/.ssh/**)` misses `cat id_rsa` run inside `~/.ssh`. Resolve relative tokens against the session cwd. |
 | T64.17 | P2 | bug | done | `cox-protocol/src/config.rs:1416-1417`; `cox-session/src/lib.rs:552-559` | A project may point `memory.dir` anywhere. Guard it like the other path keys. |
 | T64.18 | P2 | dead code | done | `cox-core/src/session.rs:53-55` (`#[allow(dead_code)]`); set at `compact.rs:413` | `State::Compacting` is written but never matched. Match it in the UI/status, or drop it and its allow. |
@@ -44,7 +44,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | --- | --- | --- | --- | --- | --- |
 | T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.4 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
@@ -58,8 +57,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
-| T33.45.7 | todo | P2 | 4 | 0% | |
-| T33.45.9 | todo | P2 | 3 | 0% | |
 | T33.45.10 | todo | P2 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
@@ -70,7 +67,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T37.33 | todo | P1 | 3 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
-| T52.26 | todo | P2 | 3 | 0% | |
 | T53.5 | todo | P3 | 3 | 0% | |
 | T53.6 | todo | P3 | 2 | 0% | |
 | T53.7 | todo | P3 | 2 | 0% | |
@@ -885,24 +881,6 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
 
-#### T33.40.4 Jev plugin as a provider, end to end and offline
-
-Depends: T33.40.3, T33.7 · Size: ~180 · Files: `tests/plugins_jev.rs` (+ `tests/fixtures/jev/*.json`, fixtures)
-Goal: prove the provider path through the real binary with no network and no keychain (J§8).
-Plan:
-1. A scratch `COX_HOME`. Install and enable the built fixture package from its local folder (C3) with `--yes`.
-2. Main turns come from `COX_PROVIDER=scripted`.
-3. Jev is wiremock on 127.0.0.1, reached through `[providers.typesafe] base_url` in the scratch config, with `TYPESAFE_API_KEY=test-key` in the env.
-4. A test-only scripted command makes one decision call. It reuses T33.40.1's WAT harness pattern.
-Check:
-- `jev_request_carries_host_injected_bearer` and `jev_key_never_reaches_guest`;
-- `jev_call_writes_usage_row_with_plugin_job` (provider `typesafe`, model `jev-1.13.0`, cost from the plugin catalog row);
-- `jev_call_blocked_by_budget_falls_back`;
-- `jev_401_is_one_notice_and_fail_open`;
-- `jev_529_retries_max_retries_times`;
-- `three_failures_disable_decide_export`;
-- `cox plugin list --json` shows the provider and model contributions.
-
 #### T33.40.5 Parity: the `typesafe` table configures the plugin's section
 
 Depends: T33.40.4 · Size: ~120 · Files: `crates/cox/src/session.rs`, `crates/cox-plugin/src/provider.rs`, `crates/cox/src/doctor.rs`
@@ -1095,17 +1073,6 @@ Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and a
 
 
 Plan (Claude Code / opus-5.5): (1) `plugin_ui.rs`: `PluginSlots` tracks the selected inspector tab and its area in cells; `Slot::DesktopInspector` is visible only while its plugin's tab is selected, so it renders only then; `select_tab` and `open_inspector` (for `CommandOut::OpenInspector`). `PluginUi::declare` takes `InitOut.desktop` in place of the keys: the tab and actions are sanitized, a symbol outside `is_symbol_name` becomes `puzzlepiece.extension`, the toolbar is capped at `MAX_TOOLBAR_ACTIONS`, and an action whose command is not among the plugin's granted commands is dropped with a notice; `action(id)` asks `cox_command` for `plugin:<id>:<command>`. The keys, `PluginKey` and `key` go. (2) `palette.rs`: `PaletteItem.symbol` (optional, serde and UniFFI default, so existing callers keep compiling). (3) `live.rs`: `plugin_tabs`, `plugin_toolbar`, `select_plugin_tab`, `plugin_action`; plugin palette actions join `palette`; `OpenInspector` selects the tab; declare notices are emitted once the session is open; `plugin_keys`/`plugin_key` removed (and their `cox-ffi` forwards, which no Swift view calls). Verify with `cargo nextest run -p cox-app -p cox-ffi`, clippy and fmt.
-#### T33.45.7 FFI and Swift: the desktop contributions
-
-Depends: T33.45.6 · Files: `crates/cox-ffi/src/{session,types}.rs`, `desktop/macos/Packages/CoxUI/…` (Inspector, SessionToolbar, CommandPalette, PluginWidgetView), `desktop/design/DESIGN.md` §6 rows · Design: `docs/design/plugins.md` §15, A134
-
-Check: `forward_only` passes; a snapshot per new view in light and dark; an unknown SF Symbol draws `puzzlepiece.extension` (settles §15.4's **unverified** note).
-
-#### T33.45.9 Docs: the three-part plugin API reference
-
-Depends: T33.45.1, T33.45.2 · Files: `docs/plugins.md` (or `docs/plugins/api.md`), its generator and drift test · Design: `docs/design/plugins.md` §15, A134
-
-Check: every field of `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` appears under its part (shared, terminal-only, desktop-only), checked by test.
 #### T33.45.10 Docs: Russian and Ukrainian translations
 
 Depends: T33.45.9 · Files: `docs/ru/plugins.md`, `docs/uk/plugins.md` (new directories) · Design: `docs/design/plugins.md` §15, A134
@@ -1469,12 +1436,6 @@ Every card keeps the P51 rules, and:
 - an external agent's usage is its own billing: no `usage` row is invented for it, and the cost pill shows "—" as the mockup does;
 - a remote session never sends API keys or the Keychain's secrets over the wire and never forwards the ssh agent;
 - plugin widgets reach the screen only through `cox_sanitize::sanitize` and PL§8's limits, as in the TUI.
-
-#### T52.26 CoxUI: Merge in the best-of compare view
-
-Depends: T52.25 · Size: ~180 · Files: CoxUI `BestOfCompare` screen, the merge sheet (new molecule), `desktop/macos/App` wiring
-Goal: the compare view shows a **Merge** button when more than one candidate is in `mergeable`. It opens a sheet with one checkbox per mergeable candidate (all checked at first; label, diffstat, cost), a merger picker with the composer's providers and models and the external agents the best-of control offers, and Merge, which stays blocked until two or more are checked (the not-allowed pointer, T37.50). The merge then appears as one more column, labelled with what it merged and by which model or agent, and can be opened in Review or kept like any other candidate.
-Check: CoxUI snapshots: compare view with one result (no Merge button) and with three (button shown); the sheet with two checked, with one checked (Merge blocked), with the merger menu open on a model and on an agent; a merge column running and done; swiftlint strict and swift-format clean.
 
 ### P53 — Plugin distribution (goal: a plugin installs from git or a URL through the same validation and per-digest grant as a local folder, and the plugin API, the Rust SDK and the Go SDK are ready to publish once `api = 1` is frozen)
 

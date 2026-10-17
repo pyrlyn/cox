@@ -72,6 +72,8 @@ A handler returns `Result<output, E>` for any error type that implements `Displa
 | `on_event` | `cox_on_event` | `EventBatch` → `Effects` | for the events in `InitOut.subscribe` (PL§5) |
 | `hook` | `cox_hook` | `HookCall` → `HookOutcome` as `Value` | for the hooks in `capabilities.hooks` (PL§6) |
 | `decide` | `cox_decide` | `Question` → `Advice` | at the decision points in `capabilities.decide` (PL§6b) |
+| `decide_call` | `cox_decide` | `Question` → `DecideOut` | instead of `decide`, when the answer needs a model call on your own `[[provider]]` section (T33.40.1) |
+| `decide_resume` | `cox_decide_resume` | `DecideResume` → `Option<Advice>` | after that call, with its events |
 | `tool_subject`, `tool_risk`, `tool_call` | `cox_tool_*` | `ToolCallIn` → `String`, `Risk` / `ToolOutput` as `Value` | for the tools in `InitOut.tools` (PL§7) |
 | `provider_stream` | `cox_provider_stream` | `ProviderCall` → `Vec<ProviderEvent>` as `Vec<Value>` | for an `api = "plugin"` provider (PL§7a) |
 | `command` | `cox_command` | `CommandIn` → `CommandOut` | `/<id>:<name>` on every surface (PL§8) |
@@ -252,7 +254,7 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 - ABI `CommandOut`: `prompt`, `prompt.text`, `prompt.kind`, `compact`, `compact.focus`, `compact.kind`, `toggle_panel`, `toggle_panel.kind`, `open_overlay`, `open_overlay.kind`, `notice`, `notice.kind`, `nothing`, `nothing.kind`
 - ABI `RenderIn`: `slot`, `width`, `height`
 - ABI `RenderItemIn`: `target`, `call`, `result`, `width`
-- ABI `ProviderCall`: `request`, `model`
+- ABI `ProviderCall`: `request`, `model`, `base_url`
 - ABI `ModelCall`: `request`, `tier`, `own_provider`
 - ABI `ModelTier`: `cheap`, `code`
 - ABI `OwnProvider`: `name`, `model`
