@@ -1,3 +1,688 @@
+#### T61.5.3 One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.5.2 · Size: ~80 · Priority: P2 · Complexity: 3
+
+Goal: as T61.5.1 for the remaining crates with more than one test file; `cox-tui`'s `screenshots` stays separate (named by `--test screenshots`).
+
+Files: as T61.5.1, for each crate.
+
+Steps: as T61.5.1, one commit per crate.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-tui -p cox-tools -p cox-ext -p cox-app
+mise exec -- cargo clippy -p cox-tui -p cox-tools -p cox-ext -p cox-app --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+Output: `cargo nextest list` counts (tests listed) 298/266/66/270 before and the same after for `cox-tui`/`cox-tools`/`cox-ext`/`cox-app`, identical names once the old binary name is read as the module; `nextest run`: `cox-tui` 298 passed, `cox-tools` 265 passed and 1 skipped (as before), `cox-ext` 66 passed, `cox-app` 270 passed; clippy `-D warnings` and `fmt --check` clean per crate. The workspace-wide `nextest run --workspace` and `cargo insta test --check` were not run: the task was run one crate at a time.
+
+Done when: equal test counts per crate; §4.3.9 has the workspace build-phase time after all three cards.
+
+Out of scope: unit tests in `src/`.
+
+Done: `cox-tui` 14 of its 15 files, all 7 `cox-tools` files and all 6 `cox-ext` files are modules of `tests/it/main.rs`; in `cox-app` only `intents` and `scenarios` are, one commit per crate. Kept separate: `cox-tui`'s `screenshots` (`just screenshots`), and `cox-app`'s `app`, `best_of`, `external` and `mcp_login`, which the card did not name: they call `env::set_var`/`remove_var` for `HOME`, `COX_HOME` and `COX_PROVIDER`, which under a runner that shares one process (`cargo test`) would leak into the other tests. Shared helpers stay in `tests/common/` (`cox-tui`, `cox-tools`; `cox-app` still includes `cox-core`'s by path with one more `../`), and `cox-ext/tests/fixtures/` stays because `cox-core` includes a skill from it. The 64 moved `cox-tui`, `cox-ext` and `cox-app` snapshots became `tests/it/snapshots/it__<module>__<name>.snap`, with only the `source:` line changed. References updated: the CI step `cargo nextest run -p cox-tools sandbox_ bash_` gained a `bash::` filter, because two `bash` tests (`assignment_prefix_is_not_read_only`, `safe_locale_assignment_stays_read_only`) no longer carry `bash_` in their name; comments in `cox-sandbox/src/path.rs`, `cox-tools/src/read.rs` and `cox-app/Cargo.toml`, and `AGENTS.md`. `research.md` §4.3.9 has the per-crate build-phase rows (single runs under a load of 9 to 38, so directions only: `cox-tui` 4.40 s to 2.93 s, `cox-tools` 14.42 s to 9.78 s, `cox-ext` 6.56 s to 2.03 s, `cox-app` 17.09 s to 7.80 s). The workspace-wide build-phase time was not measured.
+
+#### T61.5.2 One integration-test binary for `cox`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.5.1 · Size: ~60 · Priority: P2 · Complexity: 3
+
+Goal: as T61.5.1 for `crates/cox/tests/` (22 files), except the binaries a command names by itself: `docs` and `ide` (`just docs-check`, CI's docs job), `deps` (named in `AGENTS.md`), `trycmd` and `tui_e2e` (own fixtures and terminal) stay separate.
+
+Files: as T61.5.1, for `crates/cox`.
+
+Steps: as T61.5.1. `plugin_example_dart` keeps its test name, which `just plugin-examples` filters on.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox
+just docs-check
+```
+
+Done when: equal test counts; §4.3.9 has the before/after.
+
+Out of scope: `cox-tui` and the rest.
+
+Done: 16 files are modules of `crates/cox/tests/it/main.rs` (the card said 19 files; there were 22). Kept separate: `docs` and `ide` (`just docs-check`), `deps` (`AGENTS.md`), `trycmd`, `tui_e2e` as the card says, and also `remote`, which the card did not name: it calls `env::set_var` for `HOME` and an API key, so under a runner that shares one process (`cargo test`) it would leak into the other tests. `fixtures/`, `scenarios/` and `support/` stay in `tests/` (the helper `[[bin]]`s and `CARGO_MANIFEST_DIR` paths name them). Two `include_str!` paths gained a `../`. The `plain` snapshot moved to `tests/it/snapshots/it__plain__plain_transcript.snap` (insta prefixes the binary name `it`; only the `source:` line changed). References updated: `Cargo.toml` and `support/` comments, `docs/compat.md`, `docs/design/providers.md`, `research.md` (the `--test lsp` command is now `-E 'test(/^lsp::/)'`), the `cursor_fixtures.py` docstring, and `plan.md` cards that named the moved paths or `--test gemini_compat` / `--test windows_e2e`. `plugin_example_dart` and `plugin_example_go` keep their test names, so the `just plugin-examples` and CI filters `test(plugin_example_dart)` / `test(plugin_example_go)` still select them (checked with `nextest list --run-ignored only`). Test count (`cargo nextest list -p cox`): 215 before and 215 after, identical names once the old binary name is read as the module. Build phase of `-p cox --no-run` after `cargo clean -p cox`: 8.35 s to 6.42 s (`research.md` §4.3.9; one run each on a loaded machine, a small gap because sccache is warm). Checks: `nextest run -p cox`: 214 passed, 1 failed, 5 ignored, the failure being `plain_transcript_snapshot`, which fails on `main` with the same snapshot diff before and after; `cargo test --locked -p cox --test docs --test ide`: 5 + 3 passed (the other two `docs-check` commands touch other crates and are unchanged); `cargo clippy -p cox --all-targets -- -D warnings` and `cargo fmt --check` clean (the whole workspace was not built).
+
+#### T61.5.1 One integration-test binary for `cox-core`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.1 · Size: ~60 (moves, plus one `main.rs`) · Priority: P2 · Complexity: 3
+
+Goal: `crates/cox-core/tests/*.rs` (21 files) become modules of one test binary, so `nextest` links one binary instead of 21.
+
+Files:
+- `crates/cox-core/tests/it/main.rs` (new; `mod` lines only)
+- `crates/cox-core/Cargo.toml` (one `[[test]] name = "it"` if auto-discovery needs it)
+- the moved test files (renames; they do not count as source files)
+
+Steps:
+1. `git mv` each file into `tests/it/`; `common/` and `scenarios/` move with them. `cox-app`'s dev setup reuses cox-core's harness (`crates/cox-app/Cargo.toml` comment): keep the path it uses working.
+2. insta snapshot names carry the module path: move the snapshot files with `cargo insta test --accept` only after confirming each moved snapshot's content is unchanged (`git diff -M --stat` shows renames only).
+3. Update every `--test <name>` for this crate in `justfile`, `.github/`, `docs/`, `AGENTS.md` and open `plan.md` cards to `--test it -E 'test(/^<name>::/)'`.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core
+mise exec -- cargo nextest run -p cox-app
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Done when: the test count before and after is equal (`nextest list`); §4.3.9 has the `-p cox-core` build-phase time before and after.
+
+Out of scope: other crates (T61.5.2, T61.5.3).
+
+Done: 24 files (the card said 21) are modules of `crates/cox-core/tests/it/main.rs`; `common/` and `scenarios/` stay in `tests/`, because `cox`, `cox-app` and `cox-tui` name their paths (`#[path = "../common/mod.rs"] mod common;` in `main.rs`, `use crate::common;` in the modules). The compact snapshot moved to `tests/it/snapshots/it__compact__...snap` (body unchanged, only the `source:` header line differs, since insta prefixes the crate name `it`); the scenario snapshots stay, their `snapshot_path` is now `../scenarios`. No `--test <name>` for cox-core existed outside `done.md`. Test count 431 before and after, identical names. Build phase of `-p cox-core --no-run` 28 s to 14 s (`research.md` §4.3.9). Checks: nextest `-p cox-core` 431 passed, `-p cox-app` 270 passed, clippy `-p cox-core -p cox-app --all-targets` and `fmt --check` clean (the whole workspace was not run: too heavy beside parallel agents).
+#### T61.6 CI: one feature set per target
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
+Depends: T61.1 · Size: ~5 · Files: `.github/workflows/ci.yml`, `justfile`, `research.md`
+Goal: the `rust` matrix compiles the workspace once per target: `build-command`, clippy and nextest use the same features, so nextest reuses the build.
+Check: pending the first CI run of this change (job log of `rust / aarch64-apple-darwin`: no `Compiling` line for a workspace crate after the build step). Local: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 mise exec -- cargo nextest run --workspace --all-features --no-run` finished with no errors; the all-features run passed except `plain_transcript_snapshot`.
+Done: `test-command` in `ci.yml` and `just check-all` now use `--all-features`, the feature set `build-command` already used (clippy already got it from the shared workflow's `feature-args` default), so nextest no longer compiles the default feature set a second time. Local `--all-features` run: 2566 of 2567 tests passed. `plain_transcript_snapshot` (crate `cox`) fails under the default features too (context percentage 1% in the snapshot, 2% in the output); not fixed here. `actionlint` reports only the existing `if: false` on the Windows job. §4.3.9 has a T61.6 table with the before CI times (PR run 38933123898: x86_64 Linux 1294 s, aarch64 Linux 1025 s, aarch64 macOS 1482 s); the after times are pending the first CI run of this change, so the card's "before and after" condition is not met until then.
+#### T66.8 `/refine` and `cox refine`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T66.7 · Size: ~120 · Files: `crates/cox-tui/src/refine.rs` (new), `crates/cox-tui/src/{commands,state,view,lib}.rs`, `crates/cox-protocol/src/commands.rs`, `crates/cox-session/src/refine.rs`, `crates/cox/src/{refine_cmd.rs (new),cli,main,session}.rs`, `crates/cox/tests/tui_e2e.rs`, `docs/getting-started.md`
+Goal: the user can propose, review, apply and undo a refine from the TUI and the CLI. Global scope always needs the explicit flag.
+- TUI: `/refine <text> [--global]` asks the cheap tier for a proposal and opens it as a git-style diff (`y` or `Enter` applies, `n` or `Esc` drops it, nothing is written before that); `/refine list` shows the session's refines; `/refine undo [<event id>] [--global]` reverses one, a bare undo taking the newest applied local refine. `list`, `undo` and `--global` are matched as whole words, so "list the failing tests" still proposes.
+- CLI: `cox refine list [--session ID]` (default: the newest session in the directory) and `cox refine undo <event id> [--global]`. Applying stays TUI-only because the diff is reviewed there.
+- `cox-session`: `Refiner::refine` is now `propose` (a `Pending` holding the sanitized unified diff, no write) followed by `apply`; `undo_event`, `latest_undoable` and `describe` need no `Session`, so the CLI undoes without a provider. A refine event that changed the global entries is undone only with the flag (`RefineError::GlobalNeedsFlag`). An entry changed between the review and `y` becomes a recorded rejection.
+- New dependency in `cox-session`: `similar` (already a workspace dependency) for the review diff.
+Check: `tui_refine_reviews_applies_and_the_cli_lists_and_undoes_it` (scripted provider, scratch `COX_HOME`: a local note is shown in the diff, written only after `y`, listed and undone by `cox refine`) and `cli_refine_undo_of_a_global_event_needs_the_global_flag`.
+```text
+$ mise exec -- cargo nextest run -p cox refine
+     Summary 2 tests run: 2 passed, 220 skipped
+$ mise exec -- cargo nextest run -p cox -p cox-session -p cox-tui -p cox-protocol -p cox-app
+     Summary 1003 tests run: 1001 passed, 2 failed (cox::plain plain_transcript_snapshot: ctx 1% -> 2%, caused by T66.6 on the base and unchanged by this task; cox::docs docs_name_every_subcommand: fixed by the docs paragraph, now passes)
+$ mise exec -- cargo clippy -p cox-session -p cox-tui -p cox-protocol -p cox --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Not run: the workspace-wide clippy and nextest (scoped to the touched crates). `docs/screenshots/theme_picker.svg` has unrelated drift and was left alone.
+
+#### T66.7 Session: apply a refine, record it, and render the digest after the cached prefix
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T66.5, T66.6 · Size: ~180 · Files: `crates/cox-session/src/refine.rs` (new), `crates/cox-session/src/lib.rs`, `crates/cox-core/src/session.rs`
+Goal: the session layer, not the core, writes the files and the store row. Prompt notes reach the model as a tail block in the volatile slot, so a refine never moves the cache breakpoint.
+- `Refiner::refine(text, scope)`: builds a one-line-per-entry digest of the scope's entries, calls `Session::propose_refine`, converts the edits and runs `harness::Scope::apply`, then `refine_insert` (`applied`, evidence from the model, `edits` with the before/after hashes, fingerprint after). A proposal the core rejects, or one the disk contradicts (create over an existing entry, update of a missing one), is a `rejected` row with a cox-written reason and no file change. An empty proposal, or one whose edits rewrite entries to the bytes they already have, returns `Unchanged` before any backup or row. If the row cannot be written the edits are rolled back.
+- `Refiner::undo(event_id)`: refuses an unknown event, one that was not `applied`, one already undone, and one whose entries changed after it (current hash differs from the recorded `after_sha`); otherwise `harness::Scope::rollback` and a `rolled_back` row with `rollback_of` and the reversed edits.
+- `prompt_notes` / `Refiner::refresh_notes`: the prompt-note entries of the global scope, then the session's own (`COX_HOME/sessions/<id>/harness`), rendered as one `<harness_notes>` block (16 KiB cap; the closing tag is stripped from file content) and installed with the new `Session::set_harness_notes`, which appends it to `system[3]`, the volatile block after the last cache breakpoint. It is re-rendered only when the scope fingerprints change. `open` installs the notes of earlier refines. Skills and subagents are read once at open, so they take effect in the next session.
+- New dependency `ulid` in `cox-session` (already a workspace dependency): event ids are lowercase ULIDs, which `harness::apply` accepts.
+Check: `refine_writes_a_local_note_records_it_and_keeps_the_cached_prefix` (`system[0..=2]` equal before and after, `system[3]` carries the note and is not cached), `refining_twice_against_the_same_store_changes_no_bytes`, `undo_restores_the_files_and_writes_a_rolled_back_row`, `a_local_note_reaches_its_own_session_and_not_another`, `a_global_note_reaches_every_session`, `a_proposal_aimed_at_the_base_prompt_is_recorded_as_rejected_and_writes_nothing`, `a_disk_conflict_is_a_rejection_not_an_error`; core: `harness_notes_reach_system_3_and_leave_the_prefix_byte_identical`.
+```text
+$ mise exec -- cargo nextest run -p cox-session refine
+     Summary [   0.107s] 7 tests run: 7 passed, 81 skipped
+$ mise exec -- cargo nextest run -p cox-session -p cox-core
+     Summary [   2.228s] 526 tests run: 526 passed, 1 skipped
+$ mise exec -- cargo nextest run -p cox --test deps
+     Summary [   1.500s] 11 tests run: 11 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-session -p cox-core --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Not run: the workspace-wide clippy (only `cox-session` and `cox-core` changed).
+Out of scope: the commands, which are T66.8.
+
+#### T66.5 Harness entries on disk: apply, backup, rollback, fingerprint
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T66.4 · Size: ~200 · Files: `crates/cox-ext/src/harness.rs` (new), `crates/cox-ext/src/lib.rs`, `crates/cox-ext/tests/harness.rs` (new), `crates/cox-ext/Cargo.toml`
+Goal: the four refinable kinds (`prompt-note`, `memory`, `skill` and `subagent`; no factory) are applied with a backup first, undone exactly, and fingerprinted by content.
+- Scope: `Scope::Local { root }` keeps `harness/<kind>/<id>.md` under the session directory; `Scope::Global { home, memory_dir }` writes where cox already reads each kind (memory facts in the memory directory plus `memory::rebuild_index`, `skills/<id>/SKILL.md`, `agents/<id>.md`, `notes/<id>.md`). Ids go through `memory::is_valid_name` (`[a-z0-9-]{1,64}`), so no path built from one leaves the scope root; an entry that is a symlink is refused.
+- `Scope::apply(event_id, edits) -> Applied { event_id, before, after, edits }` checks every edit first (action against existence, content presence, no duplicates), copies each touched file to `<root>/harness-backup/<event id>/` with a manifest, then writes; a failed write rolls back. `before`/`after` are scope fingerprints and each `EditRecord` carries the `before_sha`/`after_sha` that `refine_events` stores. `rollback(event_id)` restores the copies, deletes entries the event created and consumes the backup.
+- `Scope::fingerprint()` is sha256 over the entries sorted by `scope\0kind\0id` with their length-prefixed content. cox-ext now links the workspace `sha2`.
+Check: `rollback_restores_the_bytes_and_deletes_what_the_event_created`, `an_id_with_a_slash_or_dots_is_refused_and_nothing_is_written`, `the_same_store_gives_the_same_fingerprint`, `a_local_edit_is_invisible_to_another_sessions_load` and six more in `crates/cox-ext/tests/harness.rs`.
+```text
+$ mise exec -- cargo nextest run -p cox-ext harness
+     Summary [   0.087s] 10 tests run: 10 passed, 66 skipped
+$ mise exec -- cargo nextest run -p cox-ext
+     Summary [   1.157s] 76 tests run: 76 passed, 0 skipped
+$ mise exec -- cargo clippy -p cox-ext --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Out of scope: proposing edits (T66.6) and the session wiring (T66.7).
+
+#### T66.4 Store: the `refine_events` table
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: - · Size: ~120 · Files: `crates/cox-store/migrations/00000000000010_refine_events/{up,down}.sql`, `crates/cox-store/src/{schema,models,refine,lib}.rs`, the schema snapshot
+Goal: every refine (proposed, applied, rejected or rolled back) is one Diesel row that a later undo and `cox refine list` can read.
+- Columns: `id` (TEXT primary key), `session_id`, `scope` (`local`|`global`), `trigger` (`manual`|`auto`), `evidence` (the model's rationale for the whole refine), `edits` (JSON array of `{action, kind, id, before_sha, after_sha}`), `outcome` (`applied`|`rejected`|`rolled_back`), `rollback_of` (nullable), `fingerprint`, `created_at`.
+- `Store::refine_insert`, `refine_get` and `refine_list(session, limit)` through the typed DSL, with no raw SQL outside the migration.
+Check: `refine_event_round_trips_every_field`, `refine_list_is_newest_first_and_honours_limit`, `down_migration_drops_the_refine_events_table`.
+Done: the migration carries CHECKs for the three enums and an index on `(session_id, created_at)`; `refine.rs` holds `RefineScope`, `RefineTrigger`, `RefineOutcome` and `RefineEdit` (`before_sha` is absent on a create, `after_sha` on a removal). `refine_list` orders by `created_at` then `id`, both descending. A repeated id is an error (append-only). `older_binary_refuses_newer_schema` now expects `00000000000010`.
+```text
+$ mise exec -- cargo nextest run -p cox-store
+     Summary [   5.342s] 51 tests run: 51 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-store --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Out of scope: writing files, which is T66.5.
+#### T66.11 `cox run -p --autonomous`: shell gates and the headless loop
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.10 · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: a headless run continues under the driver's verdict. Every gate runs inside the same sandbox as `bash`.
+
+Files:
+- `crates/cox-tools/src/gate.rs` (new): `ShellGateRunner`. It uses `sandbox::command` with the session's `Policy` and the gate timeout. The output tail is capped and archived first, as for `bash`.
+- `crates/cox/src/run.rs`: after each `UserTurn`, ask `decide`; on `Continue`, submit its text as the next `UserTurn`; print the stop reason
+- `tests/autonomous.rs`
+
+Steps:
+1. Only `cox run -p` reads `--autonomous`, and the interactive TUI never enters the loop. The model still edits the todo list (`cox-tools/src/todo.rs`); the driver does not.
+2. The stream-json output carries one `autonomous` record per decision.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox autonomous
+#### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Goal: the supervisor runs one worker process per session and keeps it alive under T66.19's policy. `docs/design/serve.md` S6, D3 and D7.
+
+Plan: `worker.rs` spawns the program with tokio's process support, writes the wire lines (`open`, `end`) with serde_json, reads the `opened` reply and drains the rest of stdout, and reports each exit through a callback. `supervisor.rs` keeps one slot per session (running, restarting, failed), measures uptime, feeds each exit to `restart::Policy`, schedules a restart as a timed event, refuses a 17th worker, and on an injected shutdown future sends `end`, waits a grace (10 s by default) and kills what is left. Tests drive a fake worker `sh` script in a tempdir with a short grace and a capped restart delay. New third-party deps for cox-serve: tokio, serde_json, thiserror (all already in the workspace); no workspace crate, so the `deps.rs` rule stays as it is.
+
+Files:
+- `crates/cox-serve/src/worker.rs`
+- `crates/cox-serve/src/supervisor.rs`
+
+Steps:
+1. Spawn the worker program (`current_exe() serve --worker` in production; a parameter, so tests pass a fake) with piped stdio.
+2. Apply T66.19's policy on each exit; a restart reopens the session with `resume`. A worker the supervisor gave up on is listed as failed.
+3. Enforce a cap of 16 workers.
+4. On SIGINT or SIGTERM, send `end` to every worker, wait 10 s, then SIGKILL.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve supervisor
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when, against `COX_HOME=/tmp/cox-scratch` with the scripted provider, a gate that fails once and then passes yields exactly two turns and `GatesPassed`.
+
+Out of scope: goals that persist across runs.
+
+Execution plan:
+1. `cox-tools/src/gate.rs`: `ShellGateRunner` implements `GateRunner` over `bash::run_line` (the one spawn path: same sandbox wrap, env allowlist, PTY and group kill), with the session's `SandboxPolicy`, workspace roots, cwd and `Archive`. It archives the whole output before returning, caps the tail at a line-safe size with an `expand #id` trailer, and turns a spawn error, sandbox denial or timeout into a failed gate.
+2. `cox/src/cli.rs`: `--autonomous` on `RunArgs`, `requires = prompt`, conflicts with `--loop`.
+3. `cox/src/run.rs`: validate the `[autonomous]` policy before the session opens; `run_autonomous` drives one `UserTurn` at a time, asks `Driver::decide`, submits the `Continue` text as the next turn, and writes one `autonomous` stream-json record per decision and the stop reason to stderr and the `json` summary. Only an `Outcome` fold of `diff`/`Checkpoint` events feeds `files_changed`.
+4. Tests: gate runner unit tests (pass, fail with tail, timeout, archive-before-cap); `crates/cox/tests/autonomous.rs` e2e against the scripted provider and a scratch `COX_HOME`: a failing gate continues, a passing gate stops, no gates refuses the flag, the TUI never sees the flag.
+5. Docs: the `cox run` flag docs and any trycmd help snapshot.
+
+Files changed beyond the list: `crates/cox-core/src/session.rs` (`Session::archive()`, so the gates archive into the session's own store and the CLI opens no second one), `crates/cox/src/cli.rs` (the flag), `crates/cox/src/config_load.rs` (the flag-to-key map, required by `config_every_flag_has_a_config_key`), `docs/getting-started.md`. The e2e test is `crates/cox/tests/autonomous.rs` (the card's `tests/autonomous.rs` has no top-level `tests/`). `files_changed` is read from tool diffs and checkpoints, so a file changed only through `bash` is not seen as progress. A run that stops for any reason other than `gates_passed` or the turn's own stop exits 1.
+
+Check output:
+```
+mise exec -- cargo nextest run -p cox-tools -p cox-core -p cox   # 939 tests run; the only failures were config_every_flag_has_a_config_key (fixed by mapping the flag) and plain_transcript_snapshot (fails identically on the base commit, unrelated); rerun of -p cox: 220 run, 219 passed, plain_transcript_snapshot the one failure. New: cox::autonomous 5 tests, cox-tools gate::tests 6 tests, all passed
+mise exec -- cargo clippy -p cox -p cox-tools -p cox-core --all-targets -- -D warnings   # clean
+mise exec -- cargo fmt --check   # clean
+```
+
+#### T66.10 `[autonomous]` config, which a project cannot set
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.9 · Size: ~100 · Priority: P2 · Complexity: 2
+
+Goal: the user sets gates and limits, but a repository cannot. Gates are shell commands, so a project-set gate would let a repository run code.
+
+Files:
+- `crates/cox-protocol/src/config.rs`
+- `crates/cox-config/src/load.rs`: add `autonomous` to `GUARDED_KEYS` (`load.rs:497`)
+- `docs/config.jsonschema`, regenerated through the drift test
+
+Steps:
+1. The `[autonomous]` table has `gates = []`, `max_continuations`, `max_turns`, `max_tokens`, `timeout_secs`, `gate_retries` and `gate_timeout_secs`.
+2. A project layer that sets any of these keys is reverted with a warning, as for the other guarded keys.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-config
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `project_cannot_set_autonomous_gates` passes and the schema drift test is green.
+
+Out of scope: running the gates.
+
+Execution plan:
+1. `cox-protocol/src/config.rs`: `Config.autonomous: AutonomousPolicy` (the T66.9 type, so no second struct), `[autonomous]` in `default.toml` with the policy's defaults, and `docs/config.md` regenerated by its drift test.
+2. `cox-config/src/load.rs`: revert the whole table when a project layer differs, a `GuardViolation` with its own reason, `autonomous` in `GUARDED_KEYS`.
+3. Tests: `project_cannot_set_autonomous_gates` (the user's gates survive and reach `validate`), the defaults test, the schema drift test regenerated.
+4. Verify with nextest on `cox-protocol` and `cox-config`, clippy and fmt.
+
+Files changed beyond the list: `crates/cox-protocol/default.toml` (the `[autonomous]` table) and `docs/config.md` (generated from it), both required by their drift tests; `Config.autonomous` is the T66.9 `AutonomousPolicy`, so no second struct. `GUARDED_KEYS` sits at `load.rs:715` now, not `:497`.
+
+Check output:
+```
+mise exec -- cargo nextest run -p cox-protocol -p cox-config   # 179 tests run: 179 passed (project_cannot_set_autonomous_gates, autonomous_defaults_have_no_gate_and_fail_validation, config_jsonschema_matches_committed_file, config_docs_config_md_matches_default_toml)
+mise exec -- cargo clippy -p cox-protocol -p cox-config --all-targets -- -D warnings   # clean
+mise exec -- cargo fmt --check   # clean
+```
+
+#### T66.9 A pure autonomous driver beside the USD cap
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~200 · Priority: P2 · Complexity: 4
+
+Goal: a pure function decides whether a headless run starts another turn. It continues only toward failing gates and stays within its own turn, token and time limits. `budget::decide` stays the USD cap.
+
+Files:
+- `crates/cox-protocol/src/autonomous.rs` (new): `AutonomousPolicy`, the `GateRunner` trait, `GateResult` and `AutonomousStop`
+- `crates/cox-core/src/autonomous.rs` (new)
+- `crates/cox-core/tests/autonomous.rs`
+
+Steps:
+1. Policy defaults, from prime-agent's `pa-core/src/autonomous/mod.rs`:
+   - 3 continuations;
+   - 12 turns;
+   - 80 000 tokens;
+   - 30 minutes;
+   - 3 gate retries;
+   - a 5-minute timeout per gate.
+2. `decide(&State, last_stop, gate) -> Next::Continue(text) | Next::Stop(AutonomousStop)`:
+   - `Error`, `Interrupted`, `Refusal` and `Budget` never continue (idea: `pa-core/src/autonomous/gates.rs` `should_autonomously_continue`).
+   - Gates run in order and the first failure wins.
+   - All gates passing stops the run with `GatesPassed`.
+   - A failure with retries left continues, with the failing command and the tail of its output.
+   - Exhausted retries stop with `GateRetriesExhausted`.
+   - Each limit stops the run under its own reason.
+3. `no_progress_streak` counts continuations that changed no file and repeated the same gate result. At 2 the run stops with `NoProgress`. The streak lives in the run's `State`.
+4. A passed gate only means its commands passed; it is not task success. The stop reason is `GatesPassed`, and no surface prints "done" or "success" for it.
+5. Autonomous mode needs at least one gate; a policy with none is a config error.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core autonomous
+
+#### T66.6 Core: a refine proposal from one cheap call, with the base prompt fixed
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: the core turns the transcript tail, the digest of current entries and the user's `/refine` text into a validated list of edits. It writes no file, and the base prompt can never be a target.
+
+Files:
+- `crates/cox-core/src/refine.rs` (new)
+- `crates/cox-core/src/prompts/refine.md` (new; written for cox, not Prime's prose)
+- `crates/cox-core/tests/refine.rs`
+
+Steps:
+1. Make one call on the `Job::Memory` routing tier, the same pattern as `memory_extract.rs`. No new `Job` variant is added.
+2. The model returns `{evidence, edits: [{action: create|update|delete, kind, id, content?, reason}]}`. Validation:
+   - at most 5 edits;
+   - `content` of at most 4 KB;
+   - `kind` is one of the four;
+   - `id` matches the pattern;
+   - any id that names the base prompt is refused (idea: `pa-core/src/refinement/planner.rs`, "base system prompt is not editable").
+   An invalid proposal yields no edits and outcome `rejected` with the reason.
+3. `prompt.md` and `prompt_minimal.md` stay `include_str!` constants (`context.rs:28, 32`).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core refine
+#### T66.3 `agent` collect: a status and a capped preview by task id
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.2 · Size: ~150 · Priority: P1 · Complexity: 3
+
+Goal: the parent fetches a background child's result when it needs it. The spawn result never holds the child's answer.
+
+Files:
+- `crates/cox-core/src/subagent.rs`
+- `crates/cox-core/src/tasks.rs`
+- the cox-core subagent test file
+
+Steps:
+1. A background spawn returns `AgentHandle { task_id, name, status }` as `structured` (`subagent.rs:588-596` already carries the id). The history pointer line written by `publish_task_result` (`tasks.rs:96-106`) ends with `collect <task id>`.
+2. Add a `collect` input to the same `agent` tool: `{"collect": ["<task id>", …], "timeout_ms": n}`. For each task it returns `status`, one of `queued`, `running`, `done`, `error` or `cancelled`. Once a task has settled, it also returns a preview within the preset's `result_cap_tokens` and, when T66.2 archived the answer, `expand <id>`. A timeout returns a snapshot, never an error (idea: `pa-core/src/session_engine/rlm_host.rs` `RlmSubagentHost::collect`; `pa-daemon/src/rlm_child_model.rs` caps its preview at 160 characters).
+3. Delivery stays through the parent (T34.5). Usage rows stay where they are: in the child's session, with cap summaries under `Job::Summarize`. A foreground `agent` call is unchanged, because the parent waits for that answer by design.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core subagent
+#### T66.18 Worker mode in `cox-app`'s server: one session, ended on EOF
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.17 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the server can run as one session's worker, and on EOF every mode ends its sessions instead of only closing them, so detached bash processes are killed. `docs/design/serve.md` S3, D3 and F2.
+
+Files:
+- `crates/cox-app/src/server.rs`
+
+Steps:
+1. `ServeMode::{Client, Worker}` for `serve`. A worker refuses a second `open` and skips `load_login_env`.
+2. On EOF both modes end their sessions (F2).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app server
+#### T66.20 `cox-serve`: run directory, singleton lock, socket and peer uid
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.19 · Size: ~170 · Priority: P2 · Complexity: 3
+
+Plan: extract `lock::claim_path` (the existing `lock` tests stay green); `socket.rs` checks the path against `sun_path` first, makes or checks `run/` (`0700`, a real directory, ours, no group or other bits), takes `run/serve.lock` through `claim_path`, then, as the holder, unlinks a stale `serve.sock` and binds it under umask `077` with mode `0600`. Peer uid: tokio `UnixStream::peer_cred` (already in the workspace); effective uid from `nix` (already a workspace dependency). `admit` is a pure predicate and `admit_peer` fails closed. Verify with the seven named tests plus the `lock` and `deps` tests.
+
+Goal: the supervisor's socket is reachable only by the same user, and only one supervisor runs per `COX_HOME`. `docs/design/serve.md` S5 and all of D4 except the `cox attach` bridge and Windows.
+
+Files:
+- `crates/cox-store/src/lock.rs` (extract `claim_path` from `claim`, same behaviour)
+- `crates/cox-serve/src/socket.rs` (`#[cfg(unix)]`)
+- `crates/cox-serve/src/lib.rs`
+
+Steps:
+1. `COX_HOME/run` is created with mode `0700`; an existing one must be a directory, not a symlink, owned by the effective uid, with no group or other bits, or startup is refused naming the path and mode.
+2. A second supervisor on the same `COX_HOME` is refused through an OS lock on `run/serve.lock` taken with the extracted `lock::claim_path`, naming the holder.
+3. Only the lock holder unlinks a stale `serve.sock`; it binds with umask `077` and sets mode `0600`.
+4. A path over `sun_path` (104 bytes on macOS, 108 on Linux) is refused naming the limit; no fallback to `/tmp`.
+5. `admit(peer_uid, own_uid)` is a pure predicate; every accepted connection is checked before its first line is read, and a mismatch is dropped and logged.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve socket
+mise exec -- cargo nextest run -p cox-store lock
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass, and the existing `lock` tests stay green: `a_second_supervisor_is_refused_naming_the_holder`, `a_stale_socket_is_replaced`, `a_run_dir_open_to_others_is_refused`, `a_symlinked_run_dir_is_refused`, `a_path_over_sun_path_is_refused`, `the_socket_is_owner_only`, `admit_refuses_another_uid`.
+
+Out of scope: the `cox attach` bridge, routing connections to workers, and Windows (later cards).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve socket: 8 passed (the seven named tests and admit_peer_checks_the_connected_uid)
+cargo nextest run -p cox-store lock: 7 passed (the existing lock tests, unchanged, after the claim_path extraction)
+cargo nextest run -p cox --test deps: passed (cox-serve may depend on cox-store alone)
+cargo clippy -p cox-serve -p cox-store --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+Done when these tests pass, with a fake worker program as `crates/cox/tests/remote.rs` fakes `ssh`: `a_crashed_worker_is_restarted_idle_with_resume`, `give_up_marks_the_session_failed`, `shutdown_ends_every_worker`, `the_cap_refuses_the_seventeenth_open`.
+
+Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve: 10 passed (supervisor: a_crashed_worker_is_restarted_idle_with_resume, give_up_marks_the_session_failed, shutdown_ends_every_worker, the_cap_refuses_the_seventeenth_open; worker: open_and_end_lines_match_the_wire, only_the_reply_to_the_supervisor_counts; the four restart tests); 15 more runs of the supervisor tests all passed
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+cargo hakari verify: workspace-hack works correctly
+```
+
+#### T66.19 New crate `cox-serve`: the restart policy
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~120 · Priority: P2 · Complexity: 2
+
+Goal: a pure policy decides what the supervisor does when a worker exits. `docs/design/serve.md` S4 and D3. `cox-serve` is its own crate because it will own a trust boundary (who may connect) and process supervision, which must stay out of `cox-app` (linked into the macOS app through `cox-ffi`) and out of `crates/cox` (clap and dispatch only).
+
+Files:
+- `crates/cox-serve/Cargo.toml`, `crates/cox-serve/src/lib.rs`, `crates/cox-serve/src/restart.rs`
+- Docs: the workspace `Cargo.toml` members line, an `AGENTS.md` layout row, a `docs/design/crates.md` row
+
+Steps:
+1. `restart.rs` is pure: `Policy::on_exit(uptime, clean) -> Restart(Duration) | GiveUp | Done`.
+2. Delays start at 250 ms and double to a 30 s cap; the supervisor gives up after 5 consecutive failures; 30 s of life resets the count; a clean exit is never restarted.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve restart
+mise exec -- cargo nextest run -p cox --test deps
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `delays_double_from_250ms_to_a_30s_cap`, `gives_up_after_five_consecutive_failures`, `thirty_seconds_of_life_resets_the_count`, `a_clean_exit_is_never_restarted`.
+
+Execution plan: add `crates/cox-serve` (std only, `publish = false`, workspace lints); `restart.rs` holds named consts, `Policy` and `Decision`; the fifth consecutive failure gives up, so the 30 s cap is reachable only through the pure `delay` function and is tested there. Register the AGENTS.md row, the crates.md row and a `deps.rs` rule that `cox-serve` has no workspace dependency (the members line is the `crates/*` glob, so it needed no edit).
+
+Out of scope: spawning processes and the socket (T66.20, T66.21).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve restart: 4 passed (delays_double_from_250ms_to_a_30s_cap, gives_up_after_five_consecutive_failures, thirty_seconds_of_life_resets_the_count, a_clean_exit_is_never_restarted)
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy --workspace --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+
+#### T66.18 Worker mode in `cox-app`'s server: one session, ended on EOF
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.17 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the server can run as one session's worker, and on EOF every mode ends its sessions instead of only closing them, so detached bash processes are killed. `docs/design/serve.md` S3, D3 and F2.
+
+Files:
+- `crates/cox-app/src/server.rs`
+
+Steps:
+1. `ServeMode::{Client, Worker}` for `serve`. A worker refuses a second `open` and skips `load_login_env`.
+2. On EOF both modes end their sessions (F2).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app server
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the tests, run with a fake `GateRunner`, show that:
+- a pass stops the run;
+- a fail followed by a pass stops on the second try;
+- the token limit stops the run while a gate is still failing;
+- an error does not continue;
+- an interrupt does not continue;
+- two no-progress continuations stop the run.
+
+Out of scope: config, the shell runner and the run loop (T66.10, T66.11). The TUI does not enter this loop.
+
+Done:
+- `cox_protocol::autonomous`: `AutonomousPolicy` (field names as T66.10's `[autonomous]` table, `Default` with step 1's values, `validate` returns `NoGates` or `BlankGate`), `GateResult`, the async `GateRunner` trait (infallible: a spawn failure, sandbox denial or timeout is a failed result) and `AutonomousStop` (`GatesPassed`, `GateRetriesExhausted`, `NoProgress`, `MaxContinuations`, `MaxTurns`, `MaxTokens`, `Timeout`, `TurnEnded{stop}`). Not reachable from `Event`, so `docs/protocol.jsonschema` is unchanged.
+- `cox_core::autonomous`: `Driver::new(policy)` rejects a gateless policy, so `decide` cannot run without one. `decide(&mut State, &TurnReport, &dyn GateRunner) -> Next` takes `&mut State` because the streak and per-gate failure counts live there; the clock is `TurnReport.elapsed`, a value. Order: a never-continue stop (no gate runs), gates in order (first failure wins; a pass wins even at a limit), the limits, the gate retries (a gate stops after `gate_retries + 1` failed checks), then the no-progress streak (2).
+- Check: `cargo nextest run -p cox-protocol -p cox-core` 571 passed, 1 skipped; `-E 'test(autonomous) | binary(autonomous)'` 20 passed. The card's `nextest run -p cox-core autonomous` filter matches test names only, so it runs the 3 unit tests; the integration binary needs `binary(autonomous)`. `cargo clippy -p cox-protocol -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean.
+Done when tests show that:
+- an edit aimed at the base prompt is refused;
+- malformed JSON is rejected;
+- a valid proposal parses;
+- after a refine, the base prompt bytes and `system[0..=2]` are byte-identical to before.
+
+Out of scope: applying edits or running a refine in the background automatically.
+
+Done:
+- `crates/cox-core/src/refine.rs`: `Session::propose_refine(text, digest)` sends one `memory`-job request through the shared `side_call` (route, ledger row, spend), with the user's text, the digest (written by the session layer) and the last 24 000 bytes of the transcript cut on a char boundary. It touches neither the history nor the prefix. `refine::parse` reads the answer as a `serde_json::Value` (no new dependency; a surrounding code fence is tolerated) and returns `Proposal { evidence, edits }` or `Rejected { reason }`; the reason is written by cox and never quotes the model. Any failure rejects the whole proposal: more than 5 edits, an unknown kind or action, an id outside `[a-z0-9-]{1,64}` (the existing `memory_extract::is_valid_name`, now `pub(crate)`), a kind or id naming the base prompt (`prompt`, `prompt-minimal`, `base`, `system`, or containing `base-prompt`/`system-prompt`), content missing on create/update, present on delete or over 4096 bytes, or one entry edited twice.
+- `crates/cox-core/src/prompts/refine.md`: the instructions, written for cox; the transcript and digest are framed as evidence, not instructions.
+- `prompt.md` and `prompt_minimal.md` stay `include_str!` constants in `context.rs`; nothing in this task can write them.
+Check: `cargo nextest run -p cox-core refine` 6 passed: `refine_refuses_an_edit_aimed_at_the_base_prompt`, `refine_rejects_malformed_json`, `refine_parses_a_valid_proposal_inside_a_code_fence`, `refine_rejects_a_proposal_out_of_bounds`, `refine_is_one_memory_call_and_leaves_the_cached_prefix_byte_identical` (`system[0..=2]` from `assemble` and the history are byte-identical before and after; one `memory` usage row), `refine_rejects_a_bad_answer_but_still_records_its_cost`. Whole `-p cox-core`: 437 passed. `cargo clippy -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: the workspace-wide clippy (only `cox-core` changed).
+#### T33.45.10 Docs: Russian and Ukrainian translations
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T33.45.9 · Files: `docs/ru/plugins.md`, `docs/uk/plugins.md` (new directories), `crates/cox/tests/docs.rs` · Design: `docs/design/plugins.md` §15, A134
+Goal: the three-part plugin API reference exists in Russian and Ukrainian beside the English page, and cannot silently fall behind it.
+- `docs/ru/plugins.md` and `docs/uk/plugins.md` translate every part and heading of `docs/plugins.md`; each opens by naming the English page the authority. Code blocks, identifiers, keys, ABI names and URLs are verbatim; relative links gain `../`.
+- `crates/cox/tests/docs.rs`: `docs_relative_links_resolve` also walks `docs/ru` and `docs/uk`; `plugin_docs_translations_match_the_english_page` compares the heading levels, every fenced block byte for byte, the generated field-index bullets, the relative links and the in-page anchors with the English page; `a_translation_missing_a_heading_fails_the_parity_check` proves the check fails on a missing heading or an edited block.
+Check: both cover all three parts and every heading of the English page; `just test` green.
+Check output: `cargo nextest run -p cox --test docs` 7 passed, including `plugin_docs_translations_match_the_english_page` and `a_translation_missing_a_heading_fails_the_parity_check`; `cargo clippy -p cox --test docs -- -D warnings` and `cargo fmt --check` clean. `just docs-check` runs the same `docs` test binary.
+#### T63.2 CI: re-run only the Swift packages a change can affect
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T61.4 (shared job; not a code dependency) · Priority: P2 · Complexity: 3
+Goal: on a pull request, a package whose test inputs are byte-identical to a run that already passed on `main` (or earlier on the same pull request) is not tested again; everything else runs as before. A change to `CoxUI` alone re-runs `CoxUI` and `CoxTranscript`; a Rust-only change re-runs `CoxCore` only, so the five packages that do not link `CoxFFI` (and their snapshot images) are skipped. SwiftPM has no per-test result cache, so the unit that can be skipped is a whole package. The app target is built on every run.
+Done:
+- `scripts/desktop/swift_test_select.py` owns the input lists and the hash (`git ls-files -s` of the package, its transitive local dependencies, the extra paths its tests read, the shared files, plus `xcodebuild -version` and `sw_vers -productVersion`) and prints `NAME HASH run|skip`. An unknown package fails closed.
+- `scripts/desktop/swift_test.sh` is the per-package loop that was inline in `ci.yml`, plus the pass markers (`desktop/macos/build/swift-test-pass/NAME-HASH`, written only by a package that passed). It runs every package unless `COX_SWIFT_TEST_ALL=0`; `ci.yml` sets 0 on `pull_request` only.
+- `ci.yml` `desktop-macos`: `actions/cache/restore` and `actions/cache/save` v6.1.0 (`55cc8345863c7cc4c66a329aec7e433d2d1c52a9`, `gh api repos/actions/cache/git/ref/tags/v6.1.0`, checked 2026-10-17) around the script; the save runs after a failure too. The job comment states the rule. `desktop-macos-lint` runs the selection tests.
+- `justfile` `desktop-test` (new recipe): the XCFramework, then the script with `COX_SWIFT_TEST_ALL=1`.
+- Deviations from the card's input table, found by reading the tests: `CoxPlatform`, `CoxTranscriptText` and `CoxTranscript` tests read `desktop/macos/Fixtures` through `#filePath`, and `CoxCore`'s `WelcomeTests` summarises the repository root (`AGENTS.md`, `CLAUDE.md`, `.cargo`), so those are hashed too; `.github/actions/desktop-macos/action.yml` (the toolchain and XCFramework steps) and the selector itself are shared inputs. Dependencies are read from each `Package.swift` (`.package(path:)`), not copied.
+- Step 5 (`push` to `main` so `main` writes markers) is not done: it adds a macOS run per merge and the card says to ask the creator first. Until then markers come from earlier runs of the same pull request and from manual runs on `main` (`workflow_dispatch` runs every package and saves).
+Check:
+- `python3 -m unittest discover -s scripts/desktop -p 'test_swift_test_select.py'`: 19 tests pass (unchanged inputs skip all; a `crates/` or `Cargo.lock` change selects `CoxCore` only; a `CoxUI` source or snapshot change selects `CoxUI` and `CoxTranscript`; a `CoxModel` change selects it and its four dependents but not `CoxUI`; a Fixtures change; each shared file; a new toolchain; run-all; unknown package; drift against the real manifests).
+- `swift_test.sh` against a stub `swift` on the real tree: first run with `CoxUI` failing wrote five markers and exited 1; the second run skipped those five and ran `CoxUI` alone; a run without `COX_SWIFT_TEST_ALL=0` ran all six.
+- `ruby -ryaml` loads `ci.yml`; `bash -n` passes. actionlint and shellcheck are not installed in this checkout (mise shims without a version).
+- Baseline for `desktop-macos` on pull requests with every package run (successful runs 38941648537, 38941652721, 38943380391, 38943832554, 38944038140, 38945470792): 52.6, 53.9, 55.2, 59.7, 63.1, 63.7 min, median 57.5 min. Many later runs were cancelled or queued, so no newer sample.
+- Pending CI on this pull request: the first push runs all six packages and stores a key; a push touching only `crates/cox-tools/src/git.rs` should show five "skipped" and `CoxCore` tested; a push touching only a `CoxUI` source should run `CoxUI` and `CoxTranscript`. Their job times are the "after" column. `research.md` §4.3.9 does not exist on `main` yet (T61.1, #312), so the before/after rows are added there once it lands.
+#### T61.8 Optimized build scripts and proc macros in dev
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
+Depends: T61.1 · Size: ~5 · Files: none (rejected; `Cargo.toml` unchanged, `research.md` §4.3.9 only)
+Goal: decide by measurement whether `[profile.dev.build-override] opt-level = 3` speeds the dev build (diesel, serde, schemars, uniffi and clap macros; typify's `build.rs`).
+Check: `MISE_SCCACHE_PROBE=1 CARGO_BUILD_JOBS=4 mise exec -- cargo build --workspace --timings`, clean `target/`, on the kept variant (no override). Output: `real 300.23 s, user 1023.86 s, sys 81.67 s`; load 18.95 before, 37.69 at the end (a 1-minute average that includes the build); the report is `target/cargo-timings/cargo-timing.html`. Top build-script run: `aws-lc-sys` 86.4 s. Top proc-macro crate: `diesel_derives` 12.2 s, `typify-impl` 11.4 s, `uniffi_macros` 8.9 s.
+Done: verdict rejected; the override is not kept. Clean builds (`rm -rf target`, A, B, A, B): A 322.37 s and 306.22 s (mean 314.3 s), B 379.04 s and 303.48 s (mean 341.3 s, +8.6 %), inside the 16 to 76 s spread of each variant. Incremental (`touch crates/cox-tui/src/lib.rs`): medians A 5.45 s, B 5.00 s, with the first run after each clean at 10 to 12 s in both. Neither path shows a speedup, and the clean build is not shown to be not slower, so the rule (keep only if both are not slower) rejects it. Rows, loads, commands and the top units are in `research.md` §4.3.9.
+Plan (Claude Code / sonnet-5.5): add `ServeMode` and a `mode` argument to `serve`, and `serve_stdio` passes `Client` after `load_login_env`. A `Worker` answers a second `open` (one that does not resume the held session) with an `Outcome::Err` reply, the wire's error type, before `App::open` runs; no new `AppError` variant, so `app.rs` stays untouched. `Server::stop` calls `LiveSession::end` instead of `close`. Tests in `crates/cox-app/tests/app.rs`: `a_worker_refuses_a_second_session` (the second open errs, the first session stays usable) and `eof_ends_every_session` (a detached `sleep` started by `bash` is dead after EOF). Verify: the Check below, then clippy and fmt.
+
+Done when `eof_ends_every_session` and `a_worker_refuses_a_second_session` pass.
+
+Out of scope: the `cox serve --worker` flag and the supervisor that spawns workers (later cards).
+
+Check: `mise exec -- cargo nextest run -p cox-app` passed (276 tests), including `eof_ends_every_session` (a background `bash` runs `exec sleep 300`; after the client's stdin closes the process is dead; with `stop` calling `close` again it is still alive after 5 s and the test fails) and `a_worker_refuses_a_second_session` (the second `open` answers an error naming one session, a `resume` of the held id attaches, the first session still answers `snapshot`; with `refuses` returning false the test fails). `-p cox --test docs` 5 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. `docs/app-server.md` now says EOF ends the sessions. `serve_stdio` takes the mode and `cox app-server --stdio` passes `Client`; the `--worker` flag is a later card.
+
+#### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.16 · Size: ~140 · Priority: P2 · Complexity: 3
+
+Goal: a client can detach and reattach to a session the server holds, and one session never gets a second core. `docs/design/serve.md` S2, D1, D2 and F1.
+
+Files:
+- `crates/cox-app/src/wire.rs`
+- `crates/cox-app/src/server.rs`
+- `docs/app-server.md` (the call list); generated: `docs/app-server.schema.json`
+
+Steps:
+1. `Call::Attach`, `Call::End` and `Call::Inbox`, with `Reply::Inbox`.
+2. `close` stops the pump and sends `ended`, but no longer closes the controller.
+3. `open` with `resume` of an id this server already holds attaches instead of calling `App::open` again (F1).
+
+Plan (Claude Code / sonnet-5.5): `wire.rs` gets the three calls and `Reply::Inbox`, plus the round-trip entries; the schema is regenerated by deleting `docs/app-server.schema.json` and rerunning the drift test. In `server.rs` each session's pump becomes a `JoinHandle` in `pumps` (so a detach can abort and await it: no stale batch is sent after the snapshot). `close` aborts the pump and queues `ended` after the response, and leaves the controller and the canvas pull alone (`LiveSession::close` would close both for good). `attach` and a repeated `open` of a held id abort the old pump, answer `Opened` from the snapshot and start a new pump. `end` runs `LiveSession::end` and forgets the session; a live pump ends itself with `ended`, a detached one gets `ended` queued. Tests go in `crates/cox-app/tests/app.rs` beside the existing `serve` tests, because their scripted-provider and pipe helpers live there. The call list in `docs/app-server.md` gains three lines.
+
+Check: `mise exec -- cargo nextest run -p cox-app server wire` passed, including `app_server_schema_drift` (`docs/app-server.schema.json` regenerated by the drift test) and `wire_round_trips_every_message` for the three calls and `Reply::Inbox`. The four named tests pass in `cox-app::app`: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core` (fails with `left: 2, right: 1` StateChanged lines when `open` skips the held-id check), `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`. Whole `-p cox-app` run 274 passed; `-p cox --test remote --test docs` 6 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean.
+
+Done when these tests pass: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core`, `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`; and the schema drift test is green.
+
+Out of scope: the supervisor, the socket and worker mode (T66.18 and later cards).
+
+#### T66.16 `docs/app-server.md` says what a dropped connection does
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~10 (docs only) · Priority: P2 · Complexity: 1
+
+Goal: the doc stops promising that a running turn survives a dropped client. `docs/design/serve.md` S1 and D8: today the turn stops, the session can be resumed, and resident sessions are planned.
+
+Files:
+- `docs/app-server.md`
+
+Steps:
+1. Replace "A running turn keeps running on the host" and "the session itself keeps running on the host" with today's behaviour.
+
+Check:
+```bash
+! grep -n "keeps running on the host" docs/app-server.md
+mise exec -- cargo nextest run -p cox --test docs
+```
+
+Done when the Check passes.
+
+Out of scope: any code.
+
+Done: `docs/app-server.md` no longer promises that a running turn survives a dropped client. When the connection drops, the running turn stops, the session can be resumed with `open` and `resume`, and resident sessions are planned in `docs/design/serve.md` (T66.12). The two sentences are the only changes in the file.
+
+Check output:
+```
+$ ! grep -n "keeps running on the host" docs/app-server.md
+(no output)
+$ mise exec -- cargo nextest run -p cox --test docs
+    PASS cox::docs relative_links_skip_urls_and_anchors
+    PASS cox::docs app_server_doc_cites_paths_that_exist
+    PASS cox::docs docs_config_covers_every_key
+    PASS cox::docs docs_relative_links_resolve
+    PASS cox::docs docs_name_every_subcommand
+    Summary: 5 tests run: 5 passed, 0 skipped
+#### T33.40.6.1 Core: one batched `risk` question per tool batch
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.21, T33.40.1 · Size: ~120 · Files: `crates/cox-core/src/turn.rs`, `crates/cox-core/src/monotone.rs`, `plugins/jev/src/decide.rs`, `crates/cox/tests/plugins_jev.rs`, `crates/cox-plugin-api/src/abi.rs` (doc comment only) (regenerated: `docs/protocol.jsonschema`, `docs/plugin-abi.schema.json`)
+The T33.40.4 Jev guest answered the per-call question, so it must answer the batched one too, or its e2e tests break.
+Goal: J§5.1's one request per tool batch, which T33.40.6 needs and the core cannot ask today: `gate` calls `advise_risk` once per call, and it asks a flat question (`items: vec![]`) whose state has no task, cwd or sandbox mode. Every `PreToolUse` hook of a batch now runs before the batch's first approval prompt (A163).
+Steps:
+1. `run_signed_tools` runs `PreToolUse` for every call of the batch first, then asks one `risk` question for the batch. The shared state is the task (clipped), the cwd, the workspace roots and the sandbox mode; each item is `tool`, `subject`, `input` and `classifier_risk`, never tool output.
+2. `Answer::Items` applies per call through `raise_risk`. A flat answer, a missing item or a late answer leaves every call at its classifier risk.
+3. A late `risk` answer stays "no answer" and records a `Notice` naming the point and its deadline; `Event::Advised` keeps its shape.
+4. The core keeps the advice `note` for `risk` as it does for `approve_hint`, so the probabilities a plugin reports reach the rollout.
+Check:
+- `risk_batch_asks_once_with_one_item_per_call`;
+- `risk_items_raise_only_their_own_call`;
+- `late_risk_answer_records_a_notice`;
+- `risk_note_reaches_the_rollout`;
+- still green: `risk_advice_cannot_lower_risk`, `risk_not_asked_when_outcome_would_not_change`, `late_advice_falls_back_to_static_pick`, `late_salience_keeps_every_item`, `batched_question_answers_each_item`.
+
+Plan: in `turn.rs`, split `gate` so `run_signed_tools` first runs `PreToolUse` for every known call (a block fails only that call), then calls `Session::advise_risk` once with the surviving calls, then runs the engine and the approval loop per call as before. In `monotone.rs`, `advise_risk` takes the batch: it keeps the J5.1 "ask only when the outcome could change" filter per call, sends one `Question` with the shared state (task from `compact::working_state`, cwd, workspace roots, sandbox mode) and one item per eligible call, checks `Question::fits`, and applies each `Answer::Items` entry through `raise_risk` to its own call; `ask_point` tells a late answer from silence so `risk` records a `Notice`; the note is sanitized, clipped and kept on an applied `risk` advice as for `approve_hint`. Verify with the four Check tests in `monotone.rs`, all of `cox-core`, `cox --test plugins_jev` and the other decide e2e tests, clippy and fmt.
+
+Result: `run_signed_tools` runs every `PreToolUse` of a batch first (`pre_tool_use`; a blocked call fails alone), then calls `Session::advise_risk` once with the surviving calls, then gates each call serially as before. `advise_risk` keeps the per-call "ask only when the outcome could change" filter and asks one `Question` with the shared state (`task` from `compact::working_state`, scrubbed and clipped; `cwd`; `workspace_roots`; `sandbox`) and one item per eligible call (`tool`, `subject`, `input`, `classifier_risk`). It checks `Question::fits` again in the core and applies each `Answer::Items` entry through `raise_risk` to its own call. A new `Reply { Silent, Late, Advice }` lets `risk` record an Info `Notice` ("plugin X gave no risk advice within N ms; the classifier's risk stands") with no `Advised`. `clean_note` (sanitized, 200 characters) now serves both `approve_hint` and an applied `risk`; the 200-character clip is a known limit for T33.40.6's probabilities. Widened by the creator (A163): the Jev guest answers a batched question with `Answer::Items`, the same severity Score for each item, and puts the item states under `state.items`; the `plugins_jev` rig writes one file per tool batch so the per-request counts hold. `jev_call_blocked_by_budget_falls_back` changed meaning. Every batch now follows a main provider call that passes the same budget gate, so no second question can be asked over the cap; the test asserts one request, one usage row, no skip notice, `turn_done` with `stop = budget`, `a.txt` written and `b.txt` not. The refused call-out itself stays covered by `cox-core`'s `decide_call_out_over_budget_falls_back`.
+
+Check output:
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-plugin -p cox-plugin-api -p cox-protocol -p cox-core
+     Summary 743 tests run: 743 passed, 1 skipped   (includes the four new tests and every still-green test above)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test plugins_jev --test plugin_cli --test external_agents_cursor
+     Summary 28 tests run: 28 passed, 0 skipped
+$ (cd plugins && mise exec -- cargo test -p cox-plugin-jev -p cox-plugin-sdk --locked)
+     cox-plugin-jev 20 passed; cox-plugin-sdk 10 passed
+$ mise exec -- cargo clippy -p cox-core -p cox -p cox-plugin-api --all-targets -- -D warnings: clean
+$ (cd plugins && mise exec -- cargo clippy -p cox-plugin-jev -p cox-plugin-sdk --all-targets --locked -- -D warnings; cargo clippy -p cox-plugin-jev --target wasm32-unknown-unknown --locked -- -D warnings): clean
+$ mise exec -- cargo fmt --check; (cd plugins && mise exec -- cargo fmt --check): clean
+```
+Done when a scripted-provider test shows:
+- the spawn result holds no answer text;
+- `collect` on a running task returns `running`;
+- after completion, `collect` returns a preview within the cap and the archive id;
+- `expand` returns the full body.
+
+Out of scope: a separate `task_output` tool; peer messages between children.
+
+Result: `tasks.rs` gains `TaskStatus` (`queued`, `running`, `done`, `error`, `cancelled`) and a per-session `Collect` record for each background subagent (name, status, the settled answer, the archive id), with `begin_collect`, `mark_running`, `settle_collect` and `collect_snapshot`, which waits on the existing `tasks_idle` notify up to `timeout_ms` and returns the records as they stand when time or the call's cancel token runs out. The record holds the answer `run_task` already capped (summary or cut, with `full answer: expand <id>` when T66.2 archived it), so `collect` adds no way around `result_cap_tokens`. A background spawn returns `structured` `{task_id, name, status: "queued"}` and no answer. `drive` marks each run `running` and settles it before the notice goes out: `cancelled` when the run was interrupted, `error` for a driver refusal or a failed run, else `done`; a woken finished child goes back to `running`, and a child that cannot resume is settled `error`. `pointer_line` takes a `collect` flag: a subagent's line ends with `| collect <task id>`, a detached `bash` line is unchanged. `agent(collect: [id or name, …], timeout_ms)` is checked before the concurrency slot is reserved; it takes at most 8 tasks and clamps the wait to 120 s, and an unknown id, an empty or non-string list, or `task` together with `collect` is denied. Its risk is `ReadOnly` and its subject `collect`. The input schema drops `required` (a top-level `anyOf` is refused by providers) and the description says `task` or `collect`. Foreground calls are unchanged. `docs/tools.md` names the new input. Tests (in `subagent.rs`, because a task id is unknown to a script): `background_spawn_returns_a_handle_and_no_answer`, `pointer_line_for_a_subagent_ends_with_collect_and_its_id`, `collect_returns_a_done_tasks_preview_by_id_and_by_name`, `collect_reports_queued_running_and_a_timeout_snapshot`, `collect_wakes_when_the_task_settles_before_the_timeout`, `collect_reports_error_for_a_refused_run_and_cancelled_for_an_interrupted_one`, `collect_preview_of_an_over_cap_answer_stays_within_the_cap_and_names_the_archive_row`, `collect_denies_unknown_tasks_mixed_calls_and_oversized_lists`, `collect_is_read_only_whatever_the_preset`; and `background_spawn_hands_out_a_collect_handle_and_the_pointer_names_it` through the loop in `tests/subagent.rs`. Not done: the macOS and TUI summary line for an `agent` call (`cox-app` `summary.rs`) still reads "Delegated to `collect`: " for a collect call, because that file is outside this card.
+Check output: `mise exec -- cargo nextest run -p cox-core` — 440 passed, 1 skipped; `mise exec -- cargo nextest run -p cox -E 'test(agent) or test(subagent)'` — 12 passed; `mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+#### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.16 · Size: ~140 · Priority: P2 · Complexity: 3
+
+Goal: a client can detach and reattach to a session the server holds, and one session never gets a second core. `docs/design/serve.md` S2, D1, D2 and F1.
+
+Files:
+- `crates/cox-app/src/wire.rs`
+- `crates/cox-app/src/server.rs`
+- `docs/app-server.md` (the call list); generated: `docs/app-server.schema.json`
+
+Steps:
+1. `Call::Attach`, `Call::End` and `Call::Inbox`, with `Reply::Inbox`.
+2. `close` stops the pump and sends `ended`, but no longer closes the controller.
+3. `open` with `resume` of an id this server already holds attaches instead of calling `App::open` again (F1).
+
+Plan (Claude Code / sonnet-5.5): `wire.rs` gets the three calls and `Reply::Inbox`, plus the round-trip entries; the schema is regenerated by deleting `docs/app-server.schema.json` and rerunning the drift test. In `server.rs` each session's pump becomes a `JoinHandle` in `pumps` (so a detach can abort and await it: no stale batch is sent after the snapshot). `close` aborts the pump and queues `ended` after the response, and leaves the controller and the canvas pull alone (`LiveSession::close` would close both for good). `attach` and a repeated `open` of a held id abort the old pump, answer `Opened` from the snapshot and start a new pump. `end` runs `LiveSession::end` and forgets the session; a live pump ends itself with `ended`, a detached one gets `ended` queued. Tests go in `crates/cox-app/tests/app.rs` beside the existing `serve` tests, because their scripted-provider and pipe helpers live there. The call list in `docs/app-server.md` gains three lines.
+
+Check: `mise exec -- cargo nextest run -p cox-app server wire` passed, including `app_server_schema_drift` (`docs/app-server.schema.json` regenerated by the drift test) and `wire_round_trips_every_message` for the three calls and `Reply::Inbox`. The four named tests pass in `cox-app::app`: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core` (fails with `left: 2, right: 1` StateChanged lines when `open` skips the held-id check), `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`. Whole `-p cox-app` run 274 passed; `-p cox --test remote --test docs` 6 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean.
+
+Done when these tests pass: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core`, `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`; and the schema drift test is green.
+
+Out of scope: the supervisor, the socket and worker mode (T66.18 and later cards).
+
+Done when these tests pass: `delays_double_from_250ms_to_a_30s_cap`, `gives_up_after_five_consecutive_failures`, `thirty_seconds_of_life_resets_the_count`, `a_clean_exit_is_never_restarted`.
+
+Execution plan: add `crates/cox-serve` (std only, `publish = false`, workspace lints); `restart.rs` holds named consts, `Policy` and `Decision`; the fifth consecutive failure gives up, so the 30 s cap is reachable only through the pure `delay` function and is tested there. Register the AGENTS.md row, the crates.md row and a `deps.rs` rule that `cox-serve` has no workspace dependency (the members line is the `crates/*` glob, so it needed no edit).
+
+Out of scope: spawning processes and the socket (T66.20, T66.21).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve restart: 4 passed (delays_double_from_250ms_to_a_30s_cap, gives_up_after_five_consecutive_failures, thirty_seconds_of_life_resets_the_count, a_clean_exit_is_never_restarted)
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy --workspace --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+#### T61.7 sccache for local builds and the in-repository CI jobs
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T61.1 · Size: ~60 · Files: `mise.toml`, `.github/actions/desktop-macos/action.yml`, `.github/workflows/ci.yml`, `scripts/test_sccache_config.py`, `research.md`
+Goal: dependencies compiled in one worktree are reused by another without sharing a `target/` (sharing one breaks, as seen 2026-09-23), and the CI jobs outside the shared `rust` matrix reuse compiled crates across runs.
+- Already there when the card was claimed: the `sccache` pin and the fail-open `RUSTC_WRAPPER` template in `mise.toml`, the R2 backend action `.github/actions/sccache` in the `sandbox-landlock`, `plugins` and `plugin-examples` jobs, and the `toolchain.md` row. The R2 action was reused instead of the Actions cache backend named in step 3.
+- Added: `SCCACHE_CACHE_SIZE = "10G"` and `CMAKE_C_COMPILER_LAUNCHER`/`CMAKE_CXX_COMPILER_LAUNCHER` (same probe template, so whisper.cpp in `cox-voice` is cached and an empty value means no launcher); optional `sccache-*` inputs on the `desktop-macos` action that run the shared sccache action before the XCFramework build, passed by `ci.yml`'s `desktop-macos` job (read-only on pull requests). `desktop-build.yml` (release) stays uncached: passing the secrets would need `release.yml` changes.
+- Test: `scripts/test_sccache_config.py` pins the variables and the wiring (config-only change, so the assertion on the config is the test).
+Check: `python3 -m unittest discover -s scripts -p 'test_sccache_config.py'` ran 6 tests, OK. `mise exec -- env` shows `RUSTC_WRAPPER`, `CMAKE_C_COMPILER_LAUNCHER`, `CMAKE_CXX_COMPILER_LAUNCHER` set to the mise sccache and `SCCACHE_CACHE_SIZE=10G`. `cargo build -p cox-config` in a second worktree with an empty `target/`: 667 hits of 670 requests, 35 to 36 s with the cache against 105 to 106 s without it (research.md §4.3.9, T61.7).
+Done: §4.3.9 has the clean build of the second worktree with and without sccache.
+```
+
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
 Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
@@ -9877,6 +10562,76 @@ Status: done 2026-10-14
 Result: implemented as the card describes. New crate `crates/cox-target` (`lib.rs` 280, `launcher.rs` 102, `command.rs` 207 lines, tests included); `cox-app/src/remote.rs` delegates to it, `RemoteError::BadHost` became `RemoteError::Target`. The ssh argv for `Tty::No` is byte-identical to the old one. Extra test `name_that_reads_as_an_option_never_reaches_a_command` (a hand-built `Target`, docker context included). The Windows branches compile only under `cfg(windows)` and were not built here.
 
 Check (2026-10-14): `cargo nextest run -p cox-target -p cox-app` 273/273; `cargo nextest run -p cox --test remote --test deps` 11/11; clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean; `cargo hakari verify` clean.
+
+#### T68.2 `[targets.<name>]` in config
+
+Model: Claude / sonnet-5.5 · Depends: T68.1 · Size: ~120 · Priority: P1 · Complexity: 2
+
+Goal: `[targets.<name>]` with `target` (`kind:name`), `cwd`, `context` (docker) and `program` (an absolute launcher path that overrides the lookup), plus `[launchers]` per kind. A surface accepts a target by its config name or as a literal `kind:name`. `desktop.remote_hosts` stays and reads as `ssh:<alias>` targets. The project-config guard reverts every `targets.*` and `launchers.*` key. Files: `cox-protocol/src/config.rs`, `cox-config/src/load.rs`, `default.toml`, `docs/config.md`, regenerated `docs/config.jsonschema`.
+
+Done when `project_config_cannot_name_a_target`, `remote_hosts_read_as_ssh_targets` and the schema drift test pass.
+
+Status: done 2026-10-14
+Result: `targets` and `launchers` in `cox-protocol` config, user config only (both in `GUARDED_KEYS`; tests `project_config_cannot_name_a_target`, `project_config_cannot_set_a_launcher`). `cox-target/src/resolve.rs`: `Entry`, `Resolved`, `resolve` (a configured name wins over a literal; entry `program` over `[launchers]` over the fixed lookup; a configured launcher must be absolute and exist; new `TargetError` variants `RelativeLauncher`, `MissingLauncher`, `ContextNeedsDocker`). `cox-session/src/targets.rs`: `resolve(&Config, &str)` and `configured(&Config)` (`desktop.remote_hosts` as `ssh:<alias>`). `docs/config.md` and `docs/config.jsonschema` regenerated by their tests from `default.toml` and a `TARGETS_DOCS` constant. No caller yet (T68.4, T68.6), so the binary was not run.
+
+Check (2026-10-14): `cargo nextest run -p cox-target -p cox-protocol -p cox-config -p cox-session` 250/250; `-p cox --test deps` 10/10; `-p cox-app settings` 18/18; clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean; `cargo hakari verify` clean.
+
+#### T68.3 `hello` handshake and readable failures
+
+Model: Claude / sonnet-5.5 · Depends: T68.1 · Size: ~180 · Priority: P1 · Complexity: 2
+
+Goal: the first exchange on the app-server wire is `hello`: wire version, cox version, OS, arch and the sandbox backend (or none). The client refuses another wire major version with one sentence naming both versions. The launcher's stderr is read, bounded (8 KiB) and passed through `cox_sanitize::sanitize`, so `cox: command not found`, exit 127, an unknown container or a stopped instance becomes `RemoteError::NotInstalled` / `RemoteError::Unreachable` with the target and a hint, instead of a silent drop. Files: `cox-app/src/wire.rs`, `server.rs`, `remote.rs`, `docs/app-server.schema.json`.
+
+Done when `old_wire_version_is_refused_by_name`, `missing_remote_cox_says_how_to_install` and `remote_stderr_is_sanitized_and_bounded` pass.
+
+Status: done 2026-10-14
+Result: `Call::Hello` / `Reply::Hello(HostInfo { wire, cox, os, arch, sandbox })`; the server answers from `cox_tools::sandbox::backend(LinuxBackend::Auto)` as `doctor` does. `connect_with` and `reconnect` say hello first, with a 30 s deadline (`HELLO_TIMEOUT`). New `RemoteError` variants `WireVersion`, `RemoteTooOld`, `NotInstalled`, `Unreachable`; `Disconnected` stays for drops after hello. The launcher's stderr is piped, its last 8 KiB kept and passed through `cox_sanitize::sanitize` before it reaches an error. An `id: 0` answer (a line the server could not read, e.g. an older cox without `hello`) pairs only with the pending hello. `RemoteWorkspace::info()` returns the `HostInfo` by clone (it is replaced on reconnect). `docs/app-server.md` Handshake section; schema regenerated. Review round: id-0 pairing narrowed to the hello, and the hello deadline added.
+
+Check (2026-10-14): `cargo nextest run -p cox-app` 273/273; `-p cox --test remote` 1/1; `-p cox-ffi` 15/15 (before the review round, which changed no FFI-visible type); clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean.
+
+#### T68.9 End-to-end tests with fake launchers
+
+Model: Claude / sonnet-5.5 · Depends: T68.1 · Size: ~60 + tests · Priority: P1 · Complexity: 2
+
+Goal: test-support scripts named `ssh`, `docker`, `limactl` and `colima` that check their argv and exec the local `cox app-server --stdio` against a scratch `COX_HOME`, used by every P68 card; one `#[ignore]` test per real backend (`colima`, `lima`, `docker` under Colima) for a manual run. Done when `crates/cox/tests/targets.rs` runs a turn through each fake launcher with the scripted provider.
+
+Status: done 2026-10-14
+Result: `crates/cox/tests/support/fake_launcher.rs` (one fake launcher for all four kinds; the argv prefix is written out by hand so a wrong `cox_target::command` fails a test) and `crates/cox/tests/targets.rs`: a full scripted turn over the public `cox_app::wire` types through fake ssh, docker (with and without `--context`), limactl and colima; `fake_launcher_sees_no_api_key`; extra `fake_launcher_refuses_an_argv_it_was_not_given`. `tests/remote.rs` uses the shared helper. `cox` dev-depends on `cox-target`. The `#[ignore]` real-backend tests (`COX_TEST_COLIMA_PROFILE`, `COX_TEST_LIMA_INSTANCE`, `COX_TEST_DOCKER_CONTAINER`) were not run.
+
+Check (2026-10-14): `cargo nextest run -p cox --test targets --test remote --test deps` 17 passed, 3 skipped (ignored); clippy `--workspace --all-targets -D warnings` clean; `cargo fmt --check` clean.
+
+#### T68.4 Desktop: connect to any target (Rust and FFI)
+
+Model: Claude / sonnet-5.5 · Depends: T68.2, T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
+
+Goal: `RemoteWorkspace::connect(target)` takes a `Target`; `App::targets()` lists the configured ones and the running ones it can see — `docker ps --format json`, `limactl list --json`, `colima list --json`, each run through the T68.1 launcher with a timeout, a missing launcher listing nothing (fail open). `cox-ffi` forwards both (one-expression bodies, D11). Done when `listing_skips_a_missing_launcher` and `connect_reaches_a_docker_target` (fake `docker` script) pass.
+
+Status: done 2026-10-14
+Result: `cox-target/src/discover.rs` (pure): `listing(kind, launcher)` builds the scrubbed-env command for `docker ps --format '{{json .}}'`, `limactl list --json` and `colima list --json`; `parse_listing` accepts NDJSON or an array, keeps running instances and drops names `check_name` refuses. `cox-session/src/targets.rs` `launcher(config, kind)`. `cox-app/src/targets.rs`: `TargetChoice`, `App::targets()` (configured first, then discovered, the three listings run concurrently with a 3 s timeout and `kill_on_drop`; a missing launcher, non-zero exit, timeout or unreadable output lists nothing for that kind) and `App::connect_target(text)` through `cox_session::targets::resolve`. `RemoteWorkspace::connect(Resolved, local)` spawns `cox [--cwd <dir>] app-server --stdio` through `cox_target::command(.., Tty::No)`; `connect_remote(host)` now goes through `connect_target("ssh:<host>")`; new `RemoteError::Config`. `cox-ffi`: `connect_target`, `targets` and the `TargetChoice` record as one-expression forwards; `connect_remote(host)` kept for Swift. Docker `context` is config-only, not discovered.
+
+Check (2026-10-14): `cargo nextest run -p cox-target -p cox-app -p cox-ffi -p cox -p cox-session` 601/601 (incl. `listing_skips_a_missing_launcher`, `connect_reaches_a_docker_target`, `forward_only`); clippy on the same packages `--all-targets -D warnings` clean; `cargo fmt --check` clean.
+
+#### T68.6 `--on <target>` for the TUI and `cox run`
+
+Model: Claude / sonnet-5.5 · Depends: T68.2 · Size: ~200 · Priority: P1 · Complexity: 3
+
+Goal: a global `--on <target>`. `cox --on lima:dev` runs the remote TUI through the launcher with a tty (`ssh -t`, `docker exec -it`, `limactl shell`, `colima ssh`); `cox run --on docker:ci -p …` runs without a tty, sends the prompt as one stream-json input line on stdin rather than on the command line, copies stdout through unchanged and exits with the remote exit code. Only an allowlisted set of flags is forwarded (`--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume`, `--continue`); `--cwd` comes from the target's `cwd`. Done when e2e `run_on_target_sends_prompt_over_stdin` and `run_on_target_returns_remote_exit_code` (fake launcher) pass.
+
+Status: done 2026-10-14
+Result: global `--on <target>` (`crates/cox/src/on_target.rs`). The TUI runs remotely with a tty and inherited stdio; `cox run --on` runs without a tty, writes the prompt as one JSON string line on the child's stdin, copies our stdin through after it and returns the remote exit code (a signal-killed launcher gives 1). Forwarded: `--cwd` from the target's config, `--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume`, `--continue`, each value checked by `cox_target::command`; any other flag, a TUI first-turn prompt or another subcommand is refused by name. New `cox run --prompt-stdin` (conflicts with `-p`): the first stdin line is a JSON string with the prompt, the rest stays the approvals channel. `cox-target` becomes a normal dependency of `cox`. `docs/config.md` "Running on a target". Not run against a real target or a real PTY.
+
+Check (2026-10-14): `cargo nextest run -p cox -p cox-target` 228 passed, 5 skipped (incl. e2e `run_on_target_sends_prompt_over_stdin`, `run_on_target_returns_remote_exit_code`, `run_on_target_refuses_a_flag_it_does_not_forward`; unit `tui_on_a_target_asks_for_a_tty`); clippy `-p cox -p cox-target --all-targets -D warnings` clean; `cargo fmt --check` clean.
+
+#### T68.7 `agent` presets on a target
+
+Model: Claude / sonnet-5.5 · Depends: T68.2 · Size: ~150 · Priority: P2 · Complexity: 3
+
+Goal: `[external_agents.<name>]` gains `target`. Such a preset runs `cox run --output-format stream-json` on the target through the existing `StreamJson` driver (`cox-session/src/external_agents.rs`) instead of a local program; the remote run's usage lines become local `usage` rows under the preset's model, so the ledger stays complete. A preset with a target is not wrapped in the local sandbox (the remote applies its own) and still asks permission per call like `CloudAgent`. Done when `agent_on_target_records_remote_usage` and `agent_on_target_is_not_locally_sandboxed_but_asks` pass.
+
+Status: done 2026-10-14
+Result: `ExternalAgentConfig.target` (user config only: `external_agents` is already in `GUARDED_KEYS`). `cox-session/src/target_agents.rs`: a preset with a target resolves through `targets::resolve` at session open and runs `cox [--cwd <cwd>] run --output-format stream-json --prompt-stdin` through `cox_target::command(.., Tty::No)`, not wrapped in the local sandbox; the prompt goes as one JSON string line on stdin. `external_agents.rs`: the stream-json loop is a shared `pump`, keeping `assistant` and `result` lines for the remote run and taking `usage` from `result` into one `usage` row under the preset name ($0, like other external agents). Permission: a call needs an `allow` rule for `TargetAgent(<kind:name>)` in user config; `bypass` and `auto` do not waive it (as `CloudAgent`); without it the call is refused naming the rule (approved by the creator 2026-10-14). A preset whose launcher is missing is left out with a warning. The preset's model/mode/sandbox are not forwarded to the remote run.
+
+Check (2026-10-14): `cargo nextest run -p cox-protocol -p cox-config -p cox-target -p cox-session --features cox-session/plugins` 256/256 (incl. `agent_on_target_records_remote_usage`, `agent_on_target_is_not_locally_sandboxed_but_asks`, `a_target_without_a_launcher_leaves_the_preset_out`); clippy on those packages clean; `cargo fmt --check` clean.
 
 #### T37.44.16 The shared file walker skips `.git/`
 

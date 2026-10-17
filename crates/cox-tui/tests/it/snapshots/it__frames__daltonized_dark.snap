@@ -1,0 +1,28 @@
+---
+source: crates/cox-tui/tests/it/frames.rs
+expression: "daltonized(\"cox-dark-daltonized\")"
+---
+⚙ edit src/a.rs · +1 −1 · 4ms
+  ± src/a.rs  +1 −1
+  --- a/src/a.rs
+  +++ b/src/a.rs
+  @@ -1 +1 @@
+  -let x = 1;
+  +let x = 2;
+│ ✓ 0B 4ms · /undo
+⚙ bash false · 4ms
+│ ✗ 0B 4ms
+> Enter send · Shift+Tab mode cycle · @ file · / command
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [default]
+----
+#7dcfff
+
+
+
+#bb9af7
+#e69f00
+#56b4e9
+#7dcfff
+#e69f00
+#e69f00
+#565f89

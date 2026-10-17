@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// A remote host over cox-ffi (DT§4.4, T52.20, T52.21): `App.connectRemote` as a
+// A remote host over cox-ffi (DT§4.4, T52.20, T52.21): `App.connectTarget` as a
 // `RemoteWorkspace`, and a remote session as a `SessionClient`, so the stores and the windows
 // show it as they show a local one. Separate from `LiveCoreClient.swift` because the wire answers
 // only what `cox app-server` serves: what it has no message for says so instead of guessing.
@@ -12,8 +12,14 @@ import CoxFFIBindings
 import Foundation
 
 extension LiveCoreClient: RemoteConnector {
-  public func connect(host: String) async throws -> any RemoteWorkspace {
-    LiveRemote(try await app.connectRemote(host: host))
+  public func connect(target: String) async throws -> any RemoteWorkspace {
+    LiveRemote(try await app.connectTarget(text: target))
+  }
+
+  public func targets() async -> [CoxClient.TargetChoice] {
+    ((try? await app.targets()) ?? []).map {
+      CoxClient.TargetChoice(name: $0.name, target: $0.target, configured: $0.configured)
+    }
   }
 }
 
@@ -24,6 +30,12 @@ final class LiveRemote: RemoteWorkspace {
 
   var host: String { handle.host() }
   var isConnected: Bool { handle.isConnected() }
+
+  var info: CoxClient.HostInfo {
+    let info = handle.info()
+    return CoxClient.HostInfo(
+      wire: info.wire, cox: info.cox, platform: info.os, arch: info.arch, sandbox: info.sandbox)
+  }
 
   func reconnect() async throws { try await handle.reconnect() }
 

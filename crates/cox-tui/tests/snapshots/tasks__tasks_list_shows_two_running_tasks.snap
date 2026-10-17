@@ -1,7 +1,0 @@
----
-source: crates/cox-tui/tests/tasks.rs
-expression: redacted
----
-2 running background tasks
-- <task>: explore: find x
-- <task>: shell: cargo test
