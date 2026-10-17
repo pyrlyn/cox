@@ -84,6 +84,47 @@ cargo clippy -p cox -p cox-app -p cox-serve --all-targets -- -D warnings: clean
 cargo fmt --check: clean
 ```
 
+#### T66.24 End-to-end: kill the client, reattach, and the rollout grows only by the turn
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3
+
+Goal: one test proves the point of the whole serve design: a session outlives its client and a reattach writes nothing to the rollout. `docs/design/serve.md` "Acceptance test for the later cards", S9 and D6.
+
+Files:
+- `crates/cox/tests/serve.rs` (test only)
+
+Steps:
+1. Against a scratch `COX_HOME` with the scripted provider (`COX_PROVIDER=scripted`, `COX_SCENARIO`, as `crates/cox/tests/remote.rs` sets them), start `cox serve` in the background and wait for `run/serve.sock`.
+2. Client A runs `cox attach --stdio`, sends `open` for a new session in a scratch cwd and counts the rollout's lines (M). It sends one prompt, reads patches until the turn ends, records the line count (N, with N > M) and the blocks it folded with `coalesce::apply`.
+3. Kill client A with SIGKILL and assert the worker still holds the lock (`Store::session_holder` is `Some`).
+4. Client B runs `cox attach --stdio` and sends `attach`. Assert `Opened.blocks` equals A's folded blocks, the rollout still has exactly N lines with `seq` running 1..=N without a repeat, and lines M+1..=N are that one turn's events from `TurnStarted` to `TurnDone`.
+5. SIGTERM to `cox serve`: assert the lock is free and the socket is removed.
+6. Every process the test starts is killed at the end, including on failure, through a drop guard (a test never leaves a process behind).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test serve
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Execution plan: `crates/cox/tests/serve.rs` only (`#[cfg(all(unix, feature = "app-server"))]`), under a short scratch home in `/tmp` because of `sun_path`. A drop guard owns `cox serve` and each client child and kills them. Readiness is polled with deadlines (the socket, then each reply line). Lines are built and read with `cox_app::wire`, patches folded with `cox_app::coalesce::apply`, the lock probed with `Store::session_holder`, and the rollout read from `Store::rollout_path`. Verify with five runs of the new test in a row, then the Check below.
+
+Done when `a_reattach_after_a_killed_client_writes_nothing_to_the_rollout` passes.
+
+Out of scope: a restarted worker's `StateChanged` line (a restart replays the rollout and appends one, D6; only a reattach must add nothing), a TUI attach, and Windows.
+
+Product fix found by the test: `cox serve` left `serve.sock` behind after SIGTERM, against this card and `docs/design/serve.md` S9. `Bound` now unlinks the file (a drop guard declared before the lock, so it goes while the lock is still held); `bind` still replaces a file a crash left. Narrow tests in `socket.rs`: `dropping_the_bound_socket_removes_its_file` (fails without the guard), `a_missing_socket_file_does_not_fail_the_drop`.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox --test serve --test serve_cmd --test deps: 15 passed (a_reattach_after_a_killed_client_writes_nothing_to_the_rollout 4.4 s)
+cargo test -p cox --test serve, five runs in a row: 5 passed (3.2 to 3.9 s each)
+cargo nextest run -p cox-serve: 27 passed
+cargo clippy -p cox -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+
 #### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
