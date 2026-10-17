@@ -1,0 +1,17 @@
+---
+source: crates/cox-ext/tests/it/instructions.rs
+expression: loaded.block
+---
+# Instructions
+## AGENTS.md
+# Root agents
+Use cargo.
+
+## CLAUDE.md
+Style: see Two spaces. and mail ops@example.com.
+
+## .claude/CLAUDE.md
+Project claude file.
+
+## sub/AGENTS.md
+Sub agents.

@@ -1,0 +1,6 @@
+---
+source: crates/cox-tui/tests/it/status.rs
+assertion_line: 226
+expression: wide
+---
+sonnet-5 · ctx ▰▰▰▱▱ 41% · $4.20/5 · workspace-write · 0 tasks · cache 60% · ⎇ main +12 −3 · [default]

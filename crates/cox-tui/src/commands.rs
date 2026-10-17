@@ -163,6 +163,10 @@ pub enum Action {
         name: String,
         args: String,
     },
+    /// `/refine <text> [--global]`, `/refine list`, `/refine undo [<id>]`
+    /// (T66.8): `crates/cox` proposes, applies and undoes; the TUI shows
+    /// the proposal as a diff and asks first.
+    Refine(crate::refine::Request),
     /// `/plugin new <name> [--lang <lang>] [--with <cap,...>]` (T33.30,
     /// PL§13): `lang` is `None` when `--lang` was not given, so `state.rs`
     /// opens `Modal::Picker(Kind::PluginLang)` instead of guessing one.
@@ -228,6 +232,10 @@ pub fn parse(line: &str, tier: Tier) -> Option<Action> {
     let args: Vec<String> = words.map(str::to_string).collect();
     let joined = || (!args.is_empty()).then(|| args.join(" "));
     Some(match name {
+        "refine" => match crate::refine::parse(&args) {
+            Ok(request) => Action::Refine(request),
+            Err(usage) => Action::Notice(usage.into()),
+        },
         "model" => {
             let (tier, model) = match args.first().and_then(|a| tier_named(a)) {
                 Some(t) => (t, args.get(1)),

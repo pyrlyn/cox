@@ -3,7 +3,7 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 //! T35.7: a test-only stand-in for Cursor's `agent` CLI, so
-//! `tests/external_agents_cursor.rs` drives the real plugin, sandbox and
+//! `tests/it/external_agents_cursor.rs` drives the real plugin, sandbox and
 //! driver path with no network and no Cursor account. It replays a fixture
 //! `cox-vendor cursor-fixtures` wrote from Cursor's and ACP's documented
 //! examples (`tests/fixtures/cursor/*.json`) over stdio. A `[[bin]]` of

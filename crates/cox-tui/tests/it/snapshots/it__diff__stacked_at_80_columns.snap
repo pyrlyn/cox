@@ -1,0 +1,18 @@
+---
+source: crates/cox-tui/tests/it/diff.rs
+expression: diff_view(80)
+---
+ git diff HEAD · PageUp/PageDown scroll · Esc closes
+  ± src/loop.rs  +2 −2
+  --- a/src/loop.rs
+  +++ b/src/loop.rs
+  @@ -10,5 +10,5 @@
+   fn step(&mut self) {
+  -    let total = price * count;
+  -    self.log(total);
+  +    let total = price * quantity + tax;
+       self.emit(total);
+  +    self.ledger.record(total);
+   }
+> Esc close · PageUp scroll up · PageDown scroll down
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · workspace-write · [default]

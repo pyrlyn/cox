@@ -1,8 +1,0 @@
----
-source: crates/cox-tui/tests/cells.rs
-expression: "format!(\"{says}\\n---\\n{delivered}\")"
----
-explore: find the flaky test says: found it: flaky_sleep in
-tests/shell.rs
----
-→ explore: find the flaky test: keep looking

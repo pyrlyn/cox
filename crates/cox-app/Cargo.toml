@@ -68,7 +68,7 @@ workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 # The scenario tests run a real session over the Scripted provider and
-# reuse cox-core's test harness (`tests/scenarios.rs`).
+# reuse cox-core's test harness (`tests/it/scenarios.rs`).
 cox-provider = { path = "../cox-provider", version = "0.1.2" }
 insta = { workspace = true }
 # Paused time: a consumer that naps 2 s per pull stays a fast test.
