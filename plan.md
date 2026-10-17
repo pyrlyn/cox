@@ -115,7 +115,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
-| T61.5.2 | todo | P2 | 3 | 0% | |
+| T61.5.2 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
 | T61.7 | todo | P2 | 2 | 0% | |
@@ -1921,6 +1921,8 @@ Goal: as T61.5.1 for `crates/cox/tests/` (19 files), except the binaries a comma
 Files: as T61.5.1, for `crates/cox`.
 
 Steps: as T61.5.1. `plugin_example_dart` keeps its test name, which `just plugin-examples` filters on.
+
+Execution plan (claimed 2026-10-17): count `nextest list -p cox` and time the build phase before. Merge into `crates/cox/tests/it/` the 16 files no command names by itself: `cloud_agents`, `doc_examples`, `external_agents_cursor`, `gemini_compat`, `lsp`, `mcp_serve`, `no_real_keychain_in_tests`, `plain`, `plugin_cli`, `plugin_example_dart`, `plugin_example_go`, `plugin_new_cli`, `plugins`, `plugins_jev`, `run_cli`, `subagent_messaging`. Keep separate `docs`, `ide`, `deps`, `trycmd`, `tui_e2e` and also `remote`, which calls `env::set_var` (`HOME`, a key) and must not share a process with other tests. Fix relative `include_str!` paths, rename the `plain` snapshot to `it__plain__plain_transcript.snap`, update references to the merged binaries, then compare counts and names and run the Check.
 
 Check:
 ```bash
