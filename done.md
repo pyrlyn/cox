@@ -91,6 +91,43 @@ Done:
 - `cox_core::autonomous`: `Driver::new(policy)` rejects a gateless policy, so `decide` cannot run without one. `decide(&mut State, &TurnReport, &dyn GateRunner) -> Next` takes `&mut State` because the streak and per-gate failure counts live there; the clock is `TurnReport.elapsed`, a value. Order: a never-continue stop (no gate runs), gates in order (first failure wins; a pass wins even at a limit), the limits, the gate retries (a gate stops after `gate_retries + 1` failed checks), then the no-progress streak (2).
 - Check: `cargo nextest run -p cox-protocol -p cox-core` 571 passed, 1 skipped; `-E 'test(autonomous) | binary(autonomous)'` 20 passed. The card's `nextest run -p cox-core autonomous` filter matches test names only, so it runs the 3 unit tests; the integration binary needs `binary(autonomous)`. `cargo clippy -p cox-protocol -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean.
 
+#### T66.12 Design: resident sessions and a supervisor
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
+
+Goal: settle the crate-boundary change before any code. Today the TUI owns `cox_core::Session` (`cox-tui/src/app.rs:18, 94`), and the session lock (`cox-store/src/lock.rs`) ends with the process.
+
+Files:
+- `docs/design/serve.md` (new)
+
+Steps (each question is answered with code references):
+1. Can the attach protocol be the existing app-server protocol (`docs/app-server.md`: `open`, `send`, `snapshot`, `patches`) instead of a second enum in cox-protocol? If not, why not?
+2. Does the TUI consume `cox_app` patches or raw `Event`s?
+3. `cox serve` runs one worker process per session under one supervisor. It restarts a failed worker after 250 ms, doubling up to 30 s, and gives up after 5 consecutive failures; a worker that lives 30 s resets the count (idea: `pa-daemon/src/supervisor.rs`, `supervisor/supervision.rs`).
+4. Where does the socket live under `COX_HOME`, with what mode, and who may attach?
+5. The session lock moves to the worker.
+6. Reattach replays the rollout from cox-store and never a second JSONL dialect.
+7. `docs/app-server.md` says a running turn keeps running on the host, but `cox app-server --stdio` exits when stdin closes (`cox-app/src/server.rs:145, 237-243`). Fix the doc or the behaviour.
+8. Acceptance test for the later cards: on a scratch `COX_HOME`, start serve, run one scripted turn, kill the client, and reattach. The rollout must grow only by that turn's events.
+
+Check:
+```bash
+test -s docs/design/serve.md
+```
+
+Done when the doc ends with the implementation cards (each within the size limit). The creator then approves them in a new §6 amendment, and only then does code start.
+
+Out of scope: any code.
+
+Execution plan:
+1. Read `docs/app-server.md`, `cox-app/src/server.rs`, `cox-store/src/lock.rs`, the open/resume path in `cox-session` and `cox-app`, and the TUI's ownership of `Session`; note file:line for every claim.
+2. Write `docs/design/serve.md`: answer steps 1–8 with code references, list alternatives, trust boundaries, failure modes and out-of-scope items; cite primary sources for other tools (checked 2026-10-17).
+3. End the doc with proposed implementation cards (title, files, size, Check); do not add them to `plan.md` — they wait for the creator's §6 amendment.
+4. Verify: `test -s docs/design/serve.md`, and any docs link test that covers `docs/design/`.
+
+Done: `docs/design/serve.md` answers steps 1–8 with `path:line` references and ends with nine proposed implementation cards (S1–S9). Decisions: the attach protocol is the app-server wire plus three additive calls (`attach`, `end`, `inbox`), with no second enum in cox-protocol; serve carries patches only and the TUI stays an in-process `Event` consumer (a TUI attach is a later design); `cox serve` supervises one re-executed worker process per session, each the existing `cox_app::server::serve` loop over pipes, with the 250 ms → 30 s backoff, give-up after 5 failures and reset after 30 s; the socket is `COX_HOME/run/serve.sock` (dir 0700, socket 0600, peer uid check, singleton lock), and remote clients reach it only through `ssh … cox attach --stdio`; the session lock lives in the worker; reattach answers from the live controller's snapshot and writes nothing, and a restart replays the rollout. Findings: `docs/app-server.md:20-21` and `:118-120` are false today (the runtime drop at `crates/cox/src/main.rs:172-176` cancels the turn); `app-server` can build two cores for one session (`open` with `resume` of an id it already holds) and closes rather than ends its sessions on EOF. The proposed cards are not in `plan.md`: they await the creator's approval in a new §6 amendment, after which T66.13 and T66.14 get their files and steps.
+Check: `test -s docs/design/serve.md` passed. No test covers `docs/design/` (`crates/cox/tests/docs.rs` reads only top-level `docs/*.md`), so no cargo run was needed.
+
 #### T61.1 Build-time baseline
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
