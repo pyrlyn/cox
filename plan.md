@@ -880,7 +880,7 @@ Check:
   - `risk_thresholds_raise_on_any_hazard`;
   - `risk_low_answers_give_no_advice`;
   - `risk_config_overrides_thresholds`;
-- e2e in `Auto` mode with a confining sandbox, where a scripted `git push --force origin main` is auto-allowed without the plugin:
+- e2e in `Auto` mode with a confining sandbox, where a scripted `git push origin main` (classifier: `Exec`) is auto-allowed without the plugin (A164):
   - a high fixture gives `Ask`, headless denies, and `Advised { point: risk, applied: true }` is in the rollout;
   - a low fixture leaves the call allowed;
   - a wiremock delay past 200 ms leaves it allowed and records T33.40.6.1's late-answer `Notice`, with no `Advised` (A163);
@@ -891,7 +891,7 @@ Check:
 
 Depends: T33.40.6 · Size: ~200 · Files: `evals/src/cox_evals/jev_risk.py`, `evals/tests/test_jev_risk.py`, `evals/risk/commands.yaml` (data)
 Goal: measure J§5.1 against the no-Jev baseline at a hard budget cap.
-- The corpus has about 300 labelled commands: must-ask (force push, publish, deploy, remote delete, pipe-to-shell, credential exfiltration) and benign (build, test, grep, formatting, local git). The labels and a one-line reason are in the file.
+- The corpus has about 300 labelled commands: must-ask (remote push such as `git push origin main`, A164; publish, deploy, remote delete, pipe-to-shell, credential exfiltration) and benign (build, test, grep, formatting, local git). The labels and a one-line reason are in the file.
 - Each command is one scripted bash call in `Auto` mode with the sandbox on. The scripted provider costs $0, and Jev is live.
 - The run is repeated without the plugin as the baseline.
 Plan:
@@ -3075,6 +3075,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A158 §3 (new P68: T68.1–T68.10), by the creator (2026-10-14) — run targets: a whole cox session runs over ssh on Linux, macOS or Windows, in a Docker container, in a Lima instance or in the Colima VM, from the desktop app, the TUI and `cox run` (`--on <target>`) and the `agent` tool. Why: the only remote path is the desktop app's `ssh <host> cox app-server --stdio` with a hard-coded `/usr/bin/ssh` (T52.19–T52.21); containers and VMs are the usual isolation for agents (research.md 9.1.x). Effect: a new pure crate `cox-target` owns target names, launcher lookup (absolute paths only) and launch argv, and `cox-app/src/remote.rs` delegates to it; the app-server wire gains a `hello` handshake; `targets.*` is user config only. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link and nothing typed by the model or the person goes on the remote command line. `cox` must already be on the target; installing it and throwaway `docker run` containers are ideas, not cards. No new dependency; D7 holds on targets without a sandbox backend. No §0 decision changes.
 - A159 §3 (new P69: T69.1–T69.8), by the creator (2026-10-15) — tasks from a comparison of openai/codex at `f0c5077c` and xai-org/grok-build at `2bdd1d6a` with cox: PowerShell readers meet `Read` denies, `allow_for_session_persists` is honored, more default read-only workspace dirs, a store `quick_check`, a compaction that rejects stubs and survives overflow, live tasks reattached after compaction, optional edit anchors, an integer compact threshold. Why: cox already leads on sandboxing, lossless archives and truncation; these are the gaps. Both sources are Apache-2.0; every card says implement similar, not copy, and records the licence. Effect: eight cards; no new dependency, no §0 decision changes.
 - A163 §3 P33 (new T33.40.6.1; T33.40.6 amended), by the creator (2026-10-17): T33.40.6 needs core changes its file list does not cover. The core asks `risk` once per call with no task, cwd or sandbox mode in the state, records nothing for a late answer and drops the advice note for `risk`. T33.40.6.1 makes the core ask one batched question per tool batch (every `PreToolUse` of the batch runs before the first approval prompt), keeps the note, and records a `Notice` for a late `risk` answer. The creator chose: a late answer stays no answer plus a `Notice`, not `Advised { applied: false }`; the Jev guest reports a raise with confidence 1.0, its own J§5.1 thresholds being the gate, with its probabilities in the note. On 2026-10-17 the creator widened T33.40.6.1 to the Jev guest (`plugins/jev/src/decide.rs`) and its e2e tests (`crates/cox/tests/plugins_jev.rs`). No §0 decision changes.
+- A164 §3 P33 (T33.40.6 and T33.40.7 amended), by the creator (2026-10-17): T33.40.6/T33.40.7 e2e use `git push origin main` (classifier: Exec) instead of `git push --force origin main`, which the classifier already rates Destructive so `risk` is never asked.
 
 ## 7. Risk register
 
