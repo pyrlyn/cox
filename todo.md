@@ -81,7 +81,6 @@
 - T61.8. Optimized build scripts and proc macros in dev
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
-- T61.11. No feature-unification rebuilds between `just test` and `just check-all`
 - T63.2. CI: re-run only the Swift packages a change can affect
 - T66.3. `agent` collect: a status and a capped preview by task id
 - T66.4. Store: the `refine_events` table
@@ -94,6 +93,12 @@
 - T66.11. `cox run -p --autonomous`: shell gates and the headless loop
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
+- T66.16. `docs/app-server.md` says what a dropped connection does
+- T66.17. App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
+- T66.18. Worker mode in `cox-app`'s server: one session, ended on EOF
+- T66.19. New crate `cox-serve`: the restart policy
+- T66.20. `cox-serve`: run directory, singleton lock, socket and peer uid
+- T66.21. `cox-serve`: spawn workers, watch them, restart them, shut down
 - T67.3. Five more hook events
 - T67.4. `/goal`: a judged stop condition
 - T67.5. `/goal` in the TUI and stream-json
