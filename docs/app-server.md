@@ -56,7 +56,14 @@ module, and a drift test keeps it current.
   - `snapshot`, `expand`, `complete`, `changes` and `plan` read one session.
   - `plugin_action` runs the command a plugin button or action (`plugin:<id>:<command>`)
     names, and answers whether the session's plugins granted it.
-  - `close` stops a session's stream.
+  - `close` stops a session's stream and sends `ended`. The server still holds
+    the session, and its timeline keeps folding.
+  - `attach` streams a session the server still holds again, from its snapshot,
+    and answers like `open`. An `open` that resumes a session this server
+    already holds attaches to it instead of building a second core.
+  - `end` ends a session: its turns stop and what they detached is killed.
+  - `inbox` returns the approvals and questions that wait, so a client that
+    attaches sees those that arrived while it was away.
 
   The server answers each with a `response` that carries the same `id`. The
   response is either `ok` with a reply, or `err` with a message. A line that is

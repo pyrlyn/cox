@@ -23,10 +23,11 @@ use cox_app::live::LiveSession;
 use cox_app::server::{ServerHost, serve};
 use cox_app::wire::{self, Call, Line, Outcome, Reply, Request, ServerEvent};
 use cox_app::{
-    BlockId, BlockKind, CheckId, CheckStatus, FileChange, InboxItem, Intent, Layer, Need,
+    Block, BlockId, BlockKind, CheckId, CheckStatus, FileChange, InboxItem, Intent, Layer, Need,
 };
 use cox_app::{Browser, BrowserError, PageText};
 use cox_app::{TaskKind, TaskTarget, tasks};
+use cox_protocol::ids::SessionId;
 use cox_protocol::traits::{Archive as _, Store as _};
 use cox_protocol::types::{Attachment, Decision, Event, StopReason};
 
@@ -78,6 +79,18 @@ tool_calls = [{ name = "write", input = { path = "out.txt", content = "two\n" } 
 
 [[turn]]
 text = "Done again."
+"#;
+
+/// Three plain replies: one per turn.
+const THREE_REPLIES: &str = r#"
+[[turn]]
+text = "One."
+
+[[turn]]
+text = "Two."
+
+[[turn]]
+text = "Three."
 "#;
 
 /// Two plain replies: one per turn.
@@ -269,8 +282,13 @@ async fn pending(session: &LiveSession) -> cox_protocol::CallId {
 
 /// The user and assistant texts, in order.
 fn texts(session: &LiveSession) -> Vec<String> {
-    let blocks = session.snapshot().into_iter().map(|b| b.kind);
+    block_texts(session.snapshot())
+}
+
+fn block_texts(blocks: Vec<Block>) -> Vec<String> {
     blocks
+        .into_iter()
+        .map(|b| b.kind)
         .filter_map(|k| match k {
             BlockKind::User { text, .. } | BlockKind::Assistant { text, .. } => Some(text),
             _ => None,
@@ -1340,6 +1358,307 @@ async fn app_server_stalled_client_does_not_delay_the_turn() {
         waiting.is_ok(),
         "the turn waited on a client that stopped reading"
     );
+}
+
+/// Opens a session through the wire and returns its id; the request id is 1.
+async fn open_over_wire(
+    to: &mut tokio::io::DuplexStream,
+    lines: &mut ServerLines,
+    dir: &Path,
+) -> SessionId {
+    request(to, 1, open_call(dir)).await;
+    let Outcome::Ok(Reply::Opened { session, .. }) = response(lines, 1).await else {
+        panic!("open failed");
+    };
+    session
+}
+
+/// Reads until a patch of `session` ends a turn.
+async fn turn_ends(lines: &mut ServerLines, session: SessionId) {
+    loop {
+        if let Line::Notification(n) = next_line(lines).await
+            && let ServerEvent::Patches {
+                session: s,
+                patches,
+            } = n.event
+            && s == session
+            && patches.iter().any(ends_turn)
+        {
+            return;
+        }
+    }
+}
+
+/// Reads until both the response to `id` and `ended` for `session` came, in
+/// either order; the outcome and whether the response was first.
+async fn response_then_ended(
+    lines: &mut ServerLines,
+    id: u64,
+    session: SessionId,
+) -> (Outcome, bool) {
+    let (mut outcome, mut ended) = (None, false);
+    let mut response_first = false;
+    while outcome.is_none() || !ended {
+        match next_line(lines).await {
+            Line::Response(r) if r.id == id => {
+                response_first = !ended;
+                outcome = Some(r.outcome);
+            }
+            Line::Notification(n) if n.event == (ServerEvent::Ended { session }) => ended = true,
+            _ => {}
+        }
+    }
+    (
+        outcome.expect("the loop ends with a response"),
+        response_first,
+    )
+}
+
+/// Asks for the snapshot until `done` accepts its texts; those texts.
+async fn snapshot_until(
+    to: &mut tokio::io::DuplexStream,
+    lines: &mut ServerLines,
+    session: SessionId,
+    done: impl Fn(&[String]) -> bool,
+) -> Vec<String> {
+    for id in 100.. {
+        request(to, id, Call::Snapshot { session }).await;
+        let Outcome::Ok(Reply::Snapshot(blocks)) = response(lines, id).await else {
+            panic!("snapshot failed");
+        };
+        let all = block_texts(blocks);
+        if done(&all) {
+            return all;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    unreachable!("the range has no end")
+}
+
+#[tokio::test]
+async fn close_then_attach_streams_from_the_snapshot() {
+    let dir = scratch(Some(THREE_REPLIES));
+    let (app, events) = server_app(dir.path());
+    let (mut to_server, mut lines, server_in, server_out) = pipes(64 * 1024);
+    let client = async {
+        let session = open_over_wire(&mut to_server, &mut lines, dir.path()).await;
+        request(
+            &mut to_server,
+            2,
+            Call::Send {
+                session,
+                intent: send("one"),
+            },
+        )
+        .await;
+        turn_ends(&mut lines, session).await;
+
+        request(&mut to_server, 3, Call::Close { session }).await;
+        let (closed, in_order) = response_then_ended(&mut lines, 3, session).await;
+        assert_eq!(closed, Outcome::Ok(Reply::Closed));
+        assert!(in_order, "`closed` comes before `ended`");
+
+        // A turn while no client is attached still folds.
+        request(
+            &mut to_server,
+            4,
+            Call::Send {
+                session,
+                intent: send("two"),
+            },
+        )
+        .await;
+        let folded = snapshot_until(&mut to_server, &mut lines, session, |t| {
+            t.contains(&"Two.".to_owned())
+        })
+        .await;
+        assert_eq!(folded, ["one", "One.", "two", "Two."]);
+        while app.activity(session) != Activity::Idle {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        request(&mut to_server, 5, Call::Attach { session }).await;
+        let Outcome::Ok(Reply::Opened {
+            session: held,
+            blocks,
+            ..
+        }) = response(&mut lines, 5).await
+        else {
+            panic!("attach failed");
+        };
+        assert_eq!(held, session);
+        assert_eq!(block_texts(blocks), folded);
+
+        // The stream runs again, from the snapshot on.
+        request(
+            &mut to_server,
+            6,
+            Call::Send {
+                session,
+                intent: send("three"),
+            },
+        )
+        .await;
+        turn_ends(&mut lines, session).await;
+        drop(to_server);
+        while lines.next_line().await.ok().flatten().is_some() {}
+    };
+    let ((), served) = tokio::join!(
+        client,
+        serve(Arc::clone(&app), events, server_in, server_out)
+    );
+    served.expect("served");
+}
+
+#[tokio::test]
+async fn open_of_an_open_session_attaches_instead_of_a_second_core() {
+    let dir = scratch(Some(TWO_REPLIES));
+    let (app, events) = server_app(dir.path());
+    let store = cox_store::Store::open(&dir.path().join("user/.cox")).expect("store");
+    let (mut to_server, mut lines, server_in, server_out) = pipes(64 * 1024);
+    let client = async {
+        let session = open_over_wire(&mut to_server, &mut lines, dir.path()).await;
+        request(
+            &mut to_server,
+            2,
+            Call::Send {
+                session,
+                intent: send("one"),
+            },
+        )
+        .await;
+        turn_ends(&mut lines, session).await;
+        let opening_lines = |store: &cox_store::Store| {
+            store
+                .rollout_read(&session)
+                .expect("rollout")
+                .iter()
+                .filter(|e| matches!(e, Event::StateChanged { .. }))
+                .count()
+        };
+        let before = opening_lines(&store);
+
+        let again = Call::Open {
+            cwd: dir.path().join("project"),
+            resume: Some(session),
+            theme: "base16-ocean.dark".into(),
+        };
+        request(&mut to_server, 3, again).await;
+        let Outcome::Ok(Reply::Opened {
+            session: held,
+            blocks,
+            ..
+        }) = response(&mut lines, 3).await
+        else {
+            panic!("open of a held session failed");
+        };
+        assert_eq!(held, session);
+        assert_eq!(block_texts(blocks), ["one", "One."]);
+        // A second core would append its own opening line to the rollout.
+        assert_eq!(opening_lines(&store), before);
+
+        request(
+            &mut to_server,
+            4,
+            Call::Send {
+                session,
+                intent: send("two"),
+            },
+        )
+        .await;
+        turn_ends(&mut lines, session).await;
+        drop(to_server);
+        while lines.next_line().await.ok().flatten().is_some() {}
+    };
+    let ((), served) = tokio::join!(client, serve(app, events, server_in, server_out));
+    served.expect("served");
+}
+
+#[tokio::test]
+async fn end_ends_the_session() {
+    let dir = scratch(Some(TWO_REPLIES));
+    let (app, events) = server_app(dir.path());
+    let (mut to_server, mut lines, server_in, server_out) = pipes(64 * 1024);
+    let client = async {
+        let session = open_over_wire(&mut to_server, &mut lines, dir.path()).await;
+        request(&mut to_server, 2, Call::End { session }).await;
+        let (ended, _) = response_then_ended(&mut lines, 2, session).await;
+        assert_eq!(ended, Outcome::Ok(Reply::Closed));
+
+        request(&mut to_server, 3, Call::Snapshot { session }).await;
+        let gone = response(&mut lines, 3).await;
+        assert!(matches!(gone, Outcome::Err(_)), "{gone:?}");
+        request(&mut to_server, 4, Call::Attach { session }).await;
+        let gone = response(&mut lines, 4).await;
+        assert!(matches!(gone, Outcome::Err(_)), "{gone:?}");
+
+        // Detached first: nothing streams, so `ended` is still sent.
+        request(&mut to_server, 5, open_call(dir.path())).await;
+        let Outcome::Ok(Reply::Opened { session: other, .. }) = response(&mut lines, 5).await
+        else {
+            panic!("open failed");
+        };
+        request(&mut to_server, 6, Call::Close { session: other }).await;
+        response_then_ended(&mut lines, 6, other).await;
+        request(&mut to_server, 7, Call::End { session: other }).await;
+        let (ended, _) = response_then_ended(&mut lines, 7, other).await;
+        assert_eq!(ended, Outcome::Ok(Reply::Closed));
+        drop(to_server);
+        while lines.next_line().await.ok().flatten().is_some() {}
+    };
+    let ((), served) = tokio::join!(client, serve(app, events, server_in, server_out));
+    served.expect("served");
+}
+
+#[tokio::test]
+async fn inbox_returns_an_item_that_arrived_while_detached() {
+    let dir = scratch(Some(WRITE));
+    let (app, events) = server_app(dir.path());
+    let (mut to_server, mut lines, server_in, server_out) = pipes(64 * 1024);
+    let client = async {
+        let session = open_over_wire(&mut to_server, &mut lines, dir.path()).await;
+        request(&mut to_server, 2, Call::Close { session }).await;
+        response_then_ended(&mut lines, 2, session).await;
+
+        // The write needs approval, and no client is attached to be asked.
+        request(
+            &mut to_server,
+            3,
+            Call::Send {
+                session,
+                intent: send("write it"),
+            },
+        )
+        .await;
+        assert!(matches!(
+            response(&mut lines, 3).await,
+            Outcome::Ok(Reply::Sent { .. })
+        ));
+        let waiting = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while app.activity(session) != Activity::WaitingOnYou {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(waiting.is_ok(), "the turn never reached its approval");
+
+        request(&mut to_server, 4, Call::Inbox).await;
+        let Outcome::Ok(Reply::Inbox(items)) = response(&mut lines, 4).await else {
+            panic!("inbox failed");
+        };
+        let [item] = &items[..] else {
+            panic!("one item: {items:?}");
+        };
+        assert_eq!(item.session, session);
+        assert!(matches!(item.need, Need::Approval { .. }), "{item:?}");
+        drop(to_server);
+        while lines.next_line().await.ok().flatten().is_some() {}
+    };
+    let ((), served) = tokio::join!(
+        client,
+        serve(Arc::clone(&app), events, server_in, server_out)
+    );
+    served.expect("served");
 }
 
 #[tokio::test]
