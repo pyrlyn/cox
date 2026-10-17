@@ -197,3 +197,10 @@ Programs the project uses and the direct packages from its manifests.
 | Microsoft.WindowsAppSDK | local (`App`, `Cox.UI`, `Cox.Transcript`) | https://github.com/microsoft/WindowsAppSDK | T58.3: WinUI 3 (2.5.1, the stable line in R10.2.5) |
 | Microsoft.Windows.SDK.BuildTools | local (the same projects) | https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools | T58.3: Windows SDK targeting pack the WinUI targets require; 10.0.26100.7705, the latest 26100 build, with `TargetPlatformMinVersion` 10.0.17763.0 (A128) |
 | MSTest.Sdk | local (`Cox.Tests`, pinned in `global.json`) | https://github.com/microsoft/testfx | T58.3, A141: MSTest 4.4.1, the creator's C# test runner |
+
+## Linkers
+
+- **Windows (MSVC):** `rust-lld` through `.cargo/config.toml` (`[target.*-pc-windows-msvc] linker`). It ships with rustup, nothing to install.
+- **Linux:** `mold`, pinned in `mise.toml` for Linux only and driven by `clang`. mise `[env]` sets `CARGO_TARGET_{X86_64,AARCH64}_UNKNOWN_LINUX_GNU_RUSTFLAGS` to `-C linker=clang -C link-arg=-fuse-ld=mold` only when mise has mold installed (`mise install`); otherwise the variable is empty and the default linker stays. A Linux machine without mold (or without mise) builds as before; to use mold, run `mise install` and make sure `clang` is on PATH (`apt install clang`). `RUSTFLAGS`, when set, overrides these flags. CI installs mold on Linux runners.
+- **macOS:** Apple's native linker (mold has no macOS support).
+- **Cranelift:** not used. It needs a nightly toolchain and this repository is on stable.
