@@ -501,6 +501,37 @@ fn doctor_names_the_plugin_that_serves_typesafe() {
 }
 
 #[test]
+fn doctor_prices_jev_from_the_plugin_row() {
+    // The rig's `[providers.typesafe]` table makes `jev-latest` a configured
+    // model; no built-in price row covers it any more (T33.40.15), so only
+    // the granted plugin's `[[models]]` keep `catalog prices` green.
+    let server = Typesafe::answering(reply(10));
+    let rig = Rig::new(&server, &[]);
+    let out = rig
+        .cox()
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap()
+        .stdout;
+    let rows: Vec<Value> = serde_json::from_slice(&out).unwrap();
+    let find = |check: &str| {
+        rows.iter()
+            .find(|r| r["check"] == check)
+            .unwrap_or_else(|| panic!("{rows:?}"))
+    };
+    let prices = find("catalog prices");
+    assert_eq!(prices["status"], "ok", "{prices}");
+    let plugin = find("plugin jev");
+    assert!(
+        plugin["detail"]
+            .as_str()
+            .unwrap()
+            .contains("models from plugin:jev: jev-1.13.0, jev-latest"),
+        "{plugin}"
+    );
+}
+
+#[test]
 fn git_push_is_auto_allowed_without_the_plugin() {
     let server = Typesafe::answering(fixture(1, true, 10));
     let rig = Rig {

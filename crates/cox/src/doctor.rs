@@ -92,8 +92,11 @@ pub fn run(
     }
 
     // Every model reachable from [tiers.*] or [providers.*].models has a
-    // catalog price (T30.27).
-    results.push(check_catalog_prices(config));
+    // catalog price (T30.27), a granted plugin's own `[[models]]` included.
+    results.push(check_catalog_prices(
+        config,
+        &granted_plugin_models(cwd, &home),
+    ));
 
     // .claude/settings.json found.
     results.push(check_claude_settings());
@@ -723,6 +726,31 @@ fn granted_manifests<'a>(
         .collect()
 }
 
+/// Each granted plugin's `[[models]]` by plugin id: the rows a model that
+/// only a plugin prices (`jev-latest`, T33.40.15) needs to count as priced.
+#[cfg(feature = "plugins")]
+fn granted_plugin_models(
+    cwd: &std::path::Path,
+    home: &std::path::Path,
+) -> Vec<(String, Vec<cox_protocol::plugin::ModelDecl>)> {
+    let root = crate::config_load::find_git_root(cwd);
+    let found = cox_plugin::discover::discover(home, root.as_deref());
+    let store = cox_store::Store::open(home).ok();
+    granted_manifests(&found, store.as_ref(), root.as_deref())
+        .into_iter()
+        .map(|(id, m)| (id.to_string(), m.models.clone()))
+        .collect()
+}
+
+/// The slim build has no plugin host, so no plugin prices a model.
+#[cfg(not(feature = "plugins"))]
+fn granted_plugin_models(
+    _cwd: &std::path::Path,
+    _home: &std::path::Path,
+) -> Vec<(String, Vec<cox_protocol::plugin::ModelDecl>)> {
+    Vec::new()
+}
+
 /// A plugin-served provider section: which plugin serves it and the env var
 /// its key comes from, so the "API keys" check and the `provider` rows read
 /// one view of what a session would build.
@@ -873,10 +901,8 @@ fn check_plugins_with(
     let store = cox_store::Store::open(home).ok();
 
     // Granted plugins' `[[models]]` feed the catalog so a price or field
-    // conflict with the built-in table (T33.16) shows up per plugin below;
-    // `check_catalog_prices` still passes `&[]` for the top-level catalog
-    // check until `cox-session` keeps loaded manifests around to share (that
-    // wiring is T33.16's own "Left").
+    // conflict with the built-in table (T33.16) shows up per plugin below,
+    // and so does each row the plugin supplies, with its `plugin:<id>` source.
     let granted = granted_manifests(&found, store.as_ref(), root.as_deref());
     let plugin_models: Vec<cox_models::PluginModels<'_>> = granted
         .iter()
@@ -930,6 +956,21 @@ fn check_plugins_with(
                 .collect();
             if !conflicts.is_empty() {
                 parts.push(format!("catalog conflicts: {}", conflicts.join("; ")));
+            }
+        }
+        if let Some(catalog) = &catalog {
+            let mut supplied: Vec<&str> = catalog
+                .rows()
+                .filter(|r| r.source == cox_models::RowSource::Plugin(p.id.clone()))
+                .map(|r| r.id.as_str())
+                .collect();
+            supplied.sort_unstable();
+            if !supplied.is_empty() {
+                parts.push(format!(
+                    "models from plugin:{}: {}",
+                    p.id,
+                    supplied.join(", ")
+                ));
             }
         }
         let detail = parts.join("; ");
@@ -1107,9 +1148,16 @@ fn catalog_prices_status(catalog: &cox_models::Catalog, ids: &[String]) -> Check
 /// test uses for `default.toml`, so the two checks can never disagree; this
 /// row also covers a user's own `[providers.*]` config, which that test
 /// never sees.
-fn check_catalog_prices(config: &cox_protocol::Config) -> CheckResult {
+fn check_catalog_prices(
+    config: &cox_protocol::Config,
+    plugin_models: &[(String, Vec<cox_protocol::plugin::ModelDecl>)],
+) -> CheckResult {
     let ids = config.configured_model_ids();
-    match cox_models::Catalog::load(config, &[], None) {
+    let plugins: Vec<cox_models::PluginModels<'_>> = plugin_models
+        .iter()
+        .map(|(plugin, models)| cox_models::PluginModels { plugin, models })
+        .collect();
+    match cox_models::Catalog::load(config, &plugins, None) {
         Ok(catalog) => catalog_prices_status(&catalog, &ids),
         Err(e) => CheckResult::fail(
             "catalog prices",
@@ -1526,7 +1574,7 @@ mod tests {
     #[test]
     fn catalog_prices_check_is_ok_on_the_default_config() {
         let config = cox_protocol::Config::default();
-        let result = check_catalog_prices(&config);
+        let result = check_catalog_prices(&config, &[]);
         assert_eq!(result.status, "ok", "{}", result.detail);
     }
 
@@ -1547,7 +1595,7 @@ mod tests {
                 efforts: vec![],
                 ..Default::default()
             });
-        let result = check_catalog_prices(&config);
+        let result = check_catalog_prices(&config, &[]);
         assert_eq!(result.status, "warn", "{}", result.detail);
         assert!(
             result.detail.contains("claude-doctor-test-unpriced"),
@@ -1563,7 +1611,7 @@ mod tests {
         // alongside `[providers.*].models`.
         let mut config = cox_protocol::Config::default();
         config.tiers.cheap.model = "claude-doctor-test-tier-unpriced".into();
-        let result = check_catalog_prices(&config);
+        let result = check_catalog_prices(&config, &[]);
         assert_eq!(result.status, "warn", "{}", result.detail);
         assert!(
             result.detail.contains("claude-doctor-test-tier-unpriced"),
