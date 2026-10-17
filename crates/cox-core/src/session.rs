@@ -108,6 +108,8 @@ pub(crate) struct Inner {
     pub(crate) tasks: HashMap<TaskId, (String, Tier, crate::tasks::TaskKind)>,
     /// Subagents a follow-up can reach, running or finished (T34.5, SM§2).
     pub(crate) children: HashMap<TaskId, crate::tasks::Child>,
+    /// Where each background subagent stands, for `agent(collect)` (T66.3).
+    pub(crate) collects: HashMap<TaskId, crate::tasks::Collect>,
     /// Received-message counter per task (T34.6, SM§5):
     /// `MAX_MESSAGES_PER_TASK` denies the 17th delivery instead of letting
     /// a flood spin the addressee.
@@ -612,6 +614,7 @@ impl Session {
                 routed: None,
                 tasks: HashMap::new(),
                 children: HashMap::new(),
+                collects: HashMap::new(),
                 message_counts: HashMap::new(),
                 detach: HashMap::new(),
                 extracted: Vec::new(),

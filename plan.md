@@ -2274,37 +2274,6 @@ Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeI
 - the `pa-daemon` JSONL socket dialect.
 
 
-#### T66.3 `agent` collect: a status and a capped preview by task id
-
-Model: sonnet · Status: open · Depends: T66.2 · Size: ~150 · Priority: P1 · Complexity: 3
-
-Goal: the parent fetches a background child's result when it needs it. The spawn result never holds the child's answer.
-
-Files:
-- `crates/cox-core/src/subagent.rs`
-- `crates/cox-core/src/tasks.rs`
-- the cox-core subagent test file
-
-Steps:
-1. A background spawn returns `AgentHandle { task_id, name, status }` as `structured` (`subagent.rs:588-596` already carries the id). The history pointer line written by `publish_task_result` (`tasks.rs:96-106`) ends with `collect <task id>`.
-2. Add a `collect` input to the same `agent` tool: `{"collect": ["<task id>", …], "timeout_ms": n}`. For each task it returns `status`, one of `queued`, `running`, `done`, `error` or `cancelled`. Once a task has settled, it also returns a preview within the preset's `result_cap_tokens` and, when T66.2 archived the answer, `expand <id>`. A timeout returns a snapshot, never an error (idea: `pa-core/src/session_engine/rlm_host.rs` `RlmSubagentHost::collect`; `pa-daemon/src/rlm_child_model.rs` caps its preview at 160 characters).
-3. Delivery stays through the parent (T34.5). Usage rows stay where they are: in the child's session, with cap summaries under `Job::Summarize`. A foreground `agent` call is unchanged, because the parent waits for that answer by design.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core subagent
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when a scripted-provider test shows:
-- the spawn result holds no answer text;
-- `collect` on a running task returns `running`;
-- after completion, `collect` returns a preview within the cap and the archive id;
-- `expand` returns the full body.
-
-Out of scope: a separate `task_output` tool; peer messages between children.
-
 #### T66.4 Store: the `refine_events` table
 
 Model: sonnet · Status: open · Depends: — · Size: ~120 · Priority: P2 · Complexity: 2

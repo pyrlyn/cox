@@ -282,6 +282,47 @@ async fn tasks_background_agent_reports_pointer_then_notice() {
     assert!(store.usage_rows().iter().any(|r| r.job == Job::Explore));
 }
 
+/// T66.3: the model gets a handle to collect by, never the answer, and the
+/// pointer the finished task leaves in history says how to fetch it.
+#[tokio::test]
+async fn background_spawn_hands_out_a_collect_handle_and_the_pointer_names_it() {
+    let (session, _store, mut rx) = open(
+        &scenario("subagent_background"),
+        cox_protocol::Config::default(),
+    );
+    let running = spawn_turn(&session, "go");
+    running.await.expect("join").expect("turn");
+    let events = drain_with_background(&mut rx, 1).await;
+
+    let handle = events
+        .iter()
+        .find_map(|e| match e {
+            Event::ToolCallDone { result, .. } => result.structured.clone(),
+            _ => None,
+        })
+        .expect("structured handle");
+    let keys: Vec<_> = handle.as_object().expect("object").keys().collect();
+    assert_eq!(keys, ["task_id", "name", "status"]);
+    assert_eq!(handle["status"], "queued");
+    assert!(!handle.to_string().contains("CHILD-ANSWER"), "{handle}");
+    let task_id = handle["task_id"].as_str().expect("task id");
+
+    let pointer = session
+        .history()
+        .await
+        .iter()
+        .flat_map(|m| &m.content)
+        .find_map(|c| match c {
+            Content::Text { text } if text.contains("finished") => Some(text.clone()),
+            _ => None,
+        })
+        .expect("completion pointer");
+    assert!(
+        pointer.ends_with(&format!("collect {task_id}")),
+        "{pointer}"
+    );
+}
+
 #[tokio::test]
 async fn tasks_two_background_agents_run_concurrently() {
     let (session, _, mut rx) = open(
