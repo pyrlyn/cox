@@ -2584,7 +2584,7 @@ Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store 
 
 #### T66.23 `cox serve` and `cox attach --stdio`
 
-Model: sonnet · Status: open · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
+Model: Claude Code / sonnet · Status: in progress · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
 
 Goal: the supervisor and the bridge are commands a person can run. `docs/design/serve.md` S8, D3, D4 item 7 and D8. `crates/cox` stays clap and dispatch only.
 
@@ -2611,6 +2611,13 @@ mise exec -- cargo fmt --check
 The last `attach` run exits non-zero and names `COX_HOME/run/serve.sock`; `COX_HOME` is a scratch tree, never `~/.cox`.
 
 Done when `docs_name_every_subcommand` passes, `serve --help` does not list `--worker`, and `cox attach --stdio` with no supervisor fails naming the socket path.
+
+Execution plan:
+1. The router takes `projects`, `sessions` and `search` through `cox_serve::Workspace`, and `cox-serve` may not link `cox-app`. The impl is a thin pair: `cox_app::server::workspace_reply` (cox-app owns the wire, so it decodes the call and encodes the `Reply`; `Server::answer` reuses it for the same three calls) and a three-line `impl Workspace` over `Arc<App>` in `crates/cox/src/serve_cmd.rs`, the only place both crates meet.
+2. `cli.rs`: `Serve(ServeArgs)` with a hidden `--worker` and `Attach(AttachArgs)` with a required `--stdio`, both behind `app-server`. `main.rs` dispatches to `serve_cmd`, which holds the Windows refusal.
+3. `serve_cmd.rs`: `serve` reads the login environment once, builds `App`, binds the socket, and runs `cox_serve::router::serve` until `terminated()`; workers are `current_exe() --home <home> serve --worker`. `--worker` runs `serve_stdio(Worker)`. `attach` runs `cox_serve::attach::stdio`.
+4. `docs/app-server.md` "Resident sessions"; a `deps.rs` rule that only `crates/cox` depends on `cox-serve`.
+5. Verify: tests for `workspace_reply`, `tests/serve_cmd.rs` (help hides `--worker`, `attach --stdio` without a supervisor fails naming the socket), `--test docs --test deps`, clippy, fmt.
 
 Out of scope: the end-to-end test (T66.24), the desktop app choosing `cox attach --stdio` for a host that runs `cox serve` (a P52 desktop card), and heartbeat (T66.13).
 
