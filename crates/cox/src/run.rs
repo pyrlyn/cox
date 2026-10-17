@@ -9,10 +9,13 @@
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use cox_core::Session;
+use cox_core::autonomous::{Driver, Next, State, TurnReport};
 use cox_protocol::Event;
+use cox_protocol::autonomous::AutonomousStop;
 use cox_protocol::ids::{CallId, ItemId, SessionId};
 use cox_protocol::image::{self, ImageError, MAX_IMAGE_BYTES};
 use cox_protocol::traits::Store as _;
@@ -20,6 +23,7 @@ use cox_protocol::types::{
     ApprovalPolicy, Attachment, Decision, ItemKind, Mode, StopReason, Submission, Tier,
 };
 use cox_store::Store;
+use cox_tools::gate::ShellGateRunner;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -63,12 +67,21 @@ struct Outcome {
     denied: u32,
     stop: Option<StopReason>,
     failed: bool,
+    // T66.11: the turn wrote a file (a tool diff or a checkpoint), which the
+    // autonomous driver reads as progress.
+    files_changed: bool,
+    // Why an `--autonomous` run ended; `None` for every other run.
+    autonomous: Option<AutonomousStop>,
 }
 
 impl Outcome {
     fn exit_code(&self) -> i32 {
         match &self.stop {
             _ if self.failed => EXIT_ERROR,
+            // A run that gave up on a failing gate, or hit a limit, did not
+            // finish its job however calmly its last turn ended; only a
+            // passing gate (or the turn's own stop) keeps the turn's code.
+            _ if self.gave_up() => EXIT_ERROR,
             None | Some(StopReason::Error) => EXIT_ERROR,
             Some(StopReason::Refusal { .. }) => EXIT_DENIED,
             Some(StopReason::Budget) => EXIT_BUDGET,
@@ -78,10 +91,17 @@ impl Outcome {
         }
     }
 
+    fn gave_up(&self) -> bool {
+        !matches!(
+            self.autonomous,
+            None | Some(AutonomousStop::GatesPassed | AutonomousStop::TurnEnded { .. })
+        )
+    }
+
     /// The `json` shape and the `stream-json` `result` alias share one body.
     fn summary(&self) -> Value {
         let session = self.session.map(|s| s.to_string());
-        json!({
+        let mut summary = json!({
             "session": session,
             "result": self.result,
             "usage": {
@@ -95,7 +115,11 @@ impl Outcome {
             "stop": self.stop,
             "denied": self.denied,
             "exit_code": self.exit_code(),
-        })
+        });
+        if let Some(stop) = &self.autonomous {
+            summary["autonomous"] = json!(stop);
+        }
+        summary
     }
 
     /// T27.6: folds one `--loop` iteration's outcome into the running
@@ -112,6 +136,7 @@ impl Outcome {
         self.denied += other.denied;
         self.stop = other.stop;
         self.failed = other.failed;
+        self.files_changed = other.files_changed;
     }
 
     /// Folds one event in; returns a Claude-compatible alias line to print
@@ -152,6 +177,10 @@ impl Outcome {
                 decision: Decision::Deny { .. },
                 ..
             } => self.denied += 1,
+            Event::ToolCallDone { result, .. } if result.diff.is_some() => {
+                self.files_changed = true;
+            }
+            Event::Checkpoint { files, .. } if !files.is_empty() => self.files_changed = true,
             Event::TurnDone { stop, .. } => self.stop = Some(stop.clone()),
             Event::Error { fatal: true, .. } => self.failed = true,
             _ => {}
@@ -185,6 +214,12 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
         (None, None) => None,
         _ => anyhow::bail!("--loop and --max-iterations must be given together"),
     };
+    // T66.11: a policy without a gate is refused before a session opens, so
+    // the refusal costs nothing and starts no process.
+    let driver = args
+        .autonomous
+        .then(|| autonomous_driver(cli, cwd))
+        .transpose()?;
     // T40.7: every `--image` is read and checked before any request, so a
     // bad one costs nothing.
     let attachments = match read_images(&args.images) {
@@ -235,6 +270,18 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
     // `--deep`, or `--mode architect` like it. `core.mode = architect` from
     // a config file alone never confirms: that run is refused below.
     let confirm_think = args.deep || cli.mode.as_deref() == Some("architect");
+    // The gates run in the session's own sandbox, roots and archive, which
+    // only exist now that it is open.
+    let autonomous = driver.map(|driver| Autonomous {
+        driver,
+        gates: Arc::new(ShellGateRunner::new(
+            cwd.to_path_buf(),
+            loaded.config.core.workspace_roots.clone(),
+            session::sandbox_policy(&loaded.config),
+            session.archive(),
+            session.id(),
+        )),
+    });
     let unconfirmed_architect = loaded.config.core.mode == Mode::Architect && !confirm_think;
     // The event receiver is taken once and, for `--loop`, shared across
     // every iteration's `drive` call on the same session — that is also
@@ -246,9 +293,14 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
             .events()
             .ok_or_else(|| anyhow::anyhow!("session events already taken"))?;
         let interrupter = session.clone();
+        let gates = autonomous.as_ref().map(|a| a.gates.clone());
         tokio::spawn(async move {
             if tokio::signal::ctrl_c().await.is_ok() {
                 interrupter.interrupt();
+                // A gate is a process of ours too: Ctrl+C ends it.
+                if let Some(gates) = gates {
+                    gates.cancel();
+                }
             }
         });
         // T9.1: `--deep` routes the run through think; the flag itself is
@@ -261,8 +313,20 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
                 })
                 .await?;
         }
-        let outcome = match loop_spec {
-            Some(loop_spec) => {
+        let outcome = match (&autonomous, loop_spec) {
+            (Some(auto), _) => {
+                let prompt = (prompt, attachments);
+                run_autonomous(
+                    &session,
+                    &mut rx,
+                    prompt,
+                    format,
+                    (approvals, confirm_think),
+                    auto,
+                )
+                .await
+            }
+            (None, Some(loop_spec)) => {
                 run_loop(
                     &session,
                     &mut rx,
@@ -274,7 +338,7 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
                 )
                 .await
             }
-            None => {
+            (None, None) => {
                 let prompt = (prompt, attachments);
                 drive(&session, &mut rx, prompt, format, approvals, confirm_think).await
             }
@@ -295,6 +359,9 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
         session.wait_tasks_cleared(SHELL_CANCEL_GRACE).await;
         outcome
     })?;
+    if let Some(stop) = &outcome.autonomous {
+        eprintln!("cox: autonomous run stopped: {}", describe(stop));
+    }
     if unconfirmed_architect && matches!(outcome.stop, Some(StopReason::Refusal { .. })) {
         eprintln!(
             "cox: architect mode runs on the think tier; pass --mode architect to confirm it"
@@ -506,6 +573,130 @@ async fn run_loop(
         }
     }
     Ok(total)
+}
+
+/// What `--autonomous` needs beyond a plain run: the driver and the runner
+/// of its gates.
+struct Autonomous {
+    driver: Driver,
+    gates: Arc<ShellGateRunner>,
+}
+
+/// The driver for `--autonomous`, from the user's own `[autonomous]` table
+/// (a project cannot set it, T66.10). A table without a usable gate is
+/// refused here.
+fn autonomous_driver(cli: &Cli, cwd: &Path) -> anyhow::Result<Driver> {
+    let policy = config_load::load(cwd, cli)?.config.autonomous;
+    Driver::new(policy).map_err(|e| {
+        anyhow::anyhow!(
+            "--autonomous: {e}; list shell commands in `[autonomous] gates` of your config"
+        )
+    })
+}
+
+/// `cox run -p --autonomous` (T66.11): `drive` one turn, run the gates, and
+/// while the driver says `Continue` submit its text as the next user turn.
+/// Each decision is one `autonomous` record under `stream-json`; the reason
+/// the run ended also goes into the final summary. Every turn goes through
+/// `drive`, so approvals, redaction and printing are the ones a plain run has.
+async fn run_autonomous(
+    session: &Session,
+    rx: &mut mpsc::Receiver<Event>,
+    prompt: (String, Vec<Attachment>),
+    format: Format,
+    // `(approvals, confirm_think)`, bundled for clippy's argument limit.
+    consent: (Option<Duration>, bool),
+    auto: &Autonomous,
+) -> anyhow::Result<Outcome> {
+    let (approvals, confirm_think) = consent;
+    let started = Instant::now();
+    let mut state = State::default();
+    let mut total = Outcome::default();
+    let mut prompt = prompt;
+    loop {
+        let turn = drive(session, rx, prompt, format, approvals, confirm_think).await?;
+        let report = TurnReport {
+            // A turn with no `TurnDone` never ended cleanly.
+            stop: turn.stop.clone().unwrap_or(StopReason::Error),
+            tokens: u64::from(turn.tokens[0]) + u64::from(turn.tokens[1]),
+            files_changed: turn.files_changed,
+            elapsed: started.elapsed(),
+        };
+        let fatal = turn.failed;
+        total.merge(turn);
+        let next = if fatal {
+            Next::Stop(AutonomousStop::TurnEnded {
+                stop: StopReason::Error,
+            })
+        } else {
+            let next = auto.driver.decide(&mut state, &report, &*auto.gates).await;
+            // Ctrl+C during a gate fails it; that is the user's stop, not a
+            // failure to feed back to the model.
+            match next {
+                Next::Continue(_) if auto.gates.is_cancelled() => {
+                    Next::Stop(AutonomousStop::TurnEnded {
+                        stop: StopReason::Interrupted,
+                    })
+                }
+                other => other,
+            }
+        };
+        match next {
+            Next::Continue(text) => {
+                write_decision(format, "continue", &state, None)?;
+                prompt = (text, Vec::new());
+            }
+            Next::Stop(stop) => {
+                write_decision(format, "stop", &state, Some(&stop))?;
+                total.autonomous = Some(stop);
+                return Ok(total);
+            }
+        }
+    }
+}
+
+/// The `autonomous` stream-json record: counters after the decision, and the
+/// stop reason when the run ends.
+fn write_decision(
+    format: Format,
+    decision: &str,
+    state: &State,
+    stop: Option<&AutonomousStop>,
+) -> anyhow::Result<()> {
+    if format != Format::StreamJson {
+        return Ok(());
+    }
+    let mut record = json!({
+        "type": "autonomous",
+        "decision": decision,
+        "turns": state.turns,
+        "continuations": state.continuations,
+        "tokens": state.tokens,
+    });
+    if let Some(stop) = stop {
+        record["stop"] = json!(stop);
+    }
+    writeln!(std::io::stdout().lock(), "{record}")?;
+    Ok(())
+}
+
+/// The stop reason for a person. `GatesPassed` says only that every gate
+/// exited zero, never that the task is done (T66.9 step 4).
+fn describe(stop: &AutonomousStop) -> String {
+    match stop {
+        AutonomousStop::GatesPassed => {
+            "every gate command exited 0 (not a check of the task)".into()
+        }
+        AutonomousStop::GateRetriesExhausted { command } => {
+            format!("gate `{command}` kept failing")
+        }
+        AutonomousStop::NoProgress => "no file changed and the same gate kept failing".into(),
+        AutonomousStop::MaxContinuations => "reached max_continuations".into(),
+        AutonomousStop::MaxTurns => "reached max_turns".into(),
+        AutonomousStop::MaxTokens => "reached max_tokens".into(),
+        AutonomousStop::Timeout => "reached timeout_secs".into(),
+        AutonomousStop::TurnEnded { stop } => format!("the turn ended with {stop:?}"),
+    }
 }
 
 /// One driver line: `{"approve":"<call_id>"}` or `{"deny":"<call_id>","reason":"…"}`.

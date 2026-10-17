@@ -8,6 +8,7 @@
 //! events instead of calling a model.
 
 mod advise;
+pub mod autonomous;
 mod budget;
 pub mod cache_diag;
 mod checkpoint;
