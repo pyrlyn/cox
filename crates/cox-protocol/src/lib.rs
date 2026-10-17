@@ -14,6 +14,7 @@
 //! process lives behind a trait in `cox-protocol`").
 //!
 //! - [`ids`] — ULID newtypes (`SessionId`, `TurnId`, `ItemId`, `CallId`, `ArchiveId`, `TaskId`).
+//! - [`autonomous`] — `AutonomousPolicy`, `GateRunner`, `GateResult`, `AutonomousStop`: the contract of a gate-driven headless run (T66.9). Not reachable from `Submission`/`Event`, so it has no wire schema yet.
 //! - [`agent`] — `AgentDef`, `tier_for`: a discovered subagent definition. Not reachable from `Submission`/`Event` (no wire schema), but crosses the `cox-ext` → `cox-core` boundary, so it lives here (T34.1).
 //! - [`types`] — `Submission`, `Event`, the provider-neutral `Request`/`Content`, `ToolSpec`, and everything reachable from them.
 //! - [`errors`] — the error taxonomy (plan.md §1.14): `ProviderError`, `ToolError`, `CoreError`, `StoreError`, `ExtError`, `McpError`.
@@ -23,6 +24,7 @@
 //! - [`plugin`] — `cox-plugin-api` re-exported (A52): the `plugin.toml` manifest and, later, the ABI payloads. It lives in its own crate because the guest SDK builds it for wasm32.
 
 pub mod agent;
+pub mod autonomous;
 pub mod commands;
 pub mod config;
 pub mod errors;

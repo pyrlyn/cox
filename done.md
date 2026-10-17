@@ -1,3 +1,55 @@
+#### T66.9 A pure autonomous driver beside the USD cap
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~200 · Priority: P2 · Complexity: 4
+
+Goal: a pure function decides whether a headless run starts another turn. It continues only toward failing gates and stays within its own turn, token and time limits. `budget::decide` stays the USD cap.
+
+Files:
+- `crates/cox-protocol/src/autonomous.rs` (new): `AutonomousPolicy`, the `GateRunner` trait, `GateResult` and `AutonomousStop`
+- `crates/cox-core/src/autonomous.rs` (new)
+- `crates/cox-core/tests/autonomous.rs`
+
+Steps:
+1. Policy defaults, from prime-agent's `pa-core/src/autonomous/mod.rs`:
+   - 3 continuations;
+   - 12 turns;
+   - 80 000 tokens;
+   - 30 minutes;
+   - 3 gate retries;
+   - a 5-minute timeout per gate.
+2. `decide(&State, last_stop, gate) -> Next::Continue(text) | Next::Stop(AutonomousStop)`:
+   - `Error`, `Interrupted`, `Refusal` and `Budget` never continue (idea: `pa-core/src/autonomous/gates.rs` `should_autonomously_continue`).
+   - Gates run in order and the first failure wins.
+   - All gates passing stops the run with `GatesPassed`.
+   - A failure with retries left continues, with the failing command and the tail of its output.
+   - Exhausted retries stop with `GateRetriesExhausted`.
+   - Each limit stops the run under its own reason.
+3. `no_progress_streak` counts continuations that changed no file and repeated the same gate result. At 2 the run stops with `NoProgress`. The streak lives in the run's `State`.
+4. A passed gate only means its commands passed; it is not task success. The stop reason is `GatesPassed`, and no surface prints "done" or "success" for it.
+5. Autonomous mode needs at least one gate; a policy with none is a config error.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core autonomous
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the tests, run with a fake `GateRunner`, show that:
+- a pass stops the run;
+- a fail followed by a pass stops on the second try;
+- the token limit stops the run while a gate is still failing;
+- an error does not continue;
+- an interrupt does not continue;
+- two no-progress continuations stop the run.
+
+Out of scope: config, the shell runner and the run loop (T66.10, T66.11). The TUI does not enter this loop.
+
+Done:
+- `cox_protocol::autonomous`: `AutonomousPolicy` (field names as T66.10's `[autonomous]` table, `Default` with step 1's values, `validate` returns `NoGates` or `BlankGate`), `GateResult`, the async `GateRunner` trait (infallible: a spawn failure, sandbox denial or timeout is a failed result) and `AutonomousStop` (`GatesPassed`, `GateRetriesExhausted`, `NoProgress`, `MaxContinuations`, `MaxTurns`, `MaxTokens`, `Timeout`, `TurnEnded{stop}`). Not reachable from `Event`, so `docs/protocol.jsonschema` is unchanged.
+- `cox_core::autonomous`: `Driver::new(policy)` rejects a gateless policy, so `decide` cannot run without one. `decide(&mut State, &TurnReport, &dyn GateRunner) -> Next` takes `&mut State` because the streak and per-gate failure counts live there; the clock is `TurnReport.elapsed`, a value. Order: a never-continue stop (no gate runs), gates in order (first failure wins; a pass wins even at a limit), the limits, the gate retries (a gate stops after `gate_retries + 1` failed checks), then the no-progress streak (2).
+- Check: `cargo nextest run -p cox-protocol -p cox-core` 571 passed, 1 skipped; `-E 'test(autonomous) | binary(autonomous)'` 20 passed. The card's `nextest run -p cox-core autonomous` filter matches test names only, so it runs the 3 unit tests; the integration binary needs `binary(autonomous)`. `cargo clippy -p cox-protocol -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean.
+
 #### T33.40.5 Parity: the `typesafe` table configures the plugin's section
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17

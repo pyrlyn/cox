@@ -126,7 +126,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T66.9 | in progress | P2 | 4 | 0% | Claude Code / opus-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2520,59 +2519,6 @@ mise exec -- cargo fmt --check
 Done when an e2e run against a scratch `COX_HOME` on the scripted provider applies one local note, lists it, and undoes it.
 
 Out of scope: running refine automatically on a timer.
-
-#### T66.9 A pure autonomous driver beside the USD cap
-
-Model: Claude Code / opus-5.5 · Status: in progress · Depends: — · Size: ~200 · Priority: P2 · Complexity: 4
-
-Goal: a pure function decides whether a headless run starts another turn. It continues only toward failing gates and stays within its own turn, token and time limits. `budget::decide` stays the USD cap.
-
-Files:
-- `crates/cox-protocol/src/autonomous.rs` (new): `AutonomousPolicy`, the `GateRunner` trait, `GateResult` and `AutonomousStop`
-- `crates/cox-core/src/autonomous.rs` (new)
-- `crates/cox-core/tests/autonomous.rs`
-
-Steps:
-1. Policy defaults, from prime-agent's `pa-core/src/autonomous/mod.rs`:
-   - 3 continuations;
-   - 12 turns;
-   - 80 000 tokens;
-   - 30 minutes;
-   - 3 gate retries;
-   - a 5-minute timeout per gate.
-2. `decide(&State, last_stop, gate) -> Next::Continue(text) | Next::Stop(AutonomousStop)`:
-   - `Error`, `Interrupted`, `Refusal` and `Budget` never continue (idea: `pa-core/src/autonomous/gates.rs` `should_autonomously_continue`).
-   - Gates run in order and the first failure wins.
-   - All gates passing stops the run with `GatesPassed`.
-   - A failure with retries left continues, with the failing command and the tail of its output.
-   - Exhausted retries stop with `GateRetriesExhausted`.
-   - Each limit stops the run under its own reason.
-3. `no_progress_streak` counts continuations that changed no file and repeated the same gate result. At 2 the run stops with `NoProgress`. The streak lives in the run's `State`.
-4. A passed gate only means its commands passed; it is not task success. The stop reason is `GatesPassed`, and no surface prints "done" or "success" for it.
-5. Autonomous mode needs at least one gate; a policy with none is a config error.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core autonomous
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when the tests, run with a fake `GateRunner`, show that:
-- a pass stops the run;
-- a fail followed by a pass stops on the second try;
-- the token limit stops the run while a gate is still failing;
-- an error does not continue;
-- an interrupt does not continue;
-- two no-progress continuations stop the run.
-
-Out of scope: config, the shell runner and the run loop (T66.10, T66.11). The TUI does not enter this loop.
-
-Execution plan:
-1. `cox-protocol/src/autonomous.rs`: `AutonomousPolicy` (field names as T66.10's table, `Default` with step 1's values, `validate` rejecting no gates with a thiserror `AutonomousError`), `GateResult`, the async `GateRunner` trait (infallible: a timeout or spawn failure is a failed result) and `AutonomousStop`; serde only, not reachable from `Event`, so `docs/protocol.jsonschema` does not change.
-2. `cox-core/src/autonomous.rs`: `State`, `TurnReport` (stop, tokens, files changed, elapsed — the clock is a value the caller passes), `Next` and `decide`. Order: a never-continue stop, then gates in order (first failure wins, all passing is `GatesPassed`), then the limits, then gate retries, then the no-progress streak.
-3. `cox-core/tests/autonomous.rs`: the six Done-when claims against a scripted `GateRunner`.
-4. Verify with nextest, clippy and fmt on `cox-protocol` and `cox-core`.
 
 #### T66.10 `[autonomous]` config, which a project cannot set
 
