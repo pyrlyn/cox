@@ -126,7 +126,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
-| T66.6 | in progress | P2 | 3 | 0% | Claude Code / opus-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2428,49 +2427,6 @@ Done when tests prove that:
 - a local edit is invisible to another session's load.
 
 Out of scope: proposing edits (T66.6) and the session wiring (T66.7).
-
-#### T66.6 Core: a refine proposal from one cheap call, with the base prompt fixed
-
-Model: opus · Status: in progress · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
-
-Execution plan:
-1. `refine.rs`: `Session::propose_refine(text, digest)` builds one user message (request, digest, transcript tail cut on a char boundary) and sends it through `side::side_call` on `Job::Memory`, so routing, the ledger row and the spend are the shared path; no history or prefix is touched.
-2. `parse` deserialises `{evidence, edits}` (a surrounding code fence is tolerated) and validates count, kind, id pattern, base-prompt ids, content size and presence; any failure rejects the whole proposal with a reason.
-3. `prompts/refine.md`: the instructions, written for cox; `lib.rs` exposes the module.
-4. `tests/refine.rs` over a `Scripted` `memory` turn: base-prompt edit refused, malformed JSON rejected, a valid proposal parses with one `memory` usage row, `system[0..=2]` from `assemble` byte-identical before and after, history unchanged. Verify with the card's Check scoped to `-p cox-core`.
-
-Goal: the core turns the transcript tail, the digest of current entries and the user's `/refine` text into a validated list of edits. It writes no file, and the base prompt can never be a target.
-
-Files:
-- `crates/cox-core/src/refine.rs` (new)
-- `crates/cox-core/src/prompts/refine.md` (new; written for cox, not Prime's prose)
-- `crates/cox-core/tests/refine.rs`
-
-Steps:
-1. Make one call on the `Job::Memory` routing tier, the same pattern as `memory_extract.rs`. No new `Job` variant is added.
-2. The model returns `{evidence, edits: [{action: create|update|delete, kind, id, content?, reason}]}`. Validation:
-   - at most 5 edits;
-   - `content` of at most 4 KB;
-   - `kind` is one of the four;
-   - `id` matches the pattern;
-   - any id that names the base prompt is refused (idea: `pa-core/src/refinement/planner.rs`, "base system prompt is not editable").
-   An invalid proposal yields no edits and outcome `rejected` with the reason.
-3. `prompt.md` and `prompt_minimal.md` stay `include_str!` constants (`context.rs:28, 32`).
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core refine
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when tests show that:
-- an edit aimed at the base prompt is refused;
-- malformed JSON is rejected;
-- a valid proposal parses;
-- after a refine, the base prompt bytes and `system[0..=2]` are byte-identical to before.
-
-Out of scope: applying edits or running a refine in the background automatically.
 
 #### T66.7 Session: apply a refine, record it, and render the digest after the cached prefix
 
