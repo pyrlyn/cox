@@ -1,3 +1,40 @@
+#### T66.16 `docs/app-server.md` says what a dropped connection does
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~10 (docs only) · Priority: P2 · Complexity: 1
+
+Goal: the doc stops promising that a running turn survives a dropped client. `docs/design/serve.md` S1 and D8: today the turn stops, the session can be resumed, and resident sessions are planned.
+
+Files:
+- `docs/app-server.md`
+
+Steps:
+1. Replace "A running turn keeps running on the host" and "the session itself keeps running on the host" with today's behaviour.
+
+Check:
+```bash
+! grep -n "keeps running on the host" docs/app-server.md
+mise exec -- cargo nextest run -p cox --test docs
+```
+
+Done when the Check passes.
+
+Out of scope: any code.
+
+Done: `docs/app-server.md` no longer promises that a running turn survives a dropped client. When the connection drops, the running turn stops, the session can be resumed with `open` and `resume`, and resident sessions are planned in `docs/design/serve.md` (T66.12). The two sentences are the only changes in the file.
+
+Check output:
+```
+$ ! grep -n "keeps running on the host" docs/app-server.md
+(no output)
+$ mise exec -- cargo nextest run -p cox --test docs
+    PASS cox::docs relative_links_skip_urls_and_anchors
+    PASS cox::docs app_server_doc_cites_paths_that_exist
+    PASS cox::docs docs_config_covers_every_key
+    PASS cox::docs docs_relative_links_resolve
+    PASS cox::docs docs_name_every_subcommand
+    Summary: 5 tests run: 5 passed, 0 skipped
+```
+
 #### T66.12 Design: resident sessions and a supervisor
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4

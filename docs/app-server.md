@@ -18,11 +18,11 @@ ssh devbox cox app-server --stdio
 ```
 
 The server reads requests until stdin closes, then closes every session stream
-it opened. A running turn keeps running on the host. It writes nothing to
-stdout except protocol lines; logs go to cox's log file under `COX_HOME` on the
-host. At start it reads the login shell's environment, as the app does locally,
-so tools such as `cargo` or `mise` and env-var keys resolve as they would in a
-terminal there.
+it opened. A running turn stops too; the session can be resumed later with
+`open` and `resume`. It writes nothing to stdout except protocol lines; logs go
+to cox's log file under `COX_HOME` on the host. At start it reads the login
+shell's environment, as the app does locally, so tools such as `cargo` or
+`mise` and env-var keys resolve as they would in a terminal there.
 
 A one-line request to try it by hand is in
 `crates/cox/tests/fixtures/app-server/projects.jsonl`:
@@ -116,8 +116,11 @@ Each host is a sidebar group under a host badge. The app re-reads the group
 every few seconds. When the connection drops, the group shows **Disconnected**
 with a **Reconnect** button, and its rows are read-only until it reconnects.
 A session opened from a host streams through that host's connection. When the
-connection drops, the session's stream ends; the session itself keeps running
-on the host.
+connection drops, the session's stream ends and its running turn stops. The
+session and its rollout stay on the host, and `open` with `resume` brings it
+back (see *What crosses the wire*). Resident sessions, which would keep running
+with no client attached, are planned in `docs/design/serve.md` (T66.12). They
+are not built yet.
 
 A remote session in the app does not yet have:
 
