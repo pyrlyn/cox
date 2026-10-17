@@ -282,7 +282,7 @@ mod tests {
     }
 
     /// Smoke test kept alongside the exhaustive table in
-    /// `tests/confine.rs`: a plain in-root relative path resolves to an
+    /// `tests/it/confine.rs`: a plain in-root relative path resolves to an
     /// absolute path under the root.
     #[test]
     fn confine_plain_relative_path_stays_in_root() {

@@ -250,7 +250,7 @@ fn wide_shot(name: &str, state: &mut State) -> String {
 }
 
 /// One finished user turn with `files` checkpointed paths, feeding the
-/// rewind timeline the way `tests/rewind.rs` does.
+/// rewind timeline the way `cox-core`'s `tests/it/rewind.rs` does.
 fn rewind_turn(state: &mut State, seq: u32, text: &str, files: usize) {
     let turn = TurnId::new();
     ev(

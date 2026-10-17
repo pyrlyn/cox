@@ -1,0 +1,8 @@
+---
+source: crates/cox-tui/tests/it/cells.rs
+expression: "format!(\"{collapsed}\\n---\\n{expanded}\")"
+---
+∴ thought (~24 tokens · Ctrl+T)
+---
+∴ The user wants the turn loop explained. Read src/main.rs
+first, then summarise the state machine.

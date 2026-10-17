@@ -1,0 +1,6 @@
+---
+source: crates/cox-tui/tests/it/status.rs
+assertion_line: 238
+expression: narrow
+---
+sonnet-5 · ctx ▰▰▰▱▱ 41% · $4.20/5 · ⎇ main +12 −3 · [default]

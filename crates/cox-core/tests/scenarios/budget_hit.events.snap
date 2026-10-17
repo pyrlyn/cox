@@ -1,5 +1,5 @@
 ---
-source: crates/cox-core/tests/budget.rs
+source: crates/cox-core/tests/it/budget.rs
 expression: kinds(&second)
 ---
 [

@@ -96,6 +96,23 @@ CREATE TABLE plugin_kv (
   PRIMARY KEY (plugin_id, key)
 );
 
+-- refine_events
+CREATE TABLE refine_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('local','global')),
+  trigger TEXT NOT NULL CHECK (trigger IN ('manual','auto')),
+  evidence TEXT NOT NULL,
+  edits TEXT NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('applied','rejected','rolled_back')),
+  rollback_of TEXT,
+  fingerprint TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- refine_events_session
+CREATE INDEX refine_events_session ON refine_events (session_id, created_at);
+
 -- rollout_fts
 CREATE VIRTUAL TABLE rollout_fts USING fts5(session_id UNINDEXED, turn UNINDEXED, text);
 

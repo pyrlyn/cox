@@ -1,0 +1,18 @@
+---
+source: crates/cox-tui/tests/it/cells.rs
+expression: rendered
+---
+⚙ bash seq 20 · 8ms · exit 0
+│ 1
+│ 2
+│ 3
+│ 4
+│ 5
+│ 6
+│ … 10 more lines
+│ 17
+│ 18
+│ 19
+│ 20
+│ [exit 0 in 8ms]
+│ ✓ 0B 8ms

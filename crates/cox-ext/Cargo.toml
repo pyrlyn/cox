@@ -27,6 +27,9 @@ nix = { workspace = true, features = ["signal"] }
 pathdiff = { workspace = true }
 # T22.3: a `matcher` that is not a plain tool name compiles as a regex.
 regex = { workspace = true }
+# T66.5: the harness fingerprint and the per-edit content hashes; already a
+# workspace dependency.
+sha2 = { workspace = true }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]

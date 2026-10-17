@@ -1,0 +1,8 @@
+---
+source: crates/cox-tui/tests/it/diff.rs
+expression: "out.iter().map(|l| marked(l, &state.theme)).collect::<Vec<_>>().join(\"\\n\")"
+---
+  ± src/loop.rs  +1 −1
+  @@ -1 +1 @@
+  -~let total = price * ~[-count;-]
+  +~let total = price * ~{+quantity + tax;+}

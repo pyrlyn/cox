@@ -10,7 +10,7 @@ repository.workspace = true
 default-run = "cox"
 
 # T35.7: the test-only stand-in for Cursor's `agent` CLI that
-# `tests/external_agents_cursor.rs` spawns. A `[[bin]]` because an
+# `tests/it/external_agents_cursor.rs` spawns. A `[[bin]]` because an
 # integration test can only find a binary of its own package
 # (`CARGO_BIN_EXE_fake_agent`); its only dependency is `serde_json`.
 [[bin]]
@@ -19,7 +19,7 @@ path = "tests/support/fake_agent.rs"
 test = false
 doc = false
 
-# T41.8: the test-only language server `tests/lsp.rs` points
+# T41.8: the test-only language server `tests/it/lsp.rs` points
 # `lsp.servers.rust.command` at; same shape and dist exclusion as
 # `fake_agent`, and its only dependency is `serde_json` too.
 [[bin]]
@@ -90,6 +90,9 @@ cox-config = { path = "../cox-config", version = "0.1.2" }
 # this crate keeps the flags, the TUI loop and the printing. Its `plugins`
 # feature follows this crate's.
 cox-session = { path = "../cox-session", version = "0.1.2", default-features = false }
+# T68.6: `--on <target>` builds the launch command with the same
+# `cox_target::command` the desktop app uses; `tests/targets.rs` shares it.
+cox-target = { path = "../cox-target", version = "0.1.2" }
 # T52.19: the app-server surface; optional behind `app-server`.
 cox-app = { path = "../cox-app", version = "0.1.2", optional = true }
 # T66.23: `cox serve` and `cox attach --stdio`; behind the same feature.
@@ -143,7 +146,7 @@ vt100 = { workspace = true }
 # wiremock tests).
 wiremock = { workspace = true }
 # T33.28: the Rust reference plugin built from `plugins/examples/rust` for
-# `tests/plugins.rs` and `examples/plugin_bench.rs` (PL§13); a workspace
+# `tests/it/plugins.rs` and `examples/plugin_bench.rs` (PL§13); a workspace
 # crate with no dependencies of its own.
 cox-plugin-fixtures = { path = "../cox-plugin-fixtures" }
 
