@@ -175,6 +175,27 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox autonomous
+#### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Goal: the supervisor runs one worker process per session and keeps it alive under T66.19's policy. `docs/design/serve.md` S6, D3 and D7.
+
+Plan: `worker.rs` spawns the program with tokio's process support, writes the wire lines (`open`, `end`) with serde_json, reads the `opened` reply and drains the rest of stdout, and reports each exit through a callback. `supervisor.rs` keeps one slot per session (running, restarting, failed), measures uptime, feeds each exit to `restart::Policy`, schedules a restart as a timed event, refuses a 17th worker, and on an injected shutdown future sends `end`, waits a grace (10 s by default) and kills what is left. Tests drive a fake worker `sh` script in a tempdir with a short grace and a capped restart delay. New third-party deps for cox-serve: tokio, serde_json, thiserror (all already in the workspace); no workspace crate, so the `deps.rs` rule stays as it is.
+
+Files:
+- `crates/cox-serve/src/worker.rs`
+- `crates/cox-serve/src/supervisor.rs`
+
+Steps:
+1. Spawn the worker program (`current_exe() serve --worker` in production; a parameter, so tests pass a fake) with piped stdio.
+2. Apply T66.19's policy on each exit; a restart reopens the session with `resume`. A worker the supervisor gave up on is listed as failed.
+3. Enforce a cap of 16 workers.
+4. On SIGINT or SIGTERM, send `end` to every worker, wait 10 s, then SIGKILL.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve supervisor
 mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo fmt --check
 ```
@@ -373,6 +394,17 @@ cargo nextest run -p cox-store lock: 7 passed (the existing lock tests, unchange
 cargo nextest run -p cox --test deps: passed (cox-serve may depend on cox-store alone)
 cargo clippy -p cox-serve -p cox-store --all-targets -- -D warnings: clean
 cargo fmt --check: clean
+Done when these tests pass, with a fake worker program as `crates/cox/tests/remote.rs` fakes `ssh`: `a_crashed_worker_is_restarted_idle_with_resume`, `give_up_marks_the_session_failed`, `shutdown_ends_every_worker`, `the_cap_refuses_the_seventeenth_open`.
+
+Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve: 10 passed (supervisor: a_crashed_worker_is_restarted_idle_with_resume, give_up_marks_the_session_failed, shutdown_ends_every_worker, the_cap_refuses_the_seventeenth_open; worker: open_and_end_lines_match_the_wire, only_the_reply_to_the_supervisor_counts; the four restart tests); 15 more runs of the supervisor tests all passed
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+cargo hakari verify: workspace-hack works correctly
 ```
 
 #### T66.19 New crate `cox-serve`: the restart policy
@@ -393,6 +425,40 @@ Check:
 ```bash
 mise exec -- cargo nextest run -p cox-serve restart
 mise exec -- cargo nextest run -p cox --test deps
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `delays_double_from_250ms_to_a_30s_cap`, `gives_up_after_five_consecutive_failures`, `thirty_seconds_of_life_resets_the_count`, `a_clean_exit_is_never_restarted`.
+
+Execution plan: add `crates/cox-serve` (std only, `publish = false`, workspace lints); `restart.rs` holds named consts, `Policy` and `Decision`; the fifth consecutive failure gives up, so the 30 s cap is reachable only through the pure `delay` function and is tested there. Register the AGENTS.md row, the crates.md row and a `deps.rs` rule that `cox-serve` has no workspace dependency (the members line is the `crates/*` glob, so it needed no edit).
+
+Out of scope: spawning processes and the socket (T66.20, T66.21).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve restart: 4 passed (delays_double_from_250ms_to_a_30s_cap, gives_up_after_five_consecutive_failures, thirty_seconds_of_life_resets_the_count, a_clean_exit_is_never_restarted)
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy --workspace --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+
+#### T66.18 Worker mode in `cox-app`'s server: one session, ended on EOF
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.17 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the server can run as one session's worker, and on EOF every mode ends its sessions instead of only closing them, so detached bash processes are killed. `docs/design/serve.md` S3, D3 and F2.
+
+Files:
+- `crates/cox-app/src/server.rs`
+
+Steps:
+1. `ServeMode::{Client, Worker}` for `serve`. A worker refuses a second `open` and skips `load_login_env`.
+2. On EOF both modes end their sessions (F2).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app server
 mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo fmt --check
 ```
@@ -615,6 +681,7 @@ Goal: dependencies compiled in one worktree are reused by another without sharin
 - Test: `scripts/test_sccache_config.py` pins the variables and the wiring (config-only change, so the assertion on the config is the test).
 Check: `python3 -m unittest discover -s scripts -p 'test_sccache_config.py'` ran 6 tests, OK. `mise exec -- env` shows `RUSTC_WRAPPER`, `CMAKE_C_COMPILER_LAUNCHER`, `CMAKE_CXX_COMPILER_LAUNCHER` set to the mise sccache and `SCCACHE_CACHE_SIZE=10G`. `cargo build -p cox-config` in a second worktree with an empty `target/`: 667 hits of 670 requests, 35 to 36 s with the cache against 105 to 106 s without it (research.md §4.3.9, T61.7).
 Done: §4.3.9 has the clean build of the second worktree with and without sccache.
+```
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
