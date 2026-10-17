@@ -8,7 +8,10 @@
 //! notifications, pulled with the same coalescing as the FFI, so a stalled
 //! client costs memory per changed block and never delays a turn (DT§4.5).
 //! A session outlives its stream: `close` stops the pump, `attach` starts a
-//! new one from the snapshot, and only `end` (or the process) stops the core.
+//! new one from the snapshot, and only `end` stops the core. When the client's
+//! stream closes the server ends every session it holds, so nothing a turn
+//! detached outlives the process. A `ServeMode::Worker` hosts one session
+//! for a supervisor (`docs/design/serve.md` D3).
 //! Separate from `wire` so a client links the shapes without this loop.
 //!
 //! Trust: the server's `Host` never answers a secret — keys come from this
@@ -34,6 +37,16 @@ use crate::wire::{self, Call, Line, Notification, Outcome, Reply, Response, Serv
 /// Lines waiting for the writer. A stalled client fills it; then each
 /// session's pump waits and its controller coalesces instead.
 const OUT_QUEUE: usize = 64;
+
+/// Who is on the other end of the stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServeMode {
+    /// A person's app: any number of sessions.
+    Client,
+    /// A supervisor's child: one session, and the supervisor already
+    /// loaded the login environment this process inherits.
+    Worker,
+}
 
 /// What serving can fail with.
 #[derive(Debug, thiserror::Error)]
@@ -100,19 +113,23 @@ impl Host for ServerHost {
 
 /// `cox app-server --stdio`: one client on stdin and stdout until stdin
 /// closes. `home` is `COX_HOME` (`None`: `~/.cox`).
-pub async fn serve_stdio(home: Option<PathBuf>) -> Result<(), ServerError> {
+pub async fn serve_stdio(home: Option<PathBuf>, mode: ServeMode) -> Result<(), ServerError> {
     // A non-interactive ssh shell has a thin environment; tools and env-var
     // keys resolve as in a terminal only after the login shell's is read.
-    let _warning = crate::app::load_login_env().await;
+    // A worker inherits the supervisor's, which has read it already.
+    if mode == ServeMode::Client {
+        let _warning = crate::app::load_login_env().await;
+    }
     let (host, events) = ServerHost::channel();
     let app = App::new(home, host)?;
-    serve(app, events, tokio::io::stdin(), tokio::io::stdout()).await
+    serve(app, mode, events, tokio::io::stdin(), tokio::io::stdout()).await
 }
 
-/// Serves `input`'s requests until it closes, then stops every stream and
+/// Serves `input`'s requests until it closes, then ends every session and
 /// flushes what the client has not read yet.
 pub async fn serve<R, W>(
     app: Arc<App>,
+    mode: ServeMode,
     events: mpsc::UnboundedReceiver<ServerEvent>,
     input: R,
     output: W,
@@ -125,6 +142,7 @@ where
     let writer = tokio::spawn(write(queued, output));
     let mut server = Server {
         app,
+        mode,
         out,
         sessions: HashMap::new(),
         fresh: Vec::new(),
@@ -166,6 +184,7 @@ where
 
 struct Server {
     app: Arc<App>,
+    mode: ServeMode,
     out: mpsc::Sender<Line>,
     sessions: HashMap<SessionId, Arc<LiveSession>>,
     /// Opened or attached by the last call; their pumps start after its
@@ -182,10 +201,25 @@ struct Server {
 
 impl Server {
     async fn call(&mut self, call: Call) -> Outcome {
+        if self.refuses(&call) {
+            return Outcome::Err("this worker serves one session".into());
+        }
         match self.answer(call).await {
             Ok(reply) => Outcome::Ok(reply),
             Err(e) => Outcome::Err(e.to_string()),
         }
+    }
+
+    /// A worker's one session is its supervisor's routing unit: a second
+    /// core here would share the worker's process lock (D3). Resuming the
+    /// held id is not a second session; `answer` turns it into an attach.
+    fn refuses(&self, call: &Call) -> bool {
+        let Call::Open { resume, .. } = call else {
+            return false;
+        };
+        self.mode == ServeMode::Worker
+            && !self.sessions.is_empty()
+            && !resume.is_some_and(|id| self.sessions.contains_key(&id))
     }
 
     async fn answer(&mut self, call: Call) -> Result<Reply, AppError> {
@@ -336,11 +370,13 @@ impl Server {
         }
     }
 
-    /// Closes every stream and waits for the pumps, so only the writer
-    /// still holds the queue when this returns.
+    /// Ends every session and waits for the pumps, so only the writer still
+    /// holds the queue when this returns. `end` rather than `close`: nobody
+    /// is left to reattach, and a shell a turn detached would otherwise
+    /// outlive the process (F2).
     async fn stop(mut self) {
         for live in self.sessions.values() {
-            live.close();
+            live.end();
         }
         self.tasks.abort_all();
         while self.tasks.join_next().await.is_some() {}

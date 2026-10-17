@@ -1,3 +1,31 @@
+#### T66.17 Worker mode in `cox-app`'s server: one session, ended on EOF
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.16 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the server can run as one session's worker, and on EOF every mode ends its sessions instead of only closing them, so detached bash processes are killed. `docs/design/serve.md` S3, D3 and F2.
+
+Files:
+- `crates/cox-app/src/server.rs`
+
+Steps:
+1. `ServeMode::{Client, Worker}` for `serve`. A worker refuses a second `open` and skips `load_login_env`.
+2. On EOF both modes end their sessions (F2).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app server
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Plan (Claude Code / sonnet-5.5): add `ServeMode` and a `mode` argument to `serve`, and `serve_stdio` passes `Client` after `load_login_env`. A `Worker` answers a second `open` (one that does not resume the held session) with an `Outcome::Err` reply, the wire's error type, before `App::open` runs; no new `AppError` variant, so `app.rs` stays untouched. `Server::stop` calls `LiveSession::end` instead of `close`. Tests in `crates/cox-app/tests/app.rs`: `a_worker_refuses_a_second_session` (the second open errs, the first session stays usable) and `eof_ends_every_session` (a detached `sleep` started by `bash` is dead after EOF). Verify: the Check below, then clippy and fmt.
+
+Done when `eof_ends_every_session` and `a_worker_refuses_a_second_session` pass.
+
+Out of scope: the `cox serve --worker` flag and the supervisor that spawns workers (later cards).
+
+Check: `mise exec -- cargo nextest run -p cox-app` passed (276 tests), including `eof_ends_every_session` (a background `bash` runs `exec sleep 300`; after the client's stdin closes the process is dead; with `stop` calling `close` again it is still alive after 5 s and the test fails) and `a_worker_refuses_a_second_session` (the second `open` answers an error naming one session, a `resume` of the held id attaches, the first session still answers `snapshot`; with `refuses` returning false the test fails). `-p cox --test docs` 5 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. `docs/app-server.md` now says EOF ends the sessions. `serve_stdio` takes the mode and `cox app-server --stdio` passes `Client`; the `--worker` flag is a later card.
+
 #### T66.16 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.15 · Size: ~140 · Priority: P2 · Complexity: 3

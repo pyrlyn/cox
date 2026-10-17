@@ -17,8 +17,9 @@ hand:
 ssh devbox cox app-server --stdio
 ```
 
-The server reads requests until stdin closes, then closes every session stream
-it opened. A running turn keeps running on the host. It writes nothing to
+The server reads requests until stdin closes, then ends every session it
+opened. A running turn stops, a shell it detached is killed, and the session
+can be resumed later. It writes nothing to
 stdout except protocol lines; logs go to cox's log file under `COX_HOME` on the
 host. At start it reads the login shell's environment, as the app does locally,
 so tools such as `cargo` or `mise` and env-var keys resolve as they would in a

@@ -2629,32 +2629,6 @@ Done when the Check passes.
 
 Out of scope: any code.
 
-#### T66.17 Worker mode in `cox-app`'s server: one session, ended on EOF
-
-Model: Claude Code / sonnet-5.5 · Status: in progress · Depends: T66.16 · Size: ~80 · Priority: P2 · Complexity: 2
-
-Goal: the server can run as one session's worker, and on EOF every mode ends its sessions instead of only closing them, so detached bash processes are killed. `docs/design/serve.md` S3, D3 and F2.
-
-Files:
-- `crates/cox-app/src/server.rs`
-
-Steps:
-1. `ServeMode::{Client, Worker}` for `serve`. A worker refuses a second `open` and skips `load_login_env`.
-2. On EOF both modes end their sessions (F2).
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-app server
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Plan (Claude Code / sonnet-5.5): add `ServeMode` and a `mode` argument to `serve`, and `serve_stdio` passes `Client` after `load_login_env`. A `Worker` answers a second `open` (one that does not resume the held session) with an `Outcome::Err` reply, the wire's error type, before `App::open` runs; no new `AppError` variant, so `app.rs` stays untouched. `Server::stop` calls `LiveSession::end` instead of `close`. Tests in `crates/cox-app/tests/app.rs`: `a_worker_refuses_a_second_session` (the second open errs, the first session stays usable) and `eof_ends_every_session` (a detached `sleep` started by `bash` is dead after EOF). Verify: the Check below, then clippy and fmt.
-
-Done when `eof_ends_every_session` and `a_worker_refuses_a_second_session` pass.
-
-Out of scope: the `cox serve --worker` flag and the supervisor that spawns workers (later cards).
-
 ### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
 
 Rationale in §6 A148. Idea-only: the source is the public Claude Code documentation of each feature, and no code is copied.
