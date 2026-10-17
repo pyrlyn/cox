@@ -32,6 +32,39 @@ Out of scope: a separate `task_output` tool; peer messages between children.
 Result: `tasks.rs` gains `TaskStatus` (`queued`, `running`, `done`, `error`, `cancelled`) and a per-session `Collect` record for each background subagent (name, status, the settled answer, the archive id), with `begin_collect`, `mark_running`, `settle_collect` and `collect_snapshot`, which waits on the existing `tasks_idle` notify up to `timeout_ms` and returns the records as they stand when time or the call's cancel token runs out. The record holds the answer `run_task` already capped (summary or cut, with `full answer: expand <id>` when T66.2 archived it), so `collect` adds no way around `result_cap_tokens`. A background spawn returns `structured` `{task_id, name, status: "queued"}` and no answer. `drive` marks each run `running` and settles it before the notice goes out: `cancelled` when the run was interrupted, `error` for a driver refusal or a failed run, else `done`; a woken finished child goes back to `running`, and a child that cannot resume is settled `error`. `pointer_line` takes a `collect` flag: a subagent's line ends with `| collect <task id>`, a detached `bash` line is unchanged. `agent(collect: [id or name, …], timeout_ms)` is checked before the concurrency slot is reserved; it takes at most 8 tasks and clamps the wait to 120 s, and an unknown id, an empty or non-string list, or `task` together with `collect` is denied. Its risk is `ReadOnly` and its subject `collect`. The input schema drops `required` (a top-level `anyOf` is refused by providers) and the description says `task` or `collect`. Foreground calls are unchanged. `docs/tools.md` names the new input. Tests (in `subagent.rs`, because a task id is unknown to a script): `background_spawn_returns_a_handle_and_no_answer`, `pointer_line_for_a_subagent_ends_with_collect_and_its_id`, `collect_returns_a_done_tasks_preview_by_id_and_by_name`, `collect_reports_queued_running_and_a_timeout_snapshot`, `collect_wakes_when_the_task_settles_before_the_timeout`, `collect_reports_error_for_a_refused_run_and_cancelled_for_an_interrupted_one`, `collect_preview_of_an_over_cap_answer_stays_within_the_cap_and_names_the_archive_row`, `collect_denies_unknown_tasks_mixed_calls_and_oversized_lists`, `collect_is_read_only_whatever_the_preset`; and `background_spawn_hands_out_a_collect_handle_and_the_pointer_names_it` through the loop in `tests/subagent.rs`. Not done: the macOS and TUI summary line for an `agent` call (`cox-app` `summary.rs`) still reads "Delegated to `collect`: " for a collect call, because that file is outside this card.
 Check output: `mise exec -- cargo nextest run -p cox-core` — 440 passed, 1 skipped; `mise exec -- cargo nextest run -p cox -E 'test(agent) or test(subagent)'` — 12 passed; `mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
 
+#### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
+
+Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
+
+Execution plan (Claude Code / opus-5.5): main already carries cargo-hakari's `workspace-hack` (#212), so measure it as it stands. (1) In an own worktree and `target/`, `CARGO_BUILD_JOBS=4`, build what `just check-all` builds (`cargo nextest run --workspace`, without the swarfr step). (2) For a few one-crate scratch edits, run `just test --changed-since HEAD` and count the non-workspace `compiler-artifact` messages with `fresh: false` (`--cargo-message-format json`); then the reverse direction. (3) Zero → close with the counts in `research.md` §4.3.9 and cargo's unification status for Rust 1.98.1 cited; non-zero → step 2 below. Verify: the Check below.
+
+Goal: switching between `just test` (a `-p` subset) and `just check-all` (`--workspace`) does not rebuild dependencies because their features unify differently, or the card is rejected with the reason.
+
+Files:
+- `Cargo.toml`
+- a workspace-hack crate if chosen (`crates/cox-workspace-hack`)
+- `docs/design/crates.md`
+
+Steps:
+1. Measure the rebuild first: `just check-all`, then `just test --changed-since HEAD~1` and count the dependency crates `cargo` recompiles. Zero → close as not needed.
+2. Compare cargo's own workspace feature unification (check whether it is stable in the pinned Rust; cite the cargo docs) with `cargo-hakari`. hakari makes every member depend on the hack crate: `crates/cox/tests/deps.rs` (`ffi_depends_only_on_app_and_protocol`, `app_has_no_terminal_or_cli`, the "only X depends on Y" rules) must still pass; a hack crate that drags `ratatui` or `clap` into `cox-ffi`'s graph is rejected.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test deps
+```
+
+Done when: §4.3.9 has the rebuild count before and after, or the rejection and its reason.
+
+Out of scope: changing which crates depend on which.
+
+Result: closed as not needed (step 1 measured zero). `just test` always builds `--workspace` and narrows only the tests it runs with nextest's `-E 'rdeps(=…)'`, so cargo resolves the same features as `just check-all`. Counted with `--cargo-message-format json` (`compiler-artifact`, `fresh: false`, non-workspace package), rustc/cargo 1.98.1, after a full `check-all` build (683 dependency units): `just test --changed-since HEAD~1` → 0 dependency units rebuilt (857 fresh); `just test --changed-since HEAD` after one-line edits in `cox-ffi`, `cox-tui`, `cox-plugin-api` → 0, 0, 0; `check-all` again → 0. Hand-typed `-p` builds outside the card rebuild a few dependencies once per `target/` (`-p cox-ffi` 35, `-p cox-plugin-api` 27, `-p cox-tui` 6; 0 on the second run) because of the deliberate `final-excludes`/`traversal-excludes` in `.config/hakari.toml`. Cargo's own `resolver.feature-unification = "workspace"` is still nightly-only in 1.98.1 (https://doc.rust-lang.org/1.98.1/cargo/reference/unstable.html#feature-unification, checked 2026-10-17), so the existing cargo-hakari `workspace-hack` (#212) stays unchanged. Numbers and method: `research.md` §4.3.9. T61.1's baseline was not needed for a count.
+
+Check output (`mise exec -- cargo nextest run -p cox --test deps`):
+```
+     Summary [   1.398s] 11 tests run: 11 passed, 0 skipped
+```
+
 #### T66.12 Design: resident sessions and a supervisor
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
