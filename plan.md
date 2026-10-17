@@ -115,7 +115,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
-| T61.5.1 | todo | P2 | 3 | 0% | |
+| T61.5.1 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T61.5.2 | todo | P2 | 3 | 0% | |
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
@@ -1915,7 +1915,7 @@ Out of scope: sccache (T61.7).
 
 #### T61.5.1 One integration-test binary for `cox-core`
 
-Model: sonnet · Status: open · Depends: T61.1 · Size: ~60 (moves, plus one `main.rs`) · Priority: P2 · Complexity: 3
+Model: sonnet · Status: in progress · Depends: T61.1 · Size: ~60 (moves, plus one `main.rs`) · Priority: P2 · Complexity: 3
 
 Goal: `crates/cox-core/tests/*.rs` (21 files) become modules of one test binary, so `nextest` links one binary instead of 21.
 
@@ -1939,6 +1939,8 @@ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 Done when: the test count before and after is equal (`nextest list`); §4.3.9 has the `-p cox-core` build-phase time before and after.
 
 Out of scope: other crates (T61.5.2, T61.5.3).
+
+Execution plan (Claude Code / sonnet-5.5): record `nextest list` count and the `--no-run` build time (with load average) first; `git mv` the 21 files and `common/`, `scenarios/`, `snapshots/` into `tests/it/` with a `main.rs` of `mod` lines; fix the `include_str!`/path references and cox-app's path; update `--test <name>` mentions; run nextest for `-p cox-core` and `-p cox-app`, clippy and fmt; record before/after in §4.3.9.
 
 #### T61.5.2 One integration-test binary for `cox`
 
