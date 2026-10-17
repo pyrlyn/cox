@@ -123,7 +123,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.8 | todo | P3 | 1 | 0% | |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
-| T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
@@ -2089,30 +2088,6 @@ Done when: §4.3.9 has an incremental `just desktop-app` after a one-line `CoxUI
 
 Out of scope: lint rules.
 
-#### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
-
-Model: opus · Status: open · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
-
-Goal: switching between `just test` (a `-p` subset) and `just check-all` (`--workspace`) does not rebuild dependencies because their features unify differently, or the card is rejected with the reason.
-
-Files:
-- `Cargo.toml`
-- a workspace-hack crate if chosen (`crates/cox-workspace-hack`)
-- `docs/design/crates.md`
-
-Steps:
-1. Measure the rebuild first: `just check-all`, then `just test --changed-since HEAD~1` and count the dependency crates `cargo` recompiles. Zero → close as not needed.
-2. Compare cargo's own workspace feature unification (check whether it is stable in the pinned Rust; cite the cargo docs) with `cargo-hakari`. hakari makes every member depend on the hack crate: `crates/cox/tests/deps.rs` (`ffi_depends_only_on_app_and_protocol`, `app_has_no_terminal_or_cli`, the "only X depends on Y" rules) must still pass; a hack crate that drags `ratatui` or `clap` into `cox-ffi`'s graph is rejected.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox --test deps
-```
-
-Done when: §4.3.9 has the rebuild count before and after, or the rejection and its reason.
-
-Out of scope: changing which crates depend on which.
-
 ---
 
 ### P63 — Desktop architecture and test hardening (goal: SessionStore's patch rules are checked against generated inputs, not only hand-picked cases; a pull request re-runs only the Swift packages its change can affect; `CoxModel` and `CoxCore` cannot import AppKit or SwiftUI; the stores get their clients from one dependency system instead of initializer plumbing)
@@ -2284,7 +2259,7 @@ Rationale in §6 A142. T65.1 is in `done.md`.
 
 Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) at `afe8d14` (v0.9.8). It is MIT, but no code is copied, so no notice is needed. Each card cites prime-agent files for the idea only, and the implementation is written from the card. If a later card ever copies a substantial part, that file and `THIRD-PARTY-NOTICES` carry prime-agent's full MIT text, both copyright lines and the repository URL, and that notice is never replaced by cox's header.
 
-**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it. A161 adds the first three, T66.16 → T66.17 → T66.18.
+**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it. A161 adds the first three, T66.16 → T66.17 → T66.18. A162 adds T66.19 → T66.20; T66.21 follows T66.18 and T66.19.
 
 **Already in cox, so no card:**
 - `ContextTooLong` already compacts once per user turn and then surfaces the error (`session.rs:1846-1867`, `retried_after_too_long`). That is the contract of prime-agent's `OverflowRecovery` (`pa-daemon/src/overflow_compaction.rs`).
@@ -2657,6 +2632,89 @@ mise exec -- cargo fmt --check
 Done when `eof_ends_every_session` and `a_worker_refuses_a_second_session` pass.
 
 Out of scope: the `cox serve --worker` flag and the supervisor that spawns workers (later cards).
+
+#### T66.19 New crate `cox-serve`: the restart policy
+
+Model: sonnet · Status: open · Depends: T66.12 · Size: ~120 · Priority: P2 · Complexity: 2
+
+Goal: a pure policy decides what the supervisor does when a worker exits. `docs/design/serve.md` S4 and D3. `cox-serve` is its own crate because it will own a trust boundary (who may connect) and process supervision, which must stay out of `cox-app` (linked into the macOS app through `cox-ffi`) and out of `crates/cox` (clap and dispatch only).
+
+Files:
+- `crates/cox-serve/Cargo.toml`, `crates/cox-serve/src/lib.rs`, `crates/cox-serve/src/restart.rs`
+- Docs: the workspace `Cargo.toml` members line, an `AGENTS.md` layout row, a `docs/design/crates.md` row
+
+Steps:
+1. `restart.rs` is pure: `Policy::on_exit(uptime, clean) -> Restart(Duration) | GiveUp | Done`.
+2. Delays start at 250 ms and double to a 30 s cap; the supervisor gives up after 5 consecutive failures; 30 s of life resets the count; a clean exit is never restarted.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve restart
+mise exec -- cargo nextest run -p cox --test deps
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `delays_double_from_250ms_to_a_30s_cap`, `gives_up_after_five_consecutive_failures`, `thirty_seconds_of_life_resets_the_count`, `a_clean_exit_is_never_restarted`.
+
+Out of scope: spawning processes and the socket (T66.20, T66.21).
+
+#### T66.20 `cox-serve`: run directory, singleton lock, socket and peer uid
+
+Model: sonnet · Status: open · Depends: T66.19 · Size: ~170 · Priority: P2 · Complexity: 3
+
+Goal: the supervisor's socket is reachable only by the same user, and only one supervisor runs per `COX_HOME`. `docs/design/serve.md` S5 and all of D4 except the `cox attach` bridge and Windows.
+
+Files:
+- `crates/cox-store/src/lock.rs` (extract `claim_path` from `claim`, same behaviour)
+- `crates/cox-serve/src/socket.rs` (`#[cfg(unix)]`)
+- `crates/cox-serve/src/lib.rs`
+
+Steps:
+1. `COX_HOME/run` is created with mode `0700`; an existing one must be a directory, not a symlink, owned by the effective uid, with no group or other bits, or startup is refused naming the path and mode.
+2. A second supervisor on the same `COX_HOME` is refused through an OS lock on `run/serve.lock` taken with the extracted `lock::claim_path`, naming the holder.
+3. Only the lock holder unlinks a stale `serve.sock`; it binds with umask `077` and sets mode `0600`.
+4. A path over `sun_path` (104 bytes on macOS, 108 on Linux) is refused naming the limit; no fallback to `/tmp`.
+5. `admit(peer_uid, own_uid)` is a pure predicate; every accepted connection is checked before its first line is read, and a mismatch is dropped and logged.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve socket
+mise exec -- cargo nextest run -p cox-store lock
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass, and the existing `lock` tests stay green: `a_second_supervisor_is_refused_naming_the_holder`, `a_stale_socket_is_replaced`, `a_run_dir_open_to_others_is_refused`, `a_symlinked_run_dir_is_refused`, `a_path_over_sun_path_is_refused`, `the_socket_is_owner_only`, `admit_refuses_another_uid`.
+
+Out of scope: the `cox attach` bridge, routing connections to workers, and Windows (later cards).
+
+#### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
+
+Model: opus · Status: open · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Goal: the supervisor runs one worker process per session and keeps it alive under T66.19's policy. `docs/design/serve.md` S6, D3 and D7.
+
+Files:
+- `crates/cox-serve/src/worker.rs`
+- `crates/cox-serve/src/supervisor.rs`
+
+Steps:
+1. Spawn the worker program (`current_exe() serve --worker` in production; a parameter, so tests pass a fake) with piped stdio.
+2. Apply T66.19's policy on each exit; a restart reopens the session with `resume`. A worker the supervisor gave up on is listed as failed.
+3. Enforce a cap of 16 workers.
+4. On SIGINT or SIGTERM, send `end` to every worker, wait 10 s, then SIGKILL.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve supervisor
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass, with a fake worker program as `crates/cox/tests/remote.rs` fakes `ssh`: `a_crashed_worker_is_restarted_idle_with_resume`, `give_up_marks_the_session_failed`, `shutdown_ends_every_worker`, `the_cap_refuses_the_seventeenth_open`.
+
+Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
 
 ### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
 
@@ -3151,6 +3209,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A158 §3 (new P68: T68.1–T68.10), by the creator (2026-10-14) — run targets: a whole cox session runs over ssh on Linux, macOS or Windows, in a Docker container, in a Lima instance or in the Colima VM, from the desktop app, the TUI and `cox run` (`--on <target>`) and the `agent` tool. Why: the only remote path is the desktop app's `ssh <host> cox app-server --stdio` with a hard-coded `/usr/bin/ssh` (T52.19–T52.21); containers and VMs are the usual isolation for agents (research.md 9.1.x). Effect: a new pure crate `cox-target` owns target names, launcher lookup (absolute paths only) and launch argv, and `cox-app/src/remote.rs` delegates to it; the app-server wire gains a `hello` handshake; `targets.*` is user config only. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link and nothing typed by the model or the person goes on the remote command line. `cox` must already be on the target; installing it and throwaway `docker run` containers are ideas, not cards. No new dependency; D7 holds on targets without a sandbox backend. No §0 decision changes.
 - A159 §3 (new P69: T69.1–T69.8), by the creator (2026-10-15) — tasks from a comparison of openai/codex at `f0c5077c` and xai-org/grok-build at `2bdd1d6a` with cox: PowerShell readers meet `Read` denies, `allow_for_session_persists` is honored, more default read-only workspace dirs, a store `quick_check`, a compaction that rejects stubs and survives overflow, live tasks reattached after compaction, optional edit anchors, an integer compact threshold. Why: cox already leads on sandboxing, lossless archives and truncation; these are the gaps. Both sources are Apache-2.0; every card says implement similar, not copy, and records the licence. Effect: eight cards; no new dependency, no §0 decision changes.
 - A161 §3 P66 (new T66.16–T66.18), by the creator (2026-10-17): the first three implementation cards from `docs/design/serve.md` (T66.12), its proposals S1–S3. S1 corrects `docs/app-server.md`, which promises that a turn survives a dropped client; S2 adds `attach`, `end` and `inbox` to the app-server wire and makes `open` of a held session attach (F1: two cores for one session); S3 adds worker mode and ends sessions on EOF (F2). Why: they need no new crate or dependency and fix two bugs the design found. S4–S9 (`cox-serve`, the socket, supervision, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
+- A162 §3 P66 (new T66.19–T66.21), by the creator (2026-10-17): the next three implementation cards from `docs/design/serve.md`, its proposals S4–S6. S4 adds the crate `cox-serve` with a pure restart policy; S5 adds its run directory, singleton lock and owner-only socket with a peer-uid check (D4), extracting `lock::claim_path` in cox-store so one lock implementation serves both; S6 adds worker supervision and shutdown. Why: a new crate, because process supervision and the socket's trust boundary must stay out of `cox-app` (linked into the macOS app) and out of `crates/cox`. No new dependency. S7–S9 (router and bridge, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
 
 ## 7. Risk register
 
