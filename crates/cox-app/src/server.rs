@@ -7,6 +7,11 @@
 //! `App` and `Workspace`; each open session's patches stream as
 //! notifications, pulled with the same coalescing as the FFI, so a stalled
 //! client costs memory per changed block and never delays a turn (DT§4.5).
+//! A session outlives its stream: `close` stops the pump, `attach` starts a
+//! new one from the snapshot, and only `end` stops the core. When the client's
+//! stream closes the server ends every session it holds, so nothing a turn
+//! detached outlives the process. A `ServeMode::Worker` hosts one session
+//! for a supervisor (`docs/design/serve.md` D3).
 //! Separate from `wire` so a client links the shapes without this loop.
 //!
 //! Trust: the server's `Host` never answers a secret — keys come from this
@@ -21,7 +26,7 @@ use std::sync::Arc;
 use cox_protocol::ids::SessionId;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use tokio::task::JoinSet;
+use tokio::task::{JoinHandle, JoinSet};
 
 use crate::InboxItem;
 use crate::app::{App, AppError, Host};
@@ -32,6 +37,16 @@ use crate::wire::{self, Call, Line, Notification, Outcome, Reply, Response, Serv
 /// Lines waiting for the writer. A stalled client fills it; then each
 /// session's pump waits and its controller coalesces instead.
 const OUT_QUEUE: usize = 64;
+
+/// Who is on the other end of the stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServeMode {
+    /// A person's app: any number of sessions.
+    Client,
+    /// A supervisor's child: one session, and the supervisor already
+    /// loaded the login environment this process inherits.
+    Worker,
+}
 
 /// What serving can fail with.
 #[derive(Debug, thiserror::Error)]
@@ -98,19 +113,23 @@ impl Host for ServerHost {
 
 /// `cox app-server --stdio`: one client on stdin and stdout until stdin
 /// closes. `home` is `COX_HOME` (`None`: `~/.cox`).
-pub async fn serve_stdio(home: Option<PathBuf>) -> Result<(), ServerError> {
+pub async fn serve_stdio(home: Option<PathBuf>, mode: ServeMode) -> Result<(), ServerError> {
     // A non-interactive ssh shell has a thin environment; tools and env-var
     // keys resolve as in a terminal only after the login shell's is read.
-    let _warning = crate::app::load_login_env().await;
+    // A worker inherits the supervisor's, which has read it already.
+    if mode == ServeMode::Client {
+        let _warning = crate::app::load_login_env().await;
+    }
     let (host, events) = ServerHost::channel();
     let app = App::new(home, host)?;
-    serve(app, events, tokio::io::stdin(), tokio::io::stdout()).await
+    serve(app, mode, events, tokio::io::stdin(), tokio::io::stdout()).await
 }
 
-/// Serves `input`'s requests until it closes, then stops every stream and
+/// Serves `input`'s requests until it closes, then ends every session and
 /// flushes what the client has not read yet.
 pub async fn serve<R, W>(
     app: Arc<App>,
+    mode: ServeMode,
     events: mpsc::UnboundedReceiver<ServerEvent>,
     input: R,
     output: W,
@@ -123,9 +142,12 @@ where
     let writer = tokio::spawn(write(queued, output));
     let mut server = Server {
         app,
+        mode,
         out,
         sessions: HashMap::new(),
         fresh: Vec::new(),
+        ended: Vec::new(),
+        pumps: HashMap::new(),
         tasks: JoinSet::new(),
     };
     server.tasks.spawn(forward(events, server.out.clone()));
@@ -150,8 +172,8 @@ where
             break;
         }
         // After the response, so the client knows the session before its
-        // first patch.
-        server.stream_fresh();
+        // first patch, and sees `closed` before `ended`.
+        server.settle().await;
     }
     server.stop().await;
     match writer.await {
@@ -162,19 +184,42 @@ where
 
 struct Server {
     app: Arc<App>,
+    mode: ServeMode,
     out: mpsc::Sender<Line>,
     sessions: HashMap<SessionId, Arc<LiveSession>>,
-    /// Opened by the last call; their pumps start after its response.
+    /// Opened or attached by the last call; their pumps start after its
+    /// response.
     fresh: Vec<Arc<LiveSession>>,
+    /// Detached or ended by the last call; told after its response.
+    ended: Vec<SessionId>,
+    /// One per attached session. A handle, not a `JoinSet` entry, so a
+    /// detach can wait until the pump stopped: a batch it had already pulled
+    /// must not reach the client after the snapshot that supersedes it.
+    pumps: HashMap<SessionId, JoinHandle<()>>,
     tasks: JoinSet<()>,
 }
 
 impl Server {
     async fn call(&mut self, call: Call) -> Outcome {
+        if self.refuses(&call) {
+            return Outcome::Err("this worker serves one session".into());
+        }
         match self.answer(call).await {
             Ok(reply) => Outcome::Ok(reply),
             Err(e) => Outcome::Err(e.to_string()),
         }
+    }
+
+    /// A worker's one session is its supervisor's routing unit: a second
+    /// core here would share the worker's process lock (D3). Resuming the
+    /// held id is not a second session; `answer` turns it into an attach.
+    fn refuses(&self, call: &Call) -> bool {
+        let Call::Open { resume, .. } = call else {
+            return false;
+        };
+        self.mode == ServeMode::Worker
+            && !self.sessions.is_empty()
+            && !resume.is_some_and(|id| self.sessions.contains_key(&id))
     }
 
     async fn answer(&mut self, call: Call) -> Result<Reply, AppError> {
@@ -186,16 +231,18 @@ impl Server {
             Call::Search { query, limit } => {
                 Reply::Search(self.app.workspace().search(&query, limit)?)
             }
+            // F1: a second `App::open` of a held id would build a second
+            // core on one rollout, so it attaches to the first.
             Call::Open { cwd, resume, theme } => {
-                let live = self.app.open(cwd, resume, theme).await?;
-                let reply = Reply::Opened {
-                    session: live.id(),
-                    blocks: live.snapshot(),
-                    warnings: live.warnings().to_vec(),
-                };
-                self.adopt(live);
-                reply
+                match resume.filter(|id| self.sessions.contains_key(id)) {
+                    Some(held) => self.attach(held).await?,
+                    None => {
+                        let live = self.app.open(cwd, resume, theme).await?;
+                        self.opened(live)
+                    }
+                }
             }
+            Call::Attach { session } => self.attach(session).await?,
             Call::Send { session, intent } => {
                 let child = self.live(session)?.send(intent).await?;
                 Reply::Sent {
@@ -240,13 +287,59 @@ impl Server {
                 let live = self.live(session)?;
                 Reply::CanvasAttach(live.select_canvas(&plugin, &frame, &value).await)
             }
+            // The controller keeps folding, so `attach` can answer from it;
+            // `LiveSession::close` would end the fold and the canvas pull
+            // for good.
             Call::Close { session } => {
-                if let Some(live) = self.sessions.remove(&session) {
-                    live.close();
+                if self.stop_pump(session).await {
+                    self.ended.push(session);
                 }
                 Reply::Closed
             }
+            Call::End { session } => {
+                let live = self
+                    .sessions
+                    .remove(&session)
+                    .ok_or(AppError::NotOpen(session))?;
+                // Ending closes the controller: a running pump flushes what
+                // is queued and sends `ended` itself.
+                live.end();
+                if self.pumps.get(&session).is_none_or(JoinHandle::is_finished) {
+                    self.ended.push(session);
+                }
+                Reply::Closed
+            }
+            Call::Inbox => Reply::Inbox(self.app.inbox()),
         })
+    }
+
+    fn opened(&mut self, live: Arc<LiveSession>) -> Reply {
+        let reply = Reply::Opened {
+            session: live.id(),
+            blocks: live.snapshot(),
+            warnings: live.warnings().to_vec(),
+        };
+        self.adopt(live);
+        reply
+    }
+
+    /// Streams a held session again from its snapshot. The old pump is
+    /// stopped first, so the snapshot is the newest thing the client sees.
+    async fn attach(&mut self, session: SessionId) -> Result<Reply, AppError> {
+        let live = self.live(session)?;
+        self.stop_pump(session).await;
+        Ok(self.opened(live))
+    }
+
+    /// Whether a pump was still streaming `session`.
+    async fn stop_pump(&mut self, session: SessionId) -> bool {
+        let Some(pump) = self.pumps.remove(&session) else {
+            return false;
+        };
+        let running = !pump.is_finished();
+        pump.abort();
+        let _ = pump.await;
+        running
     }
 
     fn live(&self, session: SessionId) -> Result<Arc<LiveSession>, AppError> {
@@ -263,20 +356,34 @@ impl Server {
         id
     }
 
-    fn stream_fresh(&mut self) {
+    async fn settle(&mut self) {
         for live in self.fresh.drain(..) {
-            self.tasks.spawn(pump(live, self.out.clone()));
+            let pump = tokio::spawn(pump(Arc::clone(&live), self.out.clone()));
+            self.pumps.insert(live.id(), pump);
+        }
+        for session in self.ended.drain(..) {
+            // A gone writer fails the next response, which ends serving.
+            let _ = self
+                .out
+                .send(notification(ServerEvent::Ended { session }))
+                .await;
         }
     }
 
-    /// Closes every stream and waits for the pumps, so only the writer
-    /// still holds the queue when this returns.
+    /// Ends every session and waits for the pumps, so only the writer still
+    /// holds the queue when this returns. `end` rather than `close`: nobody
+    /// is left to reattach, and a shell a turn detached would otherwise
+    /// outlive the process (F2).
     async fn stop(mut self) {
         for live in self.sessions.values() {
-            live.close();
+            live.end();
         }
         self.tasks.abort_all();
         while self.tasks.join_next().await.is_some() {}
+        for pump in self.pumps.into_values() {
+            pump.abort();
+            let _ = pump.await;
+        }
     }
 }
 

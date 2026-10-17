@@ -17,11 +17,12 @@ hand:
 ssh devbox cox app-server --stdio
 ```
 
-The server reads requests until stdin closes, then closes every session stream
-it opened. A running turn keeps running on the host. It writes nothing to
-stdout except protocol lines; logs go to cox's log file under `COX_HOME` on the
-host. At start it reads the login shell's environment, as the app does locally,
-so tools such as `cargo` or `mise` and env-var keys resolve as they would in a
+The server reads requests until stdin closes, then ends every session it
+opened. A running turn stops, a shell it detached is killed, and the session
+can be resumed later with `open` and `resume`. It writes nothing to stdout
+except protocol lines; logs go to cox's log file under `COX_HOME` on the host.
+At start it reads the login shell's environment, as the app does locally, so
+tools such as `cargo` or `mise` and env-var keys resolve as they would in a
 terminal there.
 
 A one-line request to try it by hand is in
@@ -56,7 +57,14 @@ module, and a drift test keeps it current.
   - `snapshot`, `expand`, `complete`, `changes` and `plan` read one session.
   - `plugin_action` runs the command a plugin button or action (`plugin:<id>:<command>`)
     names, and answers whether the session's plugins granted it.
-  - `close` stops a session's stream.
+  - `close` stops a session's stream and sends `ended`. The server still holds
+    the session, and its timeline keeps folding.
+  - `attach` streams a session the server still holds again, from its snapshot,
+    and answers like `open`. An `open` that resumes a session this server
+    already holds attaches to it instead of building a second core.
+  - `end` ends a session: its turns stop and what they detached is killed.
+  - `inbox` returns the approvals and questions that wait, so a client that
+    attaches sees those that arrived while it was away.
 
   The server answers each with a `response` that carries the same `id`. The
   response is either `ok` with a reply, or `err` with a message. A line that is
@@ -116,8 +124,11 @@ Each host is a sidebar group under a host badge. The app re-reads the group
 every few seconds. When the connection drops, the group shows **Disconnected**
 with a **Reconnect** button, and its rows are read-only until it reconnects.
 A session opened from a host streams through that host's connection. When the
-connection drops, the session's stream ends; the session itself keeps running
-on the host.
+connection drops, the session's stream ends and its running turn stops. The
+session and its rollout stay on the host, and `open` with `resume` brings it
+back (see *What crosses the wire*). Resident sessions, which would keep running
+with no client attached, are planned in `docs/design/serve.md` (T66.12). They
+are not built yet.
 
 A remote session in the app does not yet have:
 

@@ -125,10 +125,24 @@ pub enum Call {
         frame: String,
         value: String,
     },
-    /// Stops the session's patch stream; the session keeps running.
+    /// Stops the session's patch stream and sends `ended`; the session keeps
+    /// running, and its timeline keeps folding for `attach`.
     Close {
         session: SessionId,
     },
+    /// Streams a session this server still holds again, from its snapshot;
+    /// answered like `open`.
+    Attach {
+        session: SessionId,
+    },
+    /// Ends the session: its turns stop and what they detached is killed.
+    /// `close` does not.
+    End {
+        session: SessionId,
+    },
+    /// The inbox, so a client that attaches sees what arrived while it was
+    /// away; an item is pushed only once.
+    Inbox,
 }
 
 /// The answer to request `id`.
@@ -178,6 +192,7 @@ pub enum Reply {
     Shown,
     CanvasAttach(#[schemars(with = "Option<Value>")] Option<CanvasAttach>),
     Closed,
+    Inbox(#[schemars(with = "Vec<Value>")] Vec<InboxItem>),
 }
 
 /// Pushed by the server, never answered.
@@ -356,6 +371,9 @@ mod tests {
                 value: "screen#home/hero".into(),
             }),
             request(Call::Close { session: id }),
+            request(Call::Attach { session: id }),
+            request(Call::End { session: id }),
+            request(Call::Inbox),
             reply(Reply::Projects(Vec::new())),
             reply(Reply::Sessions(Vec::new())),
             reply(Reply::Search(Vec::new())),
@@ -390,6 +408,7 @@ mod tests {
             }))),
             reply(Reply::CanvasAttach(None)),
             reply(Reply::Closed),
+            reply(Reply::Inbox(Vec::new())),
             Line::Response(Response {
                 v: VERSION,
                 id: 8,
