@@ -67,8 +67,10 @@ fn reply(input_tokens: u32) -> ResponseTemplate {
     }))
 }
 
-/// A scratch home with the Jev package installed and enabled, and the
-/// scripted turn that writes `files` in one batch.
+/// A scratch home with the Jev package installed and enabled, and a
+/// scripted run that writes each of `files` in a tool batch of its own, so
+/// each write is one `risk` question (the core asks once per batch,
+/// T33.40.6.1).
 struct Rig {
     home: tempfile::TempDir,
     cwd: tempfile::TempDir,
@@ -88,18 +90,16 @@ impl Rig {
             scenario: PathBuf::new(),
         };
         let scenario = rig.home.path().join("scenario.toml");
-        let calls: Vec<String> = files
+        let turns: String = files
             .iter()
-            .map(|f| format!(r#"{{ name = "write", input = {{ path = "{f}", content = "x" }} }}"#))
+            .map(|f| {
+                format!(
+                    "[[turn]]\ntext = \"writing\"\ntool_calls = \
+                     [{{ name = \"write\", input = {{ path = \"{f}\", content = \"x\" }} }}]\n\n"
+                )
+            })
             .collect();
-        std::fs::write(
-            &scenario,
-            format!(
-                "[[turn]]\ntext = \"writing\"\ntool_calls = [{}]\n\n[[turn]]\ntext = \"done\"\n",
-                calls.join(", ")
-            ),
-        )
-        .unwrap();
+        std::fs::write(&scenario, format!("{turns}[[turn]]\ntext = \"done\"\n")).unwrap();
         std::fs::write(
             rig.home.path().join("config.toml"),
             format!(
@@ -243,7 +243,7 @@ fn jev_request_carries_host_injected_bearer() {
     assert_eq!(auth, [format!("Bearer {KEY}").as_str()]);
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["model"], "jev-1.13.0");
-    assert_eq!(body["state"]["tool"], "write");
+    assert_eq!(body["state"]["items"][0]["tool"], "write");
     assert_eq!(body["questions"]["severity"]["type"], "score");
     let advised: Vec<_> = rig
         .events()
@@ -288,8 +288,12 @@ fn jev_call_writes_usage_row_with_plugin_job() {
 
 #[test]
 fn jev_call_blocked_by_budget_falls_back() {
-    // The first call costs $8.40 against the default $5 session cap, so the
-    // second question's call-out is refused before it reaches the wire.
+    // The first call costs $8.40 against the default $5 session cap. The
+    // core asks once per tool batch (T33.40.6.1), and every batch follows a
+    // main provider call that passes the same gate, so no second question
+    // is asked over the cap: the session stops on its budget instead, and
+    // the batch already asked keeps the static pick. The refused call-out
+    // itself is `cox-core`'s `decide_call_out_over_budget_falls_back`.
     let server = Typesafe::answering(reply(200_000_000));
     let rig = Rig::new(&server, &["a.txt", "b.txt"]);
     rig.run();
@@ -297,13 +301,21 @@ fn jev_call_blocked_by_budget_falls_back() {
     assert_eq!(server.requests().len(), 1);
     assert_eq!(rig.jev_rows().len(), 1);
     let notices = rig.notices();
-    let skipped = decide_skipped(&notices);
-    assert_eq!(skipped.len(), 1, "{notices:?}");
-    assert!(skipped[0].contains("budget"), "{notices:?}");
-    assert!(
-        rig.wrote("a.txt") && rig.wrote("b.txt"),
-        "the static pick stands"
+    assert!(decide_skipped(&notices).is_empty(), "{notices:?}");
+    let stops: Vec<_> = rig
+        .events()
+        .into_iter()
+        .filter(|e| e["type"] == "turn_done")
+        .map(|e| e["stop"].clone())
+        .collect();
+    assert_eq!(
+        stops,
+        [json!({ "type": "budget" })],
+        "{}",
+        rig.rollout_text()
     );
+    assert!(rig.wrote("a.txt"), "the static pick stands");
+    assert!(!rig.wrote("b.txt"), "no batch runs past the cap");
 }
 
 #[test]
