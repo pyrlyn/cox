@@ -36,6 +36,8 @@ cox-store = { path = "../cox-store", version = "0.1.2" }
 cox-acp = { path = "../cox-acp", version = "0.1.2" }
 # An external agent's stderr tail is shown only through the guard (T35.13).
 cox-sanitize = { path = "../cox-sanitize", version = "0.1.2" }
+# `targets::resolve` turns `[targets.*]` and `[launchers]` into a checked launcher and target (T68.2).
+cox-target = { path = "../cox-target", version = "0.1.2" }
 cox-plugin = { path = "../cox-plugin", version = "0.1.2", optional = true }
 # A plugin's `[[mcp]]`/`[[external_agents]]` declarations are manifest
 # types; `cox-plugin` (the extism host) does not re-export them.
@@ -44,6 +46,12 @@ cox-plugin-api = { path = "../cox-plugin-api", version = "0.1.2", optional = tru
 # the client is the one place a socket to its API opens.
 cox-cursor-cloud = { path = "../cox-cursor-cloud", version = "0.1.2", optional = true }
 thiserror = { workspace = true }
+# T66.7: a refine event's id is a lowercase ULID (`harness::apply` takes
+# `[a-z0-9-]`); already in the tree through `cox-protocol`.
+ulid = { workspace = true }
+# T66.8: the review diff of a proposed refine; already `cox-tools`' and
+# `cox-tui`'s diff engine.
+similar = { workspace = true }
 tokio = { workspace = true }
 # T56.6: reads the cloud run's event stream (`StreamExt::next`); already
 # in the tree through `cox-cursor-cloud`.

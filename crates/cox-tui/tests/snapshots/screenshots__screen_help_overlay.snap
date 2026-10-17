@@ -37,6 +37,8 @@ transcript · Ctrl+E expand · Ctrl+G diff · Alt+V voice · Ctrl+K plugin leade
        /agents                                                  live cox sessions in this workspace
        /loop <interval> <prompt> [--budget usd] | /loop stop    repeat a prompt on a timer with its
        own budget cap
+       /refine <text|list|undo> [--global]                      review, apply or undo a change to
+       notes, memory, skills
        /skills                                                  list skills
        /hooks                                                   list hooks
        /mcp                                                     MCP servers and their tools

@@ -1,0 +1,10 @@
+---
+source: crates/cox-tui/tests/it/frames.rs
+expression: "buffer_to_string(&render(&state, 80, 6))"
+---
+
+
+
+
+> Enter send · Shift+Tab mode cycle · @ file · / command · ? help
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · workspace-write · [default]

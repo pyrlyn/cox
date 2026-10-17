@@ -68,7 +68,7 @@ enum PaletteAction: String, CaseIterable {
   case inspector = "action.inspector"
   case terminal = "action.terminal"
   case browser = "action.browser"
-  case connectHost = "action.connect-host"
+  case connectTarget = "action.connect-target"
 
   var symbol: String {
     switch self {
@@ -80,7 +80,7 @@ enum PaletteAction: String, CaseIterable {
     case .inspector: "sidebar.right"
     case .terminal: "terminal"
     case .browser: "globe"
-    case .connectHost: "network"
+    case .connectTarget: "network"
     }
   }
 
@@ -141,7 +141,7 @@ extension SessionWindow {
     ]
     // Only the person opens the pane: a plugin can declare a canvas but not show it.
     items += (showing?.canvas?.canvases ?? []).map(canvasItem)
-    if model.remotes.canConnect { items.append(Action.connectHost.item("Connect to Host…")) }
+    if model.remotes.canConnect { items.append(Action.connectTarget.item("Connect to Target…")) }
     return items
   }
 
@@ -202,7 +202,7 @@ extension SessionWindow {
     case .inspector: screen.isInspectorVisible.toggle()
     case .terminal: toggleTerminal()
     case .browser: isBrowserVisible.toggle()
-    case .connectHost: connecting = ConnectHostSheet.State()
+    case .connectTarget: connecting = .opening
     }
   }
 }
