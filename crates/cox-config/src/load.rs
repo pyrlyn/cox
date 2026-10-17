@@ -929,6 +929,15 @@ fn build_figment(
     fig.merge(named("flag", Serialized::defaults(flags)))
 }
 
+/// The `[tiers]` of the embedded defaults: what a tier falls back to when
+/// its provider moved into a plugin that is not loaded (T33.40.13). `None`
+/// only if `default.toml` failed to parse, which its own tests rule out.
+pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
+    Figment::from(Toml::string(DEFAULT_CONFIG_TOML))
+        .extract_inner("tiers")
+        .ok()
+}
+
 /// The table/key tree of the embedded defaults, which [`env_key`] resolves
 /// `COX_*` names against. Empty only if `default.toml` failed to parse, which
 /// its own tests rule out; `env_key` then degrades to plain `_` splitting.

@@ -2463,7 +2463,6 @@ fn provider_name(provider: &ProviderId) -> String {
         ProviderId::Anthropic => "anthropic".to_string(),
         ProviderId::OpenAi => "openai".to_string(),
         ProviderId::Local => "local".to_string(),
-        ProviderId::Jev => "typesafe".to_string(),
         ProviderId::External => "external".to_string(),
         // The section name, not the `plugin:` ledger tag (T33.18).
         ProviderId::Plugin(name) => name.clone(),
@@ -2674,7 +2673,6 @@ mod tests {
             super::provider_name(&ProviderId::Plugin("acme".into())),
             "acme"
         );
-        assert_eq!(super::provider_name(&ProviderId::Jev), "typesafe");
     }
 
     /// Records every hook call and always continues (T22.3's claims).

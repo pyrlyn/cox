@@ -31,6 +31,43 @@ $ mise exec -- cargo clippy -p cox-provider -p cox-session -p cox -p cox-provide
 $ mise exec -- cargo fmt --check: clean
 ```
 
+#### T33.40.13 Router and `ProviderId` without Jev
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.12 · Size: ~120 · Files: `crates/cox-protocol/src/types.rs`, `crates/cox-core/src/router.rs`, `crates/cox-core/src/session.rs`
+Goal: C1, step 2.
+- `ProviderId::Jev` goes, replaced by T33.18's plugin bucket; it is never serialized in events (J§7).
+- The `typesafe` pin in `Router::pick` goes; plugin sections resolve generically.
+- A tier naming a legacy plugin provider (the table `("typesafe", "jev")`) with the plugin absent fails open (D14): one `Notice(Warn)` "Jev moved to a plugin: build `plugins/jev` and run `cox plugin install <dir>`", and that tier uses its `default.toml` provider and model for the session.
+Check: `legacy_typesafe_tier_without_plugin_uses_default_tier_with_notice`, `typesafe_tier_with_plugin_routes_to_plugin_section`, `unknown_provider_still_errors`; `docs/protocol.jsonschema` regenerated.
+
+Plan:
+- The card's file list is stale: the tier's client is built at session open in `cox-session`, not in `cox-core`, and a session whose `tiers.code.provider` is `typesafe` without the plugin would otherwise fail to open on `PluginNotLoaded`.
+- `cox-protocol`: delete `ProviderId::Jev`; the stored tag `jev` of an old ledger row still reads (as `Plugin("typesafe")`, the section that replaced it) so `cox stats` and `/cost` do not hit a `corrupt` row; the schema drops the `jev` const.
+- `cox-core/router.rs`: drop the `typesafe` arms of `pick` (id and pin); a `typesafe` tier with no loaded section is `UnknownProvider`, like any other unknown name. `session.rs`: drop the `Jev` arm of `provider_name`.
+- `cox-config`: `load::default_tiers()` reads `[tiers]` of the embedded `default.toml`.
+- `cox-session` (new `legacy_tier.rs`): after the ABI sections are built and before `assemble`, a tier naming a legacy section (`typesafe` -> plugin `jev`) that no loaded plugin serves takes the default tier's provider and model, on `config` and `base`, and one `Notice(Warn)` joins the plugin notices.
+- Verify: the three named tests (router ones in `cox-core`, the fallback ones in `cox-session`), `cargo test` of the touched crates, `just`-less schema regeneration, clippy and fmt.
+
+Result:
+- `ProviderId::Jev` is gone. A ledger row an old build wrote with the tag `jev` still reads, as `Plugin("typesafe")` (`legacy_jev_provider_tag_reads_as_the_typesafe_plugin_section`), so `cox stats` and `/cost` do not report it corrupt; the tag is never written again. `docs/protocol.jsonschema` did not change (it does not reach `ProviderId`).
+- `Router::pick` lost the `typesafe` id and pin arms; a loaded section resolves generically, and `typesafe` with no section is `UnknownProvider`.
+- The fail-open lives in `cox-session` (`legacy_tier.rs`, called from `open` after the ABI sections are built and before `assemble`), because `cox-core`'s router is pure and `assemble` would otherwise fail the open on `PluginNotLoaded`. A tier naming `typesafe` with no loaded plugin or declarative section takes the default tier's provider and model (`cox_config::load::default_tiers`); the user's effort, thinking and limits stay. One `Notice(Warn)` says "Jev moved to a plugin: build `plugins/jev` and run `cox plugin install <dir>`".
+- Not done: the `[providers.typesafe]` tombstone and the doctor row (T33.40.14).
+
+Check output:
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-protocol
+     Summary 121 tests run: 121 passed (includes legacy_jev_provider_tag_reads_as_the_typesafe_plugin_section and protocol_jsonschema_matches_committed_file)
+$ ... cargo nextest run -p cox-core -p cox-session -p cox-config
+     Summary 577 tests run: 577 passed, 1 skipped (includes legacy_typesafe_tier_without_plugin_uses_default_tier_with_notice, typesafe_tier_with_plugin_routes_to_plugin_section, unknown_provider_still_errors, open_moves_a_legacy_typesafe_tier_to_the_default)
+$ ... cargo nextest run -p cox --test deps --test plugins_jev
+     Summary 26 tests run: 25 passed (typesafe_table_overrides_plugin_transport timed out under load 60+, passed alone on rerun)
+$ ... cargo nextest run -p cox-store -p cox-plugin -p cox-provider -p cox-app
+     Summary 475 tests run: 475 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-protocol -p cox-core -p cox-session -p cox-config --all-targets -- -D warnings: clean
+$ mise exec -- cargo fmt --check: clean
+```
+
 #### T33.40.6 `risk` advisor: raise only
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4, T33.40.6.1 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/plugins_jev.rs` (also touched: `plugins/jev/src/decide.rs`, `plugins/jev/plugin.toml`, `crates/cox-core/src/monotone.rs`)

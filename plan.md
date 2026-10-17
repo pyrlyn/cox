@@ -47,7 +47,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.9 | todo | P2 | 4 | 0% | |
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
-| T33.40.13 | todo | P2 | 3 | 0% | |
 | T33.40.14 | todo | P2 | 3 | 0% | |
 | T33.40.15 | todo | P2 | 3 | 0% | |
 | T33.40.16 | todo | P2 | 2 | 0% | |
@@ -938,15 +937,6 @@ Goal: one page for users. It covers:
 - the E1/E2 results and the defaults they justify;
 - the migration from `[providers.typesafe]` (J§7).
 Check: `doc_examples` parses every `toml` block on the page against `Config` or the plugin manifest schema and fails on drift.
-
-#### T33.40.13 Router and `ProviderId` without Jev
-
-Depends: T33.40.12 · Size: ~120 · Files: `crates/cox-protocol/src/types.rs`, `crates/cox-core/src/router.rs`, `crates/cox-core/src/session.rs`
-Goal: C1, step 2.
-- `ProviderId::Jev` goes, replaced by T33.18's plugin bucket; it is never serialized in events (J§7).
-- The `typesafe` pin in `Router::pick` goes; plugin sections resolve generically.
-- A tier naming a legacy plugin provider (the table `("typesafe", "jev")`) with the plugin absent fails open (D14): one `Notice(Warn)` "Jev moved to a plugin: build `plugins/jev` and run `cox plugin install <dir>`", and that tier uses its `default.toml` provider and model for the session.
-Check: `legacy_typesafe_tier_without_plugin_uses_default_tier_with_notice`, `typesafe_tier_with_plugin_routes_to_plugin_section`, `unknown_provider_still_errors`; `docs/protocol.jsonschema` regenerated.
 
 #### T33.40.14 Config tombstone, `default.toml`, schema and doctor
 
