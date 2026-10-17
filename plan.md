@@ -2584,7 +2584,7 @@ Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store 
 
 #### T66.24 End-to-end: kill the client, reattach, and the rollout grows only by the turn
 
-Model: sonnet · Status: open · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3
+Model: Claude Code / sonnet · Status: in progress · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3
 
 Goal: one test proves the point of the whole serve design: a session outlives its client and a reattach writes nothing to the rollout. `docs/design/serve.md` "Acceptance test for the later cards", S9 and D6.
 
@@ -2605,6 +2605,8 @@ mise exec -- cargo nextest run -p cox --test serve
 mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo fmt --check
 ```
+
+Execution plan: `crates/cox/tests/serve.rs` only (`#[cfg(all(unix, feature = "app-server"))]`), under a short scratch home in `/tmp` because of `sun_path`. A drop guard owns `cox serve` and each client child and kills them. Readiness is polled with deadlines (the socket, then each reply line). Lines are built and read with `cox_app::wire`, patches folded with `cox_app::coalesce::apply`, the lock probed with `Store::session_holder`, and the rollout read from `Store::rollout_path`. Verify with five runs of the new test in a row, then the Check below.
 
 Done when `a_reattach_after_a_killed_client_writes_nothing_to_the_rollout` passes.
 
