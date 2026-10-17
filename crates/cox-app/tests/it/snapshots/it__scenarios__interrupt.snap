@@ -1,5 +1,5 @@
 ---
-source: crates/cox-app/tests/scenarios.rs
+source: crates/cox-app/tests/it/scenarios.rs
 expression: "lines.join(\"\\n\")"
 ---
 {"op":"upsert","block":{"id":"turn:#1","turn":1,"kind":{"type":"turn_meta","model":"claude-sonnet-5","tier":"code","usage":null,"stop":null}},"after":null}

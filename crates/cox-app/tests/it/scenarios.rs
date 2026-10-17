@@ -7,8 +7,7 @@
 //! provider, its patches are snapshotted, and the rollout read back through
 //! JSONL — as `cox resume` reads it — folds to the very same patches.
 
-#[path = "../../cox-core/tests/common/mod.rs"]
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

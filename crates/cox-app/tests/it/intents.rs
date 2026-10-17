@@ -8,8 +8,7 @@
 //! workspace reads the result back. Never the real `~/.cox`, never a
 //! keychain.
 
-#[path = "../../cox-core/tests/common/mod.rs"]
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
