@@ -126,6 +126,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
+| T66.8 | in progress | P2 | 2 | 0% | Claude Code / sonnet-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2356,7 +2357,7 @@ Out of scope: a separate `task_output` tool; peer messages between children.
 
 #### T66.8 `/refine` and `cox refine`
 
-Model: sonnet · Status: open · Depends: T66.7 · Size: ~120 · Priority: P2 · Complexity: 2
+Model: sonnet · Status: in progress · Depends: T66.7 · Size: ~120 · Priority: P2 · Complexity: 2
 
 Goal: the user can propose, review, apply and undo a refine from the TUI and the CLI. Global scope always needs the explicit flag.
 
@@ -2379,6 +2380,12 @@ mise exec -- cargo fmt --check
 Done when an e2e run against a scratch `COX_HOME` on the scripted provider applies one local note, lists it, and undoes it.
 
 Out of scope: running refine automatically on a timer.
+
+Execution plan (claimed by Claude Code / sonnet-5.5):
+1. `cox-session/src/refine.rs`: split `Refiner::refine` into `propose` (a `Pending` with a unified diff) and `apply`; add `undo_event`/`list_events`/`latest_undoable` that need no `Session`, so `cox refine undo` runs without a provider. A global event needs an explicit `--global` to undo.
+2. `cox-tui`: `Action::Refine`, `Ask::Refine`, `Msg::Refine`, `Modal::Refine` (diff + `y` applies, `n`/`Esc` cancels); `/refine` in the shared command table so the palette and `/help` list it.
+3. `crates/cox`: `session.rs` answers `Ask::Refine` with a `Refiner`; `refine_cmd.rs` and `cli.rs` add `cox refine list [--session ID]` and `cox refine undo <id> [--global]`.
+4. Tests: parser and state unit tests, an insta snapshot of the review modal, a PTY e2e (`tui_e2e.rs` style) that applies a local note in the TUI on the scripted provider, then `cox refine list` and `cox refine undo` against the same scratch `COX_HOME`. Docs: commands list, CLI docs, help snapshots.
 
 #### T66.9 A pure autonomous driver beside the USD cap
 
