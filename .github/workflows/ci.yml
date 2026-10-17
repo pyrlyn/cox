@@ -422,6 +422,10 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_brand_icons.py'
           python3 scripts/brand_icons.py --check
 
+      # Which Swift packages desktop-macos may skip on a pull request (T63.2).
+      - name: swift test selection
+        run: python3 -m unittest discover -s scripts/desktop -p 'test_swift_test_select.py'
+
       - name: swiftlint fixtures
         working-directory: desktop/macos
         run: |
@@ -463,10 +467,15 @@ jobs:
   # (A67), then `swift test` for every package under desktop/macos/Packages,
   # then the app target, unsigned (T37.32.1). xcode-27 is GitHub's arm64 image
   # with Xcode 27 (macos-26 / macos-latest carry Xcode 26.x); setup-xcode selects
-  # the pinned stable Xcode 27 and fails when the image has none. Always the full
-  # build: every package and the app, never only the changed ones. The toolchain
-  # and XCFramework steps are .github/actions/desktop-macos, shared with the
-  # desktop build workflow (T37.32.3).
+  # the pinned stable Xcode 27 and fails when the image has none. The full build on
+  # main and manual runs: every package and the app. On a pull request a package
+  # whose inputs (its sources, tests, snapshots, local dependencies, the files its
+  # tests read, the toolchain) are byte-identical to a run that passed, on main or
+  # earlier on the pull request, is not tested again (T63.2, A141): pass markers
+  # in actions/cache, scripts/desktop/swift_test.sh. The app target is built on
+  # every run. The toolchain and XCFramework steps are
+  # .github/actions/desktop-macos, shared with the desktop build workflow
+  # (T37.32.3).
   desktop-macos:
     needs: [config, changes]
     if: >-
@@ -480,30 +489,34 @@ jobs:
 
       - uses: ./.github/actions/desktop-macos
 
+      # Pass markers (T63.2): `actions/cache` keys are immutable, so each run saves a new key and
+      # restores the newest by prefix. A pull request reads its own and main's caches only.
+      - name: swift test pass markers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: desktop/macos/build/swift-test-pass
+          key: swift-test-pass-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: swift-test-pass-v1-
+
       # Serial: the UI tests share one NSApplication (key window, appearance, main run loop),
       # and the benchmark times the main thread, so tests running alongside break both. Every
-      # package runs before the step fails; snapshots that do not match are uploaded.
+      # package selected runs before the step fails; snapshots that do not match are uploaded.
       - name: swift test
         # A hung test (the run loop waiting on a window) would otherwise hold the runner for 6 h.
         timeout-minutes: 60
         env:
           SNAPSHOT_ARTIFACTS: ${{ runner.temp }}/snapshots
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          failed=()
-          for manifest in desktop/macos/Packages/*/Package.swift; do
-            # swiftbuild emits ColorResource symbols for Colors.xcassets. The native
-            # build system copies the catalog and leaves those symbols missing, so
-            # `Color(.surfaceWindow)` does not type-check (SwiftPM #9655).
-            package=$(dirname "$manifest")
-            swift test --no-parallel --build-system swiftbuild --package-path "$package" \
-              || failed+=("$(basename "$package")")
-          done
-          if [ ${#failed[@]} -gt 0 ]; then
-            echo "swift test failed in: ${failed[*]}" >&2
-            exit 1
-          fi
+          # Only a pull request may skip; any other trigger tests every package.
+          COX_SWIFT_TEST_ALL: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+        run: bash scripts/desktop/swift_test.sh
+
+      # After a failure too, so the packages that passed keep their markers.
+      - name: save swift test pass markers
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: desktop/macos/build/swift-test-pass
+          key: swift-test-pass-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: snapshots that did not match
         if: failure()
