@@ -43,7 +43,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.6.1 | in progress | P2 | 4 | 10% | Claude Code / opus-5.5 |
+| T33.40.6.1 | todo | P2 | 4 | 80% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
