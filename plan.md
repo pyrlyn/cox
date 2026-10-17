@@ -44,6 +44,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | --- | --- | --- | --- | --- | --- |
 | T32.17 | in progress | P2 | 3 | 80% | Claude / opus-5.5 |
 | T33.36 | todo | P2 | 4 | 0% | |
+| T33.40.6.1 | todo | P2 | 4 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
@@ -881,10 +882,28 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
 
+#### T33.40.6.1 Core: one batched `risk` question per tool batch
+
+Depends: T33.21, T33.40.1 · Size: ~120 · Files: `crates/cox-core/src/turn.rs`, `crates/cox-core/src/monotone.rs`
+Goal: J§5.1's one request per tool batch, which T33.40.6 needs and the core cannot ask today: `gate` calls `advise_risk` once per call, and it asks a flat question (`items: vec![]`) whose state has no task, cwd or sandbox mode. Every `PreToolUse` hook of a batch now runs before the batch's first approval prompt (A163).
+Steps:
+1. `run_signed_tools` runs `PreToolUse` for every call of the batch first, then asks one `risk` question for the batch. The shared state is the task (clipped), the cwd, the workspace roots and the sandbox mode; each item is `tool`, `subject`, `input` and `classifier_risk`, never tool output.
+2. `Answer::Items` applies per call through `raise_risk`. A flat answer, a missing item or a late answer leaves every call at its classifier risk.
+3. A late `risk` answer stays "no answer" and records a `Notice` naming the point and its deadline; `Event::Advised` keeps its shape.
+4. The core keeps the advice `note` for `risk` as it does for `approve_hint`, so the probabilities a plugin reports reach the rollout.
+Check:
+- `risk_batch_asks_once_with_one_item_per_call`;
+- `risk_items_raise_only_their_own_call`;
+- `late_risk_answer_records_a_notice`;
+- `risk_note_reaches_the_rollout`;
+- still green: `risk_advice_cannot_lower_risk`, `risk_not_asked_when_outcome_would_not_change`, `late_advice_falls_back_to_static_pick`, `late_salience_keeps_every_item`, `batched_question_answers_each_item`.
+
 #### T33.40.6 `risk` advisor: raise only
 
 Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/it/plugins_jev.rs`
 Goal: J§5.1. There is one request per tool batch. The state is the task, the cwd, the sandbox mode and, for each call, `tool`, `subject`, `input` and `classifier_risk`, never tool output. The questions are the `severity` Score and the `irreversible`, `external_effect` and `exfiltration` Nouls. The thresholds sit in `[plugins.jev.risk]` with the J§5.1 defaults. The advice is "raise to Destructive" or none, and the core keeps `max(builtin, advised)`. `capabilities.decide` gains `risk`.
+Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4, T33.40.6.1 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/plugins_jev.rs`
+Goal: J§5.1. There is one request per tool batch. The state is the task, the cwd, the sandbox mode and, for each call, `tool`, `subject`, `input` and `classifier_risk`, never tool output. The questions are the `severity` Score and the `irreversible`, `external_effect` and `exfiltration` Nouls. The thresholds sit in `[plugins.jev.risk]` with the J§5.1 defaults. The advice is "raise to Destructive" or none, and the core keeps `max(builtin, advised)`. A raise is reported with confidence 1.0, since the guest's own thresholds are the gate, and its probabilities go in the advice note (A163). `capabilities.decide` gains `risk`.
 Check:
 - guest tests:
   - `risk_state_never_contains_tool_output`;
@@ -894,7 +913,7 @@ Check:
 - e2e in `Auto` mode with a confining sandbox, where a scripted `git push --force origin main` is auto-allowed without the plugin:
   - a high fixture gives `Ask`, headless denies, and `Advised { point: risk, applied: true }` is in the rollout;
   - a low fixture leaves the call allowed;
-  - a wiremock delay past 200 ms leaves it allowed with `Advised { applied: false }`;
+  - a wiremock delay past 200 ms leaves it allowed and records T33.40.6.1's late-answer `Notice`, with no `Advised` (A163);
   - `one_jev_request_per_tool_batch` (the wiremock count for a batch of 3);
 - `risk_advice_cannot_lower_risk` still green.
 
@@ -2955,6 +2974,8 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A157 §3 P33 (T33.47.8, new T33.47.10) — split the pane, shortcut and chip card into T33.47.8.1–T33.47.8.10, one layer each (CoxClient seam, CoxModel store, CoxCore calls, CoxUI pane, App wiring, shortcut and DT§ text, one canvas store per session in `AppStore`, a canvas page's content height and zoom in CoxPlatform, the store's pick for the palette, and a redraw that keeps §6's scroll and outline), because the card spans six Swift packages and the app, well over 200 lines and three files. `CanvasClient` is a protocol of its own rather than five more `SessionClient` requirements, so a client without canvases needs no stubs. T33.47.10 fixes a T33.47.4 bug found while wiring the pane: a local `next_canvas` never returned after `close()`, so the FFI pull held the session for ever. Effect: T33.47.8 stays open until the ten cards and its Check pass; no API or design decision changes.
 - A158 §3 (new P68: T68.1–T68.10), by the creator (2026-10-14) — run targets: a whole cox session runs over ssh on Linux, macOS or Windows, in a Docker container, in a Lima instance or in the Colima VM, from the desktop app, the TUI and `cox run` (`--on <target>`) and the `agent` tool. Why: the only remote path is the desktop app's `ssh <host> cox app-server --stdio` with a hard-coded `/usr/bin/ssh` (T52.19–T52.21); containers and VMs are the usual isolation for agents (research.md 9.1.x). Effect: a new pure crate `cox-target` owns target names, launcher lookup (absolute paths only) and launch argv, and `cox-app/src/remote.rs` delegates to it; the app-server wire gains a `hello` handshake; `targets.*` is user config only. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link and nothing typed by the model or the person goes on the remote command line. `cox` must already be on the target; installing it and throwaway `docker run` containers are ideas, not cards. No new dependency; D7 holds on targets without a sandbox backend. No §0 decision changes.
 - A159 §3 (new P69: T69.1–T69.8), by the creator (2026-10-15) — tasks from a comparison of openai/codex at `f0c5077c` and xai-org/grok-build at `2bdd1d6a` with cox: PowerShell readers meet `Read` denies, `allow_for_session_persists` is honored, more default read-only workspace dirs, a store `quick_check`, a compaction that rejects stubs and survives overflow, live tasks reattached after compaction, optional edit anchors, an integer compact threshold. Why: cox already leads on sandboxing, lossless archives and truncation; these are the gaps. Both sources are Apache-2.0; every card says implement similar, not copy, and records the licence. Effect: eight cards; no new dependency, no §0 decision changes.
+- A163 §3 P33 (new T33.40.6.1; T33.40.6 amended), by the creator (2026-10-17): T33.40.6 needs core changes its file list does not cover. The core asks `risk` once per call with no task, cwd or sandbox mode in the state, records nothing for a late answer and drops the advice note for `risk`. T33.40.6.1 makes the core ask one batched question per tool batch (every `PreToolUse` of the batch runs before the first approval prompt), keeps the note, and records a `Notice` for a late `risk` answer. The creator chose: a late answer stays no answer plus a `Notice`, not `Advised { applied: false }`; the Jev guest reports a raise with confidence 1.0, its own J§5.1 thresholds being the gate, with its probabilities in the note. No §0 decision changes.
+
 - A161 §3 P66 (new T66.16–T66.18), by the creator (2026-10-17): the first three implementation cards from `docs/design/serve.md` (T66.12), its proposals S1–S3. S1 corrects `docs/app-server.md`, which promises that a turn survives a dropped client; S2 adds `attach`, `end` and `inbox` to the app-server wire and makes `open` of a held session attach (F1: two cores for one session); S3 adds worker mode and ends sessions on EOF (F2). Why: they need no new crate or dependency and fix two bugs the design found. S4–S9 (`cox-serve`, the socket, supervision, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
 - A162 §3 P66 (new T66.19–T66.21), by the creator (2026-10-17): the next three implementation cards from `docs/design/serve.md`, its proposals S4–S6. S4 adds the crate `cox-serve` with a pure restart policy; S5 adds its run directory, singleton lock and owner-only socket with a peer-uid check (D4), extracting `lock::claim_path` in cox-store so one lock implementation serves both; S6 adds worker supervision and shutdown. Why: a new crate, because process supervision and the socket's trust boundary must stay out of `cox-app` (linked into the macOS app) and out of `crates/cox`. No new dependency. S7–S9 (router and bridge, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
 - A160 §3 P32 (new T32.17), by the creator (2026-10-13, for Mailune X1; numbered A155 on its branch, renumbered on merge because main's A155 is T33.46): `cox-config` consumes the shared `config-schema` crate (layering with named layers and per-key provenance, the `COX_*` env layer, comment-preserving edits) that was extracted from it, rtok and ketch, and drops its own copy. Why: the workspace rule against duplicated code across projects. Effect: one card; `config-schema` replaces `cox-config`'s direct `figment` and `toml_edit` dependencies. No §0 decision changes.
