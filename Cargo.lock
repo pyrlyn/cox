@@ -1112,6 +1112,7 @@ dependencies = [
  "cox-sanitize",
  "cox-session",
  "cox-store",
+ "cox-target",
  "cox-telemetry",
  "cox-tools",
  "cox-tui",
@@ -1598,6 +1599,7 @@ dependencies = [
  "cox-provider",
  "cox-sanitize",
  "cox-store",
+ "cox-target",
  "cox-tools",
  "futures",
  "nix 0.31.3",
@@ -1651,6 +1653,7 @@ name = "cox-target"
 version = "0.1.2"
 dependencies = [
  "insta",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "workspace-hack",

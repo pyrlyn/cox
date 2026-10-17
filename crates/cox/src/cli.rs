@@ -58,6 +58,13 @@ pub struct Cli {
     /// system prompt and no skills/memory index (T30.1).
     #[arg(long, global = true, value_name = "NAME")]
     pub profile: Option<String>,
+    /// Run the session on a target (`ssh:<host>`, `docker:<container>`,
+    /// `lima:<instance>`, `colima:<profile>` or a configured name) instead of
+    /// here (T68.6). Only `--model`, `--mode`, `--permission-mode`,
+    /// `--sandbox`, `--max-turns`, `--output-format`, `--resume` and
+    /// `--continue` are forwarded; the directory is the target's `cwd`.
+    #[arg(long, global = true, value_name = "TARGET")]
+    pub on: Option<String>,
     /// Run as if started from this directory.
     #[arg(long, global = true, value_name = "DIR")]
     pub cwd: Option<PathBuf>,
@@ -237,6 +244,11 @@ pub struct RunArgs {
     /// The prompt to run headlessly.
     #[arg(short = 'p', long = "prompt", value_name = "TEXT")]
     pub prompt: Option<String>,
+    /// Read the prompt from the first stdin line, a JSON string; the rest of
+    /// stdin stays the approvals channel. What `--on` sends, so the prompt
+    /// never reaches a remote command line (T68.6).
+    #[arg(long = "prompt-stdin", conflicts_with = "prompt")]
+    pub prompt_stdin: bool,
     /// Output shape: `text` | `json` | `stream-json`.
     #[arg(long = "output-format", value_name = "FORMAT")]
     pub output_format: Option<String>,
