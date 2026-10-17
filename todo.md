@@ -94,6 +94,7 @@
 - T66.11. `cox run -p --autonomous`: shell gates and the headless loop
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
+- T66.20. `cox-serve`: run directory, singleton lock, socket and peer uid
 - T67.3. Five more hook events
 - T67.4. `/goal`: a judged stop condition
 - T67.5. `/goal` in the TUI and stream-json

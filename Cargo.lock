@@ -1566,6 +1566,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cox-serve"
+version = "0.1.2"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "workspace-hack",
+]
+
+[[package]]
 name = "cox-session"
 version = "0.1.2"
 dependencies = [

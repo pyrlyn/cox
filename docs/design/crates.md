@@ -43,6 +43,7 @@ Seventeen new crates (`cox-models` comes from T30.24 (U4)), twenty-seven in tota
 | `cox-provider-jev` | `jev.rs` | (c) | protocol, models, provider-http |
 | `cox-provider-testkit` | `scripted.rs`, `replay.rs` (~750) | (d) dev-dependency of every test | protocol |
 | `cox-telemetry` | `cox/telemetry.rs` | (a) five otel crates | — |
+| `cox-serve` | T66.19 (new, `serve.md` S4), T66.21 (S6) | (b) process supervision and the socket's trust boundary stay out of `cox-app` (linked into the macOS app) and `crates/cox`; the pure restart policy, then the worker processes (tokio, serde_json for the two wire lines it sends) | — |
 | `cox-config` | `cox/config_load.rs`, `config_cmd.rs` (~990) | (c)(d) the one config owner; figment, toml_edit | protocol, models |
 | `cox-voice` | new (P54, A123) | (a) whisper.cpp (`whisper-rs`, a cmake C++ build), `cpal` platform audio, `rubato`; linked only behind `crates/cox`'s `voice` feature, off by default | protocol |
 | `cox-cursor-cloud` | new (P56, A123) | (a) the Cursor Cloud Agents wire types (T56.1) and client (T56.2): the one socket to `api.cursor.com`; not a `Provider`, not session assembly | protocol, provider-http (from T56.2) |

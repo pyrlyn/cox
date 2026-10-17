@@ -1,3 +1,166 @@
+#### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Goal: the supervisor runs one worker process per session and keeps it alive under T66.19's policy. `docs/design/serve.md` S6, D3 and D7.
+
+Plan: `worker.rs` spawns the program with tokio's process support, writes the wire lines (`open`, `end`) with serde_json, reads the `opened` reply and drains the rest of stdout, and reports each exit through a callback. `supervisor.rs` keeps one slot per session (running, restarting, failed), measures uptime, feeds each exit to `restart::Policy`, schedules a restart as a timed event, refuses a 17th worker, and on an injected shutdown future sends `end`, waits a grace (10 s by default) and kills what is left. Tests drive a fake worker `sh` script in a tempdir with a short grace and a capped restart delay. New third-party deps for cox-serve: tokio, serde_json, thiserror (all already in the workspace); no workspace crate, so the `deps.rs` rule stays as it is.
+
+Files:
+- `crates/cox-serve/src/worker.rs`
+- `crates/cox-serve/src/supervisor.rs`
+
+Steps:
+1. Spawn the worker program (`current_exe() serve --worker` in production; a parameter, so tests pass a fake) with piped stdio.
+2. Apply T66.19's policy on each exit; a restart reopens the session with `resume`. A worker the supervisor gave up on is listed as failed.
+3. Enforce a cap of 16 workers.
+4. On SIGINT or SIGTERM, send `end` to every worker, wait 10 s, then SIGKILL.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve supervisor
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass, with a fake worker program as `crates/cox/tests/remote.rs` fakes `ssh`: `a_crashed_worker_is_restarted_idle_with_resume`, `give_up_marks_the_session_failed`, `shutdown_ends_every_worker`, `the_cap_refuses_the_seventeenth_open`.
+
+Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve: 10 passed (supervisor: a_crashed_worker_is_restarted_idle_with_resume, give_up_marks_the_session_failed, shutdown_ends_every_worker, the_cap_refuses_the_seventeenth_open; worker: open_and_end_lines_match_the_wire, only_the_reply_to_the_supervisor_counts; the four restart tests); 15 more runs of the supervisor tests all passed
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+cargo hakari verify: workspace-hack works correctly
+```
+
+#### T66.19 New crate `cox-serve`: the restart policy
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~120 · Priority: P2 · Complexity: 2
+
+Goal: a pure policy decides what the supervisor does when a worker exits. `docs/design/serve.md` S4 and D3. `cox-serve` is its own crate because it will own a trust boundary (who may connect) and process supervision, which must stay out of `cox-app` (linked into the macOS app through `cox-ffi`) and out of `crates/cox` (clap and dispatch only).
+
+Files:
+- `crates/cox-serve/Cargo.toml`, `crates/cox-serve/src/lib.rs`, `crates/cox-serve/src/restart.rs`
+- Docs: the workspace `Cargo.toml` members line, an `AGENTS.md` layout row, a `docs/design/crates.md` row
+
+Steps:
+1. `restart.rs` is pure: `Policy::on_exit(uptime, clean) -> Restart(Duration) | GiveUp | Done`.
+2. Delays start at 250 ms and double to a 30 s cap; the supervisor gives up after 5 consecutive failures; 30 s of life resets the count; a clean exit is never restarted.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve restart
+mise exec -- cargo nextest run -p cox --test deps
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `delays_double_from_250ms_to_a_30s_cap`, `gives_up_after_five_consecutive_failures`, `thirty_seconds_of_life_resets_the_count`, `a_clean_exit_is_never_restarted`.
+
+Execution plan: add `crates/cox-serve` (std only, `publish = false`, workspace lints); `restart.rs` holds named consts, `Policy` and `Decision`; the fifth consecutive failure gives up, so the 30 s cap is reachable only through the pure `delay` function and is tested there. Register the AGENTS.md row, the crates.md row and a `deps.rs` rule that `cox-serve` has no workspace dependency (the members line is the `crates/*` glob, so it needed no edit).
+
+Out of scope: spawning processes and the socket (T66.20, T66.21).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve restart: 4 passed (delays_double_from_250ms_to_a_30s_cap, gives_up_after_five_consecutive_failures, thirty_seconds_of_life_resets_the_count, a_clean_exit_is_never_restarted)
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy --workspace --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+
+#### T66.18 Worker mode in `cox-app`'s server: one session, ended on EOF
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.17 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the server can run as one session's worker, and on EOF every mode ends its sessions instead of only closing them, so detached bash processes are killed. `docs/design/serve.md` S3, D3 and F2.
+
+Files:
+- `crates/cox-app/src/server.rs`
+
+Steps:
+1. `ServeMode::{Client, Worker}` for `serve`. A worker refuses a second `open` and skips `load_login_env`.
+2. On EOF both modes end their sessions (F2).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-app server
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Plan (Claude Code / sonnet-5.5): add `ServeMode` and a `mode` argument to `serve`, and `serve_stdio` passes `Client` after `load_login_env`. A `Worker` answers a second `open` (one that does not resume the held session) with an `Outcome::Err` reply, the wire's error type, before `App::open` runs; no new `AppError` variant, so `app.rs` stays untouched. `Server::stop` calls `LiveSession::end` instead of `close`. Tests in `crates/cox-app/tests/app.rs`: `a_worker_refuses_a_second_session` (the second open errs, the first session stays usable) and `eof_ends_every_session` (a detached `sleep` started by `bash` is dead after EOF). Verify: the Check below, then clippy and fmt.
+
+Done when `eof_ends_every_session` and `a_worker_refuses_a_second_session` pass.
+
+Out of scope: the `cox serve --worker` flag and the supervisor that spawns workers (later cards).
+
+Check: `mise exec -- cargo nextest run -p cox-app` passed (276 tests), including `eof_ends_every_session` (a background `bash` runs `exec sleep 300`; after the client's stdin closes the process is dead; with `stop` calling `close` again it is still alive after 5 s and the test fails) and `a_worker_refuses_a_second_session` (the second `open` answers an error naming one session, a `resume` of the held id attaches, the first session still answers `snapshot`; with `refuses` returning false the test fails). `-p cox --test docs` 5 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. `docs/app-server.md` now says EOF ends the sessions. `serve_stdio` takes the mode and `cox app-server --stdio` passes `Client`; the `--worker` flag is a later card.
+
+#### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.16 · Size: ~140 · Priority: P2 · Complexity: 3
+
+Goal: a client can detach and reattach to a session the server holds, and one session never gets a second core. `docs/design/serve.md` S2, D1, D2 and F1.
+
+Files:
+- `crates/cox-app/src/wire.rs`
+- `crates/cox-app/src/server.rs`
+- `docs/app-server.md` (the call list); generated: `docs/app-server.schema.json`
+
+Steps:
+1. `Call::Attach`, `Call::End` and `Call::Inbox`, with `Reply::Inbox`.
+2. `close` stops the pump and sends `ended`, but no longer closes the controller.
+3. `open` with `resume` of an id this server already holds attaches instead of calling `App::open` again (F1).
+
+Plan (Claude Code / sonnet-5.5): `wire.rs` gets the three calls and `Reply::Inbox`, plus the round-trip entries; the schema is regenerated by deleting `docs/app-server.schema.json` and rerunning the drift test. In `server.rs` each session's pump becomes a `JoinHandle` in `pumps` (so a detach can abort and await it: no stale batch is sent after the snapshot). `close` aborts the pump and queues `ended` after the response, and leaves the controller and the canvas pull alone (`LiveSession::close` would close both for good). `attach` and a repeated `open` of a held id abort the old pump, answer `Opened` from the snapshot and start a new pump. `end` runs `LiveSession::end` and forgets the session; a live pump ends itself with `ended`, a detached one gets `ended` queued. Tests go in `crates/cox-app/tests/app.rs` beside the existing `serve` tests, because their scripted-provider and pipe helpers live there. The call list in `docs/app-server.md` gains three lines.
+
+Check: `mise exec -- cargo nextest run -p cox-app server wire` passed, including `app_server_schema_drift` (`docs/app-server.schema.json` regenerated by the drift test) and `wire_round_trips_every_message` for the three calls and `Reply::Inbox`. The four named tests pass in `cox-app::app`: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core` (fails with `left: 2, right: 1` StateChanged lines when `open` skips the held-id check), `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`. Whole `-p cox-app` run 274 passed; `-p cox --test remote --test docs` 6 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean.
+
+Done when these tests pass: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core`, `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`; and the schema drift test is green.
+
+Out of scope: the supervisor, the socket and worker mode (T66.18 and later cards).
+
+#### T66.16 `docs/app-server.md` says what a dropped connection does
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~10 (docs only) · Priority: P2 · Complexity: 1
+
+Goal: the doc stops promising that a running turn survives a dropped client. `docs/design/serve.md` S1 and D8: today the turn stops, the session can be resumed, and resident sessions are planned.
+
+Files:
+- `docs/app-server.md`
+
+Steps:
+1. Replace "A running turn keeps running on the host" and "the session itself keeps running on the host" with today's behaviour.
+
+Check:
+```bash
+! grep -n "keeps running on the host" docs/app-server.md
+mise exec -- cargo nextest run -p cox --test docs
+```
+
+Done when the Check passes.
+
+Out of scope: any code.
+
+Done: `docs/app-server.md` no longer promises that a running turn survives a dropped client. When the connection drops, the running turn stops, the session can be resumed with `open` and `resume`, and resident sessions are planned in `docs/design/serve.md` (T66.12). The two sentences are the only changes in the file.
+
+Check output:
+```
+$ ! grep -n "keeps running on the host" docs/app-server.md
+(no output)
+$ mise exec -- cargo nextest run -p cox --test docs
+    PASS cox::docs relative_links_skip_urls_and_anchors
+    PASS cox::docs app_server_doc_cites_paths_that_exist
+    PASS cox::docs docs_config_covers_every_key
+    PASS cox::docs docs_relative_links_resolve
+    PASS cox::docs docs_name_every_subcommand
+    Summary: 5 tests run: 5 passed, 0 skipped
+```
+
 #### T66.12 Design: resident sessions and a supervisor
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~0 (design doc) · Priority: P2 · Complexity: 4
