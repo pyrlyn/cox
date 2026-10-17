@@ -47,7 +47,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.9 | todo | P2 | 4 | 0% | |
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
-| T33.40.16 | todo | P2 | 2 | 0% | |
+| T33.40.16 | in progress | P2 | 2 | 0% | Claude Code / sonnet-5.5 |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
@@ -944,6 +944,7 @@ Goal: no doc describes a built-in Jev.
 - `crates.md` loses the `cox-provider-jev` row.
 - `v0.2-jev.md` gets a closing note that the integration shipped as the `jev` plugin (A52, T33.40), with the eval verdicts.
 - In `plan.md`, T32.15 is dropped with a reason, and the PL§2 example uses `name = "typesafe"`.
+Plan: (1) drop the Jev family and `JevProviderConfig`/`JevProvider` mentions from `providers.md`; (2) drop the `cox-provider-jev` row and the C15 mention from `crates.md`; (3) add a closing note to `v0.2-jev.md` (what shipped as the `jev` plugin; the eval verdicts wait for T33.40.7); (4) check `docs/ru` and `docs/uk` for the same mentions; (5) T32.15 is already recorded as dropped in `done.md`, so only verify the PL§2 example uses `name = "typesafe"`; (6) run the `rg` check, the docs tests and `just docs-check`.
 Check: `rg -n -i 'jev|typesafe' crates docs` matches only the plugin, the tombstone, the migration notice and the history. All docs drift tests are green.
 
 #### T33.40.17 Optional: record live fixtures (needs the creator's key)
