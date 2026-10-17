@@ -722,8 +722,8 @@ fn granted_manifests<'a>(
         .collect()
 }
 
-/// The `typesafe client` row (T33.40.5): which client serves the section
-/// while both the built-in one and the Jev plugin exist. The same
+/// The `typesafe client` row (T33.40.5): which plugin serves the section,
+/// or that none is loaded (T33.40.12 removed the built-in client). The same
 /// discover-and-grant walk as [`check_plugins`], and the same lowest-id
 /// rule `cox_plugin::provider::backends` uses for a contested name, so the
 /// row names the client a session would actually build.
@@ -750,7 +750,7 @@ pub(crate) fn check_typesafe_client(
     typesafe_client_row(plugin, config)
 }
 
-/// The slim build has no plugin host, so the built-in client always serves.
+/// The slim build has no plugin host, so no plugin ever serves the section.
 #[cfg(not(feature = "plugins"))]
 pub(crate) fn check_typesafe_client(
     _cwd: &std::path::Path,
@@ -767,7 +767,7 @@ fn typesafe_client_row(plugin: Option<&str>, config: &cox_protocol::Config) -> C
     let t = &config.providers.typesafe;
     let client = match plugin {
         Some(id) => format!("served by the {id} plugin"),
-        None => "served by the built-in Jev client".to_string(),
+        None => "provided by plugin jev, not loaded".to_string(),
     };
     CheckResult::ok(
         "typesafe client",
@@ -1740,12 +1740,12 @@ mod tests {
         insta::assert_snapshot!(human(&row));
     }
 
-    /// T33.40.5 Check, built-in case: no plugin at all, and a plugin that
+    /// T33.40.5 Check, absent case: no plugin at all, and a plugin that
     /// declares the section but was never granted, both leave the section
-    /// to the built-in client.
+    /// without a client (T33.40.12).
     #[cfg(feature = "plugins")]
     #[test]
-    fn doctor_typesafe_row_names_the_builtin_client_without_a_granted_plugin() {
+    fn doctor_typesafe_row_says_not_loaded_without_a_granted_plugin() {
         let home = tempfile::tempdir().expect("tempdir");
         let config = cox_protocol::Config::default();
         let none = check_typesafe_client(home.path(), home.path(), &config);
