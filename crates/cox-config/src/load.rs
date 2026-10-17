@@ -4,8 +4,7 @@
 
 //! Config loading and provenance (plan.md §1.6/D13/T0.3): layers
 //! `config/default.toml` < `~/.cox/config.toml` < `<git root>/.cox/config.toml`
-//! < `COX_<SECTION>_<KEY>` env vars < CLI flags via `config_schema::Layers`
-//! (T32.17: the shared crate this one's own `figment` code moved into), enforces the
+//! < `COX_<SECTION>_<KEY>` env vars < CLI flags via `figment`, enforces the
 //! project-config guard list, and records which layer last set each key so
 //! `cox config show --sources` can print it.
 //!
@@ -24,14 +23,40 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-use config_schema::{EnvLayer, Layers};
 use cox_protocol::config::DEFAULT_CONFIG_TOML;
 use cox_protocol::{Config, CoreError, SandboxMode};
+use figment::providers::{Env, Format, Serialized, Toml};
+use figment::value::{Dict, Map as FigMap};
+use figment::{Figment, Metadata, Profile, Provider};
 use serde_json::Value as JsonValue;
 
-/// The layer name `cox config show --sources` prints for the imported
-/// `.claude/settings.json` files.
-const CLAUDE: &str = "claude-settings";
+/// A `Provider` adapter that reports a fixed layer name as its `Metadata`,
+/// so `Figment::find_metadata` tells us which layer produced a value —
+/// `figment`'s own provider names (`"TOML file"`, `"environment
+/// variable(s)"`, ...) aren't the `default|user|project|env|flag` labels
+/// `cox config show --sources` needs.
+struct Named<P> {
+    name: &'static str,
+    inner: P,
+}
+
+impl<P: Provider> Provider for Named<P> {
+    fn metadata(&self) -> Metadata {
+        Metadata::named(self.name)
+    }
+
+    fn data(&self) -> Result<FigMap<Profile, Dict>, figment::Error> {
+        self.inner.data()
+    }
+
+    fn profile(&self) -> Option<Profile> {
+        self.inner.profile()
+    }
+}
+
+fn named<P: Provider>(name: &'static str, inner: P) -> Named<P> {
+    Named { name, inner }
+}
 
 /// Where `cox` looks for its home directory. `COX_HOME` overrides `~/.cox`
 /// (plan.md §1.6 `core.home` comment) for the whole `~/.cox` tree, not just
@@ -56,11 +81,19 @@ pub fn user_config_path() -> PathBuf {
     cox_home().join("config.toml")
 }
 
-/// The nearest ancestor of `start` with a `.git` entry (a directory for a
-/// normal clone, a file for a worktree). Canonical, because callers compare
-/// it with other canonical paths (the home directory, session cwds).
+/// Walks up from `start` looking for a `.git` entry (a directory for a
+/// normal clone, a file for a worktree), returning the first ancestor that
+/// has one.
 pub fn find_git_root(start: &Path) -> Option<PathBuf> {
-    config_schema::git_root(&start.canonicalize().unwrap_or_else(|_| start.to_path_buf()))
+    let mut dir = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
 }
 
 /// The project config file, if `cwd` is inside a git checkout:
@@ -735,11 +768,11 @@ fn rule_list(rules: &[String]) -> String {
 }
 
 /// Dotted keys the project-config guard list can revert (plan.md §1.6);
-/// used only to pick which layer stack (with or without the project layer) a
+/// used only to pick which figment (with or without the project layer) a
 /// reverted key's provenance is looked up in. `providers` (a project-added
 /// table, T64.3) is left out: its keys never reach the effective config,
 /// and listing it would send every project-set provider key to the
-/// pre-project stack.
+/// pre-project figment.
 const GUARDED_KEYS: [&str; 27] = [
     "autonomous",
     "budget.session_usd",
@@ -776,7 +809,7 @@ const GUARDED_KEYS: [&str; 27] = [
 const HOOK_SCALARS: [&str; 3] = ["hooks.timeout_s", "hooks.fail_open", "hooks.enabled"];
 
 /// The result of [`load`]: the effective, guard-corrected `Config`, plus
-/// enough of the layer stacks to answer `source_of` for `cox config show
+/// enough of the layered figments to answer `source_of` for `cox config show
 /// --sources`.
 pub struct LoadedConfig {
     /// The effective configuration, after the project-config guard list.
@@ -784,16 +817,8 @@ pub struct LoadedConfig {
     /// Guard violations found in the project layer, if any (already applied
     /// to `config`; report these to stderr and/or a future `Notice`).
     pub violations: Vec<GuardViolation>,
-    full: Stack,
-    pre_project: Stack,
-}
-
-/// One layer stack and, when Claude layers were imported, the same stack
-/// without them: a key those layers only extended keeps the lower layer's
-/// label, as figment's `adjoin` kept it.
-struct Stack {
-    layers: Layers,
-    below_claude: Option<Layers>,
+    full_fig: Figment,
+    pre_project_fig: Figment,
 }
 
 impl LoadedConfig {
@@ -802,7 +827,7 @@ impl LoadedConfig {
     /// reports the layer its *effective* (post-revert) value came from.
     pub fn source_of(&self, key: &str) -> &'static str {
         // A guarded table (`lsp.servers`) is reverted whole, so each of its
-        // leaf keys takes its provenance from the pre-project stack too.
+        // leaf keys takes its provenance from the pre-project figment too.
         // A `*` segment (`providers.*.base_url`) stands for any one name.
         let under = |guarded: &str| {
             let mut parts = key.split('.');
@@ -812,35 +837,29 @@ impl LoadedConfig {
         };
         // Event arrays are flattened as `hooks.<Event>`, so the `hooks`
         // prefix also covers `timeout_s` and `fail_open`, which this guard
-        // does not revert. Those scalars keep the full stack's provenance.
+        // does not revert. Those scalars keep the full figment's provenance.
         let reverted = !HOOK_SCALARS.contains(&key)
             && GUARDED_KEYS.iter().any(|g| under(g))
             && self.violations.iter().any(|v| under(v.key));
-        let stack = if reverted {
-            &self.pre_project
+        let fig = if reverted {
+            &self.pre_project_fig
         } else {
-            &self.full
+            &self.full_fig
         };
-        let origin = match (stack.layers.origin_of(key), &stack.below_claude) {
-            (Some(origin), Some(below)) if origin.layer == CLAUDE => {
-                below.origin_of(key).or(Some(origin))
-            }
-            (origin, _) => origin,
-        };
-        match origin.as_ref().map(|o| o.layer.as_str()) {
+        match fig.find_metadata(key).map(|m| m.name.as_ref()) {
             Some("default") => "default",
             Some("user") => "user",
             Some("project") => "project",
             Some("env") => "env",
             Some("flag") => "flag",
-            Some(CLAUDE) => CLAUDE,
+            Some("claude-settings") => "claude-settings",
             _ => "default",
         }
     }
 }
 
 /// The imported `.claude/settings.json` layers for one `cwd`, split by owner
-/// (T22.11, A122): a repository's files are left out of the stack without
+/// (T22.11, A122): a repository's files are left out of the figment without
 /// the project, so the guard list treats their rules like a project
 /// config's (`allow` reverted, `deny`/`ask` added), while the user's own
 /// file counts like user config.
@@ -852,127 +871,105 @@ pub struct ClaudeLayers {
     pub project: Option<JsonValue>,
 }
 
-/// The `.cox` file layers, lowest first. A file that does not exist adds
-/// no layer.
-fn file_layers(user_path: &Path, project_path: Option<&Path>) -> Layers {
-    let layers = Layers::new()
-        .toml_text("default", DEFAULT_CONFIG_TOML)
-        .file("user", user_path);
-    match project_path {
-        Some(project_path) => layers.file("project", project_path),
-        None => layers,
-    }
-}
-
-fn build_stack(
+fn build_figment(
     user_path: &Path,
     project_path: Option<&Path>,
     claude: &[&JsonValue],
     flags: &JsonValue,
-) -> Result<Stack, CoreError> {
-    let mut layers = file_layers(user_path, project_path);
+) -> Figment {
+    // `Toml::file` (not `file_exact`): both paths here are always absolute
+    // (`cox_home()`/git-root-derived), and for an absolute path `Data::file`
+    // checks existence directly rather than searching parent directories —
+    // it just also treats "missing" as "empty" instead of an IO error,
+    // which `file_exact` does not (it always attempts to read the path).
+    let mut fig = Figment::new()
+        .merge(named("default", Toml::string(DEFAULT_CONFIG_TOML)))
+        .merge(named("user", Toml::file(user_path)));
+    if let Some(project_path) = project_path {
+        fig = fig.merge(named("project", Toml::file(project_path)));
+    }
     for claude in claude {
-        // figment's `adjoin`, which `Layers` does not offer: imported rules
-        // and hooks add to the `.cox` lists rather than replace them (D13:
-        // imported, read-only), and a `.cox` value wins everywhere else.
-        let below: JsonValue = layers.extract().map_err(core_error)?;
-        if let Some(added) = adjoined(&below, claude) {
-            layers = layers.overrides(CLAUDE, &added).map_err(core_error)?;
-        }
+        // `adjoin`, not `merge`: imported rules and hooks add to the `.cox`
+        // lists rather than replace them (D13: imported, read-only).
+        fig = fig.adjoin(named(
+            "claude-settings",
+            Serialized::defaults((*claude).clone()),
+        ));
     }
-    let mut layers = layers.env("env", &env_layer()?);
+    let key_tree = default_key_tree();
+    fig = fig.merge(named(
+        "env",
+        // `COX_PROVIDER` / `COX_SCENARIO` / `COX_CASSETTES` select a test-double
+        // provider (cox-provider::from_env), not config keys. `COX_HOME`
+        // overrides `core.home` directly below. `COX_EXPECT_SANDBOX` pins the
+        // backend a sandbox test asserts (CI sets it globally), so it must
+        // not leak into the config tree as `expect.sandbox` either.
+        // `COX_PLAIN` and `COX_AX_STARTUP_QUIET_MS` are read by the plain
+        // surface (T29.1) itself. `COX_KEYRING` switches the OS keyring
+        // off (A49). `COX_CURSOR_CLOUD_URL` points the cloud-agent client at
+        // a loopback test server (T56.8). The ignore list matches pre-split
+        // keys (`EXPECT_SANDBOX`, not dotted): it runs before the `map` below.
+        Env::prefixed("COX_")
+            .ignore(&[
+                "home",
+                "provider",
+                "scenario",
+                "cassettes",
+                "expect_sandbox",
+                "plain",
+                "ax_startup_quiet_ms",
+                "keyring",
+                "cursor_cloud_url",
+            ])
+            .map(move |name| env_key(&key_tree, name.as_str()).into()),
+    ));
     if let Ok(home) = env::var("COX_HOME") {
-        let home = serde_json::json!({ "core": { "home": home } });
-        layers = layers.overrides("env", &home).map_err(core_error)?;
+        fig = fig.merge(named("env", Serialized::default("core.home", home)));
     }
-    Ok(Stack {
-        layers: layers.overrides("flag", flags).map_err(core_error)?,
-        below_claude: (!claude.is_empty()).then(|| file_layers(user_path, project_path)),
-    })
+    fig.merge(named("flag", Serialized::defaults(flags)))
 }
 
-/// What `upper` adds on top of `lower` under figment's `adjoin`: the keys
-/// `lower` lacks, and each list both have as `lower`'s items then
-/// `upper`'s. `None` where `lower`'s value stands.
-fn adjoined(lower: &JsonValue, upper: &JsonValue) -> Option<JsonValue> {
-    match (lower, upper) {
-        (JsonValue::Object(lower), JsonValue::Object(upper)) => Some(JsonValue::Object(
-            upper
-                .iter()
-                .filter_map(|(key, value)| {
-                    let added = match lower.get(key) {
-                        Some(below) => adjoined(below, value)?,
-                        None => value.clone(),
-                    };
-                    Some((key.clone(), added))
-                })
-                .collect(),
-        )),
-        (JsonValue::Array(lower), JsonValue::Array(upper)) => Some(JsonValue::Array(
-            lower.iter().chain(upper).cloned().collect(),
-        )),
-        _ => None,
-    }
-}
-
-/// The `COX_*` variables, resolved against the embedded defaults' key tree
-/// so a key with `_` in its name (`TUI_SHOW_THINKING`) needs no separator.
-fn env_layer() -> Result<EnvLayer, CoreError> {
-    // Empty only if `default.toml` failed to parse, which its own tests rule
-    // out; every name is then split on `_`.
-    let mut tree: JsonValue = Layers::new()
-        .toml_text("default", DEFAULT_CONFIG_TOML)
+/// The table/key tree of the embedded defaults, which [`env_key`] resolves
+/// `COX_*` names against. Empty only if `default.toml` failed to parse, which
+/// its own tests rule out; `env_key` then degrades to plain `_` splitting.
+fn default_key_tree() -> Dict {
+    Figment::from(Toml::string(DEFAULT_CONFIG_TOML))
         .extract()
-        .unwrap_or_default();
-    lists_as_scalars(&mut tree);
-    // `COX_PROVIDER` / `COX_SCENARIO` / `COX_CASSETTES` select a test-double
-    // provider (cox-provider::from_env), not config keys. `COX_HOME`
-    // overrides `core.home` in `build_stack`. `COX_EXPECT_SANDBOX` pins the
-    // backend a sandbox test asserts (CI sets it globally), so it must not
-    // leak into the config tree as `expect.sandbox` either. `COX_PLAIN` and
-    // `COX_AX_STARTUP_QUIET_MS` are read by the plain surface (T29.1)
-    // itself. `COX_KEYRING` switches the OS keyring off (A49).
-    // `COX_CURSOR_CLOUD_URL` points the cloud-agent client at a loopback
-    // test server (T56.8) and is not a config key.
-    Ok(EnvLayer::new("COX_", &tree).map_err(core_error)?.ignore(&[
-        "home",
-        "provider",
-        "scenario",
-        "cassettes",
-        "expect_sandbox",
-        "plain",
-        "ax_startup_quiet_ms",
-        "keyring",
-        "cursor_cloud_url",
-    ]))
+        .unwrap_or_default()
 }
 
-/// config-schema reads a variable for a list key as a comma list, but a
-/// `COX_*` value has always been read as TOML (`["a", "b"]`), so the tree
-/// the names resolve against shows no lists. The resolver needs only the
-/// key names, which stay.
-fn lists_as_scalars(value: &mut JsonValue) {
-    match value {
-        JsonValue::Array(_) => *value = JsonValue::Bool(false),
-        JsonValue::Object(map) => map.values_mut().for_each(lists_as_scalars),
-        _ => {}
+/// Maps a `COX_`-stripped env name to a dotted key. Splitting on every `_`
+/// would turn `TUI_SHOW_THINKING` into `tui.show.thinking`, so each level
+/// takes the longest known name that is the whole rest or a prefix of it
+/// followed by `_`. Whatever no known name covers (a user-defined tier, a
+/// typo) is split on `_` as before, so it still lands where it did.
+fn env_key(tree: &Dict, name: &str) -> String {
+    let name = name.to_ascii_lowercase();
+    let mut rest = name.as_str();
+    let mut table = Some(tree);
+    let mut parts: Vec<&str> = Vec::new();
+    while let Some(dict) = table {
+        let hit = dict
+            .iter()
+            .filter(|(key, _)| {
+                rest.strip_prefix(key.as_str())
+                    .is_some_and(|tail| tail.is_empty() || tail.starts_with('_'))
+            })
+            .max_by_key(|(key, _)| key.len());
+        let Some((key, value)) = hit else { break };
+        parts.push(key);
+        rest = rest[key.len()..].strip_prefix('_').unwrap_or("");
+        table = value.as_dict();
     }
+    if !rest.is_empty() {
+        parts.extend(rest.split('_'));
+    }
+    parts.join(".")
 }
 
-/// `CoreError::Config` for a failed load. config-schema 0.1 carries the
-/// failing key only inside its message (``… for key `a.b` ``), so it is read
-/// back from there; the key stays empty for an error that names none.
-fn core_error(err: config_schema::Error) -> CoreError {
-    let key = match &err {
-        config_schema::Error::Layered { message, .. } => message
-            .rsplit_once(" for key `")
-            .and_then(|(_, key)| key.strip_suffix('`'))
-            .unwrap_or_default()
-            .to_string(),
-        _ => String::new(),
-    };
+fn to_core_error(err: figment::Error) -> CoreError {
     CoreError::Config {
-        key,
+        key: err.path.join("."),
         message: err.to_string(),
     }
 }
@@ -1006,25 +1003,24 @@ pub fn load_in(
 
     // Whether to import is itself a config key, so the `.cox` layers decide
     // before the Claude layer exists.
-    let native: Config = build_stack(&user_path, project_path.as_deref(), &[], flags)?
-        .layers
+    let native: Config = build_figment(&user_path, project_path.as_deref(), &[], flags)
         .extract()
-        .map_err(core_error)?;
+        .map_err(to_core_error)?;
     let claude = native
         .permissions
         .import_claude_settings
         .then(|| claude_layer(cwd))
         .flatten()
         .unwrap_or_default();
-    // T22.11: a repository's `.claude` files join only the stack with the
+    // T22.11: a repository's `.claude` files join only the figment with the
     // project, so the guard list sees their rules as the project's.
     let user_claude: Vec<&JsonValue> = claude.user.iter().collect();
     let all_claude: Vec<&JsonValue> = claude.user.iter().chain(&claude.project).collect();
-    let full = build_stack(&user_path, project_path.as_deref(), &all_claude, flags)?;
-    let pre_project = build_stack(&user_path, None, &user_claude, flags)?;
+    let full_fig = build_figment(&user_path, project_path.as_deref(), &all_claude, flags);
+    let pre_project_fig = build_figment(&user_path, None, &user_claude, flags);
 
-    let full_cfg: Config = full.layers.extract().map_err(core_error)?;
-    let without_project_cfg: Config = pre_project.layers.extract().map_err(core_error)?;
+    let full_cfg: Config = full_fig.extract().map_err(to_core_error)?;
+    let without_project_cfg: Config = pre_project_fig.extract().map_err(to_core_error)?;
 
     let mut config = full_cfg;
     let violations = apply_project_guards(&mut config, &without_project_cfg, git_root.as_deref());
@@ -1032,8 +1028,8 @@ pub fn load_in(
     Ok(LoadedConfig {
         config,
         violations,
-        full,
-        pre_project,
+        full_fig,
+        pre_project_fig,
     })
 }
 
@@ -1043,12 +1039,12 @@ pub fn load_in(
 /// Only the default and user layers: a broken project file or `COX_*` var
 /// is not the edit's fault and must not block a valid one.
 pub fn check_user_toml(contents: &str) -> Result<(), CoreError> {
-    Layers::new()
-        .toml_text("default", DEFAULT_CONFIG_TOML)
-        .toml_text("user", contents)
+    Figment::new()
+        .merge(named("default", Toml::string(DEFAULT_CONFIG_TOML)))
+        .merge(named("user", Toml::string(contents)))
         .extract::<Config>()
         .map(drop)
-        .map_err(core_error)
+        .map_err(to_core_error)
 }
 
 /// Serializes every test in this crate that mutates process-wide env vars
@@ -1110,8 +1106,8 @@ mod tests {
         // the neutral fallback *beneath* this layer (empty model lists, no
         // custom providers), so this spot-checks the registry it cannot
         // carry instead of asserting full equality with it.
-        let layers = Layers::new().toml_text("default", DEFAULT_CONFIG_TOML);
-        let cfg: Config = layers.extract().expect("default.toml deserializes cleanly");
+        let fig = Figment::new().merge(Toml::string(DEFAULT_CONFIG_TOML));
+        let cfg: Config = fig.extract().expect("default.toml deserializes cleanly");
         assert_eq!(cfg.tiers.code.model, "claude-sonnet-5");
         assert!(cfg.providers.custom.contains_key("deepseek"));
         assert!(!cfg.providers.anthropic.models.is_empty());
@@ -1650,8 +1646,8 @@ mod tests {
                 // must be the embedded default layer (no `expect` layer
                 // leaked in).
                 assert_eq!(loaded.config.core.home, home.path().to_str().unwrap());
-                let mut expected: Config = Layers::new()
-                    .toml_text("default", DEFAULT_CONFIG_TOML)
+                let mut expected: Config = Figment::new()
+                    .merge(Toml::string(DEFAULT_CONFIG_TOML))
                     .extract()
                     .expect("defaults parse");
                 expected.core.home = loaded.config.core.home.clone();
@@ -1680,67 +1676,13 @@ mod tests {
         );
     }
 
-    /// `load` with only `vars` set beside a scratch `COX_HOME` and `HOME`.
-    fn load_with_env(vars: &[(&str, &str)]) -> Result<LoadedConfig, CoreError> {
-        let home = tempdir().expect("tempdir");
-        let cwd = tempdir().expect("tempdir");
-        let home_str = home.path().to_str().unwrap();
-        let mut all = vec![("COX_HOME", Some(home_str)), ("HOME", Some(home_str))];
-        all.extend(vars.iter().map(|(k, v)| (*k, Some(*v))));
-        let mut loaded = None;
-        temp_env(&all, || loaded = Some(load_plain(cwd.path())));
-        loaded.expect("temp_env ran the closure")
-    }
-
-    /// T32.17: the names resolve as `env_key` resolved them before the
-    /// move to config-schema: a known key keeps its `_`, the rest splits.
     #[test]
     fn env_key_resolves_known_keys_and_splits_the_rest() {
-        let loaded = load_with_env(&[("COX_HOOKS_TIMEOUT_S", "7"), ("COX_TIERS_CODE_MODEL", "m")])
-            .expect("load succeeds");
-        assert_eq!(loaded.config.hooks.timeout_s, 7);
-        assert_eq!(loaded.config.tiers.code.model, "m");
-        assert_eq!(loaded.source_of("hooks.timeout_s"), "env");
-        for (name, key) in [
-            ("COX_TUI_ICONS_TOOL_ICON", "tui.icons.tool"),
-            ("COX_TIERS_FAST_MODEL", "tiers.fast"),
-        ] {
-            match load_with_env(&[(name, "x")]) {
-                Err(CoreError::Config { key: at, message }) => assert_eq!(at, key, "{message}"),
-                other => panic!(
-                    "{name}: expected a config error, got {:?}",
-                    other.map(|l| l.config)
-                ),
-            }
-        }
-    }
-
-    /// T32.17: a list key reads its `COX_*` value as TOML, never as a
-    /// comma list (config-schema's own reading), so `a,b` is still refused.
-    #[test]
-    fn env_list_key_takes_toml_not_a_comma_list() {
-        let loaded =
-            load_with_env(&[("COX_CORE_WORKSPACE_ROOTS", r#"["a", "b"]"#)]).expect("load succeeds");
-        let roots = &loaded.config.core.workspace_roots;
-        assert_eq!(roots, &[PathBuf::from("a"), PathBuf::from("b")]);
-        assert!(load_with_env(&[("COX_CORE_WORKSPACE_ROOTS", "a,b")]).is_err());
-    }
-
-    /// T32.17: the Claude layers keep figment's `adjoin`: lists add, a key
-    /// below wins, a key only above is added.
-    #[test]
-    fn adjoined_adds_lists_and_keeps_lower_values() {
-        let lower = serde_json::json!({ "p": { "deny": ["a"], "mode": "ask" }, "h": {} });
-        let upper =
-            serde_json::json!({ "p": { "deny": ["b"], "mode": "bypass" }, "h": { "Stop": [1] } });
-        assert_eq!(
-            adjoined(&lower, &upper),
-            Some(serde_json::json!({ "p": { "deny": ["a", "b"] }, "h": { "Stop": [1] } }))
-        );
-        assert_eq!(
-            adjoined(&serde_json::json!(1), &serde_json::json!([2])),
-            None
-        );
+        let tree = default_key_tree();
+        assert_eq!(env_key(&tree, "HOOKS_TIMEOUT_S"), "hooks.timeout_s");
+        assert_eq!(env_key(&tree, "TIERS_CODE_MODEL"), "tiers.code.model");
+        assert_eq!(env_key(&tree, "TUI_ICONS_TOOL_ICON"), "tui.icons.tool.icon");
+        assert_eq!(env_key(&tree, "TIERS_FAST_MODEL"), "tiers.fast.model");
     }
 
     #[test]

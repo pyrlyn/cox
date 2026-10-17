@@ -7,10 +7,8 @@
 //! `docs/config.jsonschema` and the desktop Settings screen reads.
 //!
 //! Separate from `crates/cox` (size (c): a ~1k-line leaf, and reuse (d):
-//! any surface can load config without the clap binary). The layering and
-//! the edits are the shared `config-schema` crate's (T32.17); this crate
-//! keeps cox's layer order, guard list and messages. Errors are
-//! [`ConfigError`], because AGENTS.md
+//! any surface can load config without the clap binary). `figment` and
+//! `toml_edit` live here only. Errors are [`ConfigError`], because AGENTS.md
 //! keeps `anyhow` in `crates/cox`; the binary maps them at its call sites.
 //! `crates/cox` keeps the clap-facing glue (the flag layer built from `Cli`,
 //! the Claude-settings reader from `cox-ext`, the keymap for `cox-tui`, and
@@ -37,10 +35,13 @@ pub enum ConfigError {
     /// Serializing the effective `Config` for `cox config show` failed.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-    /// The user config file on disk is not valid TOML; `message` is the
-    /// parser's.
-    #[error("{} is not valid TOML: {message}", path.display())]
-    InvalidToml { path: PathBuf, message: String },
+    /// The user config file on disk is not valid TOML. `error` is not a
+    /// `#[source]`: the message already embeds it, as before.
+    #[error("{} is not valid TOML: {error}", path.display())]
+    InvalidToml {
+        path: PathBuf,
+        error: toml_edit::TomlError,
+    },
     /// `cox config set` got an empty key.
     #[error("empty key")]
     EmptyKey,
@@ -58,24 +59,6 @@ pub enum ConfigError {
     /// type), so `cox config set` left it as it was (T22.12).
     #[error(transparent)]
     Rejected(#[from] cox_protocol::CoreError),
-}
-
-/// config-schema's edit errors onto the variants `cox config set` always
-/// returned. An I/O error keeps only its source, as before; the variants no
-/// edit produces (a layered load, a stale schema) keep their own message.
-impl From<config_schema::Error> for ConfigError {
-    fn from(err: config_schema::Error) -> Self {
-        use config_schema::Error as E;
-        match err {
-            E::Io { source, .. } => Self::Io(source),
-            E::Parse { path, message } => Self::InvalidToml { path, message },
-            E::EmptyKey => Self::EmptyKey,
-            E::NotATable { part, key } => Self::NotATable { part, key },
-            E::UnsupportedValue { key, value } => Self::UnsupportedValue { key, value },
-            E::Json(err) => Self::Json(err),
-            other => Self::Io(std::io::Error::other(other.to_string())),
-        }
-    }
 }
 
 /// `Config`'s JSON Schema, the one `docs/config.jsonschema` commits.

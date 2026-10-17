@@ -1,6 +1,5 @@
 # Todo
 
-- T32.17. `cox-config` loads through the shared `config-schema` crate
 - T33.36. Kotlin: thin PDK, template, example
 - T33.40.6. `risk` advisor: raise only
 - T33.40.7. Eval E1: risk escalation against the classifier alone

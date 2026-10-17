@@ -22,9 +22,6 @@ repository = "https://github.com/pyrlyn/cox"
 clap = { version = "4.6", features = ["derive"] }
 figment = { version = "0.10", features = ["toml", "env"] }
 toml_edit = "0.25"
-# cox-config: layering with provenance, the `COX_*` layer and `config set` edits,
-# shared with rtok, ketch and mailune (pyrlyn/crates-packages, T32.17).
-config-schema = "0.1"
 anyhow = "1.0"
 # T0.7: load local .env files without overriding the process environment.
 dotenvy = "0.15"
