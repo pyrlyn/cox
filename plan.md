@@ -47,7 +47,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.9 | todo | P2 | 4 | 0% | |
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
-| T33.40.14 | todo | P2 | 3 | 0% | |
 | T33.40.15 | todo | P2 | 3 | 0% | |
 | T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
@@ -937,22 +936,6 @@ Goal: one page for users. It covers:
 - the E1/E2 results and the defaults they justify;
 - the migration from `[providers.typesafe]` (J§7).
 Check: `doc_examples` parses every `toml` block on the page against `Config` or the plugin manifest schema and fails on drift.
-
-#### T33.40.14 Config tombstone, `default.toml`, schema and doctor
-
-Depends: T33.40.13 · Size: ~150 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox/src/doctor.rs`, `crates/cox-protocol/default.toml` (config data; `docs/config.md` and the config schema are generated)
-Goal: C1, step 3. An old config loads.
-- `JevProviderConfig` becomes `LegacyTypesafe`: the same keys, still `deny_unknown_fields`, an `Option` with no default section.
-- It stays a named field, so the table can never fall into the flattened `custom` map as a chat-shaped `CompatibleProviderConfig` (J§7).
-- Its knobs feed the plugin's `typesafe` section. Its `models` rows join the config catalog layer.
-- The `[providers.typesafe]` block leaves `default.toml`.
-- The doctor's key check covers plugin provider sections generically. A leftover table without the plugin is a doctor warning with the install pointer.
-Check:
-- `old_typesafe_table_loads_with_notice` (a config file from before this change);
-- `typesafe_table_never_becomes_compatible_section`;
-- `unknown_key_in_typesafe_table_still_rejected`;
-- a doctor snapshot;
-- the config drift test and `every_flag_has_a_config_key` green.
 
 #### T33.40.15 Catalog, prices and vendor script without Jev
 

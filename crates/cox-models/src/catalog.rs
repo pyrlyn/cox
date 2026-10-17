@@ -403,7 +403,7 @@ impl Catalog {
         for model in &config.providers.local.models {
             self.overlay_model(model, source);
         }
-        for model in &config.providers.typesafe.models {
+        for model in config.providers.typesafe.iter().flat_map(|t| &t.models) {
             self.overlay_model(model, source);
         }
         for section in config.providers.custom.values() {
@@ -438,6 +438,7 @@ fn fill<T: PartialEq>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cox_protocol::config::LegacyTypesafe;
 
     fn user_price_toml(id: &str, input: f64) -> String {
         format!(
@@ -600,11 +601,14 @@ source_url = "https://example.test"
             models: &models,
         }];
         let mut config = Config::default();
-        config.providers.typesafe.models = vec![ProviderModel {
-            id: "acme-coder".into(),
-            context_window: 128_000,
-            ..ProviderModel::default()
-        }];
+        config.providers.typesafe = Some(LegacyTypesafe {
+            models: vec![ProviderModel {
+                id: "acme-coder".into(),
+                context_window: 128_000,
+                ..ProviderModel::default()
+            }],
+            ..LegacyTypesafe::default()
+        });
         let user = user_price_toml("acme-coder", 9.0);
         let catalog = Catalog::load(&config, &plugins, Some(&user)).expect("catalog");
         let row = catalog.get("acme-coder").expect("plugin row");

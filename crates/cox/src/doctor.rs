@@ -69,7 +69,8 @@ pub fn run(
     results.push(check_db(&home));
 
     // API keys.
-    results.push(check_api_keys(config));
+    let plugins = plugin_sections(cwd, &home, config);
+    results.push(check_keys_with_plugins(config, &plugins));
 
     // Sandbox backend.
     results.push(check_sandbox());
@@ -126,9 +127,9 @@ pub fn run(
     // in the slim build and when no plugin is discovered.
     results.extend(check_plugins(cwd, &home, config));
 
-    // Which client serves the `typesafe` section: the Jev plugin or the
-    // built-in one (T33.40.5).
-    results.push(check_typesafe_client(cwd, &home, config));
+    // One row per plugin provider section, and a warning for a
+    // `[providers.typesafe]` table nothing reads (T33.40.14).
+    results.extend(check_plugin_providers(config, &plugins));
 
     // The wasmtime compilation cache's on-disk size. Empty in the slim
     // build.
@@ -722,60 +723,121 @@ fn granted_manifests<'a>(
         .collect()
 }
 
-/// The `typesafe client` row (T33.40.5): which plugin serves the section,
-/// or that none is loaded (T33.40.12 removed the built-in client). The same
-/// discover-and-grant walk as [`check_plugins`], and the same lowest-id
-/// rule `cox_plugin::provider::backends` uses for a contested name, so the
-/// row names the client a session would actually build.
+/// A plugin-served provider section: which plugin serves it and the env var
+/// its key comes from, so the "API keys" check and the `provider` rows read
+/// one view of what a session would build.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginSection {
+    pub plugin: String,
+    pub key_env: Option<String>,
+}
+
+/// Every `api = "plugin"` section a granted plugin declares, by name. The
+/// same discover-and-grant walk as [`check_plugins`], the same lowest-id
+/// rule `cox_plugin::provider::backends` uses for a contested name, and the
+/// same override: a leftover `[providers.typesafe]` table replaces the
+/// manifest's key env var, as it does at session open (T33.40.5).
 #[cfg(feature = "plugins")]
-pub(crate) fn check_typesafe_client(
+pub(crate) fn plugin_sections(
     cwd: &std::path::Path,
     home: &std::path::Path,
     config: &cox_protocol::Config,
-) -> CheckResult {
+) -> std::collections::BTreeMap<String, PluginSection> {
     use cox_plugin_api::ProviderApi;
 
     let root = crate::config_load::find_git_root(cwd);
     let found = cox_plugin::discover::discover(home, root.as_deref());
     let store = cox_store::Store::open(home).ok();
-    let plugin = granted_manifests(&found, store.as_ref(), root.as_deref())
-        .into_iter()
-        .filter(|(_, m)| {
-            m.provider
-                .iter()
-                .any(|d| d.name == "typesafe" && d.api == ProviderApi::Plugin)
-        })
-        .map(|(id, _)| id)
-        .min();
-    typesafe_client_row(plugin, config)
+    let mut granted = granted_manifests(&found, store.as_ref(), root.as_deref());
+    granted.sort_by_key(|(id, _)| *id);
+    let mut sections = std::collections::BTreeMap::new();
+    for (id, manifest) in granted {
+        for decl in manifest
+            .provider
+            .iter()
+            .filter(|d| d.api == ProviderApi::Plugin)
+        {
+            let key_env = match (&config.providers.typesafe, decl.name.as_str()) {
+                (Some(table), "typesafe") => Some(table.api_key_env.clone()),
+                _ => decl.api_key_env.clone(),
+            };
+            sections.entry(decl.name.clone()).or_insert(PluginSection {
+                plugin: id.to_string(),
+                key_env,
+            });
+        }
+    }
+    sections
 }
 
-/// The slim build has no plugin host, so no plugin ever serves the section.
+/// The slim build has no plugin host, so no plugin ever serves a section.
 #[cfg(not(feature = "plugins"))]
-pub(crate) fn check_typesafe_client(
+pub(crate) fn plugin_sections(
     _cwd: &std::path::Path,
     _home: &std::path::Path,
-    config: &cox_protocol::Config,
-) -> CheckResult {
-    typesafe_client_row(None, config)
+    _config: &cox_protocol::Config,
+) -> std::collections::BTreeMap<String, PluginSection> {
+    std::collections::BTreeMap::new()
 }
 
-/// [`check_typesafe_client`]'s wording, with the plugin id (if any) already
-/// decided. The detail lists the `[providers.typesafe]` values that
-/// configure whichever client runs, so one line shows what will be used.
-fn typesafe_client_row(plugin: Option<&str>, config: &cox_protocol::Config) -> CheckResult {
-    let t = &config.providers.typesafe;
-    let client = match plugin {
-        Some(id) => format!("served by the {id} plugin"),
-        None => "provided by plugin jev, not loaded".to_string(),
-    };
-    CheckResult::ok(
-        "typesafe client",
-        format!(
-            "{client}; base_url {}, key {}, model {}, timeout {}s, retries {}",
-            t.base_url, t.api_key_env, t.model, t.timeout_s, t.max_retries
-        ),
-    )
+/// `check_api_keys` over `config` with the plugin sections registered the
+/// way a session registers them, so a tier on a plugin provider is not
+/// reported as an unknown section.
+pub(crate) fn check_keys_with_plugins(
+    config: &cox_protocol::Config,
+    sections: &std::collections::BTreeMap<String, PluginSection>,
+) -> CheckResult {
+    let mut config = config.clone();
+    config.providers.abi = sections.keys().cloned().collect();
+    check_api_keys(&config)
+}
+
+/// One `provider <name>` row per plugin section: who serves it and whether
+/// its key resolves, so the generic key check covers plugin providers. A
+/// missing key is a warning, never a failure: extensions fail open. A
+/// leftover `[providers.typesafe]` table with no plugin to read it is a
+/// warning with the install pointer.
+pub(crate) fn check_plugin_providers(
+    config: &cox_protocol::Config,
+    sections: &std::collections::BTreeMap<String, PluginSection>,
+) -> Vec<CheckResult> {
+    check_plugin_providers_with(config, sections, cox_provider::http::resolve_key)
+}
+
+/// [`check_plugin_providers`] with the credential lookup injected, so a test
+/// never reads the real keyring (A49, T30.28).
+fn check_plugin_providers_with(
+    config: &cox_protocol::Config,
+    sections: &std::collections::BTreeMap<String, PluginSection>,
+    resolve: impl Fn(&str, &str) -> Result<String, cox_protocol::errors::ProviderError>,
+) -> Vec<CheckResult> {
+    let mut rows = Vec::new();
+    for (name, section) in sections {
+        let check = format!("provider {name}");
+        let served = format!("served by the {} plugin", section.plugin);
+        rows.push(match section.key_env.as_deref().filter(|e| !e.is_empty()) {
+            None => CheckResult::ok(&check, format!("{served}; no key configured")),
+            Some(env) if resolve(env, name).is_ok() => {
+                CheckResult::ok(&check, format!("{served}; key {env} found"))
+            }
+            Some(env) => CheckResult::warn(
+                &check,
+                format!("{served}; {env} is not set and keyring entry 'cox/{name}' not found"),
+                format!("set {env}"),
+            ),
+        });
+    }
+    if config.providers.typesafe.is_some()
+        && !sections.contains_key("typesafe")
+        && let Some(pointer) = cox_session::install_pointer("typesafe")
+    {
+        rows.push(CheckResult::warn(
+            "providers.typesafe",
+            "the table is ignored: plugin jev is not loaded".to_string(),
+            pointer,
+        ));
+    }
+    rows
 }
 
 /// The slim build has no plugin host, so there is never a discovered
@@ -1727,45 +1789,71 @@ mod tests {
     const JEV_PROVIDER: &str = "\n[[provider]]\nname = \"typesafe\"\napi = \"plugin\"\nbase_url = \"https://api.typesafe.ai\"\napi_key_env = \"TYPESAFE_API_KEY\"\n";
 
     /// T33.40.5 Check, plugin case: a granted plugin declaring the
-    /// `typesafe` ABI section serves it, and the row says so.
+    /// `typesafe` ABI section serves it, and the row says so, with the key
+    /// looked up through an injected resolver (A49).
     #[cfg(feature = "plugins")]
     #[test]
-    fn doctor_typesafe_row_names_the_granted_plugin() {
+    fn doctor_provider_row_names_the_granted_plugin() {
         let home = tempfile::tempdir().expect("tempdir");
         let (jev, digest) = stage_plugin(home.path(), "jev", JEV_PROVIDER);
         let store = cox_store::Store::open(home.path()).expect("store");
         grant_plugin(&store, &jev, &digest);
 
-        let row = check_typesafe_client(home.path(), home.path(), &cox_protocol::Config::default());
-        insta::assert_snapshot!(human(&row));
+        let config = cox_protocol::Config::default();
+        let sections = plugin_sections(home.path(), home.path(), &config);
+        let found = check_plugin_providers_with(&config, &sections, |_, _| Ok("k".into()));
+        let missing = check_plugin_providers_with(&config, &sections, |_, _| {
+            Err(cox_protocol::errors::ProviderError::Auth)
+        });
+        let human: Vec<String> = found.iter().chain(&missing).map(human).collect();
+        insta::assert_snapshot!(human.join("\n"));
     }
 
-    /// T33.40.5 Check, absent case: no plugin at all, and a plugin that
-    /// declares the section but was never granted, both leave the section
-    /// without a client (T33.40.12).
+    /// T33.40.14: a plugin that declares the section but was never granted
+    /// serves nothing, and a leftover `[providers.typesafe]` table then gets
+    /// a warning with the install pointer; without the table there is no row.
     #[cfg(feature = "plugins")]
     #[test]
-    fn doctor_typesafe_row_says_not_loaded_without_a_granted_plugin() {
+    fn doctor_warns_about_a_typesafe_table_without_a_granted_plugin() {
         let home = tempfile::tempdir().expect("tempdir");
-        let config = cox_protocol::Config::default();
-        let none = check_typesafe_client(home.path(), home.path(), &config);
-        insta::assert_snapshot!(human(&none));
-
         stage_plugin(home.path(), "jev", JEV_PROVIDER);
-        let ungranted = check_typesafe_client(home.path(), home.path(), &config);
-        assert_eq!(ungranted.detail, none.detail);
+        let mut config = cox_protocol::Config::default();
+        let sections = plugin_sections(home.path(), home.path(), &config);
+        assert!(sections.is_empty(), "an ungranted plugin serves nothing");
+        assert!(check_plugin_providers_with(&config, &sections, |_, _| Ok("k".into())).is_empty());
+
+        config.providers.typesafe = Some(cox_protocol::config::LegacyTypesafe::default());
+        let rows = check_plugin_providers_with(&config, &sections, |_, _| Ok("k".into()));
+        insta::assert_snapshot!(rows.iter().map(human).collect::<Vec<_>>().join("\n"));
     }
 
-    /// T33.40.5: the row shows the user's table, which is what configures
-    /// whichever client runs.
+    /// T33.40.14: the user's table, not the manifest, names the key env var,
+    /// because it is what configures the plugin's section at session open.
     #[test]
-    fn doctor_typesafe_row_shows_the_users_table() {
+    fn doctor_provider_row_reads_the_key_env_from_the_users_table() {
         let mut config = cox_protocol::Config::default();
-        config.providers.typesafe.base_url = "http://127.0.0.1:9".into();
-        config.providers.typesafe.timeout_s = 5;
-        let row = typesafe_client_row(Some("jev"), &config);
-        assert!(row.detail.starts_with("served by the jev plugin"));
-        assert!(row.detail.contains("http://127.0.0.1:9") && row.detail.contains("timeout 5s"));
+        config.providers.typesafe = Some(cox_protocol::config::LegacyTypesafe {
+            api_key_env: "MY_JEV_KEY".into(),
+            ..Default::default()
+        });
+        let sections = std::collections::BTreeMap::from([(
+            "typesafe".to_string(),
+            PluginSection {
+                plugin: "jev".into(),
+                key_env: Some("MY_JEV_KEY".into()),
+            },
+        )]);
+        let seen = std::cell::RefCell::new(Vec::new());
+        let rows = check_plugin_providers_with(&config, &sections, |var, section| {
+            seen.borrow_mut()
+                .push((var.to_string(), section.to_string()));
+            Ok("k".into())
+        });
+        assert_eq!(rows[0].status, "ok");
+        assert_eq!(
+            seen.into_inner(),
+            [("MY_JEV_KEY".to_string(), "typesafe".to_string())]
+        );
     }
 
     /// T33.39 Check: a scratch `COX_HOME` with one healthy (granted) plugin

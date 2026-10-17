@@ -97,7 +97,8 @@ pub struct Config {
 impl Config {
     /// Every model id reachable without touching a price file: each
     /// `[tiers.*].model`, the single-model sections' own default
-    /// (`providers.local.model`, `providers.typesafe.model`), and every
+    /// (`providers.local.model`, and `providers.typesafe.model` when that
+    /// legacy table is set), and every
     /// `[providers.*].models` list entry — native and compatible, including
     /// each `[providers.<custom>]` section's own default `model`. Sorted
     /// and deduplicated.
@@ -113,13 +114,15 @@ impl Config {
             self.tiers.code.model.clone(),
             self.tiers.think.model.clone(),
             self.providers.local.model.clone(),
-            self.providers.typesafe.model.clone(),
         ];
+        if let Some(legacy) = &self.providers.typesafe {
+            ids.push(legacy.model.clone());
+            ids.extend(legacy.models.iter().map(|m| m.id.clone()));
+        }
         for section in [
             &self.providers.anthropic.models,
             &self.providers.openai.models,
             &self.providers.local.models,
-            &self.providers.typesafe.models,
         ] {
             ids.extend(section.iter().map(|m| m.id.clone()));
         }
@@ -446,8 +449,12 @@ pub struct ProvidersConfig {
     /// `[providers.lmstudio]` (T30.15): LM Studio's Anthropic-compatible
     /// `/v1/messages`, through the Anthropic wire client.
     pub lmstudio: LmStudioProviderConfig,
-    /// `[providers.typesafe]` (Jev System One, type-1 native)
-    pub typesafe: JevProviderConfig,
+    /// `[providers.typesafe]`: the table from when Jev was built in
+    /// (T33.40.14). Unset unless a config file still has it; a named
+    /// field so the table can never fall into `custom` as a chat-shaped
+    /// section. Its knobs configure the `typesafe` plugin section.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typesafe: Option<LegacyTypesafe>,
     /// Every other `[providers.<name>]` table: an OpenAI-compatible
     /// (Type-2) provider — DeepSeek, OpenRouter, Moonshot, Z.AI, or a
     /// hand-rolled one. No code change needed to add a name here.
@@ -476,9 +483,13 @@ impl ProvidersConfig {
             // names its own single model, so efforts pass through
             // unclamped (empty means "any", `ProviderModel`'s doc).
             "lmstudio" => &[],
-            // Jev has one model family; the section default names it, and
-            // the router pins it the same way it pins `local`'s.
-            "typesafe" => &self.typesafe.models,
+            // The plugin's section has no native `models` list; a leftover
+            // table's rows still pin the model the way `local`'s do.
+            "typesafe" => self
+                .typesafe
+                .as_ref()
+                .map(|t| t.models.as_slice())
+                .unwrap_or(&[]),
             other => self
                 .custom
                 .get(other)
@@ -718,10 +729,13 @@ impl Default for LmStudioProviderConfig {
 
 impl_transport!(LmStudioProviderConfig);
 
-/// `[providers.typesafe]` (TypeSafe Jev System One, type-1 native, T21.1).
+/// `[providers.typesafe]` as written while Jev was built in (T21.1,
+/// T33.40.14): kept so an old config still loads and still configures the
+/// `jev` plugin's section. The defaults are the plugin's own, so a partial
+/// table behaves as it did before the move.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
-pub struct JevProviderConfig {
+pub struct LegacyTypesafe {
     /// API base URL; the client appends `/v1/systemone`.
     pub base_url: String,
     /// Env var holding the API key (`TYPESAFE_API_KEY`); falls back to the
@@ -737,7 +751,7 @@ pub struct JevProviderConfig {
     pub models: Vec<ProviderModel>,
 }
 
-impl Default for JevProviderConfig {
+impl Default for LegacyTypesafe {
     fn default() -> Self {
         Self {
             base_url: "https://api.typesafe.ai".to_string(),
@@ -750,7 +764,7 @@ impl Default for JevProviderConfig {
     }
 }
 
-impl_transport!(JevProviderConfig);
+impl_transport!(LegacyTypesafe);
 
 /// Any other `[providers.<name>]` table: an OpenAI-compatible (Type-2)
 /// provider in the opencode custom-provider shape
@@ -2418,7 +2432,7 @@ mod tests {
             }
         );
         assert_eq!(
-            cfg.providers.typesafe.transport(),
+            LegacyTypesafe::default().transport(),
             Transport {
                 base_url: "https://api.typesafe.ai".to_string(),
                 api_key_env: "TYPESAFE_API_KEY".to_string(),

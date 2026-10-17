@@ -5,7 +5,6 @@
 - T33.40.9. `route` advisor: downgrade only
 - T33.40.10. Eval E2: route downgrade against the static pick
 - T33.40.11. User guide: the Jev plugin
-- T33.40.14. Config tombstone, `default.toml`, schema and doctor
 - T33.40.15. Catalog, prices and vendor script without Jev
 - T33.40.16. Docs and plan sweep after the removal
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
