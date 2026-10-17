@@ -207,6 +207,47 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox-app server
+#### T66.20 `cox-serve`: run directory, singleton lock, socket and peer uid
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.19 · Size: ~170 · Priority: P2 · Complexity: 3
+
+Plan: extract `lock::claim_path` (the existing `lock` tests stay green); `socket.rs` checks the path against `sun_path` first, makes or checks `run/` (`0700`, a real directory, ours, no group or other bits), takes `run/serve.lock` through `claim_path`, then, as the holder, unlinks a stale `serve.sock` and binds it under umask `077` with mode `0600`. Peer uid: tokio `UnixStream::peer_cred` (already in the workspace); effective uid from `nix` (already a workspace dependency). `admit` is a pure predicate and `admit_peer` fails closed. Verify with the seven named tests plus the `lock` and `deps` tests.
+
+Goal: the supervisor's socket is reachable only by the same user, and only one supervisor runs per `COX_HOME`. `docs/design/serve.md` S5 and all of D4 except the `cox attach` bridge and Windows.
+
+Files:
+- `crates/cox-store/src/lock.rs` (extract `claim_path` from `claim`, same behaviour)
+- `crates/cox-serve/src/socket.rs` (`#[cfg(unix)]`)
+- `crates/cox-serve/src/lib.rs`
+
+Steps:
+1. `COX_HOME/run` is created with mode `0700`; an existing one must be a directory, not a symlink, owned by the effective uid, with no group or other bits, or startup is refused naming the path and mode.
+2. A second supervisor on the same `COX_HOME` is refused through an OS lock on `run/serve.lock` taken with the extracted `lock::claim_path`, naming the holder.
+3. Only the lock holder unlinks a stale `serve.sock`; it binds with umask `077` and sets mode `0600`.
+4. A path over `sun_path` (104 bytes on macOS, 108 on Linux) is refused naming the limit; no fallback to `/tmp`.
+5. `admit(peer_uid, own_uid)` is a pure predicate; every accepted connection is checked before its first line is read, and a mismatch is dropped and logged.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve socket
+mise exec -- cargo nextest run -p cox-store lock
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass, and the existing `lock` tests stay green: `a_second_supervisor_is_refused_naming_the_holder`, `a_stale_socket_is_replaced`, `a_run_dir_open_to_others_is_refused`, `a_symlinked_run_dir_is_refused`, `a_path_over_sun_path_is_refused`, `the_socket_is_owner_only`, `admit_refuses_another_uid`.
+
+Out of scope: the `cox attach` bridge, routing connections to workers, and Windows (later cards).
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve socket: 8 passed (the seven named tests and admit_peer_checks_the_connected_uid)
+cargo nextest run -p cox-store lock: 7 passed (the existing lock tests, unchanged, after the claim_path extraction)
+cargo nextest run -p cox --test deps: passed (cox-serve may depend on cox-store alone)
+cargo clippy -p cox-serve -p cox-store --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+
 #### T66.19 New crate `cox-serve`: the restart policy
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~120 · Priority: P2 · Complexity: 2

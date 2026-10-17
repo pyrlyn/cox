@@ -1570,6 +1570,12 @@ dependencies = [
 name = "cox-serve"
 version = "0.1.2"
 dependencies = [
+ "cox-store",
+ "nix 0.31.3",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
  "workspace-hack",
 ]
 
