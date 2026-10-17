@@ -125,7 +125,11 @@ pub fn config_agents(
     home: Option<&Path>,
 ) -> (Vec<ExternalAgentCommand>, Vec<String>) {
     let (mut agents, mut refused) = (Vec::new(), Vec::new());
-    for (name, entry) in &config.external_agents {
+    for (name, entry) in config
+        .external_agents
+        .iter()
+        .filter(|(_, e)| e.target.is_none())
+    {
         match config_agent(name, entry, config, writable, home) {
             Ok(agent) => agents.push(agent),
             Err(e) => refused.push(format!("external agent {name} (user config) left out: {e}")),
@@ -237,6 +241,12 @@ impl Spawn {
 /// `bash` ends with.
 pub(crate) struct Reap(Option<u32>);
 
+impl Reap {
+    pub(crate) fn new(pid: Option<u32>) -> Self {
+        Self(pid)
+    }
+}
+
 impl Drop for Reap {
     fn drop(&mut self) {
         if let Some(pid) = self.0 {
@@ -277,44 +287,94 @@ impl ExternalAgent for StreamJson {
         events: mpsc::Sender<Event>,
         cancel: CancellationToken,
     ) -> Result<Option<Usage>, CoreError> {
-        let (mut child, _reap) = self.0.spawn(&[&prompt], Stdio::null())?;
-        let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
-            return Err(self.0.error("no stdio pipes".into()));
-        };
-        let stderr = tokio::spawn(stderr_tail(stderr));
-        let mut lines = BufReader::new(stdout).lines();
-        let mut mapper = StreamJsonMapper::new(turn, self.0.name.clone(), cox_sanitize::sanitize);
-        loop {
-            let line = tokio::select! {
-                biased;
-                () = cancel.cancelled() => return Ok(None),
-                line = lines.next_line() => line,
-            };
-            let line = match line {
-                Ok(Some(line)) => line,
-                Ok(None) => break,
-                Err(e) => return Err(self.0.error(format!("reading its output: {e}"))),
-            };
-            for ev in mapper.map_line(&line) {
-                // `result` is the run's last line: its `TurnDone` ends the turn.
-                let done = matches!(ev, Event::TurnDone { .. });
-                if events.send(ev).await.is_err() || done {
-                    return Ok(None);
-                }
-            }
-        }
-        // EOF with no `result` line: the CLI failed before it finished.
-        let status = tokio::select! {
+        let (child, _reap) = self.0.spawn(&[&prompt], Stdio::null())?;
+        pump(&self.0.name, turn, child, false, &events, &cancel).await
+    }
+}
+
+/// Folds one CLI run's stdout into events until its `result` line, shared by
+/// the local stream-json driver and the one that runs `cox` on a target
+/// (T68.7), so a line is mapped one way. `remote_cox` says the lines come
+/// from `cox run --output-format stream-json`, which interleaves serialized
+/// events with the Claude-style alias lines: only the `assistant` and `result`
+/// lines are the mapper's, the rest would each become an "unrecognised" warning,
+/// and the `result` line's `usage` is what the ledger row is written from.
+pub(crate) async fn pump(
+    agent: &str,
+    turn: TurnId,
+    mut child: Child,
+    remote_cox: bool,
+    events: &mpsc::Sender<Event>,
+    cancel: &CancellationToken,
+) -> Result<Option<Usage>, CoreError> {
+    let fail = |message: String| CoreError::ExternalAgent {
+        agent: agent.to_string(),
+        message,
+    };
+    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+        return Err(fail("no stdio pipes".into()));
+    };
+    let stderr = tokio::spawn(stderr_tail(stderr));
+    let mut lines = BufReader::new(stdout).lines();
+    let mut mapper = StreamJsonMapper::new(turn, agent, cox_sanitize::sanitize);
+    let mut usage = None;
+    loop {
+        let line = tokio::select! {
             biased;
             () = cancel.cancelled() => return Ok(None),
-            status = child.wait() => status,
+            line = lines.next_line() => line,
         };
-        let tail = stderr.await.unwrap_or_default();
-        let status = status.map_or_else(|e| e.to_string(), |s| s.to_string());
-        Err(self
-            .0
-            .error(format!("exited ({status}) with no result: {tail}")))
+        let line = match line {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(e) => return Err(fail(format!("reading its output: {e}"))),
+        };
+        if remote_cox {
+            let value = serde_json::from_str::<serde_json::Value>(&line).ok();
+            match value.as_ref().and_then(|v| v["type"].as_str()) {
+                Some("assistant") => {}
+                Some("result") => usage = value.as_ref().and_then(result_usage),
+                _ => continue,
+            }
+        }
+        for ev in mapper.map_line(&line) {
+            // `result` is the run's last line: its `TurnDone` ends the turn.
+            let done = matches!(ev, Event::TurnDone { .. });
+            if events.send(ev).await.is_err() || done {
+                return Ok(usage);
+            }
+        }
     }
+    // EOF with no `result` line: the CLI failed before it finished.
+    let status = tokio::select! {
+        biased;
+        () = cancel.cancelled() => return Ok(None),
+        status = child.wait() => status,
+    };
+    let tail = stderr.await.unwrap_or_default();
+    let status = status.map_or_else(|e| e.to_string(), |s| s.to_string());
+    Err(fail(format!("exited ({status}) with no result: {tail}")))
+}
+
+/// The tokens a `cox run` summary reports, as the usage the core writes the
+/// ledger row from (the core zeroes the cost, EA§6); `None` when it has no
+/// `usage` object.
+fn result_usage(result: &serde_json::Value) -> Option<Usage> {
+    let tokens = result.get("usage")?;
+    let count = |key: &str| {
+        tokens[key]
+            .as_u64()
+            .map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX))
+    };
+    Some(Usage {
+        input_tokens: count("input_tokens"),
+        output_tokens: count("output_tokens"),
+        cache_read_tokens: count("cache_read_tokens"),
+        cache_write_tokens: count("cache_write_tokens"),
+        estimated: false,
+        cost_usd: 0.0,
+        latency_ms: 0,
+    })
 }
 
 /// Everything an ACP `ClientHost` is built from, shared by every ACP entry.

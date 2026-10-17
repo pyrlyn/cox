@@ -48,6 +48,19 @@
       "description": "What `App`, its `Workspace` and a `LiveSession` answer, one variant per\nmethod the desktop app calls over the FFI.",
       "oneOf": [
         {
+          "description": "The first call on a link (T68.3): what the other end is, so a client\ncan refuse a wire it does not speak before it relies on one.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "hello"
+            }
+          },
+          "required": [
+            "method"
+          ]
+        },
+        {
           "type": "object",
           "properties": {
             "method": {
@@ -660,6 +673,22 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "hello"
+            },
+            "value": {
+              "$ref": "#/$defs/HostInfo"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "projects"
             },
             "value": {
@@ -944,6 +973,43 @@
             "value"
           ]
         }
+      ]
+    },
+    "HostInfo": {
+      "description": "What `hello` answers: the host a server runs on, as the client shows it\nand checks it.",
+      "type": "object",
+      "properties": {
+        "wire": {
+          "description": "The server's `wire::VERSION`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "cox": {
+          "description": "The server's cox version.",
+          "type": "string"
+        },
+        "os": {
+          "description": "`std::env::consts::OS`: `macos`, `linux`, `windows`.",
+          "type": "string"
+        },
+        "arch": {
+          "description": "`std::env::consts::ARCH`: `aarch64`, `x86_64`.",
+          "type": "string"
+        },
+        "sandbox": {
+          "description": "The backend that confines shell commands there (`seatbelt`, `bwrap`,\n`landlock`), or `None` when the host has none (D7 then forces\n`on-request` approval).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "wire",
+        "cox",
+        "os",
+        "arch"
       ]
     },
     "TodoItem": {

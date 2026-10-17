@@ -1,6 +1,6 @@
 """Vendors the Cursor CLI fixtures (T35.7): the documented `stream-json`
 and ACP messages the test-only `fake_agent` binary replays in
-`crates/cox/tests/external_agents_cursor.rs`. This module is the only thing
+`crates/cox/tests/it/external_agents_cursor.rs`. This module is the only thing
 that writes `crates/cox/tests/fixtures/cursor/*.json` — no hand-pasted
 lines, and never a live Cursor call: every message is lifted verbatim from
 a documentation page (research.md §4.3.8 cites the same pages).
