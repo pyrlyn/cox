@@ -100,6 +100,14 @@ Done:
 - `prompt.md` and `prompt_minimal.md` stay `include_str!` constants in `context.rs`; nothing in this task can write them.
 Check: `cargo nextest run -p cox-core refine` 6 passed: `refine_refuses_an_edit_aimed_at_the_base_prompt`, `refine_rejects_malformed_json`, `refine_parses_a_valid_proposal_inside_a_code_fence`, `refine_rejects_a_proposal_out_of_bounds`, `refine_is_one_memory_call_and_leaves_the_cached_prefix_byte_identical` (`system[0..=2]` from `assemble` and the history are byte-identical before and after; one `memory` usage row), `refine_rejects_a_bad_answer_but_still_records_its_cost`. Whole `-p cox-core`: 437 passed. `cargo clippy -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: the workspace-wide clippy (only `cox-core` changed).
 
+#### T61.1 Build-time baseline
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
+Depends: — · Size: ~0 (research.md only) · Files: `research.md`
+Goal: `research.md` §4.3.9 holds the numbers P61 is judged by.
+Check: `grep -n '4.3.9' research.md`
+Done: §4.3.9 has a row for every measurement (Rust `--timings`, Swift packages, desktop app, CI jobs), the top five crates and the machine line. Single runs on a shared machine; the clean rows use a warm sccache, and a cold clean row was added. Finding: `[profile.dist]` inherits `dev` (`Cargo.toml:238-239`, since ae5ed7bd), not fat LTO, so the P61 premise behind T61.2 needs re-checking.
+
 #### T33.40.5 Parity: the `typesafe` table configures the plugin's section
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
