@@ -55,7 +55,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
-| T33.45.10 | todo | P2 | 2 | 0% | |
+| T33.45.10 | in progress | P2 | 2 | 10% | Claude Code / sonnet-5.5 |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T35.10 | todo | P3 | 2 | 0% | |
@@ -1060,6 +1060,8 @@ Plan (Claude Code / opus-5.5): (1) `plugin_ui.rs`: `PluginSlots` tracks the sele
 Depends: T33.45.9 · Files: `docs/ru/plugins.md`, `docs/uk/plugins.md` (new directories) · Design: `docs/design/plugins.md` §15, A134
 
 Check: both cover all three parts and every heading of the English page; `just test` green.
+
+Plan (Claude Code / sonnet-5.5): (1) `docs/ru/plugins.md` and `docs/uk/plugins.md`: full translations of `docs/plugins.md`, a top line naming the English page as authoritative, code, identifiers, keys and URLs verbatim, links adjusted with `../`. (2) `crates/cox/tests/docs.rs`: the relative-link test also covers `docs/ru` and `docs/uk`; a parity test per language compares the heading levels, the fenced code blocks, the generated field-index bullets and the in-page anchors with the English page, so a heading, block or index line added in English fails until both translations follow. (3) Run `cargo nextest run -p cox --test docs`, clippy on `-p cox --test docs`, `cargo fmt --check`.
 
 #### T33.47 Plugin canvas: a desktop pane of plugin-drawn pages
 
