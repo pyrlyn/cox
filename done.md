@@ -203,6 +203,15 @@ Done:
 - `crates/cox-core/src/prompts/refine.md`: the instructions, written for cox; the transcript and digest are framed as evidence, not instructions.
 - `prompt.md` and `prompt_minimal.md` stay `include_str!` constants in `context.rs`; nothing in this task can write them.
 Check: `cargo nextest run -p cox-core refine` 6 passed: `refine_refuses_an_edit_aimed_at_the_base_prompt`, `refine_rejects_malformed_json`, `refine_parses_a_valid_proposal_inside_a_code_fence`, `refine_rejects_a_proposal_out_of_bounds`, `refine_is_one_memory_call_and_leaves_the_cached_prefix_byte_identical` (`system[0..=2]` from `assemble` and the history are byte-identical before and after; one `memory` usage row), `refine_rejects_a_bad_answer_but_still_records_its_cost`. Whole `-p cox-core`: 437 passed. `cargo clippy -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: the workspace-wide clippy (only `cox-core` changed).
+#### T33.45.10 Docs: Russian and Ukrainian translations
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T33.45.9 · Files: `docs/ru/plugins.md`, `docs/uk/plugins.md` (new directories), `crates/cox/tests/docs.rs` · Design: `docs/design/plugins.md` §15, A134
+Goal: the three-part plugin API reference exists in Russian and Ukrainian beside the English page, and cannot silently fall behind it.
+- `docs/ru/plugins.md` and `docs/uk/plugins.md` translate every part and heading of `docs/plugins.md`; each opens by naming the English page the authority. Code blocks, identifiers, keys, ABI names and URLs are verbatim; relative links gain `../`.
+- `crates/cox/tests/docs.rs`: `docs_relative_links_resolve` also walks `docs/ru` and `docs/uk`; `plugin_docs_translations_match_the_english_page` compares the heading levels, every fenced block byte for byte, the generated field-index bullets, the relative links and the in-page anchors with the English page; `a_translation_missing_a_heading_fails_the_parity_check` proves the check fails on a missing heading or an edited block.
+Check: both cover all three parts and every heading of the English page; `just test` green.
+Check output: `cargo nextest run -p cox --test docs` 7 passed, including `plugin_docs_translations_match_the_english_page` and `a_translation_missing_a_heading_fails_the_parity_check`; `cargo clippy -p cox --test docs -- -D warnings` and `cargo fmt --check` clean. `just docs-check` runs the same `docs` test binary.
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
