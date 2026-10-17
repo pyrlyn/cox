@@ -715,6 +715,14 @@ Source: this repository at `main` 5efb2ba4 (https://github.com/pyrlyn/cox/commit
 
 The CI workflow runs on `pull_request` and `workflow_dispatch` only (`.github/workflows/ci.yml:4-9`), and no CI run on `main` is newer than 2026-10-05. The `pipeline` workflow on runs on `main` skips its `rust` job (for example run https://github.com/pyrlyn/cox/actions/runs/38886359637). The `main` and PR rows are therefore 11 days and two triggers apart; they are not like for like.
 
+**CI, T61.6 (one feature set per target: `test-command` and `just check-all` use `--all-features`, as `build-command` already did).** Before: the PR run https://github.com/pyrlyn/cox/actions/runs/38933123898 (2026-10-16), with the default-feature nextest step, job times from `gh run view 38933123898 --repo pyrlyn/cox --json jobs` (`completedAt` minus `startedAt`, read 2026-10-17). After: pending the first CI run of this change (the CI queue was hours deep when T61.6 was written, so no after time exists yet).
+
+| Job | Before (PR run 38933123898) | After (T61.6) |
+| --- | --- | --- |
+| `rust / x86_64-unknown-linux-gnu` | 21 min 34 s (1294 s) | pending first CI run of this change |
+| `rust / aarch64-unknown-linux-gnu` | 17 min 05 s (1025 s) | pending first CI run of this change |
+| `rust / aarch64-apple-darwin` | 24 min 42 s (1482 s) | pending first CI run of this change |
+
 **Top five crates by compile time (clean workspace, `UNIT_DATA` of `cargo-timing.html`).** Each value is the sum of a crate's build-script compile, build-script run and library units. Units run in parallel, so these are CPU-time shares, not wall shares (the report's unit total is 1714 s cold for a 147 s build).
 
 | Rank | Crate | Cold (row 8) | Warm sccache (row 1) |
