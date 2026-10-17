@@ -42,7 +42,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T33.36 | todo | P2 | 4 | 0% | |
+| T33.36 | in progress | P2 | 4 | 5% | Claude Code / opus-5.5 |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
@@ -866,6 +866,7 @@ Depends: T33.35, A61 (extism `wasmtime-exceptions` is on; `exception_handling_mo
 Goal: a cox-owned minimal Kotlin PDK over the raw extism imports (there is no maintained one, R§4.3.5 P30), the same example, and `--lang kotlin`.
 Draft: the PDK (`plugins/sdk-kotlin`, ~150 lines over the raw extism imports and `cox:host/v1`) and the example (`plugins/examples/kotlin`, id `example-kotlin`, same behaviour as the Rust example, `gradle pluginPackage`) build with Kotlin 2.4.20, Gradle 9.8.0 and OpenJDK 27.0.0 and are kept on branch `wip/t33.36-kotlin`. Left to do once WASI is on: templates, `Lang::Kotlin`, `PLUGIN_LANGS`, `just plugin-examples kotlin`, the CI step, the e2e, docs and `toolchain.md` rows.
 Check: `plugin_example_kotlin` is ignored with its reason locally and runs in the CI job.
+Execution plan (2026-10-17): WASI is on per plugin since T33.14.2/T33.43 (`wasi = true` in `plugin.toml`, no env, no preopens; `crates/cox-plugin/src/host.rs` `with_wasi(mounts.wasi)`), so the example sets `wasi = true` like Go. (1) Bring `plugins/sdk-kotlin` and `plugins/examples/kotlin` over from the draft (889db46a), check they build with the pinned Kotlin/Gradle/JDK. (2) `plugins/templates/kotlin/*.tmpl`, `Lang::Kotlin` in `crates/cox/src/plugin_new.rs`, `PLUGIN_LANGS` and the picker snapshot. (3) `just plugin-examples kotlin`, `crates/cox/tests/plugin_example_kotlin.rs` (ignored locally, run in CI's plugin-examples job with `PLUGIN_TOOLS_PATH`). (4) `docs/plugins.md`, `toolchain.md` rows. Verify: `just plugin-examples kotlin`, `cargo nextest run -p cox -E 'test(plugin)' --run-ignored only` for the Kotlin tests, clippy and fmt on `cox`.
 
 #### T33.40 Jev as the first plugin
 
