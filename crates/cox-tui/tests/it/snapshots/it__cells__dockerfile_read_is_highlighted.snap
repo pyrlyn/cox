@@ -1,0 +1,11 @@
+---
+source: crates/cox-tui/tests/it/cells.rs
+expression: "text(&s, tool_cell(&s))"
+---
+⚙ read Dockerfile · 8ms
+│ FROM rust:latest
+│ RUN apt-get update
+│ COPY . /app
+│ WORKDIR /app
+│ RUN cargo build
+│ ✓ 0B 8ms

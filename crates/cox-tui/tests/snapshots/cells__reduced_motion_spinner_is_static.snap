@@ -1,6 +1,0 @@
----
-source: crates/cox-tui/tests/cells.rs
-expression: before
----
-⚙ bash sleep 30
-⠋ running

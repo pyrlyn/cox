@@ -139,6 +139,7 @@ pub fn view(state: &State, area: Rect, buf: &mut Buffer) -> Option<Position> {
         // (`Context::Overlay`), not a band of their own.
         Some(
             Modal::Diff { .. }
+            | Modal::Refine(_)
             | Modal::Help
             | Modal::Context
             | Modal::Agents { .. }
@@ -202,6 +203,11 @@ pub fn view(state: &State, area: Rect, buf: &mut Buffer) -> Option<Position> {
         Some(Modal::Diff { text, scroll }) => {
             let lines = crate::diff::view_lines(text, &look);
             let offset = (*scroll).min(lines.len().saturating_sub(rows));
+            (lines, offset)
+        }
+        Some(Modal::Refine(review)) => {
+            let lines = review.lines(&look);
+            let offset = review.scroll().min(lines.len().saturating_sub(rows));
             (lines, offset)
         }
         Some(Modal::Help) => (
@@ -328,6 +334,7 @@ pub fn view(state: &State, area: Rect, buf: &mut Buffer) -> Option<Position> {
         // transcript `Paragraph` above.
         Some(
             Modal::Diff { .. }
+            | Modal::Refine(_)
             | Modal::Help
             | Modal::Context
             | Modal::Agents { .. }
@@ -543,5 +550,19 @@ mod tests {
         update(&mut state, event(breakdown));
         let text = buffer_to_string(&render(&state, 60, 12));
         assert!(text.contains("68000 tokens · window unknown"), "{text}");
+    }
+
+    /// T66.8: the `/refine` review draws the reason, the keys and the diff
+    /// of each entry over the transcript.
+    #[test]
+    fn refine_review_snapshot() {
+        let mut state = State::new(PermissionMode::Default, SandboxMode::WorkspaceWrite);
+        state.modal = Some(Modal::Refine(crate::refine::Review::new(
+            "the user asked for tests first twice",
+            "diff --git a/prompt-note/tests-first b/prompt-note/tests-first\n\
+             --- /dev/null\n+++ prompt-note/tests-first\n@@ -0,0 +1,2 @@\n\
+             +Write the failing test first.\n+Then the fix.\n",
+        )));
+        insta::assert_snapshot!(buffer_to_string(&render(&state, 70, 12)));
     }
 }

@@ -1,6 +1,0 @@
----
-source: crates/cox-tui/tests/cells.rs
-expression: "text(&s, tool_cell(&s))"
----
-⚙ bash sleep 5
-⠧ 0.7s

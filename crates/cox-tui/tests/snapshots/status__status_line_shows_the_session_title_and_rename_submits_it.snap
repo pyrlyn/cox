@@ -1,7 +1,0 @@
----
-source: crates/cox-tui/tests/status.rs
-expression: "buffer_to_string(&render(&state, 120, 3))"
----
-
-▷ Enter send · Shift+Tab mode cycle · @ file · / command · ? help
-sonnet-5 · ctx ▱▱▱▱▱ 30% · $0.41/5 · workspace-write · 0 tasks · cache 0% · Fix the ledger · [plan]

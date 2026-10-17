@@ -390,6 +390,37 @@
         "$ref": "#/$defs/ExternalAgentConfig"
       },
       "default": {}
+    },
+    "targets": {
+      "description": "`[targets.<name>]` (T68.2): named run targets, user config only.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/TargetConfig"
+      },
+      "default": {}
+    },
+    "launchers": {
+      "description": "`[launchers]` (T68.2): launcher program paths, user config only.",
+      "$ref": "#/$defs/LaunchersConfig",
+      "default": {
+        "ssh": null,
+        "docker": null,
+        "limactl": null,
+        "colima": null
+      }
+    },
+    "autonomous": {
+      "description": "`[autonomous]` (T66.10): gates and limits of `cox run -p\n--autonomous`. User config only: the gates are shell commands, so a\nproject config cannot set any `autonomous.*` key.",
+      "$ref": "#/$defs/AutonomousPolicy",
+      "default": {
+        "gates": [],
+        "max_continuations": 3,
+        "max_turns": 12,
+        "max_tokens": 80000,
+        "timeout_secs": 1800,
+        "gate_retries": 3,
+        "gate_timeout_secs": 300
+      }
     }
   },
   "additionalProperties": false,
@@ -2355,7 +2386,7 @@
       ]
     },
     "ExternalAgentConfig": {
-      "description": "One `[external_agents.<name>]` entry (T52.2, DT§3.3.1): an ACP agent a\ntop-level session can be driven by. The name is the TOML key. User\nconfig only: a project config can set none of it (the guards in\n`cox-config`'s `load.rs`), because an entry runs a program and widens\nwhere it may write. It always runs under the sandbox wrap, with network\non and file limits kept.",
+      "description": "One `[external_agents.<name>]` entry (T52.2, DT§3.3.1): an ACP agent a\ntop-level session can be driven by. The name is the TOML key. User\nconfig only: a project config can set none of it (the guards in\n`cox-config`'s `load.rs`), because an entry runs a program and widens\nwhere it may write. It always runs under the sandbox wrap, with network\non and file limits kept, unless it names a `target` (T68.7).",
       "type": "object",
       "properties": {
         "command": {
@@ -2383,6 +2414,146 @@
             "type": "string"
           },
           "default": []
+        },
+        "target": {
+          "description": "Run `cox run --output-format stream-json` on this target instead of a\nlocal program (T68.7): a `[targets.<name>]` name or a literal\n`kind:name`. `command`, `args`, `key_env` and `writable` then do\nnothing: the remote `cox` uses its own keys and sandbox, and the prompt\ngoes over stdin. Each call needs a `TargetAgent(<kind:name>)`\nallow rule in your own config.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "TargetConfig": {
+      "description": "One `[targets.<name>]` entry (T68.2): a machine or container a whole\nsession can run on. The name is the TOML key and what `--on` and the\ndesktop app show. User config only: a project config can set none of it\n(the guards in `cox-config`'s `load.rs`), because a target decides which\nmachine receives the session, its prompts and its files.",
+      "type": "object",
+      "properties": {
+        "target": {
+          "description": "Where it runs, as `kind:name`: `ssh:devbox`, `docker:web`,\n`lima:default` or `colima:dev`.",
+          "type": "string",
+          "default": ""
+        },
+        "cwd": {
+          "description": "Directory on the target the session starts in; letters, digits and\n`- _ . , / : = @ + \\` only, because it goes on the remote command line.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "context": {
+          "description": "`docker --context` to reach the container through; `docker:` targets only.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "program": {
+          "description": "Absolute path of the launcher program for this target; beats\n`[launchers]` and the built-in lookup.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "LaunchersConfig": {
+      "description": "`[launchers]` (T68.2): absolute paths of the programs that reach a\ntarget, for a machine where they are not at the usual place. `PATH` is\nnever searched. User config only: the path decides which program\nreceives the session, so a repository must not set it.",
+      "type": "object",
+      "properties": {
+        "ssh": {
+          "description": "`ssh`, for `ssh:` targets.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "docker": {
+          "description": "`docker`, for `docker:` targets.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "limactl": {
+          "description": "`limactl`, for `lima:` targets.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "colima": {
+          "description": "`colima`, for `colima:` targets.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "AutonomousPolicy": {
+      "description": "Limits and gates of one autonomous run. Field names match the\n`[autonomous]` config table T66.10 adds, so that table can be this type.",
+      "type": "object",
+      "properties": {
+        "gates": {
+          "description": "Shell commands run in order after each turn; the first failure wins.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "max_continuations": {
+          "description": "Turns the driver may start after the user's own.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 3
+        },
+        "max_turns": {
+          "description": "Turns in the whole run, the user's included.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 12
+        },
+        "max_tokens": {
+          "description": "Tokens the run's turns may use in total.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 80000
+        },
+        "timeout_secs": {
+          "description": "Wall-clock seconds the run may take.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 1800
+        },
+        "gate_retries": {
+          "description": "Failed checks of one gate the run may retry before it gives up.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 3
+        },
+        "gate_timeout_secs": {
+          "description": "Seconds one gate command may run before it counts as failed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 300
         }
       },
       "additionalProperties": false

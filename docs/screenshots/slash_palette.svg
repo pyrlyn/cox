@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="864" height="294" viewBox="0 0 864 294" font-family="SF Mono, Menlo, DejaVu Sans Mono, Consolas, monospace" font-size="14">
 <rect width="100%" height="100%" rx="8" fill="#1e1e1e"/>
-<text x="12.0" y="205.0" textLength="33.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d4d4d4" font-weight="bold"> /mo</text>
-<text x="12.0" y="223.0" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#11a8cd"> ▸ model</text>
+<text x="12.0" y="187.0" textLength="33.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d4d4d4" font-weight="bold"> /mo</text>
+<text x="12.0" y="205.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#11a8cd"> ▸ mode</text>
+<text x="12.0" y="223.0" textLength="840.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d4d4d4">   model                                                                                            </text>
 <text x="12.0" y="241.0" textLength="840.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d4d4d4">   permissions                                                                                      </text>
 <text x="12.0" y="259.0" textLength="25.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d4d4d4">&gt; /</text>
 <rect x="37.2" y="246.0" width="8.4" height="18" fill="#d4d4d4"/>

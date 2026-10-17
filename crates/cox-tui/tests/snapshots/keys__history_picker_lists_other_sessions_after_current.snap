@@ -1,8 +1,0 @@
----
-source: crates/cox-tui/tests/keys.rs
-expression: "picker.matches.join(\"\\n\")"
----
-second
-first
-2d ago · fix the login bug
-now · add a cache column
