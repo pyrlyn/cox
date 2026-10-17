@@ -1,3 +1,27 @@
+#### T61.5.3 One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.5.2 · Size: ~80 · Priority: P2 · Complexity: 3
+
+Goal: as T61.5.1 for the remaining crates with more than one test file; `cox-tui`'s `screenshots` stays separate (named by `--test screenshots`).
+
+Files: as T61.5.1, for each crate.
+
+Steps: as T61.5.1, one commit per crate.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-tui -p cox-tools -p cox-ext -p cox-app
+mise exec -- cargo clippy -p cox-tui -p cox-tools -p cox-ext -p cox-app --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+Output: `cargo nextest list` counts (tests listed) 298/266/66/270 before and the same after for `cox-tui`/`cox-tools`/`cox-ext`/`cox-app`, identical names once the old binary name is read as the module; `nextest run`: `cox-tui` 298 passed, `cox-tools` 265 passed and 1 skipped (as before), `cox-ext` 66 passed, `cox-app` 270 passed; clippy `-D warnings` and `fmt --check` clean per crate. The workspace-wide `nextest run --workspace` and `cargo insta test --check` were not run: the task was run one crate at a time.
+
+Done when: equal test counts per crate; §4.3.9 has the workspace build-phase time after all three cards.
+
+Out of scope: unit tests in `src/`.
+
+Done: `cox-tui` 14 of its 15 files, all 7 `cox-tools` files and all 6 `cox-ext` files are modules of `tests/it/main.rs`; in `cox-app` only `intents` and `scenarios` are, one commit per crate. Kept separate: `cox-tui`'s `screenshots` (`just screenshots`), and `cox-app`'s `app`, `best_of`, `external` and `mcp_login`, which the card did not name: they call `env::set_var`/`remove_var` for `HOME`, `COX_HOME` and `COX_PROVIDER`, which under a runner that shares one process (`cargo test`) would leak into the other tests. Shared helpers stay in `tests/common/` (`cox-tui`, `cox-tools`; `cox-app` still includes `cox-core`'s by path with one more `../`), and `cox-ext/tests/fixtures/` stays because `cox-core` includes a skill from it. The 64 moved `cox-tui`, `cox-ext` and `cox-app` snapshots became `tests/it/snapshots/it__<module>__<name>.snap`, with only the `source:` line changed. References updated: the CI step `cargo nextest run -p cox-tools sandbox_ bash_` gained a `bash::` filter, because two `bash` tests (`assignment_prefix_is_not_read_only`, `safe_locale_assignment_stays_read_only`) no longer carry `bash_` in their name; comments in `cox-sandbox/src/path.rs`, `cox-tools/src/read.rs` and `cox-app/Cargo.toml`, and `AGENTS.md`. `research.md` §4.3.9 has the per-crate build-phase rows (single runs under a load of 9 to 38, so directions only: `cox-tui` 4.40 s to 2.93 s, `cox-tools` 14.42 s to 9.78 s, `cox-ext` 6.56 s to 2.03 s, `cox-app` 17.09 s to 7.80 s). The workspace-wide build-phase time was not measured.
+
 #### T61.5.2 One integration-test binary for `cox`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.5.1 · Size: ~60 · Priority: P2 · Complexity: 3
