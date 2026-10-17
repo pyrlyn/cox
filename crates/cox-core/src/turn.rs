@@ -263,11 +263,13 @@ pub(crate) async fn run_signed_tools(
             .emit(Event::ToolCallRequested { call: call.clone() })
             .await?;
     }
-    // Gate serially so the user answers one prompt at a time and an
-    // `AllowForSession` grant covers the calls behind it in the same batch.
     let mut serial = Vec::new();
     let mut parallel = Vec::new();
     let mut done = HashMap::new();
+    // A163: every `PreToolUse` of the batch runs before its first approval
+    // prompt, so the batch's one `risk` question sees the inputs the engine
+    // will judge.
+    let mut hooked = Vec::with_capacity(calls.len());
     for call in calls {
         let Some(tool) = tools.get(&call.name).cloned() else {
             done.insert(
@@ -276,6 +278,20 @@ pub(crate) async fn run_signed_tools(
             );
             continue;
         };
+        let id = call.id;
+        match pre_tool_use(session, tool.as_ref(), call).await {
+            Ok(call) => hooked.push((tool, call)),
+            Err(reason) => {
+                done.insert(id, failed_result(&format!("blocked by hook: {reason}")));
+            }
+        }
+    }
+    let (hooked_tools, hooked_calls): (Vec<_>, Vec<_>) = hooked.into_iter().unzip();
+    // T33.21: `risk` advice may only raise what the engine judges next.
+    let advised = session.advise_risk(hooked_calls).await?;
+    // Gate serially so the user answers one prompt at a time and an
+    // `AllowForSession` grant covers the calls behind it in the same batch.
+    for (tool, call) in hooked_tools.into_iter().zip(advised) {
         let id = call.id;
         let call = match gate(session, tool.as_ref(), call).await? {
             Ok(call) => call,
@@ -412,6 +428,23 @@ fn group_by_path<T>(items: Vec<(Vec<PathBuf>, T)>) -> Vec<Vec<T>> {
         .collect()
 }
 
+/// §1.8 step i: `PreToolUse` runs before the engine so a rewritten input is
+/// what the rules judge. Returns the call to judge, or the reason a hook
+/// blocked it.
+async fn pre_tool_use(
+    session: &Session,
+    tool: &dyn Tool,
+    mut call: ToolCall,
+) -> Result<ToolCall, String> {
+    let payload = serde_json::json!({ "tool_name": call.name, "tool_input": call.input });
+    match hooks::fire(session, HookEvent::PreToolUse, payload).await {
+        HookOutcome::Block { reason } => return Err(reason),
+        HookOutcome::Modify { input } => rate(&mut call, tool, input),
+        _ => {}
+    }
+    Ok(call)
+}
+
 /// Asks the permission engine and, when it escalates, the user. Returns the
 /// call to run (the user may have edited its input) or the failed result the
 /// model sees. Auto-allows emit nothing: they are the common case and the
@@ -423,18 +456,6 @@ async fn gate(
 ) -> Result<Result<ToolCall, ToolResult>, CoreError> {
     let id = call.id;
     let denied = |reason: &str| failed_result(&format!("permission denied: {reason}"));
-    // §1.8 step i: `PreToolUse` runs before the engine so a rewritten input
-    // is what the rules judge.
-    let payload = serde_json::json!({ "tool_name": call.name, "tool_input": call.input });
-    match hooks::fire(session, HookEvent::PreToolUse, payload).await {
-        HookOutcome::Block { reason } => {
-            return Ok(Err(failed_result(&format!("blocked by hook: {reason}"))));
-        }
-        HookOutcome::Modify { input } => rate(&mut call, tool, input),
-        _ => {}
-    }
-    // T33.21: `risk` advice may only raise what the engine judges next.
-    call = session.advise_risk(call).await?;
     loop {
         let why = match session.decide(&call).await {
             Outcome::Allow { .. } => return Ok(Ok(call)),
