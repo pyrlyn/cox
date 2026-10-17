@@ -398,6 +398,19 @@
         "$ref": "#/$defs/ExternalAgentConfig"
       },
       "default": {}
+    },
+    "autonomous": {
+      "description": "`[autonomous]` (T66.10): gates and limits of `cox run -p\n--autonomous`. User config only: the gates are shell commands, so a\nproject config cannot set any `autonomous.*` key.",
+      "$ref": "#/$defs/AutonomousPolicy",
+      "default": {
+        "gates": [],
+        "max_continuations": 3,
+        "max_turns": 12,
+        "max_tokens": 80000,
+        "timeout_secs": 1800,
+        "gate_retries": 3,
+        "gate_timeout_secs": 300
+      }
     }
   },
   "additionalProperties": false,
@@ -2392,6 +2405,63 @@
             "type": "string"
           },
           "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "AutonomousPolicy": {
+      "description": "Limits and gates of one autonomous run. Field names match the\n`[autonomous]` config table T66.10 adds, so that table can be this type.",
+      "type": "object",
+      "properties": {
+        "gates": {
+          "description": "Shell commands run in order after each turn; the first failure wins.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "max_continuations": {
+          "description": "Turns the driver may start after the user's own.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 3
+        },
+        "max_turns": {
+          "description": "Turns in the whole run, the user's included.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 12
+        },
+        "max_tokens": {
+          "description": "Tokens the run's turns may use in total.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 80000
+        },
+        "timeout_secs": {
+          "description": "Wall-clock seconds the run may take.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 1800
+        },
+        "gate_retries": {
+          "description": "Failed checks of one gate the run may retry before it gives up.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 3
+        },
+        "gate_timeout_secs": {
+          "description": "Seconds one gate command may run before it counts as failed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 300
         }
       },
       "additionalProperties": false
