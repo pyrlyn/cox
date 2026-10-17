@@ -159,7 +159,7 @@ public struct ApprovalCard: View {
         .onSubmit(runEdited)
         .accessibilityLabel("Edited input")
       } else {
-        Text(content.command).textSelection(.enabled)
+        Text(content.command).textSelection(.enabled).coxPointer(.selectableText)
       }
     }
     .textStyle(.monoCommand)

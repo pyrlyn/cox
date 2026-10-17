@@ -49,6 +49,7 @@ struct CoxApp: App {
     .windowStyle(.hiddenTitleBar)
     .defaultWindowPlacement(Self.placement)
     .commands { ShellCommands() }
+    .environment(\.pointerRule, .live)
     // What needs you and what runs, from the menu bar, while `desktop.menu_bar` is on (T51.14).
     MenuBarExtra(isInserted: showsMenuBar) {
       MenuBarContent(model: model)
@@ -57,15 +58,18 @@ struct CoxApp: App {
         .lendsOpenWindow(to: model)
     }
     .menuBarExtraStyle(.window)
+    .environment(\.pointerRule, .live)
     // One session popped out of a window, alone or as a native tab (T51.11).
     WindowGroup("Session", for: PopOut.self) { $popOut in
       if let popOut { SessionWindow(model: model, popOut: popOut) }
     }
     .windowStyle(.hiddenTitleBar)
     .defaultWindowPlacement(Self.placement)
+    .environment(\.pointerRule, .live)
     Settings {
       SettingsWindow(model: model)
     }
+    .environment(\.pointerRule, .live)
   }
 }
 

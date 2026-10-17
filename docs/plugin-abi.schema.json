@@ -657,6 +657,13 @@
         "model": {
           "type": "string",
           "description": "The model id to send."
+        },
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The section's base URL as the host bound it, which a user config may\noverride (T33.40.4); `cox_http` allows only this host. Absent from an\nolder host, so a guest falls back to its manifest's `base_url`."
         }
       },
       "required": [

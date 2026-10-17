@@ -9,10 +9,13 @@
 //!   host target.
 //! - [`provider`] — `cox_provider_stream` for the `typesafe` section
 //!   (T33.40.3): System One over `cox_http`, pure behind two closures.
+//! - [`decide`] — the two-phase `cox_decide`/`cox_decide_resume` (T33.40.4)
+//!   with one minimal `risk` question.
 //!
-//! The `risk` advisor (T33.40.6) and the `route` advisor (T33.40.9) land in
-//! later cards, and `capabilities.decide` with them.
+//! The full `risk` advisor (T33.40.6) and the `route` advisor (T33.40.9)
+//! land in later cards, and `capabilities.decide` with them.
 
+pub mod decide;
 pub mod provider;
 pub mod wire;
 
@@ -23,7 +26,10 @@ pub mod wire;
 mod guest {
     use std::sync::atomic::AtomicBool;
 
-    use cox_plugin_sdk::{InitIn, InitOut, NoticeLevel, ProviderCall, SdkError, Value};
+    use cox_plugin_sdk::{
+        Advice, DecideOut, DecideResume, InitIn, InitOut, NoticeLevel, ProviderCall, Question,
+        SdkError, Value,
+    };
 
     use crate::provider::{self, StreamError};
 
@@ -45,7 +51,20 @@ mod guest {
         })
     }
 
-    cox_plugin_sdk::register!(init => init, provider_stream => provider_stream);
+    fn decide(question: Question) -> Result<DecideOut, SdkError> {
+        Ok(crate::decide::decide(&question))
+    }
+
+    fn decide_resume(resumed: DecideResume) -> Result<Option<Advice>, SdkError> {
+        Ok(crate::decide::resume(&resumed))
+    }
+
+    cox_plugin_sdk::register!(
+        init => init,
+        provider_stream => provider_stream,
+        decide_call => decide,
+        decide_resume => decide_resume,
+    );
 }
 
 #[cfg(test)]

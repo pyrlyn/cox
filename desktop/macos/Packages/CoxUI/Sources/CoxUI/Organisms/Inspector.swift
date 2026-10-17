@@ -161,7 +161,7 @@ private struct TabButton: View {
         .elevation(isLifted ? .e1 : .e0, cornerRadius: Radius.tab)
         .contentShape(shape)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain(isChosen: isSelected))
     .help(icon == nil ? "" : title)
     .accessibilityLabel(title)
     .accessibilityAddTraits(isSelected ? .isSelected : [])

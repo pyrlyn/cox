@@ -137,3 +137,25 @@ struct SendButtonStyle: ButtonStyle {
     }
   }
 }
+
+/// A button that draws its own face (a row, a tab, a chip): `.plain` plus the pointer the shared
+/// rule gives a control. It wraps `.plain` instead of redrawing the label, because a custom
+/// `ButtonStyle` loses the system's dimming of a disabled control.
+struct CoxPlainButtonStyle: PrimitiveButtonStyle {
+  /// Already chosen (the selected row, the active tab): a click would change nothing.
+  var isChosen = false
+
+  func makeBody(configuration: Configuration) -> some View {
+    PlainButtonStyle().makeBody(configuration: configuration)
+      .coxControlPointer(isChosen: isChosen)
+  }
+}
+
+extension PrimitiveButtonStyle where Self == CoxPlainButtonStyle {
+  /// `.buttonStyle(.coxPlain)`, or `.coxPlain(isChosen:)` for a row that may be the selected one.
+  static var coxPlain: CoxPlainButtonStyle { CoxPlainButtonStyle() }
+
+  static func coxPlain(isChosen: Bool) -> CoxPlainButtonStyle {
+    CoxPlainButtonStyle(isChosen: isChosen)
+  }
+}

@@ -48,7 +48,7 @@ struct DiffHunkView: View {
             Label("Revert hunk", systemImage: "arrow.uturn.backward")
               .textStyle(.caption)
           }
-          .buttonStyle(.plain)
+          .buttonStyle(.coxPlain)
           .foregroundStyle(Color(.textSecondary))
           .help("Revert hunk (⌥-click skips the confirmation)")
           .opacity(isHovered ? 1 : 0)

@@ -65,6 +65,99 @@ struct BestOfStoreTests {
     #expect(store.columns.map(\.state) == [.kept, .pruned, .pruned])
   }
 
+  @Test func bestOfMergeStoreHoldsTheChosenCandidatesAndBuildsTheRequest() async {
+    let store = BestOfStore(id: "1", client: FixtureBestOf(three))
+    await store.refresh()
+    #expect(store.mergeable == [0, 1], "a running candidate is not offered")
+    store.toggle(1)
+    store.toggle(2)
+    #expect(store.chosen == [1], "one the core does not list is ignored")
+    #expect(store.mergeRequest == nil, "one candidate and no merger is not a merge")
+    store.toggle(0)
+    store.merger = .agent(name: "claude")
+    #expect(store.chosen == [0, 1])
+    #expect(
+      store.mergeRequest == BestOfMerge(id: "1", from: [1, 0], merger: .agent(name: "claude")),
+      "the request carries the group, the chosen candidates ascending and the chosen merger")
+    store.toggle(0)
+    #expect(store.mergeRequest == nil, "fewer than two chosen")
+  }
+
+  @Test func bestOfMergeAddsTheMergeCandidateAndClearsTheChoice() async {
+    let client = FixtureBestOf(three)
+    let store = BestOfStore(id: "1", client: client)
+    await store.refresh()
+    store.toggle(0)
+    store.toggle(1)
+    store.merger = .cox(model: "gpt-5")
+    let launch = await store.merge(theme: "dark")
+    #expect(launch?.id == "1")
+    #expect(client.merges == [BestOfMerge(id: "1", from: [0, 1], merger: .cox(model: "gpt-5"))])
+    #expect(store.columns.count == 4, "the comparison is read again once the merge exists")
+    #expect(store.columns[3].candidate == .cox(model: "gpt-5"))
+    #expect(store.columns[3].state == .running)
+    #expect(store.chosen.isEmpty)
+    #expect(store.failure == nil)
+  }
+
+  @Test func bestOfMergeSheetOpensWithEveryMergeableCandidateChecked() async {
+    let store = BestOfStore(id: "1", client: FixtureBestOf(three))
+    await store.refresh()
+    store.toggle(1)
+    store.chooseAll()
+    #expect(store.chosen == [0, 1], "the running candidate is not mergeable, so not checked")
+  }
+
+  @Test func bestOfMergeColumnNamesWhatItMergedAndOnlyThat() async {
+    let store = BestOfStore(id: "1", client: FixtureBestOf(three))
+    await store.refresh()
+    store.toggle(1)
+    store.toggle(0)
+    store.merger = .agent(name: "claude")
+    await store.merge(theme: "dark")
+    let merge = store.columns[3]
+    #expect(merge.mergedFrom == [0, 1], "ascending, as the request carries them")
+    #expect(store.merged(by: merge) == [store.columns[0].label, store.columns[1].label])
+    #expect(store.merged(by: store.columns[0]).isEmpty, "a launched candidate merged nothing")
+    #expect(store.columns[0].mergedFrom == nil)
+  }
+
+  @Test func bestOfMergeOfAPickedGroupIsOfferedNothingAndRefused() async {
+    var columns = three
+    columns[1].state = .kept
+    let client = FixtureBestOf(columns)
+    let store = BestOfStore(id: "1", client: client)
+    await store.refresh()
+    #expect(store.mergeable.isEmpty, "a picked group offers nothing")
+    store.toggle(0)
+    store.merger = .cox(model: nil)
+    #expect(await store.merge(theme: "dark") == nil, "no request, no call")
+    #expect(client.merges.isEmpty)
+    do {
+      _ = try await client.merge(
+        BestOfMerge(id: "1", from: [0, 1], merger: .cox(model: nil)), theme: "dark")
+      Issue.record("a picked group must refuse")
+    } catch {
+      #expect(error as? BestOfMergeError == .picked)
+    }
+  }
+
+  @Test func bestOfMergeFailureIsShownAfterTheComparisonIsRead() async {
+    let client = FixtureBestOf(three)
+    let store = BestOfStore(id: "1", client: client)
+    await store.refresh()
+    store.toggle(0)
+    store.toggle(1)
+    store.merger = .cox(model: nil)
+    // Candidate 1 stops being finished between the read and the press.
+    var moved = three
+    moved[1].state = .running
+    client.set(moved)
+    #expect(await store.merge(theme: "dark") == nil)
+    #expect(store.failure?.contains("notDone") == true, "\(store.failure ?? "nil")")
+    #expect(store.chosen == [0], "the choice follows what the core now lists")
+  }
+
   @Test func bestOfFailedCandidateWithoutChangesOffersNoActions() {
     var failed = column(0, .cox(model: nil), .failed(why: "provider error: provider auth failed"))
     failed.files = []

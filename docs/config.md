@@ -164,7 +164,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `ask` = `[]` — a project config adds rules to this list, never replaces it
 - `deny` = `["Read(~/.ssh/**)", "Read(~/.aws/**)", "Bash(rm -rf /*)"]` — a project config adds rules to this list, never replaces it
 - `import_claude_settings` = `true`
-- `allow_for_session_persists` = `false`
+- `allow_for_session_persists` = `false` — T69.2: true also appends a Bash(<command>:*) prefix rule per approved shell command to allow in the user config, once; never for an opaque line, a denied line or another tool
 ## `[sandbox]`
 
 - `mode` = `"workspace-write"` — read-only | workspace-write | danger-full-access
@@ -208,7 +208,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 
 - `timeout_s` = `30`
 - `deferred` = `true`
-- `servers` = `{}` — [mcp.servers.<name>] command/args/url/env/sandbox — same shape as .mcp.json, plus sandbox=false to opt a named stdio server out of the sandbox wrap (default true, T33.42)
+- `servers` = `{}` — [mcp.servers.<name>] command/args/url/env/sandbox — same shape as .mcp.json, plus sandbox=false to opt a named stdio server out of the sandbox wrap (default true, T33.42); [mcp.servers.<name>] is user config only — a project config cannot set mcp.servers (a repository must not choose a program cox runs or a URL it contacts)
 ## `[lsp]`
 
 - `enabled` = `true` — the deferred ReadOnly `diagnostics` tool (P41): one sandboxed stdio LSP server per language per session, killed when the session ends

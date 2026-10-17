@@ -195,22 +195,37 @@ async fn ask_person(session: &Session, ask: Ask) {
 /// `sandboxed_argv` wrap a plugin's server gets, unless its config sets
 /// `sandbox = false` or the session is `danger-full-access` (no wrap
 /// either way). A plugin's own servers are skipped here: `plugin_mcp`
-/// already wrapped them, refusing outright where the wrap is impossible
-/// (T33.19). A user-configured server must not silently stop working on a
-/// Landlock-only or backend-less host, so it keeps running unwrapped
-/// there; one notice names every server that could not be sandboxed,
-/// not one per server.
+/// already wrapped them (T33.19).
 fn sandbox_stdio_servers(
     found: &mut cox_mcp::discovery::Discovered,
     config: &Config,
     writable: &[PathBuf],
 ) {
-    if config.sandbox.mode == cox_protocol::SandboxMode::DangerFullAccess {
+    wrap_or_drop_stdio_servers(found, config.sandbox.mode, |command, args| {
+        sandboxed_argv(command, args, config, writable)
+    });
+}
+
+/// T64.10: a server whose argv the host cannot wrap (Landlock-only or
+/// backend-less) is dropped from `found` with one notice, never spawned
+/// bare. Only the server is refused — the session still opens and the
+/// other servers load (fail open on extensions). Running it unsandboxed
+/// let a project's `.mcp.json` command use host privileges the user's
+/// sandbox policy promised to withhold; `sandbox = false` or
+/// `danger-full-access` remain the explicit ways to run one without a wrap.
+/// `wrap` is a parameter so the decision is testable on a host whose real
+/// backend wraps everything.
+fn wrap_or_drop_stdio_servers(
+    found: &mut cox_mcp::discovery::Discovered,
+    mode: cox_protocol::SandboxMode,
+    wrap: impl Fn(&Path, &[String]) -> Result<Vec<String>, String>,
+) {
+    if mode == cox_protocol::SandboxMode::DangerFullAccess {
         return;
     }
     let mut names: Vec<String> = found.servers.keys().cloned().collect();
     names.sort();
-    let mut unwrapped = Vec::new();
+    let mut skipped = Vec::new();
     for name in names {
         let is_plugin = found
             .sources
@@ -225,21 +240,24 @@ fn sandbox_stdio_servers(
         let Some(command) = cfg.command.clone() else {
             continue; // an HTTP server has nothing to wrap
         };
-        let args = cfg.args.clone();
-        match sandboxed_argv(Path::new(&command), &args, config, writable) {
+        match wrap(Path::new(&command), &cfg.args) {
             Ok(mut argv) => {
                 if let Some(cfg) = found.servers.get_mut(&name) {
                     cfg.command = Some(argv.remove(0));
                     cfg.args = argv;
                 }
             }
-            Err(_) => unwrapped.push(name),
+            Err(_) => {
+                found.servers.remove(&name);
+                found.sources.remove(&name);
+                skipped.push(name);
+            }
         }
     }
-    if !unwrapped.is_empty() {
+    if !skipped.is_empty() {
         found.notices.push(format!(
-            "mcp: this host's sandbox cannot wrap a stdio server's argv; running unsandboxed: {}",
-            unwrapped.join(", ")
+            "mcp: this host's sandbox cannot wrap a stdio server's argv; skipped (set `sandbox = false` on a server you trust to run it bare): {}",
+            skipped.join(", ")
         ));
     }
 }
@@ -340,5 +358,85 @@ mod tests {
         assert_eq!(found.servers["s"].command.as_deref(), Some("echo"));
         assert_eq!(found.servers["s"].args, ["hi"]);
         assert!(found.notices.is_empty(), "{:?}", found.notices);
+    }
+
+    /// T64.10: a stdio server the sandbox cannot wrap is skipped with a
+    /// notice, not spawned with host privileges; servers that can be
+    /// wrapped, opted out, or are HTTP still load.
+    #[test]
+    fn unwrappable_stdio_server_is_skipped_not_run_bare() {
+        let mut found = cox_mcp::discovery::Discovered::default();
+        for (name, cfg) in [
+            (
+                "project",
+                McpServerConfig {
+                    command: Some("evil".to_string()),
+                    ..McpServerConfig::default()
+                },
+            ),
+            (
+                "optout",
+                McpServerConfig {
+                    command: Some("trusted".to_string()),
+                    sandbox: false,
+                    ..McpServerConfig::default()
+                },
+            ),
+            (
+                "http",
+                McpServerConfig {
+                    url: Some("https://example.invalid/mcp".to_string()),
+                    ..McpServerConfig::default()
+                },
+            ),
+        ] {
+            found.servers.insert(name.to_string(), cfg);
+            found
+                .sources
+                .insert(name.to_string(), ".mcp.json".to_string());
+        }
+
+        wrap_or_drop_stdio_servers(
+            &mut found,
+            cox_protocol::SandboxMode::WorkspaceWrite,
+            |_, _| {
+                Err(String::from(
+                    "the landlock sandbox cannot wrap a server's argv",
+                ))
+            },
+        );
+
+        assert!(
+            !found.servers.contains_key("project"),
+            "{:?}",
+            found.servers
+        );
+        assert!(!found.sources.contains_key("project"));
+        assert_eq!(found.servers["optout"].command.as_deref(), Some("trusted"));
+        assert!(found.servers.contains_key("http"));
+        assert_eq!(found.notices.len(), 1, "{:?}", found.notices);
+        assert!(found.notices[0].contains("skipped") && found.notices[0].contains("project"));
+        assert!(!found.notices[0].contains("optout"));
+    }
+
+    /// T64.10: `danger-full-access` is the user's own choice, so an
+    /// unwrappable server is left alone there.
+    #[test]
+    fn danger_full_access_keeps_an_unwrappable_server() {
+        let mut found = cox_mcp::discovery::Discovered::default();
+        found.servers.insert(
+            "s".to_string(),
+            McpServerConfig {
+                command: Some("x".to_string()),
+                ..McpServerConfig::default()
+            },
+        );
+        wrap_or_drop_stdio_servers(
+            &mut found,
+            cox_protocol::SandboxMode::DangerFullAccess,
+            |_, _| Err(String::new()),
+        );
+        assert!(found.servers.contains_key("s"));
+        assert!(found.notices.is_empty());
     }
 }

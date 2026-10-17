@@ -129,18 +129,7 @@ impl Engine {
         grants: &[(String, String)],
     ) -> Outcome {
         // Deny and ask need one hit: the whole line or any of its commands.
-        let first = |rules: &[Rule]| {
-            rules
-                .iter()
-                .find(|r| {
-                    r.matches(&call.name, &call.subject)
-                        || call
-                            .segments
-                            .as_ref()
-                            .is_some_and(|s| s.commands.iter().any(|c| r.matches(&call.name, c)))
-                })
-                .map(|r| r.raw.clone())
-        };
+        let first = |rules: &[Rule]| first_hit(rules, call);
         if let Some(rule) = first(&self.deny) {
             return Outcome::Deny {
                 reason: format!("denied by rule {rule}"),
@@ -212,6 +201,65 @@ impl Engine {
             },
             Some(why) => Outcome::Ask(why),
         }
+    }
+}
+
+/// The raw text of the first rule that matches the whole line or any one of
+/// its commands.
+fn first_hit(rules: &[Rule], call: &ToolCall) -> Option<String> {
+    rules
+        .iter()
+        .find(|r| {
+            r.matches(&call.name, &call.subject)
+                || call
+                    .segments
+                    .as_ref()
+                    .is_some_and(|s| s.commands.iter().any(|c| r.matches(&call.name, c)))
+        })
+        .map(|r| r.raw.clone())
+}
+
+impl Engine {
+    /// The `permissions.allow` rule strings an `AllowForSession` answer to
+    /// `call` may be saved as (T69.2): one `Bash(<command>:*)` prefix rule per
+    /// command of a split line, the same commands [`grants_for`] records for
+    /// the session. Empty, so nothing is saved, when the answer would widen
+    /// trust beyond what the user saw: a tool other than `bash` (a file or a
+    /// repository is not a command prefix, and `cloud_agent` never leaves the
+    /// session), an opaque or unsplit line, a deny rule on the line, or a
+    /// command whose rule would not read back as the same prefix. All or
+    /// nothing, so the saved set never covers less than the user approved
+    /// and never more.
+    pub fn persistable_allow_rules(&self, call: &ToolCall) -> Vec<String> {
+        if canonical_tool(&call.name) != "bash" {
+            return Vec::new();
+        }
+        let Some(segments) = call
+            .segments
+            .as_ref()
+            .filter(|s| !s.opaque && !s.commands.is_empty())
+        else {
+            return Vec::new();
+        };
+        if first_hit(&self.deny, call).is_some() || self.denied_read_path(call).is_some() {
+            return Vec::new();
+        }
+        let mut rules: Vec<String> = Vec::new();
+        for command in &segments.commands {
+            let raw = format!("Bash({command}:*)");
+            let reads_back = !command.is_empty()
+                && command.trim() == command
+                && !command.chars().any(char::is_control)
+                && Rule::parse(&raw, self.home.as_deref(), &self.cwd)
+                    .is_ok_and(|r| r.matches("bash", command));
+            if !reads_back {
+                return Vec::new();
+            }
+            if !rules.contains(&raw) {
+                rules.push(raw);
+            }
+        }
+        rules
     }
 }
 
@@ -494,6 +542,70 @@ mod tests {
                 opaque,
             }),
         }
+    }
+
+    fn engine_denying(deny: &[&str]) -> Engine {
+        let cfg = PermissionsConfig {
+            deny: deny.iter().map(|d| d.to_string()).collect(),
+            ..PermissionsConfig::default()
+        };
+        Engine::compile(&cfg, Some(Path::new("/home/alice")), Path::new("/repo"))
+            .expect("rules compile")
+    }
+
+    /// T69.2: a split line saves one prefix rule per command, never a bare
+    /// `Bash`, and each reads back as the prefix the user approved.
+    #[test]
+    fn allow_for_session_saves_one_prefix_rule_per_command() {
+        let engine = engine_denying(&[]);
+        let call = bash_call(
+            "git status && git status && npm test",
+            &["git status", "git status", "npm test"],
+            false,
+        );
+        assert_eq!(
+            engine.persistable_allow_rules(&call),
+            ["Bash(git status:*)", "Bash(npm test:*)"]
+        );
+    }
+
+    /// T69.2: nothing is saved for an opaque line (the user approved a text
+    /// that cannot be split into the commands it runs), a line with no
+    /// segments, or a line a deny rule matches, however it is split.
+    #[test]
+    fn allow_for_session_saves_nothing_for_opaque_denied_or_unsplit_lines() {
+        let engine = engine_denying(&["Bash(rm -rf /*)", "Read(~/.ssh/**)"]);
+        let opaque = bash_call("Get-Content $x | iex", &["Get-Content $x | iex"], true);
+        assert!(engine.persistable_allow_rules(&opaque).is_empty());
+        let mut unsplit = bash_call("git status", &["git status"], false);
+        unsplit.segments = None;
+        assert!(engine.persistable_allow_rules(&unsplit).is_empty());
+        let denied = bash_call(
+            "git status && rm -rf /*",
+            &["git status", "rm -rf /*"],
+            false,
+        );
+        assert!(engine.persistable_allow_rules(&denied).is_empty());
+        let read_denied = bash_call("cat ~/.ssh/id_rsa", &["cat ~/.ssh/id_rsa"], false);
+        assert!(engine.persistable_allow_rules(&read_denied).is_empty());
+    }
+
+    /// T69.2: only a command prefix is saved. A file, a repository and a
+    /// cloud agent stay session-only.
+    #[test]
+    fn allow_for_session_saves_nothing_for_other_tools() {
+        let engine = engine_denying(&[]);
+        for name in ["edit", "write", "web_fetch", CLOUD_AGENT] {
+            let mut call = bash_call("acme/widgets", &["acme/widgets"], false);
+            call.name = name.into();
+            assert!(engine.persistable_allow_rules(&call).is_empty(), "{name}");
+        }
+        let mut project = bash_call("cargo test", &["cargo test"], false);
+        project.name = "project".into();
+        assert_eq!(
+            engine.persistable_allow_rules(&project),
+            ["Bash(cargo test:*)"]
+        );
     }
 
     /// T62.3: the default `Read(~/.ssh/**)` deny must also stop a bash

@@ -23,7 +23,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
-use crate::write::atomic_write;
+use crate::write::atomic_write_trusted;
 
 /// Hits one query returns. The core archives `ToolOutput.text`; this cap is
 /// per hit, not a second cut of the whole result.
@@ -619,12 +619,12 @@ async fn download(
 }
 
 fn write_cache(dir: &Path, bytes: &[u8], jsonl: &str) -> Result<(), ToolError> {
-    atomic_write(&dir.join("json.zst"), bytes)?;
-    atomic_write(
+    atomic_write_trusted(&dir.join("json.zst"), bytes)?;
+    atomic_write_trusted(
         dir.join("json.zst.sha256").as_path(),
         sha256_hex(bytes).as_bytes(),
     )?;
-    atomic_write(&dir.join("items.jsonl"), jsonl.as_bytes())?;
+    atomic_write_trusted(&dir.join("items.jsonl"), jsonl.as_bytes())?;
     Ok(())
 }
 

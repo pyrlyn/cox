@@ -71,7 +71,6 @@ row is a card, not this audit.)
 | task | leftover | why it stays |
 |---|---|---|
 | T1.6 | Mid-stream-close test uses a raw `TcpListener` instead of wiremock. | Wiremock cannot observe a client hang-up, so the raw listener is the only harness that can. |
-| T2.2 | `allow_for_session_persists` is read but not acted on. | The key is parsed ahead of the session-persistence write path that would consume it. |
 | T3.7 | `sandbox.env_passthrough` has no config key; the allowlist is fixed. | Passthrough needs its own config-key design, which P4 never scoped. |
 | T3.8 | The `web_fetch` Anthropic server-tool passthrough (`web_fetch_20260209`) is not wired. | It needs `server_tool_use`/`web_fetch_tool_result` blocks in the SSE consumer the provider task did not own. |
 | T3.9 | `crates/cox-tools/src/agent.rs` does not exist; the tool lives in `cox-core::subagent`. | The workspace dependency direction forbids `cox-tools` depending on `cox-core`. |

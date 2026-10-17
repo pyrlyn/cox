@@ -105,7 +105,7 @@ private struct RemoveButton: View {
         .foregroundStyle(Color(.textTertiary))
         .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
     .help("Remove \(label)")
     .accessibilityLabel("Remove \(label)")
   }
@@ -121,7 +121,7 @@ struct ThinkChip: View {
     Button(action: toggle) {
       ComposerChip("Think", kind: .think(isOn))
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain)
     .help(
       isOn
         ? "The next message goes to the think tier · click to turn it off"

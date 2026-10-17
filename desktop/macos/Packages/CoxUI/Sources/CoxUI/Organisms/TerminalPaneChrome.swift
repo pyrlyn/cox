@@ -128,7 +128,7 @@ private struct TerminalTabButton: View {
       .elevation(isShown ? .e1 : .e0, cornerRadius: Radius.s)
       .contentShape(shape)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.coxPlain(isChosen: isShown))
     .accessibilityLabel(label)
     .accessibilityAddTraits(isShown ? .isSelected : [])
   }

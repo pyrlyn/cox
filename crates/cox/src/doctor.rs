@@ -126,6 +126,10 @@ pub fn run(
     // in the slim build and when no plugin is discovered.
     results.extend(check_plugins(cwd, &home, config));
 
+    // Which client serves the `typesafe` section: the Jev plugin or the
+    // built-in one (T33.40.5).
+    results.push(check_typesafe_client(cwd, &home, config));
+
     // The wasmtime compilation cache's on-disk size. Empty in the slim
     // build.
     #[cfg(feature = "plugins")]
@@ -693,6 +697,87 @@ pub(crate) fn check_plugins(
     check_plugins_with(cwd, home, config, &HashMap::new())
 }
 
+/// Every discovered plugin the grant check lets load, with its manifest.
+#[cfg(feature = "plugins")]
+fn granted_manifests<'a>(
+    found: &'a cox_plugin::discover::Discovered,
+    store: Option<&cox_store::Store>,
+    root: Option<&std::path::Path>,
+) -> Vec<(&'a str, &'a cox_plugin_api::PluginManifest)> {
+    use cox_plugin::discover::State;
+    use cox_plugin::grant::Verdict;
+
+    found
+        .plugins
+        .iter()
+        .filter_map(|p| match &p.state {
+            State::Loaded { manifest, digest }
+                if crate::plugin_cmd::verdict_for(p, manifest, digest, store, root)
+                    == Verdict::Granted =>
+            {
+                Some((p.id.as_str(), &**manifest))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The `typesafe client` row (T33.40.5): which client serves the section
+/// while both the built-in one and the Jev plugin exist. The same
+/// discover-and-grant walk as [`check_plugins`], and the same lowest-id
+/// rule `cox_plugin::provider::backends` uses for a contested name, so the
+/// row names the client a session would actually build.
+#[cfg(feature = "plugins")]
+pub(crate) fn check_typesafe_client(
+    cwd: &std::path::Path,
+    home: &std::path::Path,
+    config: &cox_protocol::Config,
+) -> CheckResult {
+    use cox_plugin_api::ProviderApi;
+
+    let root = crate::config_load::find_git_root(cwd);
+    let found = cox_plugin::discover::discover(home, root.as_deref());
+    let store = cox_store::Store::open(home).ok();
+    let plugin = granted_manifests(&found, store.as_ref(), root.as_deref())
+        .into_iter()
+        .filter(|(_, m)| {
+            m.provider
+                .iter()
+                .any(|d| d.name == "typesafe" && d.api == ProviderApi::Plugin)
+        })
+        .map(|(id, _)| id)
+        .min();
+    typesafe_client_row(plugin, config)
+}
+
+/// The slim build has no plugin host, so the built-in client always serves.
+#[cfg(not(feature = "plugins"))]
+pub(crate) fn check_typesafe_client(
+    _cwd: &std::path::Path,
+    _home: &std::path::Path,
+    config: &cox_protocol::Config,
+) -> CheckResult {
+    typesafe_client_row(None, config)
+}
+
+/// [`check_typesafe_client`]'s wording, with the plugin id (if any) already
+/// decided. The detail lists the `[providers.typesafe]` values that
+/// configure whichever client runs, so one line shows what will be used.
+fn typesafe_client_row(plugin: Option<&str>, config: &cox_protocol::Config) -> CheckResult {
+    let t = &config.providers.typesafe;
+    let client = match plugin {
+        Some(id) => format!("served by the {id} plugin"),
+        None => "served by the built-in Jev client".to_string(),
+    };
+    CheckResult::ok(
+        "typesafe client",
+        format!(
+            "{client}; base_url {}, key {}, model {}, timeout {}s, retries {}",
+            t.base_url, t.api_key_env, t.model, t.timeout_s, t.max_retries
+        ),
+    )
+}
+
 /// The slim build has no plugin host, so there is never a discovered
 /// plugin.
 #[cfg(not(feature = "plugins"))]
@@ -730,21 +815,7 @@ fn check_plugins_with(
     // `check_catalog_prices` still passes `&[]` for the top-level catalog
     // check until `cox-session` keeps loaded manifests around to share (that
     // wiring is T33.16's own "Left").
-    let mut granted: Vec<(&str, &cox_plugin_api::PluginManifest)> = Vec::new();
-    for p in &found.plugins {
-        if let State::Loaded { manifest, digest } = &p.state {
-            let verdict = crate::plugin_cmd::verdict_for(
-                p,
-                manifest,
-                digest,
-                store.as_ref(),
-                root.as_deref(),
-            );
-            if verdict == Verdict::Granted {
-                granted.push((p.id.as_str(), manifest));
-            }
-        }
-    }
+    let granted = granted_manifests(&found, store.as_ref(), root.as_deref());
     let plugin_models: Vec<cox_models::PluginModels<'_>> = granted
         .iter()
         .map(|(id, m)| cox_models::PluginModels {
@@ -1650,6 +1721,51 @@ mod tests {
                 decided_at: "2026-09-26T00:00:00Z".to_string(),
             })
             .expect("grant");
+    }
+
+    #[cfg(feature = "plugins")]
+    const JEV_PROVIDER: &str = "\n[[provider]]\nname = \"typesafe\"\napi = \"plugin\"\nbase_url = \"https://api.typesafe.ai\"\napi_key_env = \"TYPESAFE_API_KEY\"\n";
+
+    /// T33.40.5 Check, plugin case: a granted plugin declaring the
+    /// `typesafe` ABI section serves it, and the row says so.
+    #[cfg(feature = "plugins")]
+    #[test]
+    fn doctor_typesafe_row_names_the_granted_plugin() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let (jev, digest) = stage_plugin(home.path(), "jev", JEV_PROVIDER);
+        let store = cox_store::Store::open(home.path()).expect("store");
+        grant_plugin(&store, &jev, &digest);
+
+        let row = check_typesafe_client(home.path(), home.path(), &cox_protocol::Config::default());
+        insta::assert_snapshot!(human(&row));
+    }
+
+    /// T33.40.5 Check, built-in case: no plugin at all, and a plugin that
+    /// declares the section but was never granted, both leave the section
+    /// to the built-in client.
+    #[cfg(feature = "plugins")]
+    #[test]
+    fn doctor_typesafe_row_names_the_builtin_client_without_a_granted_plugin() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let config = cox_protocol::Config::default();
+        let none = check_typesafe_client(home.path(), home.path(), &config);
+        insta::assert_snapshot!(human(&none));
+
+        stage_plugin(home.path(), "jev", JEV_PROVIDER);
+        let ungranted = check_typesafe_client(home.path(), home.path(), &config);
+        assert_eq!(ungranted.detail, none.detail);
+    }
+
+    /// T33.40.5: the row shows the user's table, which is what configures
+    /// whichever client runs.
+    #[test]
+    fn doctor_typesafe_row_shows_the_users_table() {
+        let mut config = cox_protocol::Config::default();
+        config.providers.typesafe.base_url = "http://127.0.0.1:9".into();
+        config.providers.typesafe.timeout_s = 5;
+        let row = typesafe_client_row(Some("jev"), &config);
+        assert!(row.detail.starts_with("served by the jev plugin"));
+        assert!(row.detail.contains("http://127.0.0.1:9") && row.detail.contains("timeout 5s"));
     }
 
     /// T33.39 Check: a scratch `COX_HOME` with one healthy (granted) plugin

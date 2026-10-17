@@ -1,0 +1,7 @@
+# T69.2: one shell call that the approval policy asks about.
+[[turn]]
+text = "run it"
+tool_calls = [{ name = "bash", input = { command = "cargo test && git status" } }]
+
+[[turn]]
+text = "done"

@@ -50,6 +50,7 @@ public struct QuestionCard: View {
           .textStyle(.transcript)
           .foregroundStyle(Color(.textPrimary))
           .textSelection(.enabled)
+          .coxPointer(.selectableText)
           .fixedSize(horizontal: false, vertical: true)
         if !content.options.isEmpty {
           VStack(alignment: .leading, spacing: Space.s) {

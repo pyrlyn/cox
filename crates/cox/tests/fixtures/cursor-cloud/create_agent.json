@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "id": "bc-e2e",
+    "name": "widgets fix",
+    "status": "ACTIVE",
+    "env": { "type": "cloud" },
+    "repos": [{ "url": "https://github.com/acme/widgets", "startingRef": "main" }],
+    "workOnCurrentBranch": false,
+    "autoCreatePR": false,
+    "url": "https://cursor.com/agents/bc-e2e",
+    "createdAt": "2026-10-03T10:00:00Z",
+    "updatedAt": "2026-10-03T10:00:00Z",
+    "latestRunId": "run-e2e"
+  },
+  "run": {
+    "id": "run-e2e",
+    "agentId": "bc-e2e",
+    "status": "CREATING",
+    "createdAt": "2026-10-03T10:00:00Z",
+    "updatedAt": "2026-10-03T10:00:00Z"
+  }
+}

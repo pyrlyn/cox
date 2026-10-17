@@ -1,0 +1,50 @@
+// Smoke test for the `{{id}}` plugin (`cox plugin new` scaffold): installs
+// this package into a scratch COX_HOME with `cox plugin install --yes`, then
+// checks that `cox plugin list --json` reports it `loaded`. Run `just build`
+// first; this test only shells out to whatever `cox` is on PATH and never
+// builds the module itself.
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"testing"
+)
+
+const id = "{{id}}"
+
+func TestInstallsAndLoadsInAScratchCoxHome(t *testing.T) {
+	if _, err := os.Stat("{{crate_name}}.wasm"); err != nil {
+		t.Fatalf("build the plugin first (just build): %v", err)
+	}
+	home := t.TempDir()
+	cox := func(args ...string) []byte {
+		cmd := exec.Command("cox", args...)
+		cmd.Env = append(os.Environ(), "COX_HOME="+home, "HOME="+home)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("cox %v (is cox on PATH?): %v", args, err)
+		}
+		return out
+	}
+	cox("plugin", "install", ".", "--yes")
+	var list struct {
+		Plugins []struct {
+			ID     string `json:"id"`
+			Loaded bool   `json:"loaded"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(cox("plugin", "list", "--json"), &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range list.Plugins {
+		if p.ID == id {
+			if !p.Loaded {
+				t.Fatalf("%s is installed but not loaded", id)
+			}
+			return
+		}
+	}
+	t.Fatalf("%s not in `cox plugin list --json`", id)
+}

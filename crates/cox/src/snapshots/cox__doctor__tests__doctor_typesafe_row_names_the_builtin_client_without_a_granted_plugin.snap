@@ -1,0 +1,5 @@
+---
+source: crates/cox/src/doctor.rs
+expression: human(&none)
+---
+typesafe client: ✓ served by the built-in Jev client; base_url https://api.typesafe.ai, key TYPESAFE_API_KEY, model jev-latest, timeout 30s, retries 2

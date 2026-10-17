@@ -646,3 +646,15 @@ fn only_ffi_depends_on_uniffi() {
         );
     }
 }
+
+/// T64.19: `crates/cox` never touches the OS keyring itself — key lookup
+/// lives in `cox-provider-http` and MCP tokens in `cox-mcp` — so a direct
+/// `keyring` dependency here is dead weight (unused since T37.31). Checked on
+/// the manifest because the crate still reaches `keyring` transitively.
+#[test]
+fn cox_does_not_depend_on_keyring() {
+    assert!(
+        !all_deps()["cox"].contains("keyring"),
+        "crates/cox must not depend on keyring directly"
+    );
+}
