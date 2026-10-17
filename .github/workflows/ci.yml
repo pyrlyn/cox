@@ -260,8 +260,11 @@ jobs:
           tinygo build -o example_go.wasm -target wasip1 -buildmode=c-shared .
 
       # Also scaffolds `cox plugin new --lang go` and builds it with TinyGo.
+      # `cargo` here is mise's shim, whose `mise exec` drops the real Go and
+      # TinyGo dirs from PATH, so the template test's TinyGo resolves to a
+      # shim with no version; hand it this step's PATH as `just` does.
       - name: go plugin example e2e
-        run: cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
+        run: PLUGIN_TOOLS_PATH="$PATH" cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
 
   deny:
     needs: config
