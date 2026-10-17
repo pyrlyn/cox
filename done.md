@@ -82,6 +82,31 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox-core autonomous
+#### T66.6 Core: a refine proposal from one cheap call, with the base prompt fixed
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: the core turns the transcript tail, the digest of current entries and the user's `/refine` text into a validated list of edits. It writes no file, and the base prompt can never be a target.
+
+Files:
+- `crates/cox-core/src/refine.rs` (new)
+- `crates/cox-core/src/prompts/refine.md` (new; written for cox, not Prime's prose)
+- `crates/cox-core/tests/refine.rs`
+
+Steps:
+1. Make one call on the `Job::Memory` routing tier, the same pattern as `memory_extract.rs`. No new `Job` variant is added.
+2. The model returns `{evidence, edits: [{action: create|update|delete, kind, id, content?, reason}]}`. Validation:
+   - at most 5 edits;
+   - `content` of at most 4 KB;
+   - `kind` is one of the four;
+   - `id` matches the pattern;
+   - any id that names the base prompt is refused (idea: `pa-core/src/refinement/planner.rs`, "base system prompt is not editable").
+   An invalid proposal yields no edits and outcome `rejected` with the reason.
+3. `prompt.md` and `prompt_minimal.md` stay `include_str!` constants (`context.rs:28, 32`).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core refine
 mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo fmt --check
 ```
@@ -100,6 +125,19 @@ Done:
 - `cox_protocol::autonomous`: `AutonomousPolicy` (field names as T66.10's `[autonomous]` table, `Default` with step 1's values, `validate` returns `NoGates` or `BlankGate`), `GateResult`, the async `GateRunner` trait (infallible: a spawn failure, sandbox denial or timeout is a failed result) and `AutonomousStop` (`GatesPassed`, `GateRetriesExhausted`, `NoProgress`, `MaxContinuations`, `MaxTurns`, `MaxTokens`, `Timeout`, `TurnEnded{stop}`). Not reachable from `Event`, so `docs/protocol.jsonschema` is unchanged.
 - `cox_core::autonomous`: `Driver::new(policy)` rejects a gateless policy, so `decide` cannot run without one. `decide(&mut State, &TurnReport, &dyn GateRunner) -> Next` takes `&mut State` because the streak and per-gate failure counts live there; the clock is `TurnReport.elapsed`, a value. Order: a never-continue stop (no gate runs), gates in order (first failure wins; a pass wins even at a limit), the limits, the gate retries (a gate stops after `gate_retries + 1` failed checks), then the no-progress streak (2).
 - Check: `cargo nextest run -p cox-protocol -p cox-core` 571 passed, 1 skipped; `-E 'test(autonomous) | binary(autonomous)'` 20 passed. The card's `nextest run -p cox-core autonomous` filter matches test names only, so it runs the 3 unit tests; the integration binary needs `binary(autonomous)`. `cargo clippy -p cox-protocol -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean.
+Done when tests show that:
+- an edit aimed at the base prompt is refused;
+- malformed JSON is rejected;
+- a valid proposal parses;
+- after a refine, the base prompt bytes and `system[0..=2]` are byte-identical to before.
+
+Out of scope: applying edits or running a refine in the background automatically.
+
+Done:
+- `crates/cox-core/src/refine.rs`: `Session::propose_refine(text, digest)` sends one `memory`-job request through the shared `side_call` (route, ledger row, spend), with the user's text, the digest (written by the session layer) and the last 24 000 bytes of the transcript cut on a char boundary. It touches neither the history nor the prefix. `refine::parse` reads the answer as a `serde_json::Value` (no new dependency; a surrounding code fence is tolerated) and returns `Proposal { evidence, edits }` or `Rejected { reason }`; the reason is written by cox and never quotes the model. Any failure rejects the whole proposal: more than 5 edits, an unknown kind or action, an id outside `[a-z0-9-]{1,64}` (the existing `memory_extract::is_valid_name`, now `pub(crate)`), a kind or id naming the base prompt (`prompt`, `prompt-minimal`, `base`, `system`, or containing `base-prompt`/`system-prompt`), content missing on create/update, present on delete or over 4096 bytes, or one entry edited twice.
+- `crates/cox-core/src/prompts/refine.md`: the instructions, written for cox; the transcript and digest are framed as evidence, not instructions.
+- `prompt.md` and `prompt_minimal.md` stay `include_str!` constants in `context.rs`; nothing in this task can write them.
+Check: `cargo nextest run -p cox-core refine` 6 passed: `refine_refuses_an_edit_aimed_at_the_base_prompt`, `refine_rejects_malformed_json`, `refine_parses_a_valid_proposal_inside_a_code_fence`, `refine_rejects_a_proposal_out_of_bounds`, `refine_is_one_memory_call_and_leaves_the_cached_prefix_byte_identical` (`system[0..=2]` from `assemble` and the history are byte-identical before and after; one `memory` usage row), `refine_rejects_a_bad_answer_but_still_records_its_cost`. Whole `-p cox-core`: 437 passed. `cargo clippy -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: the workspace-wide clippy (only `cox-core` changed).
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
