@@ -57,6 +57,12 @@ impl Swap {
         symlink(&self.outside, &dir).expect("symlink parent");
     }
 
+    /// Plants a symlink to the outside directory where the not-yet-created
+    /// directory `rel` would go, so a later `create_dir_all` follows it.
+    pub fn plant_parent(&self, rel: &str) {
+        symlink(&self.outside, self.root.join(rel)).expect("symlink planted parent");
+    }
+
     pub fn outside_secret(&self) -> String {
         std::fs::read_to_string(self.outside.join("secret.txt")).expect("read secret")
     }
