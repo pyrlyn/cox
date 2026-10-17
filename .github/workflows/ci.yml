@@ -223,6 +223,12 @@ jobs:
           install_args: go tinygo
           add_shims_to_path: false
 
+      # mise 2026.10 no longer resolves a tool from `plugins/mise.toml` when
+      # the template test runs `tinygo` from a temp dir ("No version is set
+      # for shim"). Pin the same versions globally so any cwd resolves them.
+      - name: pin Go and TinyGo globally
+        run: mise use -g go@1.27.2 tinygo@0.43.0
+
       - uses: ./.github/actions/sccache
         with:
           access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
