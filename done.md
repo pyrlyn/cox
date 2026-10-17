@@ -1,3 +1,32 @@
+#### T61.5.1 One integration-test binary for `cox-core`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T61.1 · Size: ~60 (moves, plus one `main.rs`) · Priority: P2 · Complexity: 3
+
+Goal: `crates/cox-core/tests/*.rs` (21 files) become modules of one test binary, so `nextest` links one binary instead of 21.
+
+Files:
+- `crates/cox-core/tests/it/main.rs` (new; `mod` lines only)
+- `crates/cox-core/Cargo.toml` (one `[[test]] name = "it"` if auto-discovery needs it)
+- the moved test files (renames; they do not count as source files)
+
+Steps:
+1. `git mv` each file into `tests/it/`; `common/` and `scenarios/` move with them. `cox-app`'s dev setup reuses cox-core's harness (`crates/cox-app/Cargo.toml` comment): keep the path it uses working.
+2. insta snapshot names carry the module path: move the snapshot files with `cargo insta test --accept` only after confirming each moved snapshot's content is unchanged (`git diff -M --stat` shows renames only).
+3. Update every `--test <name>` for this crate in `justfile`, `.github/`, `docs/`, `AGENTS.md` and open `plan.md` cards to `--test it -E 'test(/^<name>::/)'`.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core
+mise exec -- cargo nextest run -p cox-app
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Done when: the test count before and after is equal (`nextest list`); §4.3.9 has the `-p cox-core` build-phase time before and after.
+
+Out of scope: other crates (T61.5.2, T61.5.3).
+
+Done: 24 files (the card said 21) are modules of `crates/cox-core/tests/it/main.rs`; `common/` and `scenarios/` stay in `tests/`, because `cox`, `cox-app` and `cox-tui` name their paths (`#[path = "../common/mod.rs"] mod common;` in `main.rs`, `use crate::common;` in the modules). The compact snapshot moved to `tests/it/snapshots/it__compact__...snap` (body unchanged, only the `source:` header line differs, since insta prefixes the crate name `it`); the scenario snapshots stay, their `snapshot_path` is now `../scenarios`. No `--test <name>` for cox-core existed outside `done.md`. Test count 431 before and after, identical names. Build phase of `-p cox-core --no-run` 28 s to 14 s (`research.md` §4.3.9). Checks: nextest `-p cox-core` 431 passed, `-p cox-app` 270 passed, clippy `-p cox-core -p cox-app --all-targets` and `fmt --check` clean (the whole workspace was not run: too heavy beside parallel agents).
+
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
 Model: opus · Status: done 2026-10-17 (not needed: zero rebuilds measured) · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3

@@ -4,7 +4,7 @@
 
 //! OpenTelemetry contract tests for the session → turn → provider/tool trace.
 
-mod common;
+use crate::common;
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};

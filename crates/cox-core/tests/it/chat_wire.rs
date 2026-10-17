@@ -9,7 +9,7 @@
 //! `turn.rs` because every other loop test drives the `Scripted` provider,
 //! whose events never pass through a wire's state machine.
 
-mod common;
+use crate::common;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;

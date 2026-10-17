@@ -4,7 +4,7 @@
 
 //! Loop tests: Scripted provider + stub tools, golden Event JSONL (T2.1).
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -74,7 +74,7 @@ fn snapshot(name: &str, events: &[Event]) {
     let mut value = serde_json::to_value(events).expect("events json");
     redact(&mut value);
     insta::with_settings!({
-        snapshot_path => "scenarios",
+        snapshot_path => "../scenarios",
         prepend_module_to_snapshot => false,
     }, {
         insta::assert_json_snapshot!(format!("{name}.events"), value);

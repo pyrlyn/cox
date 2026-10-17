@@ -156,7 +156,7 @@ async fn budget_hit() {
         })
     ));
     insta::with_settings!({
-        snapshot_path => "scenarios",
+        snapshot_path => "../scenarios",
         prepend_module_to_snapshot => false,
     }, {
         insta::assert_json_snapshot!("budget_hit.events", kinds(&second));
