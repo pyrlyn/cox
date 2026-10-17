@@ -1573,6 +1573,7 @@ version = "0.1.2"
 dependencies = [
  "cox-store",
  "nix 0.31.3",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

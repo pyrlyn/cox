@@ -492,7 +492,7 @@ mod tests {
             drop(to_server);
             wire::decode(&text).expect("decodes")
         };
-        let (line, served) = tokio::join!(client, serve(app, events, server_in, server_out));
+        let (line, served) = tokio::join!(client, serve(app, ServeMode::Client, events, server_in, server_out));
         served.expect("served");
         let Line::Response(Response {
             id: 1,
@@ -533,7 +533,7 @@ mod tests {
             from_server.read_to_end(&mut bytes).await.expect("read");
             bytes
         };
-        let (bytes, served) = tokio::join!(client, serve(app, events, server_in, server_out));
+        let (bytes, served) = tokio::join!(client, serve(app, ServeMode::Client, events, server_in, server_out));
         served.expect("served");
         assert!(!bytes.contains(&b'\r'), "a CR leaked into the output");
         let text = String::from_utf8(bytes).expect("utf-8");
