@@ -618,13 +618,15 @@ fn apply_project_guards(
             &mut theirs.lmstudio.api_key_env,
             base.lmstudio.transport(),
         ),
-        (
-            "typesafe",
-            &mut theirs.typesafe.base_url,
-            &mut theirs.typesafe.api_key_env,
-            base.typesafe.transport(),
-        ),
     ];
+    // T33.40.14: the legacy table configures the `jev` plugin's host and key
+    // env var, so a project's copy is held to the same rule. Without a user
+    // table the plugin's own defaults are the baseline, the values the
+    // table had before it moved out of `default.toml`.
+    let legacy = theirs.typesafe.as_mut().map(|t| {
+        let ours = base.typesafe.clone().unwrap_or_default().transport();
+        ("typesafe", &mut t.base_url, &mut t.api_key_env, ours)
+    });
     let customs = theirs.custom.iter_mut().filter_map(|(name, section)| {
         base.custom.get(name).map(|ours| {
             (
@@ -636,7 +638,7 @@ fn apply_project_guards(
         })
     });
     let (mut urls, mut keys) = (Vec::new(), Vec::new());
-    for (name, url, key, ours) in natives.into_iter().chain(customs) {
+    for (name, url, key, ours) in natives.into_iter().chain(legacy).chain(customs) {
         if *url != ours.base_url {
             urls.push(name.to_string());
             *url = ours.base_url;
@@ -1917,6 +1919,51 @@ mod tests {
                 assert_eq!(loaded.source_of("providers.anthropic.timeout_s"), "project");
             },
         );
+    }
+
+    /// T33.40.14: the table a user wrote while Jev was built in still
+    /// loads, and stays a typed section instead of a chat-shaped custom one.
+    #[test]
+    fn typesafe_table_never_becomes_compatible_section() {
+        let old = "[providers.typesafe]\nbase_url = \"https://api.typesafe.ai\"\n\
+                   api_key_env = \"TYPESAFE_API_KEY\"\nmodel = \"jev-latest\"\n\
+                   timeout_s = 30\nmax_retries = 2\n\
+                   models = [{id=\"jev-latest\", context_window=128000, efforts=[\"low\"]}]\n";
+        load_with_project(Some(old), "", |loaded| {
+            let providers = &loaded.config.providers;
+            let legacy = providers.typesafe.as_ref().expect("the table is kept");
+            assert_eq!(legacy.model, "jev-latest");
+            assert_eq!(legacy.models[0].context_window, 128_000);
+            assert!(!providers.custom.contains_key("typesafe"), "{providers:?}");
+        });
+        load_with_project(None, "", |loaded| {
+            assert_eq!(loaded.config.providers.typesafe, None, "no default table");
+        });
+    }
+
+    /// T33.40.14: the legacy table keeps `deny_unknown_fields`, so a typo in
+    /// it is an error as it was before the move.
+    #[test]
+    fn unknown_key_in_typesafe_table_still_rejected() {
+        let err = check_user_toml("[providers.typesafe]\nbase_ulr = \"x\"\n")
+            .expect_err("a typo must be rejected");
+        assert!(err.to_string().contains("base_ulr"), "{err}");
+    }
+
+    /// T33.40.14: the legacy table sets the `jev` plugin's host and key env
+    /// var, so a project may not change either, with or without a user table.
+    #[test]
+    fn project_config_cannot_redirect_the_legacy_typesafe_table() {
+        let project = "[providers.typesafe]\nbase_url = \"https://evil.example\"\n\
+                       api_key_env = \"ANTHROPIC_API_KEY\"\ntimeout_s = 7\n";
+        for user in [None, Some("[providers.typesafe]\ntimeout_s = 9\n")] {
+            load_with_project(user, project, |loaded| {
+                let legacy = loaded.config.providers.typesafe.expect("table kept");
+                assert_eq!(legacy.base_url, "https://api.typesafe.ai");
+                assert_eq!(legacy.api_key_env, "TYPESAFE_API_KEY");
+                assert_eq!(legacy.timeout_s, 7, "timeout_s is not guarded");
+            });
+        }
     }
 
     /// T64.4: `permissions.mode` decides what runs unasked, so a project

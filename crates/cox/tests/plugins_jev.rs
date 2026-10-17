@@ -489,7 +489,7 @@ fn doctor_names_the_plugin_that_serves_typesafe() {
     let rows: Vec<Value> = serde_json::from_slice(&out).unwrap();
     let row = rows
         .iter()
-        .find(|r| r["check"] == "typesafe client")
+        .find(|r| r["check"] == "provider typesafe")
         .unwrap_or_else(|| panic!("{rows:?}"));
     assert!(
         row["detail"]

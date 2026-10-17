@@ -82,14 +82,6 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `load` = `false` — true = load the model at session start if it is not loaded (with context_window)
 - `timeout_s` = `600` — local prefill is slow, same rationale as `local`
 - `max_retries` = `4`
-## `[providers.typesafe]`
-
-- `base_url` = `"https://api.typesafe.ai"` — client appends /v1/systemone
-- `api_key_env` = `"TYPESAFE_API_KEY"` — else keyring entry "cox/typesafe"
-- `model` = `"jev-latest"`
-- `timeout_s` = `30`
-- `max_retries` = `2`
-- `models` = `[{id="jev-latest", context_window=128000, efforts=["low"]}]` — decisions are cheap-tier only
 ## `[providers.deepseek]`
 
 - `base_url` = `"https://api.deepseek.com"` — client appends /chat/completions

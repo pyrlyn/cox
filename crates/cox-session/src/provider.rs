@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cox_protocol::Config;
-use cox_protocol::config::Transport;
+use cox_protocol::config::{LegacyTypesafe, Transport};
 use cox_protocol::traits::Provider;
 use cox_provider::anthropic::{AnthropicProvider, CacheTtl};
 use cox_provider::openai::chat::OpenAiChatProvider;
@@ -99,7 +99,16 @@ pub(crate) fn assemble(
 /// (T33.40). While both exist one name serves one client, so every field
 /// of the table configures the plugin's section (T33.40.4, T33.40.5).
 pub(crate) fn abi_transport(config: &Config, section: &str) -> Option<Transport> {
-    (section == "typesafe").then(|| config.providers.typesafe.transport())
+    legacy_table(config, section).map(|t| t.transport())
+}
+
+/// The leftover `[providers.typesafe]` table, when `section` is its name.
+fn legacy_table<'a>(config: &'a Config, section: &str) -> Option<&'a LegacyTypesafe> {
+    config
+        .providers
+        .typesafe
+        .as_ref()
+        .filter(|_| section == "typesafe")
 }
 
 /// [`abi_transport`] with the table's default `model`, as the plugin host
@@ -109,12 +118,13 @@ pub(crate) fn abi_section(
     config: &Config,
     section: &str,
 ) -> Option<cox_plugin::provider::SectionConfig> {
-    let t = abi_transport(config, section)?;
+    let legacy = legacy_table(config, section)?;
+    let t = legacy.transport();
     Some(cox_plugin::provider::SectionConfig {
         base_url: t.base_url,
         api_key_env: t.api_key_env,
         timeout_s: t.timeout_s,
-        model: config.providers.typesafe.model.clone(),
+        model: legacy.model.clone(),
     })
 }
 
@@ -497,10 +507,14 @@ mod tests {
     #[test]
     fn typesafe_table_supplies_the_plugin_section() {
         let mut cfg = Config::default();
-        cfg.providers.typesafe.base_url = "http://127.0.0.1:9".into();
-        cfg.providers.typesafe.api_key_env = "MY_JEV_KEY".into();
-        cfg.providers.typesafe.timeout_s = 7;
-        cfg.providers.typesafe.model = "jev-1.13.0".into();
+        assert_eq!(abi_section(&cfg, "typesafe"), None, "no table, no override");
+        cfg.providers.typesafe = Some(LegacyTypesafe {
+            base_url: "http://127.0.0.1:9".into(),
+            api_key_env: "MY_JEV_KEY".into(),
+            timeout_s: 7,
+            model: "jev-1.13.0".into(),
+            ..LegacyTypesafe::default()
+        });
         assert_eq!(
             abi_section(&cfg, "typesafe"),
             Some(cox_plugin::provider::SectionConfig {

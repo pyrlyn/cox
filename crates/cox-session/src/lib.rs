@@ -47,6 +47,7 @@ pub mod sandbox;
 pub mod testing;
 pub mod tools;
 
+pub use legacy_tier::install_pointer;
 pub use lineage::{Follow, fork, handoff, resume};
 pub use mcp::{mcp_auth, mcp_servers};
 #[cfg(feature = "plugins")]

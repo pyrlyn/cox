@@ -372,7 +372,10 @@ mod tests {
             .expect("plugin typesafe routes");
         assert_eq!(route.provider, ProviderId::Plugin("typesafe".into()));
         assert_eq!(route.model.0, "tier-model");
-        assert_ne!(route.model.0, cfg.providers.typesafe.model);
+        assert_ne!(
+            route.model.0,
+            cox_protocol::config::LegacyTypesafe::default().model
+        );
     }
 
     /// T33.40.13: with no section loaded `typesafe` is an unknown name like

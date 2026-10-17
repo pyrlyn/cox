@@ -104,14 +104,6 @@
           "load": false,
           "timeout_s": 600,
           "max_retries": 4
-        },
-        "typesafe": {
-          "base_url": "https://api.typesafe.ai",
-          "api_key_env": "TYPESAFE_API_KEY",
-          "model": "jev-latest",
-          "timeout_s": 30,
-          "max_retries": 2,
-          "models": []
         }
       }
     },
@@ -734,16 +726,15 @@
           }
         },
         "typesafe": {
-          "description": "`[providers.typesafe]` (Jev System One, type-1 native)",
-          "$ref": "#/$defs/JevProviderConfig",
-          "default": {
-            "base_url": "https://api.typesafe.ai",
-            "api_key_env": "TYPESAFE_API_KEY",
-            "model": "jev-latest",
-            "timeout_s": 30,
-            "max_retries": 2,
-            "models": []
-          }
+          "description": "`[providers.typesafe]`: the table from when Jev was built in\n(T33.40.14). Unset unless a config file still has it; a named\nfield so the table can never fall into `custom` as a chat-shaped\nsection. Its knobs configure the `typesafe` plugin section.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LegacyTypesafe"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": {
@@ -995,8 +986,8 @@
       },
       "additionalProperties": false
     },
-    "JevProviderConfig": {
-      "description": "`[providers.typesafe]` (TypeSafe Jev System One, type-1 native, T21.1).",
+    "LegacyTypesafe": {
+      "description": "`[providers.typesafe]` as written while Jev was built in (T21.1,\nT33.40.14): kept so an old config still loads and still configures the\n`jev` plugin's section. The defaults are the plugin's own, so a partial\ntable behaves as it did before the move.",
       "type": "object",
       "properties": {
         "base_url": {
