@@ -5,7 +5,7 @@
 //! T64.8: parallel write-class calls that name the same path run one after
 //! another in model order; calls on different paths still overlap.
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

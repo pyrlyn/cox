@@ -6,7 +6,7 @@
 //! tier with read-only tools, its cost lands in the ledger under its own
 //! session, and an answer over the cap comes back summarised.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

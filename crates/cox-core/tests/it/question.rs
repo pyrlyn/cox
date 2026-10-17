@@ -6,7 +6,7 @@
 //! `Event::QuestionAsked`, the answer a `Submission::Answer`, so a headless
 //! driver with no side channel answers it and the rollout keeps both.
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 use std::sync::Arc;

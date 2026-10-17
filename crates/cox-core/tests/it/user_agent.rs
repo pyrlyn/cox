@@ -7,7 +7,7 @@
 //! (engine, hooks, slots), its answer joins history at the tail, and it is
 //! refused while a turn runs.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

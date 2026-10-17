@@ -7,7 +7,7 @@
 //! `Rewound` marker. T51.19: a hunk revert is checkpointed, confined,
 //! refused on a stale digest and undone by `/redo`.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};

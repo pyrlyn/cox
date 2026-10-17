@@ -1,5 +1,5 @@
 ---
-source: crates/cox-core/tests/compact.rs
+source: crates/cox-core/tests/it/compact.rs
 expression: "redact_ids(text, &flat)"
 ---
 [Compacted summary of 3 earlier turn(s)]

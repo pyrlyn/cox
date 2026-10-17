@@ -5,7 +5,7 @@
 //! T26.1: the loop archives a pre-image before a write and snapshots
 //! around a shell call, with a fake `Checkpointer` so no git runs here.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

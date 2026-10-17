@@ -5,7 +5,7 @@
 //! Router tests (T9.1): the job table, the think gate, no auto-escalation,
 //! overrides and local mode, plus `/model` through a live session.
 
-mod common;
+use crate::common;
 
 use common::{drain, open, spawn_turn};
 use cox_core::Session;
