@@ -38,13 +38,13 @@ pub fn client_with_timeout(timeout_s: u32) -> Result<reqwest::Client, ProviderEr
 /// `env_var` first, else the platform keyring entry `cox/<section>` (the
 /// native store per platform, not a mock). Every provider section resolves
 /// its key this way — `docs/design/providers.md` § Target shape, item 2
-/// (T30.21): `[providers.anthropic]`, `[providers.openai]`, `[providers.
-/// typesafe]` and every `[providers.<name>]` compatible section all read
-/// their own `api_key_env` first, then `cox/<section>`.
+/// (T30.21): `[providers.anthropic]`, `[providers.openai]` and every
+/// `[providers.<name>]` compatible section all read their own
+/// `api_key_env` first, then `cox/<section>`.
 ///
 /// A missing or unreadable credential is [`ProviderError::Auth`]; callers
-/// decide what that means for their section. Anthropic and Jev always need
-/// a key, so they propagate the error with `?`. OpenAI-shaped sections
+/// decide what that means for their section. Anthropic always needs
+/// a key, so it propagates the error with `?`. OpenAI-shaped sections
 /// (`openai`, `local`, and any compatible section) build with an
 /// `Option<String>` key and call `.ok()`: a local server or a self-hosted
 /// gateway commonly needs none, so a missing key there is "no

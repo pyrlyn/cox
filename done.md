@@ -13693,3 +13693,22 @@ clean
 $ mise exec -- cargo fmt --check -p cox-models -p cox
 clean
 ```
+
+#### T33.40.16 Docs and plan sweep after the removal
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 2 · Depends: T33.40.15 · Size: ~80 · Files: `docs/design/providers.md`, `docs/design/crates.md`, `docs/design/v0.2-jev.md` (+ `plan.md`)
+Goal: no doc describes a built-in Jev.
+- `providers.md` loses the Jev family.
+- `crates.md` loses the `cox-provider-jev` row.
+- `v0.2-jev.md` gets a closing note that the integration shipped as the `jev` plugin (A52, T33.40), with the eval verdicts.
+- In `plan.md`, T32.15 is dropped with a reason, and the PL§2 example uses `name = "typesafe"`.
+- Also fixed (found by the Check): the unused `Api::Jev` variant of `cox_models::effort::Api`, and doc comments in `cox-provider-http` and `cox-session` that still described a built-in Jev.
+- T32.15 was already recorded as dropped in this file (with the reason, per A52 decision 12), and the PL§2 example already uses `name = "typesafe"`; both were verified, not changed.
+- The eval verdicts are not in `v0.2-jev.md`: E1 (T33.40.7) needs a live key and has not run. The closing note says so; T33.40.7 owns adding the verdicts.
+Check: `rg -n -i 'jev|typesafe' crates docs` now matches only: the plugin (`plugins/jev` tests and `crates/cox-plugin*`, ABI and manifest docs, `plugins_jev.rs`, fixtures); the tombstone (`LegacyTypesafe`, `[providers.typesafe]` loading in `cox-protocol`, `cox-config`, `cox-session`, `cox-app`, `cox-models` catalog and its tests, `docs/config.jsonschema`); the migration notice (`cox doctor`, `legacy_tier.rs`, its snapshots, `ProviderId` ledger tag `"jev"`); and history (`docs/design/v0.2-jev.md`, `docs/design/plugins.md`, the `providers.md` tombstone mention). `docs/ru` and `docs/uk` had no Jev mentions.
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test docs
+7 tests run: 7 passed
+$ cargo nextest run -p cox --test ide ; -p cox-models ; -p cox-protocol -E 'test(config)' ; -p cox-tui -E 'test(keymap_table_matches_docs)' ; -p cox-provider-http -p cox-session
+3 + 23 + 20 + 1 + 123 tests run: all passed
+```
