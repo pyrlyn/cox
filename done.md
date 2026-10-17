@@ -133,6 +133,14 @@ Done:
 - `cox_core::autonomous`: `Driver::new(policy)` rejects a gateless policy, so `decide` cannot run without one. `decide(&mut State, &TurnReport, &dyn GateRunner) -> Next` takes `&mut State` because the streak and per-gate failure counts live there; the clock is `TurnReport.elapsed`, a value. Order: a never-continue stop (no gate runs), gates in order (first failure wins; a pass wins even at a limit), the limits, the gate retries (a gate stops after `gate_retries + 1` failed checks), then the no-progress streak (2).
 - Check: `cargo nextest run -p cox-protocol -p cox-core` 571 passed, 1 skipped; `-E 'test(autonomous) | binary(autonomous)'` 20 passed. The card's `nextest run -p cox-core autonomous` filter matches test names only, so it runs the 3 unit tests; the integration binary needs `binary(autonomous)`. `cargo clippy -p cox-protocol -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean.
 
+#### T61.1 Build-time baseline
+
+Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
+Depends: — · Size: ~0 (research.md only) · Files: `research.md`
+Goal: `research.md` §4.3.9 holds the numbers P61 is judged by.
+Check: `grep -n '4.3.9' research.md`
+Done: §4.3.9 has a row for every measurement (Rust `--timings`, Swift packages, desktop app, CI jobs), the top five crates and the machine line. Single runs on a shared machine; the clean rows use a warm sccache, and a cold clean row was added. Finding: `[profile.dist]` inherits `dev` (`Cargo.toml:238-239`, since ae5ed7bd), not fat LTO, so the P61 premise behind T61.2 needs re-checking.
+
 #### T33.40.5 Parity: the `typesafe` table configures the plugin's section
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
