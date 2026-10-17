@@ -2682,7 +2682,7 @@ Out of scope: the `cox serve --worker` flag and the supervisor that spawns worke
 
 #### T66.19 New crate `cox-serve`: the restart policy
 
-Model: sonnet · Status: open · Depends: T66.12 · Size: ~120 · Priority: P2 · Complexity: 2
+Model: Claude Code / sonnet-5.5 · Status: in progress · Depends: T66.12 · Size: ~120 · Priority: P2 · Complexity: 2
 
 Goal: a pure policy decides what the supervisor does when a worker exits. `docs/design/serve.md` S4 and D3. `cox-serve` is its own crate because it will own a trust boundary (who may connect) and process supervision, which must stay out of `cox-app` (linked into the macOS app through `cox-ffi`) and out of `crates/cox` (clap and dispatch only).
 
@@ -2703,6 +2703,8 @@ mise exec -- cargo fmt --check
 ```
 
 Done when these tests pass: `delays_double_from_250ms_to_a_30s_cap`, `gives_up_after_five_consecutive_failures`, `thirty_seconds_of_life_resets_the_count`, `a_clean_exit_is_never_restarted`.
+
+Plan (Claude Code / sonnet-5.5): add `crates/cox-serve` (std only, `publish = false`, workspace lints); `restart.rs` holds named consts, `Policy` (consecutive failures) and `Decision`; the fifth consecutive failure gives up, so the 30 s cap is reachable only through the pure `delay` function and is tested there. Register the member line, the AGENTS.md row, the crates.md row and a `deps.rs` rule that `cox-serve` has no workspace dependency yet. Verify with the Check below.
 
 Out of scope: spawning processes and the socket (T66.20, T66.21).
 
