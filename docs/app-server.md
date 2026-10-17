@@ -1,21 +1,15 @@
-# `cox app-server` and remote sessions
+# `cox app-server` wire protocol
 
-`cox app-server --stdio` serves the macOS app's session calls over stdin and
-stdout, one JSON object per line. The app runs it on another machine over your
-own `ssh`. That machine's sessions then show in the app's sidebar as a group of
-their own, and they open, stream and take prompts like local ones. The session,
-its tools, its sandbox and its keys stay on that machine. Only the protocol
-lines cross the connection.
+`cox app-server --stdio` serves the desktop app's session calls over stdin and
+stdout, one JSON object per line. The app starts it on another machine through
+a target's launcher (ssh, docker, limactl or colima); `docs/targets.md` covers
+the targets, how to put cox on them and what they may and may not receive. This
+file is the wire between the app and that server.
 
-## Running it on a host
+The session, its tools, its sandbox and its keys stay on the machine that runs
+the server. Only the protocol lines cross the connection.
 
-Install cox on the host as you would locally (see `docs/getting-started.md`),
-so that `cox` is on the `PATH` of a non-interactive ssh login. Then check it by
-hand:
-
-```sh
-ssh devbox cox app-server --stdio
-```
+## Serving
 
 The server reads requests until stdin closes, then closes every session stream
 it opened. A running turn keeps running on the host. It writes nothing to
@@ -76,6 +70,33 @@ module, and a drift test keeps it current.
     plugin's widget is checked again on the app and goes through the same
     confirmation as `open_url`.
 
+## Handshake
+
+The first request on a link is `hello`. It takes no parameters and answers the
+host's protocol version (`wire`), cox version, OS, architecture and sandbox
+backend, or no backend when the host has none. The app refuses a host that
+speaks another protocol version and says which side to update, for example:
+
+> devbox speaks app-server protocol 2 but this app speaks 1; update this app
+> so the two match
+
+A cox that is too old to know `hello` gives a plain error instead:
+
+> the cox on devbox is too old for this app (protocol 1); update cox on that
+> machine (see docs/targets.md)
+
+The app also reads the launcher's stderr, keeping the last 8 KiB and stripping
+escape sequences and bidi controls from it, so a link that closes before
+`hello` says why. When the shell reports exit status 127 or `cox: command not
+found`, the message is:
+
+> cox is not on the PATH of devbox; install cox there so that a
+> non-interactive login can run `cox` (see docs/targets.md)
+
+Any other early close shows the last lines the launcher wrote, for example
+`could not reach devbox: ssh: Could not resolve hostname devbox`. A drop after
+a successful `hello` is the usual disconnected state.
+
 A stalled client never delays a turn. The server keeps at most 64 lines queued
 for the writer. Past that, each session's patches fold into the latest state
 per block until the client reads again.
@@ -85,47 +106,6 @@ per block until the client reads again.
 - **Keys.** The server's host answers no secret request. A session on the host
   reads the host's own env vars and keyring, and the protocol has no message
   that carries a key. A test checks that no schema tag names a secret.
-- **Your ssh agent.** The app runs `ssh` with `ForwardAgent=no` and
-  `ClearAllForwardings=yes`, so neither the agent nor a port reaches the host.
-- **Your environment.** `ssh` starts with an empty environment apart from
-  `HOME`, `USER`, `LOGNAME`, `PATH` and `SSH_AUTH_SOCK`. The last lets the
-  local `ssh` itself authenticate; it is not forwarded.
-
-## How the app connects
-
-**File › Connect to Host…** takes an ssh host alias, such as a `Host` entry in
-`~/.ssh/config`. The app then runs:
-
-```sh
-/usr/bin/ssh -T -o BatchMode=yes -o ForwardAgent=no -o ClearAllForwardings=yes -- <alias> cox app-server --stdio
-```
-
-The alias is refused before anything runs if it is empty, starts with `-`, or
-contains whitespace or control characters. `BatchMode=yes` means ssh never
-prompts, so the host must accept a key from your agent or your ssh config. A
-host that cannot connect shows in the sidebar as disconnected, and the core's
-reason shows in the sheet.
-
-A host that connects is saved to `desktop.remote_hosts` in your user config
-(see `docs/config.md`), and the app reconnects to it at the next launch. A
-project's `.cox/config.toml` cannot set this key: the project-config guard
-reverts it and reports the change, because a repository must not choose where
-the app opens a shell.
-
-Each host is a sidebar group under a host badge. The app re-reads the group
-every few seconds. When the connection drops, the group shows **Disconnected**
-with a **Reconnect** button, and its rows are read-only until it reconnects.
-A session opened from a host streams through that host's connection. When the
-connection drops, the session's stream ends; the session itself keeps running
-on the host.
-
-A remote session in the app does not yet have:
-
-- completions or prompt history;
-- the Plan and Info tabs;
-- Review, or turn costs;
-- expanding a truncated output;
-- a terminal pane.
-
-The protocol has no message for these yet, or the app asks for them
-synchronously.
+- **The launch environment and the ssh agent.** How a link is started, what
+  the launcher is given and what it may forward are the target's rules and are
+  in `docs/targets.md`.

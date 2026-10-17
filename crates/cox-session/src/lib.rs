@@ -42,6 +42,9 @@ pub mod plugin_ui;
 pub mod plugins;
 pub mod provider;
 pub mod sandbox;
+#[cfg(feature = "plugins")]
+mod target_agents;
+pub mod targets;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
 pub mod tools;
@@ -502,6 +505,9 @@ pub async fn open_reporting(
             cloud_store,
             cox_provider::http::resolve_key,
         );
+        // T68.7: presets that run `cox` on a target, local to this session.
+        let (targeted, targeted_left_out) = target_agents::drivers(&base, cwd);
+        drivers.extend(targeted);
         let shared = cloud
             .iter()
             .map(|d| d.clone() as Arc<dyn cox_protocol::traits::ExternalAgent>);
@@ -516,6 +522,7 @@ pub async fn open_reporting(
             .into_iter()
             .chain(left_out)
             .chain(cloud_left_out)
+            .chain(targeted_left_out)
             .collect::<Vec<_>>()
     };
     // T33.44: each granted plugin's `cox_init` ran once, in `plugin_tools`

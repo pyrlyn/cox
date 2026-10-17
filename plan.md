@@ -127,12 +127,12 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
-| T68.5 | todo | P2 | 3 | 0% |  |
+| T68.5 | in progress | P2 | 3 | 100% | Claude / sonnet-5.5 |
 | T68.6 | todo | P1 | 3 | 0% |  |
 | T68.7 | todo | P2 | 3 | 0% |  |
-| T68.8 | todo | P2 | 3 | 0% |  |
+| T68.8 | in progress | P2 | 3 | 70% | Claude / sonnet-5.5 |
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
-| T68.10 | todo | P2 | 1 | 0% |  |
+| T68.10 | in progress | P2 | 1 | 90% | Claude / haiku-5.5 |
 
 ## Reference
 
@@ -2786,61 +2786,25 @@ Rationale in §6 A158. Today only the desktop app reaches a remote session, only
 
 **Not taken yet (in `ideas.md`):** a throwaway `docker run --rm` container from an image with the project mounted, and installing `cox` on a target.
 
-#### T68.2 `[targets.<name>]` in config
-
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.1 · Size: ~120 · Priority: P1 · Complexity: 2
-
-Goal: `[targets.<name>]` with `target` (`kind:name`), `cwd`, `context` (docker) and `program` (an absolute launcher path that overrides the lookup), plus `[launchers]` per kind. A surface accepts a target by its config name or as a literal `kind:name`. `desktop.remote_hosts` stays and reads as `ssh:<alias>` targets. The project-config guard reverts every `targets.*` and `launchers.*` key. Files: `cox-protocol/src/config.rs`, `cox-config/src/load.rs`, `default.toml`, `docs/config.md`, regenerated `docs/config.jsonschema`.
-
-Done when `project_config_cannot_name_a_target`, `remote_hosts_read_as_ssh_targets` and the schema drift test pass.
-
-#### T68.3 `hello` handshake and readable failures
-
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.1 · Size: ~180 · Priority: P1 · Complexity: 2
-
-Goal: the first exchange on the app-server wire is `hello`: wire version, cox version, OS, arch and the sandbox backend (or none). The client refuses another wire major version with one sentence naming both versions. The launcher's stderr is read, bounded (8 KiB) and passed through `cox_sanitize::sanitize`, so `cox: command not found`, exit 127, an unknown container or a stopped instance becomes `RemoteError::NotInstalled` / `RemoteError::Unreachable` with the target and a hint, instead of a silent drop. Files: `cox-app/src/wire.rs`, `server.rs`, `remote.rs`, `docs/app-server.schema.json`.
-
-Done when `old_wire_version_is_refused_by_name`, `missing_remote_cox_says_how_to_install` and `remote_stderr_is_sanitized_and_bounded` pass.
-
-#### T68.4 Desktop: connect to any target (Rust and FFI)
-
-Model: - · Status: open · Depends: T68.2, T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
-
-Goal: `RemoteWorkspace::connect(target)` takes a `Target`; `App::targets()` lists the configured ones and the running ones it can see — `docker ps --format json`, `limactl list --json`, `colima list --json`, each run through the T68.1 launcher with a timeout, a missing launcher listing nothing (fail open). `cox-ffi` forwards both (one-expression bodies, D11). Done when `listing_skips_a_missing_launcher` and `connect_reaches_a_docker_target` (fake `docker` script) pass.
-
 #### T68.5 Desktop: Connect to Target sheet (Swift)
 
-Model: - · Status: open · Depends: T68.4 · Size: ~200 · Priority: P2 · Complexity: 3
+Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.4 · Size: ~200 · Priority: P2 · Complexity: 3
 
 Goal: File > Connect to Host becomes Connect to Target: a kind picker (SSH, Docker, Lima, Colima), the listed targets of that kind, a free-text name, the `hello` result (OS, sandbox) shown before the first session opens. Remote hosts in `RemoteHosts.swift` become targets. DT§ and the shared design docs say how Windows and Linux apps repeat it. Done when the CoxUI snapshot of the sheet (recorded from CI) and a CoxModel test of the target list pass.
 
-#### T68.6 `--on <target>` for the TUI and `cox run`
-
-Model: - · Status: open · Depends: T68.2 · Size: ~200 · Priority: P1 · Complexity: 3
-
-Goal: a global `--on <target>`. `cox --on lima:dev` runs the remote TUI through the launcher with a tty (`ssh -t`, `docker exec -it`, `limactl shell`, `colima ssh`); `cox run --on docker:ci -p …` runs without a tty, sends the prompt as one stream-json input line on stdin rather than on the command line, copies stdout through unchanged and exits with the remote exit code. Only an allowlisted set of flags is forwarded (`--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume`, `--continue`); `--cwd` comes from the target's `cwd`. Done when e2e `run_on_target_sends_prompt_over_stdin` and `run_on_target_returns_remote_exit_code` (fake launcher) pass.
-
-#### T68.7 `agent` presets on a target
-
-Model: - · Status: open · Depends: T68.2 · Size: ~150 · Priority: P2 · Complexity: 3
-
-Goal: `[external_agents.<name>]` gains `target`. Such a preset runs `cox run --output-format stream-json` on the target through the existing `StreamJson` driver (`cox-session/src/external_agents.rs`) instead of a local program; the remote run's usage lines become local `usage` rows under the preset's model, so the ledger stays complete. A preset with a target is not wrapped in the local sandbox (the remote applies its own) and still asks permission per call like `CloudAgent`. Done when `agent_on_target_records_remote_usage` and `agent_on_target_is_not_locally_sandboxed_but_asks` pass.
-
 #### T68.8 Windows targets
 
-Model: - · Status: open · Depends: T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
+Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.3 · Size: ~150 · Priority: P2 · Complexity: 3
 
 Goal: `cox app-server --stdio` and `cox run` serve over Windows OpenSSH: binary stdio without CRLF translation, Windows paths accepted as a target `cwd`, `hello` reporting no sandbox so the session runs `on-request` (D7, T49.2 deferred). Run by the Windows host agent; the windows CI job runs the app-server tests once it is back on. Done when `app_server_round_trips_on_windows` passes there.
 
-#### T68.9 End-to-end tests with fake launchers
+Done on macOS (A130): `serve_stdio` skips the login-shell capture on Windows (OpenSSH starts the command with the whole environment); a CRLF client is read and a CR is never written, pinned by `app_server_reads_crlf_lines_and_writes_bare_newlines` and, over the real binary's pipes, `crates/cox/tests/app_server_stdio.rs`; `hello` already reports `sandbox: None` on Windows (`cox_sandbox::sandbox::backend`), so T57.3's `effective_approval` keeps `on-request`; a Windows `cwd` (`C:\srv\app`) passes `check_token` (`windows_cwd_is_a_safe_token`, `a_windows_cwd_reaches_the_remote_command_line_whole`); cmd.exe's and PowerShell's "not recognized" wording and cmd's status 9009 read as `NotInstalled`.
 
-Model: Claude / sonnet-5.5 · Status: in progress · Depends: T68.1 · Size: ~60 + tests · Priority: P1 · Complexity: 2
-
-Goal: test-support scripts named `ssh`, `docker`, `limactl` and `colima` that check their argv and exec the local `cox app-server --stdio` against a scratch `COX_HOME`, used by every P68 card; one `#[ignore]` test per real backend (`colima`, `lima`, `docker` under Colima) for a manual run. Done when `crates/cox/tests/targets.rs` runs a turn through each fake launcher with the scripted provider.
+Remaining for the Windows host agent: `cox-session`, `cox-app` and `cox` are not in `windows_crates` and do not build there yet (`nix` in both crates' manifests, `std::os::unix` in `cox-session/src/{env,plugins,mcp,external_agents,target_agents}.rs` and `cox-app/src/{remote,targets,terminal}.rs`, `process_group` in `cox-session/src/env.rs`). Port those (gate `nix` to `cfg(unix)`, add the crates to `windows_crates`), then run `mise exec -- cargo nextest run -p cox-app -p cox-target` and `mise exec -- cargo nextest run -p cox --test app_server_stdio` (must pass `app_server_round_trips_on_windows` and `app_server_stdio_round_trips_with_lf_and_crlf_clients`; the test sets `SHELL=/bin/sh`, harmless on Windows), then try a real `ssh <win-host> cox app-server --stdio` from a Mac `RemoteWorkspace` and `cox run --on ssh:<win-host> -p hi` with `[targets.win] cwd = "C:\\srv\\app"`. Check that OpenSSH's default shell (cmd.exe) passes `--cwd C:\srv\app` through unchanged and that stdin EOF ends the server. Then set readiness to 100% and move the card to `done.md`.
 
 #### T68.10 Docs: targets
 
-Model: - · Status: open · Depends: T68.5, T68.6, T68.7 · Size: ~150 (doc) · Priority: P2 · Complexity: 1
+Model: Claude / haiku-5.5 · Status: in progress · Depends: T68.5, T68.6, T68.7 · Size: ~150 (doc) · Priority: P2 · Complexity: 1
 
 Goal: `docs/targets.md` (each kind, how to put `cox` on it, what the trust rules above mean for a user, the sandbox inside a container), `docs/app-server.md` narrowed to the wire, `docs/config.md`, README links. Done when every target kind has a worked example and `docs/app-server.md` no longer explains ssh setup.
 

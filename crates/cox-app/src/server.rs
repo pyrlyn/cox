@@ -13,6 +13,11 @@
 //! machine's own env or keyring — and a URL or inbox item only becomes a
 //! notification the client decides about. Nothing is written to stdout but
 //! protocol lines; logs go to cox's log file.
+//!
+//! Windows OpenSSH (T68.8): stdin and stdout are pipes there, and Rust's
+//! handles do no CRLF translation on a pipe, so a line leaves as `\n` alone.
+//! A client that writes `\r\n` is read the same as one that writes `\n`,
+//! because `lines()` drops the `\r` and `wire::decode` trims the end.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,7 +32,9 @@ use crate::InboxItem;
 use crate::app::{App, AppError, Host};
 use crate::live::LiveSession;
 use crate::plugin_ui::PluginAlert;
-use crate::wire::{self, Call, Line, Notification, Outcome, Reply, Response, ServerEvent};
+use crate::wire::{
+    self, Call, HostInfo, Line, Notification, Outcome, Reply, Response, ServerEvent,
+};
 
 /// Lines waiting for the writer. A stalled client fills it; then each
 /// session's pump waits and its controller coalesces instead.
@@ -96,11 +103,29 @@ impl Host for ServerHost {
     }
 }
 
+/// What `hello` answers. No session state is read, so a client learns what
+/// it connected to before anything is opened.
+pub fn host_info() -> HostInfo {
+    HostInfo {
+        wire: wire::VERSION,
+        cox: env!("CARGO_PKG_VERSION").to_owned(),
+        os: std::env::consts::OS.to_owned(),
+        arch: std::env::consts::ARCH.to_owned(),
+        // `Auto`, as `doctor` reports it: the per-project `linux_backend`
+        // setting is not known before a session opens.
+        sandbox: cox_tools::sandbox::backend(cox_protocol::LinuxBackend::Auto)
+            .map(|backend| backend.name().to_owned()),
+    }
+}
+
 /// `cox app-server --stdio`: one client on stdin and stdout until stdin
 /// closes. `home` is `COX_HOME` (`None`: `~/.cox`).
 pub async fn serve_stdio(home: Option<PathBuf>) -> Result<(), ServerError> {
     // A non-interactive ssh shell has a thin environment; tools and env-var
     // keys resolve as in a terminal only after the login shell's is read.
+    // Windows has no login shell: OpenSSH starts the command with the user's
+    // whole environment already, so there is nothing more to read.
+    #[cfg(unix)]
     let _warning = crate::app::load_login_env().await;
     let (host, events) = ServerHost::channel();
     let app = App::new(home, host)?;
@@ -179,6 +204,7 @@ impl Server {
 
     async fn answer(&mut self, call: Call) -> Result<Reply, AppError> {
         Ok(match call {
+            Call::Hello => Reply::Hello(host_info()),
             Call::Projects { limit } => Reply::Projects(self.app.workspace().projects(limit)?),
             Call::Sessions { project, limit } => {
                 Reply::Sessions(self.app.workspace().sessions(&project, limit)?)
@@ -337,6 +363,95 @@ async fn write<W: AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn app_server_answers_hello() {
+        use tokio::io::AsyncBufReadExt as _;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (host, events) = ServerHost::channel();
+        let app = App::new(Some(dir.path().join(".cox")), host).expect("app");
+        let (mut to_server, server_in) = tokio::io::duplex(4096);
+        let (server_out, from_server) = tokio::io::duplex(4096);
+        let client = async {
+            let request = Line::Request(wire::Request {
+                v: wire::VERSION,
+                id: 1,
+                call: Call::Hello,
+            });
+            let text = wire::encode(&request).expect("encodes");
+            to_server.write_all(text.as_bytes()).await.expect("write");
+            let mut lines = BufReader::new(from_server).lines();
+            let text = lines.next_line().await.expect("read").expect("a line");
+            drop(to_server);
+            wire::decode(&text).expect("decodes")
+        };
+        let (line, served) = tokio::join!(client, serve(app, events, server_in, server_out));
+        served.expect("served");
+        let Line::Response(Response {
+            id: 1,
+            outcome: Outcome::Ok(Reply::Hello(info)),
+            ..
+        }) = line
+        else {
+            panic!("not a hello reply: {line:?}");
+        };
+        assert_eq!(info, host_info());
+        assert_eq!(info.wire, wire::VERSION);
+        assert_eq!(info.cox, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.os, std::env::consts::OS);
+    }
+
+    /// Windows OpenSSH clients and some pipes end a line with `\r\n`; the
+    /// server must answer each as it would a bare `\n` and never write a
+    /// `\r` itself, or the client's `hello` parse would see a stray byte.
+    #[tokio::test]
+    async fn app_server_reads_crlf_lines_and_writes_bare_newlines() {
+        use tokio::io::AsyncReadExt as _;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (host, events) = ServerHost::channel();
+        let app = App::new(Some(dir.path().join(".cox")), host).expect("app");
+        let (mut to_server, server_in) = tokio::io::duplex(4096);
+        let (server_out, mut from_server) = tokio::io::duplex(65536);
+        let hello = Line::Request(wire::Request {
+            v: wire::VERSION,
+            id: 7,
+            call: Call::Hello,
+        });
+        let crlf = wire::encode(&hello).expect("encodes").replace('\n', "\r\n");
+        let client = async {
+            to_server.write_all(crlf.as_bytes()).await.expect("write");
+            to_server.write_all(crlf.as_bytes()).await.expect("write");
+            drop(to_server);
+            let mut bytes = Vec::new();
+            from_server.read_to_end(&mut bytes).await.expect("read");
+            bytes
+        };
+        let (bytes, served) = tokio::join!(client, serve(app, events, server_in, server_out));
+        served.expect("served");
+        assert!(!bytes.contains(&b'\r'), "a CR leaked into the output");
+        let text = String::from_utf8(bytes).expect("utf-8");
+        assert_eq!(text.lines().count(), 2, "one answer per request: {text:?}");
+        for line in text.lines() {
+            assert!(matches!(
+                wire::decode(line),
+                Ok(Line::Response(Response {
+                    id: 7,
+                    outcome: Outcome::Ok(Reply::Hello(_)),
+                    ..
+                }))
+            ));
+        }
+    }
+
+    /// D7 (T68.8): `None` is how a client learns there is no confinement,
+    /// which keeps the session on `on-request`; Windows has no backend.
+    #[cfg(windows)]
+    #[test]
+    fn hello_reports_no_sandbox_on_windows() {
+        let info = host_info();
+        assert_eq!(info.os, "windows");
+        assert_eq!(info.sandbox, None);
+    }
 
     #[test]
     fn server_host_sends_a_plugin_notice_to_the_client() {
