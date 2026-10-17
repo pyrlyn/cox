@@ -492,7 +492,7 @@
           ]
         },
         {
-          "description": "Stops the session's patch stream; the session keeps running.",
+          "description": "Stops the session's patch stream and sends `ended`; the session keeps\nrunning, and its timeline keeps folding for `attach`.",
           "type": "object",
           "properties": {
             "method": {
@@ -514,6 +514,69 @@
           "required": [
             "method",
             "params"
+          ]
+        },
+        {
+          "description": "Streams a session this server still holds again, from its snapshot;\nanswered like `open`.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "attach"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                }
+              },
+              "required": [
+                "session"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "Ends the session: its turns stop and what they detached is killed.\n`close` does not.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "end"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/SessionId"
+                }
+              },
+              "required": [
+                "session"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "The inbox, so a client that attaches sees what arrived while it was\naway; an item is pushed only once.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "inbox"
+            }
+          },
+          "required": [
+            "method"
           ]
         }
       ]
@@ -862,6 +925,23 @@
           },
           "required": [
             "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "inbox"
+            },
+            "value": {
+              "type": "array",
+              "items": true
+            }
+          },
+          "required": [
+            "kind",
+            "value"
           ]
         }
       ]
