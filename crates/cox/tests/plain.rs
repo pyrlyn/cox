@@ -109,7 +109,9 @@ fn transcript() -> String {
     redact(&out, work.path())
 }
 
-/// Temp paths and token counts vary per machine; everything else is fixed.
+/// Temp paths and token counts vary per machine, and the context share
+/// moves whenever a tool schema or the system prompt grows; everything else
+/// is fixed.
 fn redact(out: &str, work: &Path) -> String {
     let mut out = out.replace("\r\n", "\n").replace('\x07', "<BEL>");
     let real = std::fs::canonicalize(work).unwrap();
@@ -119,10 +121,27 @@ fn redact(out: &str, work: &Path) -> String {
     out.lines()
         .map(|line| match line.strip_prefix("cost: ") {
             Some(rest) => format!("cost: {}", rest.replace(|c: char| c.is_ascii_digit(), "#")),
-            None => line.to_string(),
+            None => match line.strip_prefix("status: ") {
+                Some(rest) => format!("status: {}", redact_ctx(rest)),
+                None => line.to_string(),
+            },
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn redact_ctx(status: &str) -> String {
+    status
+        .split(" · ")
+        .map(|segment| {
+            if segment.starts_with("ctx ") {
+                segment.replace(|c: char| c.is_ascii_digit(), "#")
+            } else {
+                segment.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 #[test]
