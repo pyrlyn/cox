@@ -79,6 +79,26 @@ Depends: T61.1 · Size: ~5 · Files: `.github/workflows/ci.yml`, `justfile`, `re
 Goal: the `rust` matrix compiles the workspace once per target: `build-command`, clippy and nextest use the same features, so nextest reuses the build.
 Check: pending the first CI run of this change (job log of `rust / aarch64-apple-darwin`: no `Compiling` line for a workspace crate after the build step). Local: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 mise exec -- cargo nextest run --workspace --all-features --no-run` finished with no errors; the all-features run passed except `plain_transcript_snapshot`.
 Done: `test-command` in `ci.yml` and `just check-all` now use `--all-features`, the feature set `build-command` already used (clippy already got it from the shared workflow's `feature-args` default), so nextest no longer compiles the default feature set a second time. Local `--all-features` run: 2566 of 2567 tests passed. `plain_transcript_snapshot` (crate `cox`) fails under the default features too (context percentage 1% in the snapshot, 2% in the output); not fixed here. `actionlint` reports only the existing `if: false` on the Windows job. §4.3.9 has a T61.6 table with the before CI times (PR run 38933123898: x86_64 Linux 1294 s, aarch64 Linux 1025 s, aarch64 macOS 1482 s); the after times are pending the first CI run of this change, so the card's "before and after" condition is not met until then.
+#### T66.8 `/refine` and `cox refine`
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T66.7 · Size: ~120 · Files: `crates/cox-tui/src/refine.rs` (new), `crates/cox-tui/src/{commands,state,view,lib}.rs`, `crates/cox-protocol/src/commands.rs`, `crates/cox-session/src/refine.rs`, `crates/cox/src/{refine_cmd.rs (new),cli,main,session}.rs`, `crates/cox/tests/tui_e2e.rs`, `docs/getting-started.md`
+Goal: the user can propose, review, apply and undo a refine from the TUI and the CLI. Global scope always needs the explicit flag.
+- TUI: `/refine <text> [--global]` asks the cheap tier for a proposal and opens it as a git-style diff (`y` or `Enter` applies, `n` or `Esc` drops it, nothing is written before that); `/refine list` shows the session's refines; `/refine undo [<event id>] [--global]` reverses one, a bare undo taking the newest applied local refine. `list`, `undo` and `--global` are matched as whole words, so "list the failing tests" still proposes.
+- CLI: `cox refine list [--session ID]` (default: the newest session in the directory) and `cox refine undo <event id> [--global]`. Applying stays TUI-only because the diff is reviewed there.
+- `cox-session`: `Refiner::refine` is now `propose` (a `Pending` holding the sanitized unified diff, no write) followed by `apply`; `undo_event`, `latest_undoable` and `describe` need no `Session`, so the CLI undoes without a provider. A refine event that changed the global entries is undone only with the flag (`RefineError::GlobalNeedsFlag`). An entry changed between the review and `y` becomes a recorded rejection.
+- New dependency in `cox-session`: `similar` (already a workspace dependency) for the review diff.
+Check: `tui_refine_reviews_applies_and_the_cli_lists_and_undoes_it` (scripted provider, scratch `COX_HOME`: a local note is shown in the diff, written only after `y`, listed and undone by `cox refine`) and `cli_refine_undo_of_a_global_event_needs_the_global_flag`.
+```text
+$ mise exec -- cargo nextest run -p cox refine
+     Summary 2 tests run: 2 passed, 220 skipped
+$ mise exec -- cargo nextest run -p cox -p cox-session -p cox-tui -p cox-protocol -p cox-app
+     Summary 1003 tests run: 1001 passed, 2 failed (cox::plain plain_transcript_snapshot: ctx 1% -> 2%, caused by T66.6 on the base and unchanged by this task; cox::docs docs_name_every_subcommand: fixed by the docs paragraph, now passes)
+$ mise exec -- cargo clippy -p cox-session -p cox-tui -p cox-protocol -p cox --all-targets -- -D warnings   (clean)
+$ mise exec -- cargo fmt --check   (clean)
+```
+Not run: the workspace-wide clippy and nextest (scoped to the touched crates). `docs/screenshots/theme_picker.svg` has unrelated drift and was left alone.
+
 #### T66.7 Session: apply a refine, record it, and render the digest after the cached prefix
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17

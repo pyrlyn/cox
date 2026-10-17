@@ -101,6 +101,8 @@ pub enum Command {
     Sessions(SessionsArgs),
     /// Print archived tool output by id.
     Expand(ExpandArgs),
+    /// List or undo a session's refines (the TUI's `/refine` proposes them).
+    Refine(RefineArgs),
     /// Usage and cost stats.
     Stats(StatsArgs),
     /// Read or write config.
@@ -201,6 +203,31 @@ pub struct ExpandArgs {
     /// Optional 1-based inclusive line range (`START-END`).
     #[arg(long)]
     pub lines: Option<String>,
+}
+
+/// `cox refine` (T66.8, P66).
+#[derive(Args, Debug, Clone)]
+pub struct RefineArgs {
+    #[command(subcommand)]
+    pub action: RefineAction,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum RefineAction {
+    /// Show a session's refines, newest first.
+    List {
+        /// Session id; default is the newest session in this directory.
+        #[arg(long, value_name = "ID")]
+        session: Option<String>,
+    },
+    /// Reverse one applied refine by its event id.
+    Undo {
+        /// Event id as printed by `list`.
+        id: String,
+        /// Required when the refine changed the global entries.
+        #[arg(long)]
+        global: bool,
+    },
 }
 
 /// `cox run` (plan.md §1.12). Only the clap shape and the flag→config-key
