@@ -1,3 +1,44 @@
+#### T33.40.6 `risk` advisor: raise only
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4, T33.40.6.1 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/plugins_jev.rs` (also touched: `plugins/jev/src/decide.rs`, `plugins/jev/plugin.toml`, `crates/cox-core/src/monotone.rs`)
+Goal: J§5.1. There is one request per tool batch. The state is the task, the cwd, the sandbox mode and, for each call, `tool`, `subject`, `input` and `classifier_risk`, never tool output. The questions are the `severity` Score and the `irreversible`, `external_effect` and `exfiltration` Nouls. The thresholds sit in `[plugins.jev.risk]` with the J§5.1 defaults. The advice is "raise to Destructive" or none, and the core keeps `max(builtin, advised)`. A raise is reported with confidence 1.0, since the guest's own thresholds are the gate, and its probabilities go in the advice note (A163). `capabilities.decide` gains `risk`.
+Check:
+- guest tests:
+  - `risk_state_never_contains_tool_output`;
+  - `risk_thresholds_raise_on_any_hazard`;
+  - `risk_low_answers_give_no_advice`;
+  - `risk_config_overrides_thresholds`;
+- e2e in `Auto` mode with a confining sandbox, where a scripted `git push origin main` (classifier: `Exec`) is auto-allowed without the plugin (A164):
+  - a high fixture gives `Ask`, headless denies, and `Advised { point: risk, applied: true }` is in the rollout;
+  - a low fixture leaves the call allowed;
+  - a wiremock delay past 200 ms leaves it allowed and records T33.40.6.1's late-answer `Notice`, with no `Advised` (A163);
+  - `one_jev_request_per_tool_batch` (the wiremock count for a batch of 3);
+- `risk_advice_cannot_lower_risk` still green.
+Plan:
+1. `plugins/jev/src/risk.rs`: the J§5.1 request (per item `<i>.severity` Score and `<i>.irreversible`/`<i>.external_effect`/`<i>.exfiltration` Nouls, state as the core sends it), `Thresholds` from `[plugins.jev.risk]` (serde, unknown keys and out-of-range values refused) and the verdict: `Answer::Items` with `Score 3.0` for a raised item and `Score 0.0` for the rest, confidence 1.0, probabilities in the note; no raise gives no advice.
+2. `decide.rs` keeps the call-out plumbing and delegates the question and the verdict to `risk.rs`; `lib.rs` reads the thresholds in `init` (an invalid table fails `init`, so the plugin is warned about and skipped) and `plugin.toml` gains `decide = ["risk"]`.
+3. `crates/cox/tests/plugins_jev.rs`: drop the manifest patch, the four e2e cases with a scripted `git push origin main` under `Auto` and `workspace-write`.
+4. Verify: `cargo test` in `plugins/` for the jev crate, `cargo nextest run -p cox --test plugins_jev`, `-p cox-core` monotone tests, clippy and fmt.
+
+Result: `plugins/jev/src/risk.rs` owns J§5.1. The request carries only the shared `task`, `cwd`, `workspace_roots` and `sandbox` and each call's `tool`, `subject`, `input` and `classifier_risk` (an allowlist, so a field the core adds later never leaks tool output), with four questions per item keyed `<i>.severity` (Score over the four `Risk` levels), `<i>.irreversible`, `<i>.external_effect` and `<i>.exfiltration` (Nouls). A call is raised when `irreversible ≥ 0.7`, `external_effect ≥ 0.7`, `exfiltration ≥ 0.5`, or `severity ≥ 2.5` with confidence `≥ 0.6`; `[plugins.jev.risk]` overrides any of them (`deny_unknown_fields`, values outside 0..=1 or 0..=3 refused, and a refused table fails `cox_init`, so the host warns and skips the plugin — the creator's choice). The advice is `Answer::Items` with `Score 3.0` for a raised call and `Score 0.0` (a no-op under `max(builtin, advised)`) for the rest, confidence 1.0 and the raised calls' probabilities in the note; no raise is no advice. `decide.rs` keeps only the call-out plumbing; a `risk` question with no items is silent. `plugin.toml` declares `decide = ["risk"]`, so the e2e rig no longer patches the manifest. The e2e runs need `--approve on-failure`: a headless run defaults to `never`, under which `Exec` is denied before `risk` could matter, and `[hooks] timeout_s = 1` makes the headless driver deny the raised call's ask within a second.
+Found and fixed in `cox-core` (`monotone.rs`, two lines plus a test): the late-answer `Notice` of T33.40.6.1 was not reachable through the plugin advisor. `PluginAdvisor` gives up on the same budget and returns silence; when both timers fire on one tick, `tokio::time::timeout` polls the inner future first and sees the silence, so the core reported `Silent`. Silence that arrives once the budget has passed is now `Late`. `advisor_silent_at_its_deadline_is_late` failed 3 of 3 runs without the fix. The late e2e therefore records both the core's Info `Notice` and the host's own `decision skipped: the call-out ran past the point's budget` warning.
+Not done: `typesafe_table_overrides_plugin_transport` (T33.40.4, unchanged) asserts the whole run takes under 4 s; it failed twice while the machine's load average was about 150 (plugin load alone took ~7 s) and passed once the load eased. No change was made to it.
+
+Check output:
+```
+$ (cd plugins && mise exec -- cargo test -p cox-plugin-jev --locked)
+     test result: ok. 25 passed (risk_state_never_contains_tool_output, risk_thresholds_raise_on_any_hazard, risk_low_answers_give_no_advice, risk_config_overrides_thresholds, risk_config_refuses_an_invalid_table, risk_questions_cover_every_item, ...)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test plugins_jev
+     Summary 15 tests run: 15 passed, 0 skipped (git_push_is_auto_allowed_without_the_plugin, high_risk_answer_asks_and_headless_denies, low_risk_answer_leaves_the_call_allowed, late_risk_answer_leaves_the_call_allowed_with_a_notice, one_jev_request_per_tool_batch)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-core -p cox-plugin
+     Summary 569 tests run: 569 passed, 1 skipped (includes risk_advice_cannot_lower_risk and advisor_silent_at_its_deadline_is_late)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test plugin_cli --test external_agents_cursor
+     passed (33 run with plugins_jev; the only failure was the load-sensitive timing above)
+$ mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings: clean
+$ (cd plugins && cargo clippy -p cox-plugin-jev --all-targets --locked -- -D warnings; cargo clippy -p cox-plugin-jev --target wasm32-unknown-unknown --locked -- -D warnings): clean
+$ mise exec -- cargo fmt --check -p cox-core -p cox; (cd plugins && cargo fmt --check -p cox-plugin-jev): clean
+```
+
 #### T33.40.6.1 Core: one batched `risk` question per tool batch
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.21, T33.40.1 · Size: ~120 · Files: `crates/cox-core/src/turn.rs`, `crates/cox-core/src/monotone.rs`, `plugins/jev/src/decide.rs`, `crates/cox/tests/plugins_jev.rs`, `crates/cox-plugin-api/src/abi.rs` (doc comment only) (regenerated: `docs/protocol.jsonschema`, `docs/plugin-abi.schema.json`)

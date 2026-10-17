@@ -43,7 +43,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
 | T33.36 | todo | P2 | 4 | 0% | |
-| T33.40.6 | in progress | P2 | 4 | 10% | Claude Code / opus |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
 | T33.40.10 | todo | P3 | 3 | 0% | |
@@ -869,28 +868,6 @@ Check: `plugin_example_kotlin` is ignored with its reason locally and runs in th
 
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
-
-#### T33.40.6 `risk` advisor: raise only
-
-Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4, T33.40.6.1 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/plugins_jev.rs`
-Goal: J§5.1. There is one request per tool batch. The state is the task, the cwd, the sandbox mode and, for each call, `tool`, `subject`, `input` and `classifier_risk`, never tool output. The questions are the `severity` Score and the `irreversible`, `external_effect` and `exfiltration` Nouls. The thresholds sit in `[plugins.jev.risk]` with the J§5.1 defaults. The advice is "raise to Destructive" or none, and the core keeps `max(builtin, advised)`. A raise is reported with confidence 1.0, since the guest's own thresholds are the gate, and its probabilities go in the advice note (A163). `capabilities.decide` gains `risk`.
-Check:
-- guest tests:
-  - `risk_state_never_contains_tool_output`;
-  - `risk_thresholds_raise_on_any_hazard`;
-  - `risk_low_answers_give_no_advice`;
-  - `risk_config_overrides_thresholds`;
-- e2e in `Auto` mode with a confining sandbox, where a scripted `git push origin main` (classifier: `Exec`) is auto-allowed without the plugin (A164):
-  - a high fixture gives `Ask`, headless denies, and `Advised { point: risk, applied: true }` is in the rollout;
-  - a low fixture leaves the call allowed;
-  - a wiremock delay past 200 ms leaves it allowed and records T33.40.6.1's late-answer `Notice`, with no `Advised` (A163);
-  - `one_jev_request_per_tool_batch` (the wiremock count for a batch of 3);
-- `risk_advice_cannot_lower_risk` still green.
-Plan:
-1. `plugins/jev/src/risk.rs`: the J§5.1 request (per item `<i>.severity` Score and `<i>.irreversible`/`<i>.external_effect`/`<i>.exfiltration` Nouls, state as the core sends it), `Thresholds` from `[plugins.jev.risk]` (serde, unknown keys and out-of-range values refused) and the verdict: `Answer::Items` with `Score 3.0` for a raised item and `Score 0.0` for the rest, confidence 1.0, probabilities in the note; no raise gives no advice.
-2. `decide.rs` keeps the call-out plumbing and delegates the question and the verdict to `risk.rs`; `lib.rs` reads the thresholds in `init` (an invalid table fails `init`, so the plugin is warned about and skipped) and `plugin.toml` gains `decide = ["risk"]`.
-3. `crates/cox/tests/plugins_jev.rs`: drop the manifest patch, the four e2e cases with a scripted `git push origin main` under `Auto` and `workspace-write`.
-4. Verify: `cargo test` in `plugins/` for the jev crate, `cargo nextest run -p cox --test plugins_jev`, `-p cox-core` monotone tests, clippy and fmt.
 
 #### T33.40.7 Eval E1: risk escalation against the classifier alone
 
@@ -3236,10 +3213,10 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A158 §3 (new P68: T68.1–T68.10), by the creator (2026-10-14) — run targets: a whole cox session runs over ssh on Linux, macOS or Windows, in a Docker container, in a Lima instance or in the Colima VM, from the desktop app, the TUI and `cox run` (`--on <target>`) and the `agent` tool. Why: the only remote path is the desktop app's `ssh <host> cox app-server --stdio` with a hard-coded `/usr/bin/ssh` (T52.19–T52.21); containers and VMs are the usual isolation for agents (research.md 9.1.x). Effect: a new pure crate `cox-target` owns target names, launcher lookup (absolute paths only) and launch argv, and `cox-app/src/remote.rs` delegates to it; the app-server wire gains a `hello` handshake; `targets.*` is user config only. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link and nothing typed by the model or the person goes on the remote command line. `cox` must already be on the target; installing it and throwaway `docker run` containers are ideas, not cards. No new dependency; D7 holds on targets without a sandbox backend. No §0 decision changes.
 - A159 §3 (new P69: T69.1–T69.8), by the creator (2026-10-15) — tasks from a comparison of openai/codex at `f0c5077c` and xai-org/grok-build at `2bdd1d6a` with cox: PowerShell readers meet `Read` denies, `allow_for_session_persists` is honored, more default read-only workspace dirs, a store `quick_check`, a compaction that rejects stubs and survives overflow, live tasks reattached after compaction, optional edit anchors, an integer compact threshold. Why: cox already leads on sandboxing, lossless archives and truncation; these are the gaps. Both sources are Apache-2.0; every card says implement similar, not copy, and records the licence. Effect: eight cards; no new dependency, no §0 decision changes.
 - A163 §3 P33 (new T33.40.6.1; T33.40.6 amended), by the creator (2026-10-17): T33.40.6 needs core changes its file list does not cover. The core asks `risk` once per call with no task, cwd or sandbox mode in the state, records nothing for a late answer and drops the advice note for `risk`. T33.40.6.1 makes the core ask one batched question per tool batch (every `PreToolUse` of the batch runs before the first approval prompt), keeps the note, and records a `Notice` for a late `risk` answer. The creator chose: a late answer stays no answer plus a `Notice`, not `Advised { applied: false }`; the Jev guest reports a raise with confidence 1.0, its own J§5.1 thresholds being the gate, with its probabilities in the note. On 2026-10-17 the creator widened T33.40.6.1 to the Jev guest (`plugins/jev/src/decide.rs`) and its e2e tests (`crates/cox/tests/plugins_jev.rs`). No §0 decision changes.
-- A164 §3 P33 (T33.40.6 and T33.40.7 amended), by the creator (2026-10-17): T33.40.6/T33.40.7 e2e use `git push origin main` (classifier: Exec) instead of `git push --force origin main`, which the classifier already rates Destructive so `risk` is never asked.
 
 - A161 §3 P66 (new T66.16–T66.18), by the creator (2026-10-17): the first three implementation cards from `docs/design/serve.md` (T66.12), its proposals S1–S3. S1 corrects `docs/app-server.md`, which promises that a turn survives a dropped client; S2 adds `attach`, `end` and `inbox` to the app-server wire and makes `open` of a held session attach (F1: two cores for one session); S3 adds worker mode and ends sessions on EOF (F2). Why: they need no new crate or dependency and fix two bugs the design found. S4–S9 (`cox-serve`, the socket, supervision, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
 - A162 §3 P66 (new T66.19–T66.21), by the creator (2026-10-17): the next three implementation cards from `docs/design/serve.md`, its proposals S4–S6. S4 adds the crate `cox-serve` with a pure restart policy; S5 adds its run directory, singleton lock and owner-only socket with a peer-uid check (D4), extracting `lock::claim_path` in cox-store so one lock implementation serves both; S6 adds worker supervision and shutdown. Why: a new crate, because process supervision and the socket's trust boundary must stay out of `cox-app` (linked into the macOS app) and out of `crates/cox`. No new dependency. S7–S9 (router and bridge, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
+- A164 §3 P33 (T33.40.6 and T33.40.7 amended), by the creator (2026-10-17): T33.40.6/T33.40.7 e2e use `git push origin main` (classifier: Exec) instead of `git push --force origin main`, which the classifier already rates Destructive so `risk` is never asked.
 
 ## 7. Risk register
 
