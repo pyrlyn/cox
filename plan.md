@@ -2316,32 +2316,6 @@ Done when the tests, run with a fake `GateRunner`, show that:
 
 Out of scope: config, the shell runner and the run loop (T66.10, T66.11). The TUI does not enter this loop.
 
-#### T66.11 `cox run -p --autonomous`: shell gates and the headless loop
-
-Model: sonnet · Status: open · Depends: T66.10 · Size: ~180 · Priority: P2 · Complexity: 3
-
-Goal: a headless run continues under the driver's verdict. Every gate runs inside the same sandbox as `bash`.
-
-Files:
-- `crates/cox-tools/src/gate.rs` (new): `ShellGateRunner`. It uses `sandbox::command` with the session's `Policy` and the gate timeout. The output tail is capped and archived first, as for `bash`.
-- `crates/cox/src/run.rs`: after each `UserTurn`, ask `decide`; on `Continue`, submit its text as the next `UserTurn`; print the stop reason
-- `tests/autonomous.rs`
-
-Steps:
-1. Only `cox run -p` reads `--autonomous`, and the interactive TUI never enters the loop. The model still edits the todo list (`cox-tools/src/todo.rs`); the driver does not.
-2. The stream-json output carries one `autonomous` record per decision.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox autonomous
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when, against `COX_HOME=/tmp/cox-scratch` with the scripted provider, a gate that fails once and then passes yields exactly two turns and `GatesPassed`.
-
-Out of scope: goals that persist across runs.
-
 #### T66.13 Heartbeat re-entry for a resident session
 
 Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 3

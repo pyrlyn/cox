@@ -793,6 +793,13 @@ impl Session {
         Ok(())
     }
 
+    /// Where this session archives full tool output, for a surface that runs
+    /// a command of its own (an autonomous run's gates, T66.11) and must keep
+    /// the same lossless rule as `bash`.
+    pub fn archive(&self) -> Arc<dyn Archive> {
+        self.archive.clone()
+    }
+
     /// Cancels the provider stream and running tools.
     pub fn interrupt(&self) {
         self.cancel

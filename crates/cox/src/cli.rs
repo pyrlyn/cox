@@ -281,6 +281,11 @@ pub struct RunArgs {
     /// first turn; repeat for more. Checked before any request (T40.7).
     #[arg(long = "image", value_name = "PATH")]
     pub images: Vec<PathBuf>,
+    /// After each turn run the `[autonomous]` gate commands in the sandbox
+    /// and, while one fails, start another turn with its output (T66.11).
+    /// Needs `autonomous.gates` in your own config.
+    #[arg(long, requires = "prompt", conflicts_with = "loop")]
+    pub autonomous: bool,
 }
 
 /// `cox stats` (plan.md §1.12/T1.7). Print usage and cost statistics.

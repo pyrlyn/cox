@@ -93,6 +93,9 @@ pub fn flag_key_map() -> HashMap<&'static str, &'static str> {
         // parameters (the loop's own state), not persisted config.
         ("loop", "runtime.loop"),
         ("max-iterations", "runtime.max_iterations"),
+        // T66.11: `cox run --autonomous` only turns the driver on; its gates and
+        // limits are the user-only `[autonomous]` table, never a flag.
+        ("autonomous", "runtime.autonomous"),
         // `cox stats --project` (T28.2): a read-only scope flag, not config.
         ("project", "runtime.project"),
     ])

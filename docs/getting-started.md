@@ -132,6 +132,20 @@ The same history is available outside the TUI: `cox refine list [--session
 <id>]` (default: the newest session in this directory) and `cox refine undo
 <event id> [--global]`. Proposing and applying stay in the TUI, where the
 diff is reviewed.
+## Autonomous runs
+
+`cox run -p "…" --autonomous` runs the shell commands in `[autonomous] gates`
+(your own config; a project config cannot set them) after each turn. While one
+fails, the run starts another turn with the end of its output, within
+`max_continuations`, `max_turns`, `max_tokens`, `timeout_secs` and
+`gate_retries`; a run with no gates is refused. Every gate runs in the same
+sandbox as the `bash` tool, its full output is archived (`cox expand`), and a
+gate over `gate_timeout_secs` counts as failed. Under `--output-format
+stream-json` each decision is one `{"type":"autonomous","decision":…}` record,
+and the stop reason is printed on stderr and kept in the `json` summary.
+`gates_passed` means only that every gate exited 0, not that the task is
+done. A run that stops for any other reason of its own exits 1. Not
+combinable with `--loop`.
 
 ## What to read next
 
