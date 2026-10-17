@@ -2640,9 +2640,11 @@ Out of scope: the `cox attach` bridge, routing connections to workers, and Windo
 
 #### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
 
-Model: opus · Status: open · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
+Model: Claude Code / opus-5.5 · Status: in progress · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
 
 Goal: the supervisor runs one worker process per session and keeps it alive under T66.19's policy. `docs/design/serve.md` S6, D3 and D7.
+
+Plan: `worker.rs` spawns the program with tokio's process support, writes the wire lines (`open`, `end`) with serde_json, reads the `opened` reply and drains the rest of stdout, and reports each exit through a callback. `supervisor.rs` keeps one slot per session (running, restarting, failed), measures uptime, feeds each exit to `restart::Policy`, schedules a restart as a timed event, refuses a 17th worker, and on an injected shutdown future sends `end`, waits a grace (10 s by default) and kills what is left. Tests drive a fake worker `sh` script in a tempdir with a short grace and a capped restart delay. New third-party deps for cox-serve: tokio, serde_json, thiserror (all already in the workspace); no workspace crate, so the `deps.rs` rule stays as it is.
 
 Files:
 - `crates/cox-serve/src/worker.rs`
