@@ -112,7 +112,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T61.1 | todo | P1 | 1 | 0% | |
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
@@ -1840,29 +1839,6 @@ Rationale in §6 A140. Found by reading the build configuration (2026-10-07), no
 **Order.** T61.1 first (the baseline every later card compares against). Then T61.2 → T61.3 → T61.4 (the desktop path, the largest gain). T61.5.1–T61.5.3, T61.6, T61.7 and T61.9 are independent of each other. T61.8, T61.10 and T61.11 last; each may end as "rejected" with the measurement that rejected it.
 
 Timings go to a new `research.md` §4.3.9 "Build times", in the shape of R§4.3.4: each row is the median of 5 runs, with the machine, load average and commit. A card whose change gains nothing measurable is reverted and closed with that row.
-
-#### T61.1 Build-time baseline
-
-Model: haiku · Status: open · Depends: — · Size: ~0 (research.md only) · Priority: P1 · Complexity: 1
-
-Goal: `research.md` §4.3.9 holds the numbers P61 is judged by.
-
-Files:
-- `research.md`
-
-Steps:
-1. Rust, each with `--timings` (keep the HTML out of git): a clean `cargo build --workspace`; an incremental build after touching `crates/cox-core/src/turn.rs`; the build phase of `cargo nextest run --workspace` (clean and after the same touch); `cargo build -p cox-ffi --lib --profile dist --target aarch64-apple-darwin` clean and after the touch; the full `just desktop-xcframework`.
-2. Swift: `swift build --build-tests --build-system swiftbuild` per package under `desktop/macos/Packages/` (clean), and `just desktop-app` clean and after a one-line change in `CoxUI`.
-3. CI: the wall time of the last green `rust / <target>` and `desktop-macos` jobs on `main`, from `gh run view`.
-
-Check:
-```bash
-grep -n '4.3.9' research.md
-```
-
-Done when: §4.3.9 has a row for every step above, with the top five crates by compile time from the `--timings` report.
-
-Out of scope: any change to the build.
 
 #### T61.2 Fast profile for the XCFramework outside a release
 
