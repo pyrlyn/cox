@@ -126,6 +126,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.10 | todo | P3 | 2 | 0% | |
 | T61.11 | todo | P3 | 3 | 0% | |
 | T63.2 | todo | P2 | 3 | 0% | |
+| T66.5 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.4 | todo | P2 | 3 | 0% |  |
@@ -2359,6 +2360,8 @@ Out of scope: a separate `task_output` tool; peer messages between children.
 Model: sonnet · Status: open · Depends: T66.4 · Size: ~200 · Priority: P2 · Complexity: 3
 
 Goal: the four refinable kinds (`prompt-note`, `memory`, `skill` and `subagent`; no factory) are applied with a backup first, undone exactly, and fingerprinted by content.
+
+Plan (Claude Code / sonnet-5.5): (1) `crates/cox-ext/src/harness.rs`: `Kind`, `Scope` (`Local { root }` keeps `harness/<kind>/<id>.md` under the session dir; `Global { home, memory_dir }` maps to `memory.rs`, `skills/<id>/SKILL.md`, `agents/<id>.md`, `notes/<id>.md`), `Edit`, `Applied { event_id, before, after, edits }` where `before`/`after` are the scope fingerprints and each edit carries the `before_sha`/`after_sha` that `cox_store::refine::RefineEdit` stores; (2) `apply` validates every id and action first, then copies each touched file into `<root>/harness-backup/<event id>/` with a manifest, then writes (memory goes through `save_fact`/`rebuild_index`); `rollback(event id)` restores copies and deletes entries the manifest marks as created; (3) `fingerprint(scope)` sha256 over `scope\0kind\0id` + content in sorted order; adds `sha2` to cox-ext (plan §1 row and toolchain.md); (4) tests in `crates/cox-ext/tests/harness.rs`; run `cargo nextest run -p cox-ext harness`, clippy, fmt.
 
 Files:
 - `crates/cox-ext/src/harness.rs` (new)
