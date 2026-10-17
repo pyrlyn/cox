@@ -97,7 +97,9 @@ fn trigrams(text: &str) -> HashSet<String> {
     chars.windows(3).map(|w| w.iter().collect()).collect()
 }
 
-fn is_valid_name(name: &str) -> bool {
+/// `[a-z0-9-]{1,64}`: a fact slug, and a refine entry id (T66.6), since
+/// both become a file name under one scope root and must not leave it.
+pub(crate) fn is_valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name

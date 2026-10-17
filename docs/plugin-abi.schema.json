@@ -918,7 +918,7 @@
             "string",
             "null"
           ],
-          "description": "A caution note, for `approve_hint`.",
+          "description": "A caution note for `approve_hint`, or for `risk` the reasons behind\na raise (such as a model's probabilities). The core keeps it, cleaned\nand clipped, only when it applies the advice of one of those points.",
           "default": null
         }
       },

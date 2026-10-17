@@ -11,7 +11,6 @@
 #![allow(unsafe_code)]
 #![cfg(feature = "app-server")]
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +18,12 @@ use std::time::Duration;
 use cox_app::app::Host;
 use cox_app::remote::RemoteWorkspace;
 use cox_app::{BlockKind, InboxItem, Intent, TimelinePatch};
+use cox_target::Kind;
+
+// why: `targets.rs` uses the rest of the helper's functions.
+#[allow(dead_code)]
+#[path = "support/fake_launcher.rs"]
+mod fake_launcher;
 
 /// One plain reply.
 const REPLY: &str = r#"
@@ -43,31 +48,6 @@ fn ends_turn(patch: &TimelinePatch) -> bool {
         if matches!(block.kind, BlockKind::TurnMeta { stop: Some(_), .. }))
 }
 
-/// The fake ssh: writes its arguments and environment next to itself, skips
-/// the options, `--`, the host and the remote `cox`, and runs the built
-/// binary. ssh scrubbed its environment, so the scratch home and the
-/// scripted provider are written into the script, as the remote machine's
-/// own settings would be.
-fn fake_ssh(dir: &Path) -> std::path::PathBuf {
-    let path = dir.join("ssh");
-    let script = format!(
-        r#"#!/bin/sh
-printf '%s\n' "$@" > "{dir}/ssh-args"
-env > "{dir}/ssh-env"
-while [ "$1" != "--" ]; do shift; done
-shift 3
-export COX_HOME="{dir}/remote/.cox" COX_PROVIDER=scripted COX_SCENARIO="{dir}/scenario.toml"
-export COX_KEYRING=off
-exec "{cox}" "$@"
-"#,
-        dir = dir.display(),
-        cox = env!("CARGO_BIN_EXE_cox"),
-    );
-    std::fs::write(&path, script).expect("write the fake ssh");
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-    path
-}
-
 #[tokio::test]
 async fn remote_session_streams_through_a_fake_ssh() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -80,7 +60,13 @@ async fn remote_session_streams_through_a_fake_ssh() {
         std::env::set_var("HOME", root.join("remote"));
         std::env::set_var("ANTHROPIC_API_KEY", "sk-must-stay-local");
     }
-    let ssh = fake_ssh(root);
+    let ssh = fake_launcher::write(
+        root,
+        Kind::Ssh,
+        Path::new(env!("CARGO_BIN_EXE_cox")),
+        &root.join("remote"),
+        &root.join("scenario.toml"),
+    );
 
     let workspace = RemoteWorkspace::connect_with(&ssh, "devbox", Arc::new(Quiet))
         .await
@@ -110,11 +96,10 @@ async fn remote_session_streams_through_a_fake_ssh() {
     assert_eq!(ended, Ok(true), "the remote turn's patches did not arrive");
     assert!(workspace.is_connected());
 
-    let args = std::fs::read_to_string(root.join("ssh-args")).expect("ssh args");
-    let args: Vec<&str> = args.lines().collect();
-    assert!(args.contains(&"ForwardAgent=no"), "{args:?}");
-    assert!(args.contains(&"BatchMode=yes"), "{args:?}");
-    let env = std::fs::read_to_string(root.join("ssh-env")).expect("ssh env");
+    let args = fake_launcher::recorded_args(root, Kind::Ssh);
+    assert!(args.contains(&"ForwardAgent=no".to_owned()), "{args:?}");
+    assert!(args.contains(&"BatchMode=yes".to_owned()), "{args:?}");
+    let env = fake_launcher::recorded_env(root, Kind::Ssh);
     assert!(
         !env.contains("ANTHROPIC_API_KEY"),
         "a local key reached ssh"
