@@ -108,7 +108,7 @@ Programs the project uses and the direct packages from its manifests.
 | serde | local | https://crates.io/crates/serde | cox-protocol |
 | serde-saphyr | local | https://crates.io/crates/serde-saphyr | cox-ext: SKILL.md, command and subagent frontmatter (T7.9); maintained, serde_yaml is deprecated and pulled the unmaintained unsafe-libyaml |
 | serde_json | local | https://crates.io/crates/serde_json | preserve_order: agent-client-protocol-schema requires it, which unifies the feature into every workspace build anyway; pinning it here makes JSON key order (snapshots, rollout lines, ledger JSON) identical for per-crate and full-workspace runs instead of depending on the invocation. |
-| sha2 | local | https://crates.io/crates/sha2 | Rust dependency |
+| sha2 | local | https://crates.io/crates/sha2 | Content hashes (cox-ext harness fingerprint, T66.5; cox-store, cox-plugin, cox-mcp, cox-tools) |
 | shlex | local | https://crates.io/crates/shlex | Rust dependency |
 | similar | local | https://crates.io/crates/similar | Rust dependency |
 | syntect | local | https://crates.io/crates/syntect | Rust dependency Lives in `cox-render` (T32.2). |

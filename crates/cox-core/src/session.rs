@@ -246,6 +246,11 @@ pub struct Session {
     /// the memory directory (D2). Shared with children: the index is project
     /// facts, not a tool catalog the child may lack.
     memory_index: Arc<OnceLock<String>>,
+    /// The refined prompt notes appended to volatile `system[3]` (T66.7).
+    /// Unlike the memory index it can change mid-session (a `/refine` or an
+    /// undo), which is safe only because `system[3]` sits after the last
+    /// cache breakpoint. Shared with children, like the memory index.
+    harness_notes: Arc<std::sync::Mutex<String>>,
     /// The task id `send_message`'s `Relay` impl stamps a child's own
     /// message with (T34.6, SM§4), set once by `subagent::spawn` right
     /// after the child session exists; unset for the session the user is
@@ -433,6 +438,7 @@ impl Session {
         child.worktrees = self.worktrees.clone();
         child.instructions = self.instructions.clone();
         child.memory_index = self.memory_index.clone();
+        child.harness_notes = self.harness_notes.clone();
         child.checkpoint_warned = self.checkpoint_warned.clone();
         // T34.9: share this session's name→TaskId registry so the child can
         // resolve a sibling by name itself (`resolve_name_or_id`).
@@ -571,6 +577,7 @@ impl Session {
             instructions: Arc::new(OnceLock::new()),
             skills_index: Arc::new(OnceLock::new()),
             memory_index: Arc::new(OnceLock::new()),
+            harness_notes: Arc::new(std::sync::Mutex::new(String::new())),
             self_task: Arc::new(OnceLock::new()),
             external_agents: Arc::new(OnceLock::new()),
             event_tap: Arc::new(OnceLock::new()),
@@ -924,6 +931,17 @@ impl Session {
     /// surface passes nothing when the directory yields only the header.
     pub fn set_memory_index(&self, index: String) {
         let _ = self.memory_index.set(index);
+    }
+
+    /// Replaces the refined prompt notes `system[3]` carries (T66.7). The
+    /// session layer renders them from the harness entries on disk, since
+    /// this crate reads no files (D2); empty appends nothing. Only the next
+    /// request changes: `system[0..=2]` and the breakpoints never move.
+    pub fn set_harness_notes(&self, notes: String) {
+        *self
+            .harness_notes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = notes;
     }
 
     /// Installs the granted external-agent drivers (T35.5); the surface
@@ -1820,6 +1838,15 @@ impl Session {
             if !memory_index.is_empty() {
                 req.system[3].text.push('\n');
                 req.system[3].text.push_str(memory_index);
+            }
+            // T66.7: refined prompt notes ride in the same volatile block.
+            let notes = self
+                .harness_notes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !notes.is_empty() {
+                req.system[3].text.push('\n');
+                req.system[3].text.push_str(&notes);
             }
             req
         };
@@ -3153,5 +3180,26 @@ mod tests {
             "{}",
             b.system[3].text
         );
+    }
+
+    /// Refined prompt notes are volatile like the memory index: they reach
+    /// `system[3]` after the last cache breakpoint and leave the cached
+    /// prefix bytes alone.
+    #[tokio::test]
+    async fn harness_notes_reach_system_3_and_leave_the_prefix_byte_identical() {
+        let (plain, _, plain_provider) = recorded(cox_protocol::Config::default(), 1);
+        let (noted, _, noted_provider) = recorded(cox_protocol::Config::default(), 1);
+        noted.set_harness_notes("<harness_notes>\nWrite the test first.\n</harness_notes>".into());
+        turn(&plain, false).await;
+        turn(&noted, false).await;
+        let (plain_seen, noted_seen) = (plain_provider.seen(), noted_provider.seen());
+        let (a, b) = (&plain_seen[0], &noted_seen[0]);
+        for slot in 0..=2 {
+            assert_eq!(a.system[slot].text, b.system[slot].text, "system[{slot}]");
+        }
+        assert_eq!(a.cache_breakpoints, b.cache_breakpoints);
+        assert!(!b.system[3].cache);
+        assert!(!a.system[3].text.contains("Write the test first."));
+        assert!(b.system[3].text.contains("Write the test first."));
     }
 }
