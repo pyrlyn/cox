@@ -119,7 +119,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.5.2 | todo | P2 | 3 | 0% | |
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
-| T61.7 | todo | P2 | 2 | 0% | |
+| T61.7 | in progress | P2 | 2 | 0% | Claude Code / sonnet-5.5 |
 | T61.8 | todo | P3 | 1 | 0% | |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
@@ -2001,7 +2001,7 @@ Out of scope: `pyrlyn/ci`'s shared `ci-rust.yml` (its own repository).
 
 #### T61.7 sccache for local builds and the in-repository CI jobs
 
-Model: sonnet · Status: open · Depends: T61.1 · Size: ~40 · Priority: P2 · Complexity: 2
+Model: sonnet-5.5 · Status: in progress · Depends: T61.1 · Size: ~40 · Priority: P2 · Complexity: 2
 
 Goal: dependencies compiled in one worktree are reused by another without sharing a `target/` (sharing one breaks, as seen 2026-09-23), and the CI jobs outside the shared `rust` matrix reuse compiled crates across runs.
 
@@ -2014,6 +2014,14 @@ Steps:
 1. Pin sccache in `mise.toml` with a reason comment. Set `RUSTC_WRAPPER` only when sccache is on `PATH` (fail open: a missing sccache never fails a build), `SCCACHE_CACHE_SIZE` bounded for this disk, and `CMAKE_C_COMPILER_LAUNCHER`/`CMAKE_CXX_COMPILER_LAUNCHER` so whisper.cpp (`cox-voice`) is cached too.
 2. Leave `CARGO_INCREMENTAL` alone: sccache skips incremental workspace crates and caches their dependencies, which is the gain.
 3. CI: `mozilla-actions/sccache-action` (pinned by SHA) with the GitHub Actions cache backend in the desktop action and the `sandbox-landlock`, `plugins` and `plugin-examples` jobs.
+
+Already in place before this claim: the `sccache` pin and the fail-open `RUSTC_WRAPPER` template (`mise.toml`), the R2 backend action `.github/actions/sccache`, wired into the `sandbox-landlock`, `plugins` and `plugin-examples` jobs of `ci.yml`, and the `toolchain.md` row. The R2 action is reused instead of the Actions cache backend named in step 3.
+
+Execution plan:
+1. `mise.toml`: add `SCCACHE_CACHE_SIZE` and `CMAKE_C_COMPILER_LAUNCHER`/`CMAKE_CXX_COMPILER_LAUNCHER` with the same probe template as `RUSTC_WRAPPER`.
+2. `.github/actions/desktop-macos/action.yml`: optional R2 inputs and a `./.github/actions/sccache` step before the XCFramework build; `ci.yml`'s `desktop-macos` job passes them. `desktop-build.yml` (release) stays uncached: passing the secrets would need `release.yml` changes.
+3. A script test asserting that `mise.toml` and the action stay wired (config-only change, so the assertion is the test).
+4. Measure `cargo build -p cox-config` (one small crate, `CARGO_BUILD_JOBS=4`) in two worktrees, with and without sccache, into research.md §4.3.9.
 
 Check:
 ```bash
