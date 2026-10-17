@@ -25,6 +25,8 @@ Programs the project uses and the direct packages from its manifests.
 | colima | global (mise) | Docker runtime for Terminal-Bench (the creator's choice) | https://github.com/abiosoft/colima |
 | LM Studio (`lms`) | desktop app | Local model server for the eval matrix (`cox-bench`, provider `lmstudio`): OpenAI Chat and Anthropic Messages endpoints on :1234 | https://lmstudio.ai/docs/developer |
 | docker-cli, docker-compose, docker-buildx | global (mise) | Harbor drives task containers through `docker compose` and `docker buildx build` | https://github.com/docker/cli , https://github.com/docker/compose , https://github.com/docker/buildx |
+| go | mise (`plugins/mise.toml`) | T33.34: the Go plugin SDK (`plugins/sdk-go`), `plugins/examples/go` and `plugins/templates/go`; TinyGo's GOROOT, and `go test` for the pure parts | https://github.com/golang/go |
+| tinygo | mise (`plugins/mise.toml`) | T33.34: builds a Go plugin as a `wasip1` module extism loads (`-target wasip1 -buildmode=c-shared`); 0.43.0 takes Go 1.25–1.27 | https://github.com/tinygo-org/tinygo |
 | dart | mise (`plugins/mise.toml`) | Builds `plugins/templates/dart` and `plugins/examples/dart` (T33.38): Dart cannot emit a wasm module extism can load (research.md §4.3.5 P44), so its only plugin capability is an `[[mcp]]` stdio server, `dart compile exe` | https://github.com/dart-lang/sdk |
 | node | mise (`mise.toml`) | Runs Style Dictionary, the desktop token build (`just desktop-tokens`, T37.17, DS§2) | https://github.com/nodejs/node |
 | SwiftLint | mise (`mise.toml`, aqua) | Lints the macOS app (T37.18): default rules plus DS§9's no-literal custom rules in `desktop/macos/.swiftlint.yml`; CI's `desktop-macos-lint` job; packages run the same version through the SwiftLintPlugins build-tool plugin | https://github.com/realm/SwiftLint |
@@ -144,6 +146,12 @@ Programs the project uses and the direct packages from its manifests.
 | Package | Where | Source | Why here |
 | --- | --- | --- | --- |
 | dart_mcp | local | https://pub.dev/packages/dart_mcp | T33.38: the official Dart MCP server/client SDK (`ToolsSupport`, `stdioChannel`) a Dart plugin's `[[mcp]]` server is built on, since Dart cannot emit a wasm module extism can load |
+
+## go (`plugins/sdk-go`, `plugins/examples/go`, `plugins/templates/go`)
+
+| Package | Where | Source | Why here |
+| --- | --- | --- | --- |
+| github.com/extism/go-pdk | local | https://github.com/extism/go-pdk | T33.34: extism's official Go PDK (v1.1.3), the memory and I/O under the Go SDK's `cox:host/v1` wrappers |
 
 ## uv (`evals/`)
 

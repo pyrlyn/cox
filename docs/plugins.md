@@ -112,7 +112,7 @@ cox runs every plugin on one engine configuration; a module that needs a WebAsse
 | --- | --- | --- |
 | tail calls, function references, GC | on | extism 1.30.0 always enables them |
 | exception handling (`try_table`, `throw`, tags) | on | extism's `wasmtime-exceptions` feature, turned on for the workspace (plan.md A61): Kotlin/Wasm output uses it unconditionally and does not parse without it (research.md R§4.3.5 P42–P43) |
-| WASI | off | wasmtime 43 has an unfixed WASI filesystem advisory (RUSTSEC-2026-0269); it stays off until the extism bump (A55, T33.43) |
+| WASI preview 1 | per plugin | linked only for a manifest with `wasi = true` (a `wasip1` guest such as a TinyGo one) or a `[capabilities.fs]` grant; no preopens without the grant (T33.43, T33.14.2) |
 
 The exception switch is workspace-wide: it is one flag on the engine, not a per-plugin capability, so any plugin may use exceptions. It adds guest-visible instructions only; the host still gives each plugin its own engine and store, the same memory cap and the same per-call deadline. RUSTSEC-2026-0222 names exception-related embedder APIs (`ExnRefPre::new`, `Tag::new`), but it needs the host to move objects between engines, which neither extism nor cox does, so enabling the proposal does not make it reachable from a guest (`deny.toml`). The exception-handling support in wasmtime 43 itself has not been reviewed beyond that advisory; revisit it with the T33.43 bump.
 
@@ -122,6 +122,29 @@ The SDK is a thin layer over one rule, which a guest in any language can follow 
 
 - An export reads its input as one JSON value (an empty input means `null`) and sets one JSON value as its output. A failure sets the extism error text and returns 1.
 - A host function lives in the import module `cox:host/v1` and has the signature `(u64) -> u64`: it takes the offset of an extism memory block holding one JSON value and returns the offset of a block it allocated. The argument is the function's only argument, an object keyed by its argument names when it has several (`{"level": "warn", "text": "…"}`, `{"key": "turns", "value": 3}`, `{"name": "read", "input": {…}}`), or `null` when it has none. The reply is `{"Ok": value}` or `{"Err": AbiError}`.
+
+## Go
+
+`plugins/sdk-go` (module `github.com/pyrlyn/cox/plugins/sdk-go`) is the same API over `github.com/extism/go-pdk` v1.1.3. Go and TinyGo come from `plugins/mise.toml`. A Go plugin is a TinyGo `wasip1` module, so its `plugin.toml` sets `wasi = true`:
+
+```bash
+tinygo build -o plugin.wasm -target wasip1 -buildmode=c-shared .
+```
+
+Each export is a `//go:wasmexport` function whose whole body is `cox.Export(handler)`, where the handler maps the export's input type to its output type and an `error`. `cox_init` is required; cox probes the rest by name. The host functions are `cox.Log`, `Notify`, `KVGet`, `KVPut`, `KVDelete`, `Context`, `InvokeTool`, `ModelCall`, `HTTP`, `Output`, `Cancelled`, `Redraw` and `DesktopNotify`, with the capabilities and contexts in the table above. A refusal is a `*cox.HostError` whose `Kind` is the `AbiError` tag. `types.go` has the common payloads; a `json.RawMessage` carries any other, with its shape in `docs/plugin-abi.schema.json`.
+
+```go
+//go:wasmexport cox_init
+func coxInit() int32 {
+	return cox.Export(func(cox.InitIn) (cox.InitOut, error) {
+		return cox.InitOut{Subscribe: []string{"turn_started"}}, nil
+	})
+}
+```
+
+TinyGo is not gc: it evaluates `return n, json.Unmarshal(raw, &n)` with `n` read before the call, so take the error into a variable first. Run a package's tests under `tinygo test` as well as `go test`.
+
+The complete version is `plugins/examples/go`; `cox plugin new <name> --lang go` scaffolds a package with a `justfile` and a smoke test. `just plugin-examples go` builds the example and runs its end-to-end tests.
 
 ## Shared
 

@@ -19,6 +19,10 @@
 //! mechanism that keeps `plugin.toml`'s `[capabilities]`, the guest's stub
 //! exports and its `register!` call from ever drifting apart.
 //!
+//! [`Lang::Go`] (T33.34) uses the same blocks over its own templates: a
+//! TinyGo `wasip1` module over the Go SDK (`plugins/sdk-go`), so its
+//! `plugin.toml` always carries `wasi = true`.
+//!
 //! [`Lang::Dart`] (T33.38) has no such variance: Dart cannot emit a wasm
 //! module extism can load (`docs/design/plugins.md` §13-14, `research.md`
 //! §4.3.5 P44 — `dart compile wasm` still needs a JS bootstrap), so its
@@ -43,16 +47,16 @@ pub struct ScaffoldFile {
     pub content: String,
 }
 
-/// `--lang`. [`Lang::Rust`] and [`Lang::Dart`] have templates; [`Lang::Go`]
-/// and [`Lang::Kotlin`] are PL§13's remaining planned languages, kept here
-/// so `--lang go` names a real, if not-yet-scaffolded, choice instead of
+/// `--lang`. [`Lang::Rust`], [`Lang::Go`] and [`Lang::Dart`] have templates;
+/// [`Lang::Kotlin`] is PL§13's remaining planned language, kept here so
+/// `--lang kotlin` names a real, if not-yet-scaffolded, choice instead of
 /// clap's generic "invalid value".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lowercase")]
 pub enum Lang {
     /// The reference language: full ABI, every capability.
     Rust,
-    /// T33.34.
+    /// T33.34: TinyGo `wasip1` over the Go SDK, every wasm capability.
     Go,
     /// T33.36, only if T33.35's spike passes.
     Kotlin,
@@ -88,7 +92,9 @@ pub enum PluginNewError {
     #[error("plugin name {0:?} must match ^[a-z][a-z0-9-]{{1,23}}$ (PL§2)")]
     InvalidName(String),
     /// `--lang` named a language PL§13 plans but has not templated yet.
-    #[error("--lang {0:?} has no template yet (PL§13); only rust and dart are scaffolded today")]
+    #[error(
+        "--lang {0:?} has no template yet (PL§13); only rust, go and dart are scaffolded today"
+    )]
     UnsupportedLang(Lang),
     /// `--with` named a capability a Dart plugin cannot back: it needs a
     /// wasm export, and Dart cannot emit a wasm module extism can load
@@ -137,6 +143,39 @@ const RUST_TEMPLATES: &[(&str, &str)] = &[
     (
         ".gitignore",
         include_str!("../../../plugins/templates/rust/gitignore.tmpl"),
+    ),
+];
+
+/// The Go template's files (T33.34), with the same `cox:with` blocks as
+/// Rust's.
+const GO_TEMPLATES: &[(&str, &str)] = &[
+    (
+        "go.mod",
+        include_str!("../../../plugins/templates/go/go.mod.tmpl"),
+    ),
+    (
+        "plugin.toml",
+        include_str!("../../../plugins/templates/go/plugin.toml.tmpl"),
+    ),
+    (
+        "main.go",
+        include_str!("../../../plugins/templates/go/main.go.tmpl"),
+    ),
+    (
+        "smoke_test.go",
+        include_str!("../../../plugins/templates/go/smoke_test.go.tmpl"),
+    ),
+    (
+        "justfile",
+        include_str!("../../../plugins/templates/go/justfile.tmpl"),
+    ),
+    (
+        "README.md",
+        include_str!("../../../plugins/templates/go/README.md.tmpl"),
+    ),
+    (
+        ".gitignore",
+        include_str!("../../../plugins/templates/go/gitignore.tmpl"),
     ),
 ];
 
@@ -191,25 +230,29 @@ pub fn scaffold(
     with.dedup();
 
     match lang {
-        Lang::Rust => scaffold_rust(name, &crate_name, &with),
+        Lang::Rust => Ok(scaffold_blocks(RUST_TEMPLATES, name, &crate_name, &with)),
+        Lang::Go => Ok(scaffold_blocks(GO_TEMPLATES, name, &crate_name, &with)),
         Lang::Dart => scaffold_dart(name, &crate_name, &with),
-        Lang::Go | Lang::Kotlin => Err(PluginNewError::UnsupportedLang(lang)),
+        Lang::Kotlin => Err(PluginNewError::UnsupportedLang(lang)),
     }
 }
 
-fn scaffold_rust(
+/// Renders a template table whose capability blocks are `cox:with`
+/// markers (Rust and Go).
+fn scaffold_blocks(
+    templates: &[(&str, &str)],
     id: &str,
     crate_name: &str,
     with: &[Capability],
-) -> Result<Vec<ScaffoldFile>, PluginNewError> {
+) -> Vec<ScaffoldFile> {
     let summary = with_summary(with);
-    Ok(RUST_TEMPLATES
+    templates
         .iter()
         .map(|(path, tmpl)| ScaffoldFile {
             path: PathBuf::from(path),
             content: render(tmpl, id, crate_name, &summary, with),
         })
-        .collect())
+        .collect()
 }
 
 /// PL§13/T33.38: refuses any capability that is not `tool`/`mcp` — both
@@ -367,12 +410,10 @@ mod tests {
 
     #[test]
     fn refuses_a_language_without_a_template_yet() {
-        for lang in [Lang::Go, Lang::Kotlin] {
-            assert_eq!(
-                scaffold("demo", lang, &[]),
-                Err(PluginNewError::UnsupportedLang(lang))
-            );
-        }
+        assert_eq!(
+            scaffold("demo", Lang::Kotlin, &[]),
+            Err(PluginNewError::UnsupportedLang(Lang::Kotlin))
+        );
     }
 
     #[test]
@@ -565,6 +606,71 @@ mod tests {
         assert!(lib.contains("StatusLeft"));
         assert!(lib.contains("Slot::Panel"));
         assert_balanced_braces(lib);
+    }
+
+    fn file<'a>(files: &'a [ScaffoldFile], path: &str) -> &'a str {
+        &files
+            .iter()
+            .find(|f| f.path == Path::new(path))
+            .unwrap()
+            .content
+    }
+
+    #[test]
+    fn go_scaffold_manifest_validates_as_a_wasi_guest_with_exactly_with() {
+        let with = [Capability::Status, Capability::Hook, Capability::Command];
+        let files = scaffold("demo-go", Lang::Go, &with).unwrap();
+        for f in &files {
+            assert!(!f.content.contains("cox:with"), "a marker leaked: {f:?}");
+            assert!(!f.content.contains("{{id}}"), "a placeholder leaked: {f:?}");
+        }
+        // The host's own validator, so the scaffold and the loader agree.
+        let tmp =
+            std::env::temp_dir().join(format!("cox-plugin-new-test-go-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        write(&tmp, &files).unwrap();
+        let (parsed, _) =
+            cox_plugin::discover::load_manifest(&tmp, &tmp.join("plugin.toml"), Some("demo-go"))
+                .expect("the scaffolded manifest loads and validates");
+        let _ = fs::remove_dir_all(&tmp);
+        assert!(parsed.wasi, "TinyGo's wasip1 runtime needs WASI");
+        assert_eq!(parsed.wasm.as_deref(), Some("demo_go.wasm"));
+        let manifest = file(&files, "plugin.toml");
+        assert!(
+            manifest.contains(r#"hooks = ["PostToolUse"]"#),
+            "{manifest}"
+        );
+        assert!(manifest.contains("status = true"), "{manifest}");
+        assert!(manifest.contains("commands = true"), "{manifest}");
+        assert!(!manifest.contains("panel = true"), "{manifest}");
+        assert!(!manifest.contains("tools ="), "{manifest}");
+        assert!(file(&files, "justfile").contains("-o demo_go.wasm -target wasip1"));
+    }
+
+    #[test]
+    fn go_main_keeps_only_the_chosen_exports() {
+        let bare = scaffold("demo", Lang::Go, &[]).unwrap();
+        let main = file(&bare, "main.go");
+        assert!(main.contains("//go:wasmexport cox_init"), "{main}");
+        // Directive lines only: the header comment names the directive too.
+        assert_eq!(main.matches("\n//go:wasmexport ").count(), 1, "{main}");
+        // An unused import does not compile in Go.
+        assert!(!main.contains("encoding/json"), "{main}");
+        assert_balanced_braces(main);
+
+        let tool = scaffold("demo", Lang::Go, &[Capability::Tool]).unwrap();
+        let main = file(&tool, "main.go");
+        assert!(main.contains("//go:wasmexport cox_tool_call"), "{main}");
+        assert!(main.contains("\"encoding/json\""), "{main}");
+        assert!(!main.contains("cox_hook"), "{main}");
+        assert!(!main.contains("cox_render"), "{main}");
+        assert_balanced_braces(main);
+
+        let panel = scaffold("demo", Lang::Go, &[Capability::Panel]).unwrap();
+        let main = file(&panel, "main.go");
+        assert!(main.contains("cox.Panel"), "{main}");
+        assert!(!main.contains("StatusLeft"), "{main}");
+        assert_balanced_braces(main);
     }
 
     #[test]

@@ -42,7 +42,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T33.34 | todo | P2 | 4 | 0% | |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.5 | todo | P2 | 3 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
@@ -225,6 +224,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-plugin-api` | plugin manifest (`plugin.toml`), ABI v1 payloads, TUI widget tree, capability names; schemas `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` with drift tests. Pure; builds for `wasm32-unknown-unknown` so the guest SDK can use it; `cox-protocol` re-exports it as `plugin` (A52, P33) | serde, serde_json, schemars 1, thiserror |
 | `cox-plugin` | the WASM host: discovery, package digest, grant check, one worker per plugin, host functions (`cox:host/v1`), and the protocol-trait adapters `PluginHooks`, `WasmTool`, `PluginProvider`, `EventTap`, `Advisor` (A52, P33) | extism 1.30.0 (`default-features = false`: no ureq, no URL or file loading; `wasmtime-exceptions` on, A61), wasmtime 43 (declared only for the `anyhow` feature extism needs without its defaults), sha2 (package digest), figment (`plugin.toml`), reqwest 0.12 (`cox_http`, T33.14.1), tokio-util (`Provider` cancellation, T33.18); linked into `crates/cox` behind the default-on `plugins` feature (A55) |
 | `cox-plugin-sdk` (`plugins/sdk`, the separate guest workspace, never a `crates/*` member) | the Rust guest SDK (T33.27): typed wrappers for every PL§4 export and `cox:host/v1` host function, the `register!` macro, and the wire (`{"Ok"\|"Err"}` host replies) that other-language guests copy; builds for `wasm32-unknown-unknown` | extism-pdk 1.4.1 (`default-features = false`: no extism `http`, no msgpack), cox-plugin-api (path) |
+| `plugins/sdk-go` (Go module `github.com/pyrlyn/cox/plugins/sdk-go`, outside cargo) | the Go guest SDK (T33.34): `cox.Export` for every PL§4 export, one wrapper per `cox:host/v1` function plus `cox_desktop_notify`, `*HostError` for an `AbiError`, the common ABI payload types; the pure wire builds and tests on the host, the extism memory calls only for `GOOS=wasip1` | github.com/extism/go-pdk v1.1.3 (BSD-3-Clause); Go 1.27.2 and TinyGo 0.43.0 from `plugins/mise.toml` |
 | `cox-voice` | push-to-talk dictation (P54, A123): `Transcriber` (whisper.cpp through `whisper-rs`, model loaded once), `Recorder` (default input device, mono, resampled to 16 kHz, capped length), and the `Dictation` impl the TUI receives. Its own crate under D1: a heavy C++ build and platform audio. Behind `crates/cox`'s `voice` feature, off by default; audio never leaves the process | whisper-rs 0.16.0 (Unlicense; whisper.cpp MIT; cmake), cpal 0.18.2 (Apache-2.0), rubato 5.0.0 (MIT OR Apache-2.0) |
 | `cox-cursor-cloud` | the Cursor Cloud Agents API client (P56, A123; P56 under way, terms go-ahead given 2026-10-03): hand-written wire types (A40 step 3, never generated from or copied out of Cursor's unlicensed OpenAPI file), create/run/stream/cancel/usage. The one place a socket to `api.cursor.com` opens; not a `Provider`; the host driver that maps runs to task events lives in `cox-session` | cox-provider-http (reqwest, eventsource-stream), serde; no new dependency |
 
@@ -861,12 +861,6 @@ Every card in this phase:
 - runs the three standard commands.
 
 Host unit tests use inline WAT (R§4.3.5 P15); no `.wasm` is ever committed. **Blockers** (everything after them depends on them): T33.1, T33.2, T33.3, T33.5, T33.6.
-
-#### T33.34 Go: SDK wrapper, template, example
-
-Depends: T33.29, T33.43 (go-pdk v1.1.3 needs `wasip1`, and the host keeps WASI off until then, A55) · Size: ~200 · Files: `plugins/sdk-go/cox.go`, `plugins/examples/go/main.go`, `plugins/templates/go/*.tmpl`; `plugins/mise.toml` gets go and tinygo; CI job `plugin-examples`
-Goal: a thin Go package over `github.com/extism/go-pdk` (v1.1.3) for the PL§4 exports and host functions (`//go:wasmimport` in `cox:host/v1`). The same example is built with TinyGo `-target wasip1 -buildmode=c-shared` (`wasi = true`). `cox plugin new --lang go`.
-Check: `plugin_example_go` is `#[ignore = "needs go and tinygo: run just plugin-examples go"]` locally and runs in the `plugin-examples` CI job, where a missing toolchain fails the job; it asserts the same rollout effect as T33.28.
 
 #### T33.36 Kotlin: thin PDK, template, example
 

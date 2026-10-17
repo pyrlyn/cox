@@ -90,6 +90,18 @@ plugin-examples lang:
         mkdir -p build
         mise exec -- dart compile exe bin/server.dart -o build/example_dart
         ;;
+      go)
+        cd plugins && mise install go tinygo
+        # The template test runs `go` and `tinygo` from a scratch dir, where
+        # mise's shims find no config: put the real binaries on PATH.
+        eval "$(mise env -s bash)"
+        export PLUGIN_TOOLS_PATH="$PATH"
+        # Also under TinyGo: the guest compiler differs from gc (T33.34).
+        (cd sdk-go && go test ./... && tinygo test .)
+        cd examples/go
+        go test ./...
+        tinygo build -o example_go.wasm -target wasip1 -buildmode=c-shared .
+        ;;
       *)
         echo "plugin-examples: no {{lang}} example yet" >&2
         exit 1

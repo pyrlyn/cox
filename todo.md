@@ -1,6 +1,5 @@
 # Todo
 
-- T33.34. Go: SDK wrapper, template, example
 - T33.36. Kotlin: thin PDK, template, example
 - T33.40.5. Parity: the `typesafe` table configures the plugin's section
 - T33.40.6. `risk` advisor: raise only
