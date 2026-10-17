@@ -115,7 +115,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.2 | todo | P1 | 2 | 0% | |
 | T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
-| T61.5.1 | in progress | P2 | 3 | 0% | Claude Code / sonnet-5.5 |
 | T61.5.2 | todo | P2 | 3 | 0% | |
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
@@ -1913,35 +1912,6 @@ Done when: §4.3.9 has both job times; the desktop build workflow, which shares 
 
 Out of scope: sccache (T61.7).
 
-#### T61.5.1 One integration-test binary for `cox-core`
-
-Model: sonnet · Status: in progress · Depends: T61.1 · Size: ~60 (moves, plus one `main.rs`) · Priority: P2 · Complexity: 3
-
-Goal: `crates/cox-core/tests/*.rs` (21 files) become modules of one test binary, so `nextest` links one binary instead of 21.
-
-Files:
-- `crates/cox-core/tests/it/main.rs` (new; `mod` lines only)
-- `crates/cox-core/Cargo.toml` (one `[[test]] name = "it"` if auto-discovery needs it)
-- the moved test files (renames; they do not count as source files)
-
-Steps:
-1. `git mv` each file into `tests/it/`; `common/` and `scenarios/` move with them. `cox-app`'s dev setup reuses cox-core's harness (`crates/cox-app/Cargo.toml` comment): keep the path it uses working.
-2. insta snapshot names carry the module path: move the snapshot files with `cargo insta test --accept` only after confirming each moved snapshot's content is unchanged (`git diff -M --stat` shows renames only).
-3. Update every `--test <name>` for this crate in `justfile`, `.github/`, `docs/`, `AGENTS.md` and open `plan.md` cards to `--test it -E 'test(/^<name>::/)'`.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core
-mise exec -- cargo nextest run -p cox-app
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-```
-
-Done when: the test count before and after is equal (`nextest list`); §4.3.9 has the `-p cox-core` build-phase time before and after.
-
-Out of scope: other crates (T61.5.2, T61.5.3).
-
-Execution plan (Claude Code / sonnet-5.5): record `nextest list` count and the `--no-run` build time (with load average) first; `git mv` the 21 files and `common/`, `scenarios/`, `snapshots/` into `tests/it/` with a `main.rs` of `mod` lines; fix the `include_str!`/path references and cox-app's path; update `--test <name>` mentions; run nextest for `-p cox-core` and `-p cox-app`, clippy and fmt; record before/after in §4.3.9.
-
 #### T61.5.2 One integration-test binary for `cox`
 
 Model: sonnet · Status: open · Depends: T61.5.1 · Size: ~60 · Priority: P2 · Complexity: 3
@@ -2415,7 +2385,7 @@ Goal: the core turns the transcript tail, the digest of current entries and the 
 Files:
 - `crates/cox-core/src/refine.rs` (new)
 - `crates/cox-core/src/prompts/refine.md` (new; written for cox, not Prime's prose)
-- `crates/cox-core/tests/refine.rs`
+- `crates/cox-core/tests/it/refine.rs` (a `mod refine;` line in `it/main.rs`)
 
 Steps:
 1. Make one call on the `Job::Memory` routing tier, the same pattern as `memory_extract.rs`. No new `Job` variant is added.
@@ -2507,7 +2477,7 @@ Goal: a pure function decides whether a headless run starts another turn. It con
 Files:
 - `crates/cox-protocol/src/autonomous.rs` (new): `AutonomousPolicy`, the `GateRunner` trait, `GateResult` and `AutonomousStop`
 - `crates/cox-core/src/autonomous.rs` (new)
-- `crates/cox-core/tests/autonomous.rs`
+- `crates/cox-core/tests/it/autonomous.rs` (a `mod autonomous;` line in `it/main.rs`)
 
 Steps:
 1. Policy defaults, from prime-agent's `pa-core/src/autonomous/mod.rs`:

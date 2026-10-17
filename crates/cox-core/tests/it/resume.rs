@@ -4,7 +4,7 @@
 
 //! Resume rebuilds the same `Request` a live session would assemble (T2.4).
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 use std::sync::Arc;

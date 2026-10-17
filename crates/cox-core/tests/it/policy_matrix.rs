@@ -8,7 +8,7 @@
 //! sandbox denial becomes `ApprovalRequired { SandboxDenied }`, and only an
 //! explicit `Allow` reruns the command unconfined.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

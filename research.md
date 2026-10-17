@@ -734,6 +734,15 @@ Below the top two the order changes between the two runs: `onig_sys` 25.1 s cold
 - **An incremental edit is cheap.** One touched file in `cox-core` rebuilds the workspace in 18 s (row 2), the nextest test build in 29 s (row 4) and the dist library in 13 s (row 6). A one-line Swift edit in `CoxUI` rebuilds the app in 31 s.
 - **The six package builds add up to more than the app.** Built one by one they take 272 s, but the clean app build takes 83 s. The likely reason is that each package builds its own copy of the shared dependencies, which is the duplication T61.9 targets (not verified here).
 
+**One integration-test binary for `cox-core` (T61.5.1, measured 2026-10-17, same machine and toolchain).** The 24 `crates/cox-core/tests/*.rs` files became modules of `tests/it/main.rs`, so nextest links 1 test binary instead of 24 (plus the lib's unit-test binary in both cases). Both runs: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4`, warm sccache, every dependency already built, `cargo clean -p cox-core` immediately before, then `cargo nextest run -p cox-core --no-run`. One run each, not a median, on a machine under load from two other agents, so a gap of this size (about 2x) is the signal and the exact seconds are not.
+
+| Layout | `Finished` | Wall | Load average (1-minute) before → after | `clean -p cox-core` removed |
+| --- | --- | --- | --- | --- |
+| before: 24 test binaries | 21.92 s | 28 s | 47 → 39 | 315 files, 789.8 MiB |
+| after: `tests/it` | 10.86 s | 14 s | 41 → 39 | 181 files, 216.4 MiB |
+
+Test count (`cargo nextest list -p cox-core`): 431 before and 431 after, and the sets of names are identical once the old binary name is read as the new module name. `nextest run -p cox-core`: 431 passed; `-p cox-app` (which includes `tests/common/mod.rs` by path): 270 passed.
+
 **Machine line for the record:** Apple M3 Max, 16 cores, 64 GiB, macOS 27.0.1 (26A434), Xcode 27.1, Swift 6.4, Rust 1.98.1, measured 2026-10-17 on a shared machine (load 9–70).
 
 ### 4.4 Routing evidence (D5)
