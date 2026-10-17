@@ -1,0 +1,10 @@
+---
+source: crates/cox-tui/tests/it/cells.rs
+expression: "rest.join(\"\\n\")"
+---
+[info] hook `fmt` ran
+[warn] skill `deploy` skipped: bad frontmatter
+[budget] 80% of the session budget spent
+✗ budget exceeded: spent $5.00 of $5.00
+— compacted; earlier turns summarised as —
+  Earlier: the user asked for the loop; main.rs was read.

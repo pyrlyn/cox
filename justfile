@@ -31,9 +31,10 @@ docs-check:
     {{docs_cargo}} test --locked -p cox-tui --lib keymap_table_matches_docs
 
 docs_cargo := env("CARGO", "mise exec -- cargo")
-# The whole workspace, then the swarfr cleanup; CI runs the same suite.
+# The whole workspace, then the swarfr cleanup; CI runs the same suite with the same
+# features (--all-features), so local and CI runs share build artifacts.
 check-all: && swarfr
-    mise exec -- cargo nextest run --workspace
+    mise exec -- cargo nextest run --workspace --all-features
 
 # The crates that build for Windows (P57, T57.1): the one list `just
 # windows-check` and CI's `windows` job use. Each P57 card adds the crates it
@@ -158,6 +159,11 @@ release:
 # (aarch64-apple-darwin only, macOS 26.0) plus the generated Swift bindings.
 desktop-xcframework:
     mise exec -- bash scripts/desktop/xcframework.sh
+
+# Every Swift package's tests (T63.2): the XCFramework, then swift_test.sh with no pass markers
+# skipped, as on main. CI skips unchanged packages on pull requests only.
+desktop-test: desktop-xcframework
+    COX_SWIFT_TEST_ALL=1 mise exec -- bash scripts/desktop/swift_test.sh
 
 # The macOS app, Debug and ad-hoc signed (T37.32.1, DT§7): the XCFramework, then XcodeGen's
 # thin Cox.xcodeproj from desktop/macos/project.yml, then desktop/macos/build/Cox.app. No

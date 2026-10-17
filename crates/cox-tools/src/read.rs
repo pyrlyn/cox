@@ -6,7 +6,7 @@
 //! (plan.md T3.2, §1.11, T59.8), and an image file returned as an image (T40.4). Every path argument goes through `cox_tools::path::confine`
 //! first (AGENTS.md trust boundary) — no other constructor for a `Path`
 //! from `input` exists in this file, so the `confine_is_the_only_path_
-//! constructor` grep guard in `tests/confine.rs` stays green.
+//! constructor` grep guard in `tests/it/confine.rs` stays green.
 
 use async_trait::async_trait;
 use cox_protocol::{Concurrency, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolSpec, image};

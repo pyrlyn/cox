@@ -1,0 +1,9 @@
+---
+source: crates/cox-tui/tests/it/cells.rs
+expression: "text(&s, tool_cell(&s))"
+---
+⚙ read example.tsx · 8ms
+│ export const Button = () => {
+│   return <button>Click me</button>;
+│ };
+│ ✓ 0B 8ms
