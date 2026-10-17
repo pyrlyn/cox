@@ -124,7 +124,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T61.8 | todo | P3 | 1 | 0% | |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
-| T61.11 | todo | P3 | 3 | 0% | |
+| T61.11 | in progress | P3 | 3 | 10% | Claude Code / opus-5.5 |
 | T63.2 | todo | P2 | 3 | 0% | |
 | T68.2 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.3 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
@@ -2115,7 +2115,9 @@ Out of scope: lint rules.
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
 
-Model: opus · Status: open · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
+Model: opus · Status: in progress · Depends: T61.1 · Size: ~50 · Priority: P3 · Complexity: 3
+
+Execution plan (Claude Code / opus-5.5): main already carries cargo-hakari's `workspace-hack` (#212), so measure it as it stands. (1) In an own worktree and `target/`, `CARGO_BUILD_JOBS=4`, build what `just check-all` builds (`cargo nextest run --workspace`, without the swarfr step). (2) For a few one-crate scratch edits, run `just test --changed-since HEAD` and count the non-workspace `compiler-artifact` messages with `fresh: false` (`--cargo-message-format json`); then the reverse direction. (3) Zero → close with the counts in `research.md` §4.3.9 and cargo's unification status for Rust 1.98.1 cited; non-zero → step 2 below. Verify: the Check below.
 
 Goal: switching between `just test` (a `-p` subset) and `just check-all` (`--workspace`) does not rebuild dependencies because their features unify differently, or the card is rejected with the reason.
 
