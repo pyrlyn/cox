@@ -1,3 +1,22 @@
+#### T63.2 CI: re-run only the Swift packages a change can affect
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
+Depends: T61.4 (shared job; not a code dependency) · Priority: P2 · Complexity: 3
+Goal: on a pull request, a package whose test inputs are byte-identical to a run that already passed on `main` (or earlier on the same pull request) is not tested again; everything else runs as before. A change to `CoxUI` alone re-runs `CoxUI` and `CoxTranscript`; a Rust-only change re-runs `CoxCore` only, so the five packages that do not link `CoxFFI` (and their snapshot images) are skipped. SwiftPM has no per-test result cache, so the unit that can be skipped is a whole package. The app target is built on every run.
+Done:
+- `scripts/desktop/swift_test_select.py` owns the input lists and the hash (`git ls-files -s` of the package, its transitive local dependencies, the extra paths its tests read, the shared files, plus `xcodebuild -version` and `sw_vers -productVersion`) and prints `NAME HASH run|skip`. An unknown package fails closed.
+- `scripts/desktop/swift_test.sh` is the per-package loop that was inline in `ci.yml`, plus the pass markers (`desktop/macos/build/swift-test-pass/NAME-HASH`, written only by a package that passed). It runs every package unless `COX_SWIFT_TEST_ALL=0`; `ci.yml` sets 0 on `pull_request` only.
+- `ci.yml` `desktop-macos`: `actions/cache/restore` and `actions/cache/save` v6.1.0 (`55cc8345863c7cc4c66a329aec7e433d2d1c52a9`, `gh api repos/actions/cache/git/ref/tags/v6.1.0`, checked 2026-10-17) around the script; the save runs after a failure too. The job comment states the rule. `desktop-macos-lint` runs the selection tests.
+- `justfile` `desktop-test` (new recipe): the XCFramework, then the script with `COX_SWIFT_TEST_ALL=1`.
+- Deviations from the card's input table, found by reading the tests: `CoxPlatform`, `CoxTranscriptText` and `CoxTranscript` tests read `desktop/macos/Fixtures` through `#filePath`, and `CoxCore`'s `WelcomeTests` summarises the repository root (`AGENTS.md`, `CLAUDE.md`, `.cargo`), so those are hashed too; `.github/actions/desktop-macos/action.yml` (the toolchain and XCFramework steps) and the selector itself are shared inputs. Dependencies are read from each `Package.swift` (`.package(path:)`), not copied.
+- Step 5 (`push` to `main` so `main` writes markers) is not done: it adds a macOS run per merge and the card says to ask the creator first. Until then markers come from earlier runs of the same pull request and from manual runs on `main` (`workflow_dispatch` runs every package and saves).
+Check:
+- `python3 -m unittest discover -s scripts/desktop -p 'test_swift_test_select.py'`: 19 tests pass (unchanged inputs skip all; a `crates/` or `Cargo.lock` change selects `CoxCore` only; a `CoxUI` source or snapshot change selects `CoxUI` and `CoxTranscript`; a `CoxModel` change selects it and its four dependents but not `CoxUI`; a Fixtures change; each shared file; a new toolchain; run-all; unknown package; drift against the real manifests).
+- `swift_test.sh` against a stub `swift` on the real tree: first run with `CoxUI` failing wrote five markers and exited 1; the second run skipped those five and ran `CoxUI` alone; a run without `COX_SWIFT_TEST_ALL=0` ran all six.
+- `ruby -ryaml` loads `ci.yml`; `bash -n` passes. actionlint and shellcheck are not installed in this checkout (mise shims without a version).
+- Baseline for `desktop-macos` on pull requests with every package run (successful runs 38941648537, 38941652721, 38943380391, 38943832554, 38944038140, 38945470792): 52.6, 53.9, 55.2, 59.7, 63.1, 63.7 min, median 57.5 min. Many later runs were cancelled or queued, so no newer sample.
+- Pending CI on this pull request: the first push runs all six packages and stores a key; a push touching only `crates/cox-tools/src/git.rs` should show five "skipped" and `CoxCore` tested; a push touching only a `CoxUI` source should run `CoxUI` and `CoxTranscript`. Their job times are the "after" column. `research.md` §4.3.9 does not exist on `main` yet (T61.1, #312), so the before/after rows are added there once it lands.
+
 #### T33.40.5 Parity: the `typesafe` table configures the plugin's section
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
