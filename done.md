@@ -1,6 +1,6 @@
 #### T66.18 Worker mode in `cox-app`'s server: one session, ended on EOF
 
-Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.18 · Size: ~80 · Priority: P2 · Complexity: 2
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.17 · Size: ~80 · Priority: P2 · Complexity: 2
 
 Goal: the server can run as one session's worker, and on EOF every mode ends its sessions instead of only closing them, so detached bash processes are killed. `docs/design/serve.md` S3, D3 and F2.
 
@@ -26,9 +26,9 @@ Out of scope: the `cox serve --worker` flag and the supervisor that spawns worke
 
 Check: `mise exec -- cargo nextest run -p cox-app` passed (276 tests), including `eof_ends_every_session` (a background `bash` runs `exec sleep 300`; after the client's stdin closes the process is dead; with `stop` calling `close` again it is still alive after 5 s and the test fails) and `a_worker_refuses_a_second_session` (the second `open` answers an error naming one session, a `resume` of the held id attaches, the first session still answers `snapshot`; with `refuses` returning false the test fails). `-p cox --test docs` 5 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. `docs/app-server.md` now says EOF ends the sessions. `serve_stdio` takes the mode and `cox app-server --stdio` passes `Client`; the `--worker` flag is a later card.
 
-#### T66.18 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
+#### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
 
-Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.17 · Size: ~140 · Priority: P2 · Complexity: 3
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.16 · Size: ~140 · Priority: P2 · Complexity: 3
 
 Goal: a client can detach and reattach to a session the server holds, and one session never gets a second core. `docs/design/serve.md` S2, D1, D2 and F1.
 
@@ -50,7 +50,7 @@ Done when these tests pass: `close_then_attach_streams_from_the_snapshot`, `open
 
 Out of scope: the supervisor, the socket and worker mode (T66.18 and later cards).
 
-#### T66.17 `docs/app-server.md` says what a dropped connection does
+#### T66.16 `docs/app-server.md` says what a dropped connection does
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-17 · Depends: T66.12 · Size: ~10 (docs only) · Priority: P2 · Complexity: 1
 
