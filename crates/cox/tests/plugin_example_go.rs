@@ -221,7 +221,7 @@ fn plugin_example_go_counts_turns_in_its_status_and_resets_them() {
 /// with, because the `mise exec` that starts nextest from the repository
 /// root drops the `plugins/` tools and puts other ones first (Homebrew's
 /// `go` against mise's `GOROOT` refuses its compiler; TinyGo looks `go` up
-/// on `PATH` too). CI puts both tools on `PATH` and needs no override.
+/// on `PATH` too). CI sets it the same way: its `cargo` is a mise shim too.
 fn tool_path() -> std::ffi::OsString {
     std::env::var_os("PLUGIN_TOOLS_PATH")
         .or_else(|| std::env::var_os("PATH"))
