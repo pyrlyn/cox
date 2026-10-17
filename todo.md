@@ -88,6 +88,9 @@
 - T66.19. New crate `cox-serve`: the restart policy
 - T66.20. `cox-serve`: run directory, singleton lock, socket and peer uid
 - T66.21. `cox-serve`: spawn workers, watch them, restart them, shut down
+- T66.22. `cox-serve`: the router and the `attach --stdio` bridge
+- T66.23. `cox serve` and `cox attach --stdio`
+- T66.24. End-to-end: kill the client, reattach, and the rollout grows only by the turn
 - T67.3. Five more hook events
 - T67.4. `/goal`: a judged stop condition
 - T67.5. `/goal` in the TUI and stream-json

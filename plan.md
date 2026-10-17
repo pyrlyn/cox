@@ -2044,7 +2044,7 @@ Rationale in §6 A142. T65.1 is in `done.md`.
 
 Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) at `afe8d14` (v0.9.8). It is MIT, but no code is copied, so no notice is needed. Each card cites prime-agent files for the idea only, and the implementation is written from the card. If a later card ever copies a substantial part, that file and `THIRD-PARTY-NOTICES` carry prime-agent's full MIT text, both copyright lines and the repository URL, and that notice is never replaced by cox's header.
 
-**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it. A161 adds the first three, T66.16 → T66.17 → T66.18. A162 adds T66.19 → T66.20; T66.21 follows T66.18 and T66.19.
+**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it. A161 adds the first three, T66.16 → T66.17 → T66.18. A162 adds T66.19 → T66.20; T66.21 follows T66.18 and T66.19. A165 adds T66.22 → T66.23 → T66.24.
 
 **Already in cox, so no card:**
 - `ContextTooLong` already compacts once per user turn and then surfaces the error (`session.rs:1846-1867`, `retried_after_too_long`). That is the contract of prime-agent's `OverflowRecovery` (`pa-daemon/src/overflow_compaction.rs`).
@@ -2464,6 +2464,97 @@ mise exec -- cargo fmt --check
 Done when these tests pass, with a fake worker program as `crates/cox/tests/remote.rs` fakes `ssh`: `a_crashed_worker_is_restarted_idle_with_resume`, `give_up_marks_the_session_failed`, `shutdown_ends_every_worker`, `the_cap_refuses_the_seventeenth_open`.
 
 Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
+
+#### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
+
+Model: opus · Status: open · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Goal: a client that connects to the supervisor's socket reaches the right worker, and exactly one client is attached to a session at a time. `docs/design/serve.md` S7, D1, D4 (the bridge), D6 and the trust boundaries. T66.18 supplies worker mode and T66.17's `attach`; T66.20 supplies the socket and `admit`; T66.21 supplies the workers.
+
+Files:
+- `crates/cox-serve/src/router.rs`
+- `crates/cox-serve/src/attach.rs`
+- `crates/cox-serve/src/lib.rs`
+
+Steps:
+1. The accept loop runs `admit(peer_uid, own_uid)` on every connection before its first line is read; a mismatch is dropped and logged.
+2. Workspace calls (`projects`, `sessions`, `search`) are answered by the supervisor's own `App`, which opens SQLite and nothing else; the supervisor never owns a `Session` and never claims a session lock.
+3. A call that names a session is routed by session id to that session's worker. An `open` whose `resume` names a live worker becomes `attach`, never a second core (F1, D6).
+4. One attached client per session: a new `attach` takes the stream over and the previous client gets `ended` for that session. A detach stops only the worker's pump, never its controller, so approvals and questions wait in the worker's inbox and `inbox` returns them on the next attach.
+5. Worker notifications are forwarded to the attached client. Every line from the socket is decoded and refused like any other app-server line.
+6. `attach.rs` is the `--stdio` bridge: `tokio::io::copy_bidirectional` between stdio and the socket, so ssh's own authentication decides who reaches the socket and cox opens no inbound port.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve router
+mise exec -- cargo nextest run -p cox --test deps
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `workspace_calls_need_no_worker`, `session_calls_reach_their_worker`, `a_second_attach_ends_the_first_stream`, `open_resume_of_a_live_worker_attaches`.
+
+Out of scope: the `cox serve` and `cox attach` commands and the hidden `--worker` flag (T66.23), the end-to-end test (T66.24), a TUI that attaches (D2: a separate later design), and Windows.
+
+#### T66.23 `cox serve` and `cox attach --stdio`
+
+Model: sonnet · Status: open · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the supervisor and the bridge are commands a person can run. `docs/design/serve.md` S8, D3, D4 item 7 and D8. `crates/cox` stays clap and dispatch only.
+
+Files:
+- `crates/cox/src/cli.rs`, `crates/cox/src/main.rs`
+- `crates/cox/Cargo.toml` (`cox-serve` as an optional workspace path dependency behind the existing `app-server` feature; the `deps.rs` rule T66.19 adds lists `crates/cox` as an allowed dependent)
+- `docs/app-server.md` (a "Resident sessions" section that names both commands, which `docs_name_every_subcommand` requires)
+
+Steps:
+1. `cox serve` runs the supervisor in the foreground; it does not daemonize. The hidden `--worker` flag, not shown in `--help`, runs `cox_app::server::serve` in worker mode over stdin and stdout, and is the argv T66.21's supervisor spawns through `current_exe()`.
+2. `cox attach --stdio` runs T66.22's bridge. It never starts a supervisor: with no `cox serve` running it fails, naming the socket path.
+3. On Windows both commands refuse with "not supported yet".
+4. The docs section states what is resident (a session lives in its worker until `end`), that a TUI session is never resident, and that the desktop app's ssh command stays `cox app-server --stdio` (D8).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test docs
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- serve --help
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- attach --stdio
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+The last `attach` run exits non-zero and names `COX_HOME/run/serve.sock`; `COX_HOME` is a scratch tree, never `~/.cox`.
+
+Done when `docs_name_every_subcommand` passes, `serve --help` does not list `--worker`, and `cox attach --stdio` with no supervisor fails naming the socket path.
+
+Out of scope: the end-to-end test (T66.24), the desktop app choosing `cox attach --stdio` for a host that runs `cox serve` (a P52 desktop card), and heartbeat (T66.13).
+
+#### T66.24 End-to-end: kill the client, reattach, and the rollout grows only by the turn
+
+Model: sonnet · Status: open · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3
+
+Goal: one test proves the point of the whole serve design: a session outlives its client and a reattach writes nothing to the rollout. `docs/design/serve.md` "Acceptance test for the later cards", S9 and D6.
+
+Files:
+- `crates/cox/tests/serve.rs` (test only)
+
+Steps:
+1. Against a scratch `COX_HOME` with the scripted provider (`COX_PROVIDER=scripted`, `COX_SCENARIO`, as `crates/cox/tests/remote.rs` sets them), start `cox serve` in the background and wait for `run/serve.sock`.
+2. Client A runs `cox attach --stdio`, sends `open` for a new session in a scratch cwd and counts the rollout's lines (M). It sends one prompt, reads patches until the turn ends, records the line count (N, with N > M) and the blocks it folded with `coalesce::apply`.
+3. Kill client A with SIGKILL and assert the worker still holds the lock (`Store::session_holder` is `Some`).
+4. Client B runs `cox attach --stdio` and sends `attach`. Assert `Opened.blocks` equals A's folded blocks, the rollout still has exactly N lines with `seq` running 1..=N without a repeat, and lines M+1..=N are that one turn's events from `TurnStarted` to `TurnDone`.
+5. SIGTERM to `cox serve`: assert the lock is free and the socket is removed.
+6. Every process the test starts is killed at the end, including on failure, through a drop guard (a test never leaves a process behind).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test serve
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `a_reattach_after_a_killed_client_writes_nothing_to_the_rollout` passes.
+
+Out of scope: a restarted worker's `StateChanged` line (a restart replays the rollout and appends one, D6; only a reattach must add nothing), a TUI attach, and Windows.
 
 ### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
 
@@ -2962,6 +3053,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A161 §3 P66 (new T66.16–T66.18), by the creator (2026-10-17): the first three implementation cards from `docs/design/serve.md` (T66.12), its proposals S1–S3. S1 corrects `docs/app-server.md`, which promises that a turn survives a dropped client; S2 adds `attach`, `end` and `inbox` to the app-server wire and makes `open` of a held session attach (F1: two cores for one session); S3 adds worker mode and ends sessions on EOF (F2). Why: they need no new crate or dependency and fix two bugs the design found. S4–S9 (`cox-serve`, the socket, supervision, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
 - A162 §3 P66 (new T66.19–T66.21), by the creator (2026-10-17): the next three implementation cards from `docs/design/serve.md`, its proposals S4–S6. S4 adds the crate `cox-serve` with a pure restart policy; S5 adds its run directory, singleton lock and owner-only socket with a peer-uid check (D4), extracting `lock::claim_path` in cox-store so one lock implementation serves both; S6 adds worker supervision and shutdown. Why: a new crate, because process supervision and the socket's trust boundary must stay out of `cox-app` (linked into the macOS app) and out of `crates/cox`. No new dependency. S7–S9 (router and bridge, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
 - A160 §3 P32 (new T32.17), by the creator (2026-10-13, for Mailune X1; numbered A155 on its branch, renumbered on merge because main's A155 is T33.46): `cox-config` consumes the shared `config-schema` crate (layering with named layers and per-key provenance, the `COX_*` env layer, comment-preserving edits) that was extracted from it, rtok and ketch, and drops its own copy. Why: the workspace rule against duplicated code across projects. Effect: one card; `config-schema` replaces `cox-config`'s direct `figment` and `toml_edit` dependencies. No §0 decision changes.
+- A165 §3 P66 (new T66.22–T66.24), by the creator (2026-10-17): the last three implementation cards from `docs/design/serve.md`, its proposals S7–S9. S7 adds the router and the `--stdio` bridge to `cox-serve` (workspace calls answered by the supervisor's own `App`, session calls routed by id to their worker, an `open` of a live session turned into `attach`, one attached client per session with `ended` for the one displaced); S8 adds the `cox serve` and `cox attach --stdio` commands, the hidden `--worker` flag and the docs section; S9 is the end-to-end test that kills a client, reattaches and checks that the rollout grows only by the turn. Why: they finish the chain T66.16–T66.21 so that a session outlives the client that opened it (D1, D4, D6). T66.22 depends on T66.18, T66.20 and T66.21, because serve.md S7 depends on S2, S5 and S6. No split: each card fits within 500 non-test lines. No new external dependency, so no `plan.md` §1 row is needed (serve.md requires none); `cox-serve` is already added by A162. T66.13 (heartbeat) and T66.14 still wait for their own later amendment. No §0 decision changes.
 
 ## 7. Risk register
 
