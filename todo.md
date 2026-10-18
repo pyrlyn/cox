@@ -1,6 +1,5 @@
 # Todo
 
-- T4.1. IDE permission set (from Kerf)
 - T32.17. `cox-config` loads through the shared `config-schema` crate
 - T33.40.7. Eval E1: risk escalation against the classifier alone
 - T33.40.9. `route` advisor: downgrade only
@@ -82,3 +81,4 @@
 - T68.5. Desktop: Connect to Target sheet (Swift)
 - T68.8. Windows targets
 - T68.10. Docs: targets
+- T380. Kerf T4: least-privilege IDE levels and routable LSP/DAP entries

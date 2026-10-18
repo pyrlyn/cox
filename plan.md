@@ -42,7 +42,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T4.1 | in progress | P2 | 3 | 100% | MiMo Desktop / mimo |
 | T32.17 | in progress | P2 | 3 | 80% | Claude / opus-5.5 |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
@@ -112,7 +111,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.5 | in progress | P2 | 3 | 100% | Claude / sonnet-5.5 |
 | T68.8 | in progress | P2 | 3 | 70% | Claude / sonnet-5.5 |
 | T68.10 | in progress | P2 | 1 | 90% | Claude / haiku-5.5 |
-| T70.1 | in progress | P1 | 3 | 100% | MiMo Desktop / mimo |
+| T380 | in progress | P1 | 2 | 80% | Claude Code / opus-5.5 |
 ## Reference
 
 Name: **cox** — the coxswain steers the boat and calls the strokes; the crew (models, tools, MCP servers) does the rowing. Binary `cox`, crates `cox-*`, home `~/.cox/`.
@@ -991,25 +990,6 @@ Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a sel
 Split by A157 into T33.47.8.1–T33.47.8.10, one layer each; this card closes when they are done.
 
 Remaining (all ten sub-cards are done): the hand check — ⌘⇧D and the palette row toggle the pane, two frames show, a click adds a chip and a second replaces it — and the falsifier 3 measurement in Instruments. Both need a person at the app: the agent that built the cards cannot drive a native window, and no fixture plugin declares a canvas.
-
-#### T4.1 IDE permission set (from Kerf)
-
-Model: MiMo Desktop / mimo · Status: in progress · Depends: — · Size: ~150 · Priority: P2 · Complexity: 3
-Goal: the buffer, LSP, DAP, index, terminal and git permission classes exist in `cox-plugin-api` as `[capabilities.ide]`, with validation, grant lines, JSON Schema and a design-doc section — Kerf T4.1's permission *classes* only (T4.2 owns the LSP/DAP manifest tables).
-Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin-api/src/lib.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md`, generated `docs/plugin.schema.json` and `docs/plugins.md` API index.
-Steps:
-1. `IdeCaps` nested under `Capabilities::ide`, six `bool` classes (`buffer`, `lsp`, `dap`, `index`, `terminal`, `git`), `deny_unknown_fields`, absent = empty = none requested.
-2. `IdeCaps::grant_lines` emits `ide.<class>`; `grant::capability_list` appends them (`ide.terminal` is never `terminal.keys`).
-3. Unit tests: each family present/absent, unknown key rejected, empty vs absent, grant-line namespace.
-4. Regenerate `docs/plugin.schema.json` and the `docs/plugins.md` API index; PL§16 documents what each class allows and what it does not (plugins still never spawn processes).
-Check:
-```bash
-mise exec -- cargo test -p cox-plugin-api -p cox-plugin
-mise exec -- cargo clippy -p cox-plugin-api -p cox-plugin --all-targets -- -D warnings
-mise exec -- cargo fmt --check -p cox-plugin-api -p cox-plugin
-```
-Done when: the Check is green, `plugin_schema_matches_committed_file` and `plugin_api_reference_covers_both_schemas` pass, and PL§16 names every class with its no-bypass rule. Named as Kerf's T4.1; cox's historical sandbox T4.1/T4.2 (invariant 11) are long done and live in `done.md`.
-Out of scope: LSP/DAP manifest tables (Kerf T4.2), host spawn logic, IDE host functions or ABI payloads, Kerf's own crates.
 
 ### P34 — Subagents (goal: a subagent can be a custom named definition, capped in number, able to ask the user, and able to exchange follow-up messages with its parent and its siblings — all through the parent's own `Submission`/`Event` stream)
 
@@ -2126,19 +2106,27 @@ Model: Claude / haiku-5.5 · Status: in progress · Depends: T68.5, T68.6, T68.7
 
 Goal: `docs/targets.md` (each kind, how to put `cox` on it, what the trust rules above mean for a user, the sandbox inside a container), `docs/app-server.md` narrowed to the wire, `docs/config.md`, README links. Done when every target kind has a worked example and `docs/app-server.md` no longer explains ssh setup.
 
-### P70 — Kerf IDE plugin contract (goal: cox-plugin-api carries the manifest tables Kerf needs to declare host-spawned language servers and debug adapters)
+### P70 — Kerf IDE plugin contract (goal: cox-plugin-api carries the IDE permission classes and the manifest tables Kerf needs to declare host-spawned language servers and debug adapters)
 
-#### T70.1 Kerf T4.2: LSP and DAP manifest tables
+#### T380 Kerf T4: least-privilege IDE levels and routable LSP/DAP entries
 
-Model: MiMo Desktop / mimo · Status: in progress · Depends: — · Size: ~250 · Priority: P1 · Complexity: 3 · Files: `crates/cox-plugin-api/src/manifest.rs`, `docs/design/plugins.md` PL§2/§7e, `docs/plugin.schema.json`
+Model: Claude Code / opus-5.5 · Status: in progress · Depends: — · Size: ~60 + tests · Priority: P1 · Complexity: 2 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` §3/§7e/§16 (plus the regenerated `docs/plugin.schema.json`, the generated API index in `docs/plugins.md` and its `docs/ru`, `docs/uk` copies, and the one-line re-export in `lib.rs`)
 
-Matching Kerf `plan.md` T4.2. `[[language_servers]]` and `[[debug_adapters]]` in `PluginManifest`, its JSON Schema, validation and the plugin docs. The plugin declares a process; the host spawns it — the same "no bypass" rule as `[[mcp]]` (PL§7c/§10). Sibling Kerf T4.1 owns the IDE permission classes (buffer/lsp/dap/index/terminal/git); this card is the manifest side only.
+Matching Kerf `plan.md` T4.1/T4.2, which take what #367 landed (`[capabilities.ide]`, `ide.*` lines, the LSP/DAP tables as they are) and tighten two things. Why: a bool `ide.buffer` or `ide.git` grants the write half to a plugin that only reads, and an LSP/DAP entry with nothing to route on is approved and never starts.
 
-Landed: `LanguageServerDecl`/`DebugAdapterDecl` (`name`, `languages`, `globs` on LS, `command`, `args`, `env`, `config`) with `deny_unknown_fields` and `#[serde(default)]` so existing manifests parse; validation (non-empty `command`, `env` keys are env var names, id-joined name rule as `ExternalAgentDecl`, unique names); a data-only package may declare only these tables without `wasm`; schema + field-index drift tests; PL§7e field table, example and the spawn rule.
+Steps:
+1. `IdeCaps.buffer` becomes `Option<BufferAccess>` (`"read"` | `"edit"`, edit implies read), `IdeCaps.git` becomes `Option<GitAccess>` (`"read"` | `"write"`, write = stage and commit only). The old `true` spelling and any other word fail to parse. Nothing consumes these fields yet, so the break is cheap now.
+2. `IdeCaps::grant_lines` emits `ide.buffer.read`, `ide.buffer.edit`, `ide.git.read`, `ide.git.write`; a write level lists its read line too, so widening adds a line and the digest-bound grant asks again.
+3. `validate`: a `[[language_servers]]` entry needs `languages` or `globs`, a `[[debug_adapters]]` entry needs `languages` (`LanguageServerUnrouted`, `DebugAdapterUnrouted`).
+4. Tests: every level parses and maps to its lines, the flag spelling and unknown levels are refused, unrouted entries are refused, a read grant does not cover edit/write (`grant.rs`). Regenerate the schema and the API index; PL§3, §7e and §16 say the same.
 
-Check: `language_server_tables_default_to_empty`, `language_server_and_debug_adapter_tables_parse_and_validate`, `language_server_tables_reject_unknown_keys`, `language_server_and_debug_adapter_reject_an_empty_command`, `language_server_rejects_a_bad_env_key_or_duplicate_name`, `manifest_allows_a_wasm_less_language_server_only_package`; `plugin_schema_matches_committed_file`, `plugin_api_reference_covers_both_schemas`; `cargo test -p cox-plugin-api`, clippy `-D warnings`, `fmt --check` green.
-
-Remaining (not this card): Kerf T1 may rename the tables; a download/install hint for LSP/DAP binaries (open, deliberately out of the struct); the host spawn, supervision and buffer caps (Kerf T1), and T4.1's permission classes.
+Check:
+```bash
+mise exec -- cargo test -p cox-plugin-api -p cox-plugin
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+Done when the Check is green and Kerf's architecture §4 describes these names.
 
 ---
 
