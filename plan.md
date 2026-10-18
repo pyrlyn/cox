@@ -111,7 +111,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.5 | in progress | P2 | 3 | 100% | Claude / sonnet-5.5 |
 | T68.8 | in progress | P2 | 3 | 70% | Claude / sonnet-5.5 |
 | T68.10 | in progress | P2 | 1 | 90% | Claude / haiku-5.5 |
-| T380 | in progress | P1 | 2 | 80% | Claude Code / opus-5.5 |
 ## Reference
 
 Name: **cox** — the coxswain steers the boat and calls the strokes; the crew (models, tools, MCP servers) does the rowing. Binary `cox`, crates `cox-*`, home `~/.cox/`.
@@ -2107,26 +2106,6 @@ Model: Claude / haiku-5.5 · Status: in progress · Depends: T68.5, T68.6, T68.7
 Goal: `docs/targets.md` (each kind, how to put `cox` on it, what the trust rules above mean for a user, the sandbox inside a container), `docs/app-server.md` narrowed to the wire, `docs/config.md`, README links. Done when every target kind has a worked example and `docs/app-server.md` no longer explains ssh setup.
 
 ### P70 — Kerf IDE plugin contract (goal: cox-plugin-api carries the IDE permission classes and the manifest tables Kerf needs to declare host-spawned language servers and debug adapters)
-
-#### T380 Kerf T4: least-privilege IDE levels and routable LSP/DAP entries
-
-Model: Claude Code / opus-5.5 · Status: in progress · Depends: — · Size: ~60 + tests · Priority: P1 · Complexity: 2 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` §3/§7e/§16 (plus the regenerated `docs/plugin.schema.json`, the generated API index in `docs/plugins.md` and its `docs/ru`, `docs/uk` copies, and the one-line re-export in `lib.rs`)
-
-Matching Kerf `plan.md` T4.1/T4.2, which take what #367 landed (`[capabilities.ide]`, `ide.*` lines, the LSP/DAP tables as they are) and tighten two things. Why: a bool `ide.buffer` or `ide.git` grants the write half to a plugin that only reads, and an LSP/DAP entry with nothing to route on is approved and never starts.
-
-Steps:
-1. `IdeCaps.buffer` becomes `Option<BufferAccess>` (`"read"` | `"edit"`, edit implies read), `IdeCaps.git` becomes `Option<GitAccess>` (`"read"` | `"write"`, write = stage and commit only). The old `true` spelling and any other word fail to parse. Nothing consumes these fields yet, so the break is cheap now.
-2. `IdeCaps::grant_lines` emits `ide.buffer.read`, `ide.buffer.edit`, `ide.git.read`, `ide.git.write`; a write level lists its read line too, so widening adds a line and the digest-bound grant asks again.
-3. `validate`: a `[[language_servers]]` entry needs `languages` or `globs`, a `[[debug_adapters]]` entry needs `languages` (`LanguageServerUnrouted`, `DebugAdapterUnrouted`).
-4. Tests: every level parses and maps to its lines, the flag spelling and unknown levels are refused, unrouted entries are refused, a read grant does not cover edit/write (`grant.rs`). Regenerate the schema and the API index; PL§3, §7e and §16 say the same.
-
-Check:
-```bash
-mise exec -- cargo test -p cox-plugin-api -p cox-plugin
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-Done when the Check is green and Kerf's architecture §4 describes these names.
 
 ---
 

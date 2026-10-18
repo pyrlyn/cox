@@ -81,4 +81,3 @@
 - T68.5. Desktop: Connect to Target sheet (Swift)
 - T68.8. Windows targets
 - T68.10. Docs: targets
-- T380. Kerf T4: least-privilege IDE levels and routable LSP/DAP entries

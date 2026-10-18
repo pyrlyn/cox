@@ -13981,3 +13981,35 @@ Check: `language_server_tables_default_to_empty`, `language_server_and_debug_ada
 Remaining (not this card): Kerf T1 may rename the tables; a download/install hint for LSP/DAP binaries (open, deliberately out of the struct); the host spawn, supervision and buffer caps (Kerf T1), and T4.1's permission classes.
 
 Landed in #367 (df04e1fe), readiness 100% but never moved here; closed by T380's bookkeeping. T380 later required each entry to have something to route on.
+
+### T380 Kerf T4: least-privilege IDE levels and routable LSP/DAP entries
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-19 · Depends: — · Size: ~60 + tests · Priority: P1 · Complexity: 2 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` §3/§7e/§16 (plus the regenerated `docs/plugin.schema.json`, the generated API index in `docs/plugins.md` and its `docs/ru`, `docs/uk` copies, and the one-line re-export in `lib.rs`)
+
+Matching Kerf `plan.md` T4.1/T4.2, which take what #367 landed (`[capabilities.ide]`, `ide.*` lines, the LSP/DAP tables as they are) and tighten two things. Why: a bool `ide.buffer` or `ide.git` grants the write half to a plugin that only reads, and an LSP/DAP entry with nothing to route on is approved and never starts.
+
+Steps:
+1. `IdeCaps.buffer` becomes `Option<BufferAccess>` (`"read"` | `"edit"`, edit implies read), `IdeCaps.git` becomes `Option<GitAccess>` (`"read"` | `"write"`, write = stage and commit only). The old `true` spelling and any other word fail to parse. Nothing consumes these fields yet, so the break is cheap now.
+2. `IdeCaps::grant_lines` emits `ide.buffer.read`, `ide.buffer.edit`, `ide.git.read`, `ide.git.write`; a write level lists its read line too, so widening adds a line and the digest-bound grant asks again.
+3. `validate`: a `[[language_servers]]` entry needs `languages` or `globs`, a `[[debug_adapters]]` entry needs `languages` (`LanguageServerUnrouted`, `DebugAdapterUnrouted`).
+4. Tests: every level parses and maps to its lines, the flag spelling and unknown levels are refused, unrouted entries are refused, a read grant does not cover edit/write (`grant.rs`). Regenerate the schema and the API index; PL§3, §7e and §16 say the same.
+
+Check:
+```bash
+mise exec -- cargo test -p cox-plugin-api -p cox-plugin
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+Done when the Check is green and Kerf's architecture §4 describes these names.
+
+Check output:
+```
+$ mise exec -- cargo test -p cox-plugin-api -p cox-plugin
+test result: ok. 135 passed; 0 failed
+test result: ok. 67 passed; 0 failed
+$ mise exec -- cargo clippy -p cox-plugin-api -p cox-plugin --all-targets -- -D warnings
+Finished
+$ mise exec -- cargo fmt --check
+(clean)
+```
+Not green: `cargo clippy --workspace` stops in `cox-session` (`cox_config::load::default_tiers` missing since #364), the same failure `main` has; nothing in that crate uses the fields this card changed.
