@@ -12,11 +12,13 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
 
 use crate::restart::{Decision, Policy};
+use crate::router::Routes;
 use crate::worker::{Spawned, Worker, open_line};
 
 /// At most this many workers run at once (D3); no config key in the first cut.
@@ -93,7 +95,7 @@ struct Slot {
 }
 
 /// Each names a worker by its serial.
-enum Event {
+pub(crate) enum Event {
     /// It exited; `true` for status 0.
     Exited(u64, bool),
     /// Its restart delay is over.
@@ -109,6 +111,7 @@ pub struct Supervisor {
     serial: u64,
     events: mpsc::UnboundedSender<Event>,
     inbox: mpsc::UnboundedReceiver<Event>,
+    routes: Option<Arc<Routes>>,
 }
 
 impl Supervisor {
@@ -121,7 +124,13 @@ impl Supervisor {
             serial: 0,
             events,
             inbox,
+            routes: None,
         }
+    }
+
+    /// Hand every worker's lines after `open` to the router.
+    pub(crate) fn route_through(&mut self, routes: Arc<Routes>) {
+        self.routes = Some(routes);
     }
 
     /// Every resident session and its state.
@@ -178,7 +187,18 @@ impl Supervisor {
     /// Handle the next worker exit or due restart. Cancelling it drops at
     /// most a restart in progress, which `run` does only to shut down.
     pub async fn watch(&mut self) {
-        match self.inbox.recv().await {
+        let event = self.next_event().await;
+        self.handle(event).await;
+    }
+
+    /// The next worker exit or due restart; cancel-safe, so the router's
+    /// loop can wait on it beside its other work.
+    pub(crate) async fn next_event(&mut self) -> Option<Event> {
+        self.inbox.recv().await
+    }
+
+    pub(crate) async fn handle(&mut self, event: Option<Event>) {
+        match event {
             Some(Event::Exited(serial, success)) => self.exited(serial, success),
             Some(Event::Restart(serial)) => self.restart(serial).await,
             Some(Event::Refused(serial)) => {
@@ -244,8 +264,16 @@ impl Supervisor {
         let on_exit = move |success| {
             let _ = events.send(Event::Exited(serial, success));
         };
-        let options = &self.options;
-        Worker::spawn(&options.program, &options.args, serial, open, on_exit).await
+        let (options, routes) = (&self.options, self.routes.clone());
+        Worker::spawn(
+            &options.program,
+            &options.args,
+            serial,
+            open,
+            routes,
+            on_exit,
+        )
+        .await
     }
 
     /// The running worker with this serial, and its session.

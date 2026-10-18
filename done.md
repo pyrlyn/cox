@@ -1,3 +1,43 @@
+#### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
+
+Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Plan: `deps.rs` lets `cox-serve` depend on `cox-store` alone, so the supervisor's `App` is injected: `router::Workspace` answers `projects`/`sessions`/`search` as JSON, and T66.23 implements it over `cox_app`. `router.rs` owns one run loop (accept → `admit_peer` before the first line, the supervisor's events, `open` through `Supervisor::open`) and one task per connection that decodes each line as the app-server does (id 0 for a refused line), rewrites the request id per worker, and waits for its answer, so calls stay sequential per client. `worker.rs` writes stdin through a channel and, once the `open` reply names the session, hands every later stdout line to the router: responses go back to the caller under its own id, notifications to the session's one attached client. `open` is `Supervisor::open` (which already returns a live resume's id) then `attach`, so a live session never gets a second core; a successful `attach` takes the stream over and sends the previous client `ended`. `inbox` asks every worker and joins the lists. A client that disconnects gets `close` sent for its sessions (pump stops, controller keeps folding). `attach.rs`: connect to `COX_HOME/run/serve.sock`, check the server's uid with the same `admit_peer`, then `copy_bidirectional` with stdio. Tests run a fake worker through `/bin/sh`, as `supervisor`'s do, against a real socket in a tempdir.
+
+Goal: a client that connects to the supervisor's socket reaches the right worker, and exactly one client is attached to a session at a time. `docs/design/serve.md` S7, D1, D4 (the bridge), D6 and the trust boundaries. T66.18 supplies worker mode and T66.17's `attach`; T66.20 supplies the socket and `admit`; T66.21 supplies the workers.
+
+Files:
+- `crates/cox-serve/src/router.rs`
+- `crates/cox-serve/src/attach.rs`
+- `crates/cox-serve/src/lib.rs`
+
+Steps:
+1. The accept loop runs `admit(peer_uid, own_uid)` on every connection before its first line is read; a mismatch is dropped and logged.
+2. Workspace calls (`projects`, `sessions`, `search`) are answered by the supervisor's own `App`, which opens SQLite and nothing else; the supervisor never owns a `Session` and never claims a session lock.
+3. A call that names a session is routed by session id to that session's worker. An `open` whose `resume` names a live worker becomes `attach`, never a second core (F1, D6).
+4. One attached client per session: a new `attach` takes the stream over and the previous client gets `ended` for that session. A detach stops only the worker's pump, never its controller, so approvals and questions wait in the worker's inbox and `inbox` returns them on the next attach.
+5. Worker notifications are forwarded to the attached client. Every line from the socket is decoded and refused like any other app-server line.
+6. `attach.rs` is the `--stdio` bridge: `tokio::io::copy_bidirectional` between stdio and the socket, so ssh's own authentication decides who reaches the socket and cox opens no inbound port.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve router
+mise exec -- cargo nextest run -p cox --test deps
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `workspace_calls_need_no_worker`, `session_calls_reach_their_worker`, `a_second_attach_ends_the_first_stream`, `open_resume_of_a_live_worker_attaches`.
+
+Out of scope: the `cox serve` and `cox attach` commands and the hidden `--worker` flag (T66.23), the end-to-end test (T66.24), a TUI that attaches (D2: a separate later design), and Windows.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve: 25 passed (router: workspace_calls_need_no_worker, session_calls_reach_their_worker, a_second_attach_ends_the_first_stream, open_resume_of_a_live_worker_attaches, decode_reads_the_routing_fields; attach: the_bridge_copies_both_ways, no_supervisor_names_the_socket; the 18 earlier tests unchanged), 5 runs in a row
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check -p cox-serve: clean
+
 #### T33.40.12 Remove the built-in Jev client
 
 Model: Claude Code / sonnet · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.5, T33.40.6 (parity: the provider and one advisor are served by the plugin) · Size: ~120 edited (the deleted `jev.rs` does not count) · Files: `crates/cox-provider/src/jev.rs` (deleted), `crates/cox-provider/src/lib.rs`, `crates/cox/src/session.rs`
@@ -184,6 +224,92 @@ $ diff before.swift desktop/macos/build/bindings/cox_ffi.swift
 (empty: byte-identical)
 $ python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
 Ran 5 tests ... OK
+```
+
+#### T66.23 `cox serve` and `cox attach --stdio`
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the supervisor and the bridge are commands a person can run. `docs/design/serve.md` S8, D3, D4 item 7 and D8. `crates/cox` stays clap and dispatch only.
+
+Files:
+- `crates/cox/src/cli.rs`, `crates/cox/src/main.rs`
+- `crates/cox/Cargo.toml` (`cox-serve` as an optional workspace path dependency behind the existing `app-server` feature; the `deps.rs` rule T66.19 adds lists `crates/cox` as an allowed dependent)
+- `docs/app-server.md` (a "Resident sessions" section that names both commands, which `docs_name_every_subcommand` requires)
+
+Steps:
+1. `cox serve` runs the supervisor in the foreground; it does not daemonize. The hidden `--worker` flag, not shown in `--help`, runs `cox_app::server::serve` in worker mode over stdin and stdout, and is the argv T66.21's supervisor spawns through `current_exe()`.
+2. `cox attach --stdio` runs T66.22's bridge. It never starts a supervisor: with no `cox serve` running it fails, naming the socket path.
+3. On Windows both commands refuse with "not supported yet".
+4. The docs section states what is resident (a session lives in its worker until `end`), that a TUI session is never resident, and that the desktop app's ssh command stays `cox app-server --stdio` (D8).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test docs
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- serve --help
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- attach --stdio
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+The last `attach` run exits non-zero and names `COX_HOME/run/serve.sock`; `COX_HOME` is a scratch tree, never `~/.cox`.
+
+Done when `docs_name_every_subcommand` passes, `serve --help` does not list `--worker`, and `cox attach --stdio` with no supervisor fails naming the socket path.
+
+Out of scope: the end-to-end test (T66.24), the desktop app choosing `cox attach --stdio` for a host that runs `cox serve` (a P52 desktop card), and heartbeat (T66.13).
+
+Where the `Workspace` impl lives: `cox-serve` may depend on `cox-store` alone, so the router takes `projects`, `sessions` and `search` through `cox_serve::Workspace`. `cox_app::server::workspace_reply` (the wire is `cox-app`'s) decodes the call and encodes the `Reply`, and `cox_app::server::workspace_app` builds the supervisor's `App`; `crates/cox/src/serve_cmd.rs` holds the three-line `impl Workspace` over them, the only place the two crates meet. `deps.rs` gained a rule that only `crates/cox` depends on `cox-serve`. The supervisor reads the login shell environment once; each worker is `current_exe() serve --worker --home <home>`.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox --test serve_cmd --test docs --test deps: 19 passed (serve_help_hides_the_worker_flag, attach_needs_stdio, attach_without_a_supervisor_fails_naming_the_socket, docs_name_every_subcommand)
+cargo nextest run -p cox --bin cox / -p cox-app: the_workspace_impl_answers_workspace_calls_and_refuses_the_rest, workspace_reply_answers_the_three_workspace_calls_and_refuses_the_rest passed
+COX_HOME=/tmp/cx23 cox serve --help: lists no --worker
+COX_HOME=<long scratch path> cox attach --stdio: exit 1, "Error: cox serve is not reachable at <COX_HOME>/run/serve.sock: ..."
+COX_HOME=/tmp/cx23 cox serve & ; a projects request through cox attach --stdio answered {"kind":"projects","value":[]}; a second cox serve refused naming the holder; SIGTERM stopped the supervisor
+cargo clippy -p cox -p cox-app -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+
+#### T66.24 End-to-end: kill the client, reattach, and the rollout grows only by the turn
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3
+
+Goal: one test proves the point of the whole serve design: a session outlives its client and a reattach writes nothing to the rollout. `docs/design/serve.md` "Acceptance test for the later cards", S9 and D6.
+
+Files:
+- `crates/cox/tests/serve.rs` (test only)
+
+Steps:
+1. Against a scratch `COX_HOME` with the scripted provider (`COX_PROVIDER=scripted`, `COX_SCENARIO`, as `crates/cox/tests/remote.rs` sets them), start `cox serve` in the background and wait for `run/serve.sock`.
+2. Client A runs `cox attach --stdio`, sends `open` for a new session in a scratch cwd and counts the rollout's lines (M). It sends one prompt, reads patches until the turn ends, records the line count (N, with N > M) and the blocks it folded with `coalesce::apply`.
+3. Kill client A with SIGKILL and assert the worker still holds the lock (`Store::session_holder` is `Some`).
+4. Client B runs `cox attach --stdio` and sends `attach`. Assert `Opened.blocks` equals A's folded blocks, the rollout still has exactly N lines with `seq` running 1..=N without a repeat, and lines M+1..=N are that one turn's events from `TurnStarted` to `TurnDone`.
+5. SIGTERM to `cox serve`: assert the lock is free and the socket is removed.
+6. Every process the test starts is killed at the end, including on failure, through a drop guard (a test never leaves a process behind).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test serve
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Execution plan: `crates/cox/tests/serve.rs` only (`#[cfg(all(unix, feature = "app-server"))]`), under a short scratch home in `/tmp` because of `sun_path`. A drop guard owns `cox serve` and each client child and kills them. Readiness is polled with deadlines (the socket, then each reply line). Lines are built and read with `cox_app::wire`, patches folded with `cox_app::coalesce::apply`, the lock probed with `Store::session_holder`, and the rollout read from `Store::rollout_path`. Verify with five runs of the new test in a row, then the Check below.
+
+Done when `a_reattach_after_a_killed_client_writes_nothing_to_the_rollout` passes.
+
+Out of scope: a restarted worker's `StateChanged` line (a restart replays the rollout and appends one, D6; only a reattach must add nothing), a TUI attach, and Windows.
+
+Product fix found by the test: `cox serve` left `serve.sock` behind after SIGTERM, against this card and `docs/design/serve.md` S9. `Bound` now unlinks the file (a drop guard declared before the lock, so it goes while the lock is still held); `bind` still replaces a file a crash left. Narrow tests in `socket.rs`: `dropping_the_bound_socket_removes_its_file` (fails without the guard), `a_missing_socket_file_does_not_fail_the_drop`.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox --test serve --test serve_cmd --test deps: 15 passed (a_reattach_after_a_killed_client_writes_nothing_to_the_rollout 4.4 s)
+cargo test -p cox --test serve, five runs in a row: 5 passed (3.2 to 3.9 s each)
+cargo nextest run -p cox-serve: 27 passed
+cargo clippy -p cox -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
 ```
 
 #### T61.5.3 One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
