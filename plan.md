@@ -113,7 +113,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | in progress | P2 | 3 | 70% | Claude / sonnet-5.5 |
 | T68.10 | in progress | P2 | 1 | 90% | Claude / haiku-5.5 |
 | T70.1 | in progress | P1 | 3 | 100% | MiMo Desktop / mimo |
-
 ## Reference
 
 Name: **cox** — the coxswain steers the boat and calls the strokes; the crew (models, tools, MCP servers) does the rowing. Binary `cox`, crates `cox-*`, home `~/.cox/`.
@@ -1884,8 +1883,6 @@ Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeI
 - Prime's prompt prose;
 - the `HarnessEntry` and `GoalState` schemas;
 - the `pa-daemon` JSONL socket dialect.
-
-
 #### T66.13 Heartbeat re-entry for a resident session
 
 Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 3
