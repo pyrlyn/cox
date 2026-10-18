@@ -37,6 +37,48 @@ cargo nextest run -p cox-serve: 25 passed (router: workspace_calls_need_no_worke
 cargo nextest run -p cox --test deps --test docs: 16 passed
 cargo clippy -p cox-serve --all-targets -- -D warnings: clean
 cargo fmt --check -p cox-serve: clean
+
+#### T61.3 Bindings generator on the host dev profile, skipped when the library did not change
+
+Model: sonnet · Status: done 2026-10-17 · Depends: - · Size: ~40 · Priority: P1 · Complexity: 2
+
+Execution plan (Claude Code / sonnet): edit `xcframework.sh` (generator without `--profile`/`--target`; stamp over `libcox_ffi.a`, the only library the script packages; skip when the stamp and the bindings file both exist and match; a missing or corrupt stamp rebuilds). Test: `scripts/desktop/test_xcframework.py` runs the real script with fake `cargo`/`xcodebuild` on `PATH` (match skips, mismatch or missing stamp rebuilds, failed create leaves no stamp), wired into CI next to `test_brand_icons.py`. Then run the Check and record the no-op time in `research.md` §4.3.9.
+
+Goal: `uniffi-bindgen` is built once in the dev profile for the host, and `xcframework.sh` regenerates the bindings and the XCFramework only when `libcox_ffi.a` changed.
+
+Files:
+- `scripts/desktop/xcframework.sh`
+
+Steps:
+1. Run the generator with `cargo run -p cox-ffi --features bindgen --bin uniffi-bindgen` and no `--profile`/`--target`: library mode reads the metadata from the archive passed as `--library`, so the generator's own profile does not matter.
+2. After `cargo build`, hash the library (`shasum -a 256`) and compare with `desktop/macos/build/CoxFFI.xcframework/.source-sha256`; on a match print "unchanged" and exit 0. Write the stamp after a successful `-create-xcframework`.
+
+Check:
+```bash
+just desktop-xcframework
+cp desktop/macos/build/bindings/cox_ffi.swift "$TMPDIR/before.swift"
+just desktop-xcframework   # prints "unchanged"
+git stash && just desktop-xcframework && git stash pop
+diff "$TMPDIR/before.swift" desktop/macos/build/bindings/cox_ffi.swift
+```
+
+Done when: the bindings are byte-identical to the ones the `dist`-profile generator wrote; a second run with no Rust change is a no-op; §4.3.9 has the time of that no-op.
+
+Out of scope: CI caching (T61.4).
+
+Result: `xcframework.sh` runs the generator without `--profile`/`--target` and stamps `CoxFFI.xcframework/.source-sha256` (sha256 of `libcox_ffi.a`, the only library it packages) after the bindings are copied; a matching stamp plus an existing `bindings/cox_ffi.swift` prints "unchanged" and exits 0, anything else rebuilds. Test: `scripts/desktop/test_xcframework.py` (fake `cargo` and `xcodebuild`), run in CI next to the brand-icon test. Timings and the load caveat are in `research.md` §4.3.9.
+
+Check output:
+```text
+$ just desktop-xcframework            (empty target/: library + host dev generator, 3 min 13 s)
+xcframework successfully written out to: .../desktop/macos/build/CoxFFI.xcframework
+$ just desktop-xcframework            (x5, no Rust change; load average 46-53)
+unchanged: .../desktop/macos/build/CoxFFI.xcframework      real 5.86 5.14 9.94 19.41 3.50 s
+$ git stash && just desktop-xcframework && git stash pop     (old script: dist-profile generator)
+$ diff before.swift desktop/macos/build/bindings/cox_ffi.swift
+(empty: byte-identical)
+$ python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
+Ran 5 tests ... OK
 ```
 
 #### T66.23 `cox serve` and `cox attach --stdio`
@@ -767,6 +809,41 @@ Goal: dependencies compiled in one worktree are reused by another without sharin
 - Test: `scripts/test_sccache_config.py` pins the variables and the wiring (config-only change, so the assertion on the config is the test).
 Check: `python3 -m unittest discover -s scripts -p 'test_sccache_config.py'` ran 6 tests, OK. `mise exec -- env` shows `RUSTC_WRAPPER`, `CMAKE_C_COMPILER_LAUNCHER`, `CMAKE_CXX_COMPILER_LAUNCHER` set to the mise sccache and `SCCACHE_CACHE_SIZE=10G`. `cargo build -p cox-config` in a second worktree with an empty `target/`: 667 hits of 670 requests, 35 to 36 s with the cache against 105 to 106 s without it (research.md §4.3.9, T61.7).
 Done: §4.3.9 has the clean build of the second worktree with and without sccache.
+
+#### T33.36 Kotlin: thin PDK, template, example
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.35, A61 (extism `wasmtime-exceptions` is on; `exception_handling_module_loads`), T33.43 (Kotlin's stdlib imports `wasi_snapshot_preview1::random_get`, and the host keeps WASI off until then, A55, A63) · Size: ~200 · Files: `plugins/sdk-kotlin/src/…/Cox.kt`, `plugins/examples/kotlin/src/…/Main.kt`, `plugins/templates/kotlin/*.tmpl`; `plugins/mise.toml` gets java, gradle and kotlin
+Goal: a cox-owned minimal Kotlin PDK over the raw extism imports (there is no maintained one, R§4.3.5 P30), the same example, and `--lang kotlin`.
+Draft: the PDK (`plugins/sdk-kotlin`, ~150 lines over the raw extism imports and `cox:host/v1`) and the example (`plugins/examples/kotlin`, id `example-kotlin`, same behaviour as the Rust example, `gradle pluginPackage`) build with Kotlin 2.4.20, Gradle 9.8.0 and OpenJDK 27.0.0 and are kept on branch `wip/t33.36-kotlin`. Left to do once WASI is on: templates, `Lang::Kotlin`, `PLUGIN_LANGS`, `just plugin-examples kotlin`, the CI step, the e2e, docs and `toolchain.md` rows.
+Check: `plugin_example_kotlin` is ignored with its reason locally and runs in the CI job.
+Execution plan (2026-10-17): WASI is on per plugin since T33.14.2/T33.43 (`wasi = true` in `plugin.toml`, no env, no preopens; `crates/cox-plugin/src/host.rs` `with_wasi(mounts.wasi)`), so the example sets `wasi = true` like Go. (1) Bring `plugins/sdk-kotlin` and `plugins/examples/kotlin` over from the draft (889db46a), check they build with the pinned Kotlin/Gradle/JDK. (2) `plugins/templates/kotlin/*.tmpl`, `Lang::Kotlin` in `crates/cox/src/plugin_new.rs`, `PLUGIN_LANGS` and the picker snapshot. (3) `just plugin-examples kotlin`, `crates/cox/tests/plugin_example_kotlin.rs` (ignored locally, run in CI's plugin-examples job with `PLUGIN_TOOLS_PATH`). (4) `docs/plugins.md`, `toolchain.md` rows. Verify: `just plugin-examples kotlin`, `cargo nextest run -p cox -E 'test(plugin)' --run-ignored only` for the Kotlin tests, clippy and fmt on `cox`.
+What landed:
+- Blocker check: WASI is on per plugin since T33.14.2/T33.43 (`with_wasi(mounts.wasi)` in `crates/cox-plugin/src/host.rs`, `wasi = true` in `plugin.toml`, no environment and no preopens), so the example and the template set `wasi = true`; the host is not loosened. The built example imports only `random_get` from WASI.
+- `plugins/sdk-kotlin` and `plugins/examples/kotlin` (from the draft) now document `wasi = true` and compile Kotlin in-process (`gradle.properties`), so a build leaves no Kotlin daemon.
+- `plugins/templates/kotlin`: `settings.gradle.kts` (the PDK through `includeBuild` of `coxSdk`, since it is not published), `build.gradle.kts` (`pluginPackage` stages `plugin.toml` and `<crate>.wasm` in `build/plugin`, because `cox plugin install` copies a whole directory), `gradle.properties`, `plugin.toml` (`wasi = true`), `Main.kt` with one `@WasmExport` per `--with` block, a `justfile` whose `smoke` installs into a scratch `COX_HOME`, `README.md`, `.gitignore`.
+- `Lang::Kotlin` scaffolds through `scaffold_blocks`; `PluginNewError::UnsupportedLang` and its test are removed, since every PL§13 language has a template. `PLUGIN_LANGS` and the picker snapshot list kotlin.
+- `crates/cox/tests/plugin_example_kotlin.rs`: `plugin_example_kotlin` (T33.28's two-process rollout check), `plugin_example_kotlin_counts_turns_in_its_status_and_resets_them`, and `plugin_example_kotlin_template` (scaffolds every wasm capability, builds with Gradle against the in-repo PDK, starts it in the host, installs it). All `#[ignore]`d with "needs java and gradle: run `just plugin-examples kotlin`". The Go and Kotlin tests share `tests/common/wasm_example.rs` instead of copies of the same checks.
+- `just plugin-examples kotlin` and the `plugin-examples` CI job (mise-action installs java and gradle too) build the example and run the tests; both e2e steps pass `PLUGIN_TOOLS_PATH`, because CI's `cargo` is a mise shim.
+- Docs: a "Kotlin" section in `docs/plugins.md`; the PL§13 Kotlin row and §15 decision 3 in `docs/design/plugins.md`; java, gradle, kotlin and the Gradle packages in `toolchain.md`; the `plugins/sdk-kotlin` row in `plan.md` §1.
+Not done:
+- The PDK is not published (PL§14 decision 1), so a plugin outside this repository needs a cox checkout for `coxSdk`.
+- No version was bumped; Kotlin 2.4.20, Gradle 9.8.0 and OpenJDK 27.0.0 stay as pinned.
+- The task touches more files than the project's 3-file rule allows, as the card's own file list already did.
+Check:
+```text
+$ just plugin-examples kotlin
+        PASS (1/3) cox::plugin_example_kotlin plugin_example_kotlin_counts_turns_in_its_status_and_resets_them
+        PASS (2/3) cox::plugin_example_kotlin plugin_example_kotlin
+        PASS (3/3) cox::plugin_example_kotlin plugin_example_kotlin_template
+     Summary 3 tests run: 3 passed, 221 skipped
+$ just plugin-examples go   (after the shared-helper refactor)
+     Summary 3 tests run: 3 passed, 221 skipped
+$ cargo nextest run -p cox -p cox-tui -E 'binary(docs) | binary(doc_examples) | test(/plugin_new|picker|plugin_cli/) | binary(plugin_new_cli) | binary(deps)'
+     Summary 51 tests run: 51 passed, 471 skipped
+$ cargo clippy -p cox -p cox-tui --all-targets -- -D warnings   clean
+$ cargo fmt --check   clean
+$ cox plugin new demo-kt --lang kotlin --with status,command; just smoke   demo-kt loaded
+
 ```
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
@@ -800,6 +877,43 @@ Result: closed as not needed (step 1 measured zero). `just test` always builds `
 Check output (`mise exec -- cargo nextest run -p cox --test deps`):
 ```
      Summary [   1.398s] 11 tests run: 11 passed, 0 skipped
+```
+
+#### T61.2 Fast profile for the XCFramework outside a release
+
+Model: sonnet · Status: done 2026-10-17 (not needed: `ffi-dev` 24 s against `dist` 21 s incremental, 14% slower) · Depends: T61.1 · Size: ~40 · Priority: P1 · Complexity: 2
+
+Goal: `just desktop-open`, `just desktop-app` and CI's `desktop-macos` job build `cox-ffi` without fat LTO; only a DMG and the desktop build workflow use `dist` (A15: what ships is `dist`).
+
+Files:
+- `Cargo.toml`
+- `scripts/desktop/xcframework.sh`
+- `justfile`
+
+Steps:
+1. `[profile.ffi-dev]` in `Cargo.toml`: `inherits = "release"`, `lto = false`, `codegen-units = 16`, `incremental = true`, `debug = "line-tables-only"`, with a comment saying why it exists next to `dist`.
+2. `xcframework.sh` takes the profile from `COX_FFI_PROFILE` (default `ffi-dev`), validates it against `ffi-dev|dist` and prints which one it built.
+3. `just desktop-dmg` and `.github/workflows/desktop-build.yml` set `COX_FFI_PROFILE=dist` (the workflow is a one-line `env:`; it does not count as a source file).
+
+Check:
+```bash
+just desktop-xcframework
+COX_FFI_PROFILE=dist just desktop-xcframework
+just desktop-app
+```
+
+Done when: §4.3.9 has the incremental `just desktop-xcframework` time before and after; the DMG still comes from `dist` (the script's printed profile in the workflow log).
+
+Execution plan (Claude Code / sonnet, creator decision 2026-10-17: measure, then close if the gain is small): (1) confirm from `Cargo.toml` and `scripts/desktop/xcframework.sh` which profile the XCFramework uses and whether any LTO is on (`dist` inherits `dev`: no LTO). (2) Time the incremental `just desktop-xcframework` (touch one `cox-app` source file) on the quiet machine under the current `dist` and under the proposed `ffi-dev` settings applied locally. (3) Under 10% faster: close as not needed with both timings in `research.md` §4.3.9, drop T61.3's dependency on T61.2; otherwise implement the steps below.
+
+Out of scope: the bindings generator (T61.3), caching (T61.4).
+
+Result: closed as not needed. `[profile.dist]` is `inherits = "dev"` (no LTO, opt-level 0 for workspace crates, incremental), so the card's premise (fat LTO) does not hold, and `inherits = "release"` would optimize the workspace crates and make the rebuild slower. Incremental `scripts/desktop/xcframework.sh` after a one-line `cox-app` change, five alternating runs each on an Apple M3 Max, wall time: `dist` 23, 21, 20, 20, 21 s (median 21 s); `ffi-dev` as proposed 25, 25, 21, 24, 23 s (median 24 s). Details in `research.md` §4.3.9. Nothing in `Cargo.toml`, the script, the `justfile` or the workflow changed.
+
+Check output (`COX_FFI_PROFILE=dist` run 9 / `ffi-dev` run 10, cargo's lines for the library build):
+```
+Finished `dist` profile [unoptimized + debuginfo] target(s) in 9.53s
+Finished `ffi-dev` profile [optimized + debuginfo] target(s) in 10.34s
 ```
 
 #### T66.12 Design: resident sessions and a supervisor
