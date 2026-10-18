@@ -1,9 +1,11 @@
 [tools]
+python = "3.13.15" # runs ptools
+uv = "0.12.23" # installs the pipx: ptools tool
 "cargo:cargo-sweep" = "0.8.0" # `mise run sweep`: drops build artifacts unused for 1 day (ptools sweep)
 mold = { version = "2.42.1", os = ["linux"] } # linker, Linux only; mise [env] below turns it on where it is installed
 sccache = { version = "0.18.0", os = ["linux", "macos"] } # compiler cache; the [env] block below makes it the rustc wrapper where it is installed
 "cargo:cargo-cache" = "0.8.3" # `just cache` / `just cache-autoclean`; the shared cargo home fills up
-"cargo:https://github.com/pyrlyn/tools" = "rev:90448075a5ff0f2fe3ae69579ed333b18dcfcd51" # `just cache`, `just swarfr` (ptools, pyrlyn/tools#1; repin to a v0.1.0 tag once merged)
+"pipx:git+https://github.com/pyrlyn/tools.git" = "d6eb6452cbb7ec4b350de87194548915c2648c27" # `mise run sweep`, `just cache`, `just swarfr` (ptools, Python; pyrlyn/tools#8, repin to a tag once merged)
 rust = { version = "1.98.1", components = "rustfmt,clippy", targets = ["wasm32-unknown-unknown"] } # the one Rust version for local work, CI and releases; wasm32: the guest workspace `plugins/` (T33.27, PL§13)
 node = "24.21.0" # latest LTS; runs Style Dictionary, the desktop token generator (`just desktop-tokens`, T37.17, DS§2)
 zig = "0.16.0" # linker for `cargo zigbuild`: the Linux cox build the Terminal-Bench containers run (T30.9)
