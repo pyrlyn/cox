@@ -155,6 +155,9 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
             .filter(|(_, on)| *on)
             .map(|(k, _)| k.to_string()),
     );
+    // IDE classes (Kerf T4.1) carry their own `ide.` lines so `ide.terminal`
+    // never covers `terminal.keys`.
+    out.extend(caps.ide.grant_lines());
     match caps.model {
         Some(ModelTier::Cheap) => out.insert(MODEL_CHEAP.to_string()),
         Some(ModelTier::Code) => out.insert(MODEL_CODE.to_string()),
@@ -172,6 +175,23 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
                 .join(" ")
         });
         out.insert(format!("mcp:{} {target}", m.name));
+    }
+    // `[[language_servers]]` / `[[debug_adapters]]` (Kerf T4.2, PL§7e) are
+    // processes the host spawns after the grant; the line names the command
+    // so approving it is informed and any change asks again.
+    for ls in &manifest.language_servers {
+        let argv = std::iter::once(ls.command.as_str())
+            .chain(ls.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.insert(format!("lsp:{} {argv}", ls.name));
+    }
+    for dap in &manifest.debug_adapters {
+        let argv = std::iter::once(dap.command.as_str())
+            .chain(dap.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.insert(format!("dap:{} {argv}", dap.name));
     }
     for a in &manifest.external_agents {
         let argv = std::iter::once(a.command.as_str())
@@ -245,6 +265,8 @@ mod tests {
             provider: Vec::new(),
             models: Vec::new(),
             mcp: Vec::new(),
+            language_servers: Vec::new(),
+            debug_adapters: Vec::new(),
             external_agents: Vec::new(),
             cloud_agents: Vec::new(),
             agents: Vec::new(),
@@ -520,6 +542,21 @@ mod tests {
                 added: vec!["desktop.inspector".into(), "desktop.notify".into()],
                 removed: vec!["terminal.keys".into()],
             }
+        );
+    }
+
+    #[test]
+    fn ide_classes_are_their_own_grant_lines() {
+        let mut caps = Capabilities::default();
+        caps.ide.buffer = true;
+        caps.ide.lsp = true;
+        caps.ide.terminal = true;
+        caps.terminal.keys = true;
+        let m = manifest(caps);
+        // `ide.terminal` is the panel class; `terminal.keys` stays its own line.
+        assert_eq!(
+            capability_list(&m),
+            ["ide.buffer", "ide.lsp", "ide.terminal", "terminal.keys"]
         );
     }
 
