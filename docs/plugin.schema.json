@@ -94,12 +94,12 @@
           "canvas": false
         },
         "ide": {
-          "buffer": false,
+          "buffer": null,
           "lsp": false,
           "dap": false,
           "index": false,
           "terminal": false,
-          "git": false
+          "git": null
         }
       }
     },
@@ -349,12 +349,12 @@
           "description": "IDE permission classes (Kerf T4.1): the buffer, LSP, DAP, index,\nterminal-panel and git gates. Nested so a cox-only manifest stays\nvalid: an absent table is every field false.",
           "$ref": "#/$defs/IdeCaps",
           "default": {
-            "buffer": false,
+            "buffer": null,
             "lsp": false,
             "dap": false,
             "index": false,
             "terminal": false,
-            "git": false
+            "git": null
           }
         }
       },
@@ -483,13 +483,20 @@
       "additionalProperties": false
     },
     "IdeCaps": {
-      "description": "`capabilities.ide`: the IDE permission classes Kerf adds to cox's model\n(T4.1). Each flag is a class, not a process: a plugin that holds `lsp` or\n`dap` is a *client* of servers the **host** spawned from a declared\ncommand (T4.2 owns those tables). None of these lets a WASM guest spawn a\nprocess — PL§10's no-bypass rule still holds.\n\nEmpty vs absent: both mean \"no class requested\", matching every other\n`#[serde(default)]` flag in [`Capabilities`]. There is no `Option` here\nbecause a present-but-false flag is the same grant as an absent one.",
+      "description": "`capabilities.ide`: the IDE permission classes Kerf adds to cox's model\n(T4.1). Each flag is a class, not a process: a plugin that holds `lsp` or\n`dap` is a *client* of servers the **host** spawned from a declared\ncommand (T4.2 owns those tables). None of these lets a WASM guest spawn a\nprocess — PL§10's no-bypass rule still holds.\n\nEmpty vs absent: both mean \"no class requested\", matching every other\n`#[serde(default)]` flag in [`Capabilities`]. `buffer` and `git` are\nlevels rather than flags (T380) because their write half is the dangerous\none: a plugin that only reads must not hold the right to change.",
       "type": "object",
       "properties": {
         "buffer": {
-          "description": "Read and edit open text buffers through the host's buffer API. Not a\nfilesystem grant (`fs` is) and not a shell.",
-          "type": "boolean",
-          "default": false
+          "description": "Open text buffers through the host's buffer API: `\"read\"` or\n`\"edit\"` (edit implies read). Not a filesystem grant (`fs` is) and not\na shell.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BufferAccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "lsp": {
           "description": "Language-server client against servers the host spawned. Not a\nprocess spawn and not a language server of its own.",
@@ -512,12 +519,49 @@
           "default": false
         },
         "git": {
-          "description": "Git status/diff integration through the host's git facade. Does not\nrun `git` as a process from the guest.",
-          "type": "boolean",
-          "default": false
+          "description": "The repository through the host's git facade: `\"read\"` (status, diff,\nlog) or `\"write\"` (stage and commit only; implies read). Checkout,\nbranch, reset and push are not grantable, because they change the\nworking tree or the remote under the user. The guest never runs `git`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GitAccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
+    },
+    "BufferAccess": {
+      "description": "`capabilities.ide.buffer`: how far a plugin may touch open buffers.",
+      "oneOf": [
+        {
+          "description": "Read buffer text.",
+          "type": "string",
+          "const": "read"
+        },
+        {
+          "description": "Read, and apply edits through the host's undoable edit path.",
+          "type": "string",
+          "const": "edit"
+        }
+      ]
+    },
+    "GitAccess": {
+      "description": "`capabilities.ide.git`: how far a plugin may touch the repository.",
+      "oneOf": [
+        {
+          "description": "Status, diff and log.",
+          "type": "string",
+          "const": "read"
+        },
+        {
+          "description": "Read, plus stage and commit.",
+          "type": "string",
+          "const": "write"
+        }
+      ]
     },
     "ProviderDecl": {
       "description": "A `[[provider]]` section (PL§7a).",
@@ -727,7 +771,7 @@
           "type": "string"
         },
         "languages": {
-          "description": "Language ids it serves (`\"rust\"`, `\"python\"`), matched against the\nbuffer language. Empty with `globs` empty means never selected.",
+          "description": "Language ids it serves (`\"rust\"`, `\"python\"`), matched against the\nbuffer language. `languages` and `globs` may not both be empty: such\na server could never start (T380).",
           "type": "array",
           "items": {
             "type": "string"
@@ -782,7 +826,7 @@
           "type": "string"
         },
         "languages": {
-          "description": "Language ids it debugs (`\"rust\"`, `\"python\"`).",
+          "description": "Language ids it debugs (`\"rust\"`, `\"python\"`). Non-empty (T380).",
           "type": "array",
           "items": {
             "type": "string"

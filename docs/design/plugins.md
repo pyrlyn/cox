@@ -196,7 +196,7 @@ Validation (T33.1 and T33.4):
 - a `ui.render` target outside the plugin's own tools needs an explicit `tool:<name>`, which approval shows as "changes how <name> looks";
 - an `[[agents]]` `file` is a relative `.md` path with no `..`, `\` or `:` component, and names are unique (T45.3);
 - a `[[skills]]` `name` is 1–64 lowercase letters, digits and `-`; its `dir` is a relative path with no `..`, `\` or `:` component whose last component is the name (the folder `cox-ext` requires); names are unique (T33.46);
-- a `[[language_servers]]`/`[[debug_adapters]]` `command` is non-empty, `env` keys are env var names, and names are unique (§7e, Kerf T4.2);
+- a `[[language_servers]]`/`[[debug_adapters]]` `command` is non-empty, `env` keys are env var names, and names are unique (§7e, Kerf T4.2); a language server names at least one of `languages` or `globs` and a debug adapter at least one `languages` entry, since an entry nothing routes to never starts (T380);
 - `wasm` may be omitted only by a data-only package: `[[mcp]]`, `[[language_servers]]`, `[[debug_adapters]]`, `[[agents]]` and/or `[[skills]]`, nothing else;
 - unknown keys are an error. The manifest is ours, so `deny_unknown_fields` applies, as in `Config` (`crates/cox-protocol/src/config.rs:35`);
 - `surfaces` and the surface tables `[capabilities.terminal]` and `[capabilities.desktop]` follow §15.5; `ui.keys` is an alias of `terminal.keys`;
@@ -221,7 +221,7 @@ There is no general kv table today (`schema.rs:13-87`). A narrow `PluginStore` t
 - `NeedsApproval { added, removed }`: a new digest, or wider capabilities.
 - `Disabled`.
 
-The granted list (T33.6) is a sorted JSON array of strings, one line per capability: `events:<tag>`, `hooks:<name>`, `tools:<name>`, `invoke:<name>`, `net:<host>`, `fs.read:<root>`, `fs.write:<root>`, `decide:<point>`, `ui.render:<target>`, the flags `wasi`, `context`, `kv`, `ui.status`, `ui.panel`, `ui.overlay`, `ui.commands`, `ui.keys`, `model:cheap` or `model:code`, the IDE classes `ide.buffer`, `ide.lsp`, `ide.dap`, `ide.index`, `ide.terminal` and `ide.git` (§16), plus one line per `[[provider]]` (`provider:<name> <base_url> key=<env>`), `[[mcp]]` (`mcp:<name> <command args | url>`), `[[language_servers]]` (`lsp:<name> <command args>`, §7e), `[[debug_adapters]]` (`dap:<name> <command args>`, §7e), `[[external_agents]]` entry (`agent:<name> <argv> key=<env>`), `[[agents]]` entry (`subagent:<name> <file>`, T45.3) and `[[skills]]` entry (`skill:<name> <dir>`, T33.46). The model tier is the one ordered entry: a `model:code` grant covers a `model:cheap` request. A row whose `capabilities` is not such an array grants nothing, and a store read error counts as no grant. `Disabled` wins over the digest check. A project `.cox/config.toml` may turn `plugins.enabled` off but never on (the project-config guard list).
+The granted list (T33.6) is a sorted JSON array of strings, one line per capability: `events:<tag>`, `hooks:<name>`, `tools:<name>`, `invoke:<name>`, `net:<host>`, `fs.read:<root>`, `fs.write:<root>`, `decide:<point>`, `ui.render:<target>`, the flags `wasi`, `context`, `kv`, `ui.status`, `ui.panel`, `ui.overlay`, `ui.commands`, `ui.keys`, `model:cheap` or `model:code`, the IDE classes `ide.buffer.read`, `ide.buffer.edit`, `ide.lsp`, `ide.dap`, `ide.index`, `ide.terminal`, `ide.git.read` and `ide.git.write` (§16), plus one line per `[[provider]]` (`provider:<name> <base_url> key=<env>`), `[[mcp]]` (`mcp:<name> <command args | url>`), `[[language_servers]]` (`lsp:<name> <command args>`, §7e), `[[debug_adapters]]` (`dap:<name> <command args>`, §7e), `[[external_agents]]` entry (`agent:<name> <argv> key=<env>`), `[[agents]]` entry (`subagent:<name> <file>`, T45.3) and `[[skills]]` entry (`skill:<name> <dir>`, T33.46). The model tier is the one ordered entry: a `model:code` grant covers a `model:cheap` request. A row whose `capabilities` is not such an array grants nothing, and a store read error counts as no grant. `Disabled` wins over the digest check. A project `.cox/config.toml` may turn `plugins.enabled` off but never on (the project-config guard list).
 
 By surface:
 
@@ -373,7 +373,7 @@ Raw `cox_http` to a paid API would bypass the ledger and the budget, and would n
 | Field | Type | Rule |
 | --- | --- | --- |
 | `name` | string, required | unique in the package; fits `[a-zA-Z0-9_-]{1,64}` as `<id>-<name>`; no `__` |
-| `languages` | array of strings | language ids it serves/debugs (`"rust"`); empty (with `globs` empty on an LS) means never selected |
+| `languages` | array of strings | language ids it serves/debugs (`"rust"`); a debug adapter needs at least one, a language server needs it or `globs` (T380) |
 | `globs` | array of strings | `[[language_servers]]` only: workspace-relative glob patterns it serves |
 | `command` | string, required | non-empty; program inside the package (covered by the digest) or on PATH (shown verbatim at approval) |
 | `args` | array of strings | arguments for `command` |
@@ -687,28 +687,30 @@ Kerf takes this plugin contract as is and extends the permission set for an IDE 
 
 ```toml
 [capabilities.ide]
-buffer   = true    # text-buffer read/edit through the host
+buffer   = "edit"  # "read", or "edit" (implies read)
 lsp      = true    # LSP client to servers the host spawned
 dap      = false   # DAP client to adapters the host spawned
 index    = true    # symbol/reference queries against the host's index
 terminal = true    # terminal-panel I/O
-git      = false   # git status/diff through the host's facade
+git      = "read"  # "read" (status, diff, log), or "write" (stage and commit; implies read)
 ```
 
 | Class | Grant line | Allows | Does **not** allow |
 | --- | --- | --- | --- |
-| `buffer` | `ide.buffer` | read and edit open text buffers through the host's buffer API | raw filesystem writes (`fs` is that), a shell, or spawning anything |
+| `buffer = "read"` | `ide.buffer.read` | read open text buffers through the host's buffer API, unsaved text included | edits, raw filesystem access (`fs` is that), a shell, or spawning anything |
+| `buffer = "edit"` | `ide.buffer.read`, `ide.buffer.edit` | read, and apply edits through the host's undoable edit path | raw filesystem writes, a shell, or spawning anything |
 | `lsp` | `ide.lsp` | speak LSP as a client to language servers the host spawned from a declared command (T4.2's tables) | spawning a language server, or replacing the core's own semantic layer |
 | `dap` | `ide.dap` | speak DAP as a client to debug adapters the host spawned | spawning a debugger, or launching a debug session as a process |
 | `index` | `ide.index` | query the host's semantic index (definitions, references, symbols) | mutating the index, or bypassing the core's incremental parser |
 | `terminal` | `ide.terminal` | terminal-panel I/O through the host's terminal | a shell, a PTY of its own, or the unrelated `terminal.keys` leader contribution (§15.3) |
-| `git` | `ide.git` | git status/diff through the host's git facade | running `git` as a process from the guest |
+| `git = "read"` | `ide.git.read` | status, diff and log through the host's git facade | any mutation, or running `git` as a process from the guest |
+| `git = "write"` | `ide.git.read`, `ide.git.write` | read, plus stage and commit | checkout, branch, reset or push (they change the working tree or the remote under the user), or running `git` from the guest |
 
 **No bypass still holds (PL§10).** Every class is a host-side gate. Plugins never spawn processes: LSP and DAP commands are declared in the manifest (T4.2) and spawned by the host after the permission check, under the same sandbox wrap as `[[mcp]]` and `[[external_agents]]`. `ide.terminal` is panel I/O, not a shell; `ide.git` is a facade, not `Command::new("git")` in the guest.
 
-**Empty vs absent.** An absent `[capabilities.ide]` is every class off — the same as a table of `false`s. There is no `Option` here: a present-but-false flag is not a request. A data-only package (`wasm` absent) may not set any of them, by the existing default-equality check.
+**Empty vs absent.** An absent `[capabilities.ide]` is every class off — the same as a table of `false`s and absent levels. `buffer` and `git` are levels, not flags (T380), because their write half is the dangerous one: `true` or any other word is a parse error, never a guess at a level. A data-only package (`wasm` absent) may not set any of them, by the existing default-equality check.
 
-**Grant lines** are `ide.<class>`, one line per requested class, sorted with the rest (§3). `ide.terminal` never covers `terminal.keys`, and `terminal.keys` never covers `ide.terminal`.
+**Grant lines** are `ide.<class>`, one line per requested class, sorted with the rest (§3); `buffer` and `git` add `.read`, and `.edit`/`.write` beside it, so widening read to edit or write adds a line and asks again. `ide.terminal` never covers `terminal.keys`, and `terminal.keys` never covers `ide.terminal`.
 
 **Versioning.** The manifest denies unknown keys, so a cox older than this section refuses `[capabilities.ide]` and skips the plugin with the usual notice (§15.7). An old manifest loads unchanged.
 

@@ -245,7 +245,7 @@ pub fn enable_command(id: &str, source: Source) -> String {
 
 #[cfg(test)]
 mod tests {
-    use cox_plugin_api::Capabilities;
+    use cox_plugin_api::{BufferAccess, Capabilities, GitAccess};
     use serde_json::json;
 
     use super::*;
@@ -548,7 +548,7 @@ mod tests {
     #[test]
     fn ide_classes_are_their_own_grant_lines() {
         let mut caps = Capabilities::default();
-        caps.ide.buffer = true;
+        caps.ide.buffer = Some(BufferAccess::Read);
         caps.ide.lsp = true;
         caps.ide.terminal = true;
         caps.terminal.keys = true;
@@ -556,8 +556,41 @@ mod tests {
         // `ide.terminal` is the panel class; `terminal.keys` stays its own line.
         assert_eq!(
             capability_list(&m),
-            ["ide.buffer", "ide.lsp", "ide.terminal", "terminal.keys"]
+            [
+                "ide.buffer.read",
+                "ide.lsp",
+                "ide.terminal",
+                "terminal.keys"
+            ]
         );
+    }
+
+    /// T380: a read grant does not cover edit or write; widening asks again
+    /// for the write line alone.
+    #[test]
+    fn widening_ide_buffer_or_git_needs_approval() {
+        let mut caps = Capabilities::default();
+        caps.ide.buffer = Some(BufferAccess::Edit);
+        caps.ide.git = Some(GitAccess::Write);
+        let m = manifest(caps);
+        let stored = grant("d1", &["ide.buffer.read", "ide.git.read"]);
+        assert_eq!(
+            check(&m, "d1", Some(&stored)),
+            Verdict::NeedsApproval {
+                added: vec!["ide.buffer.edit".into(), "ide.git.write".into()],
+                removed: vec![],
+            }
+        );
+        let stored = grant(
+            "d1",
+            &[
+                "ide.buffer.edit",
+                "ide.buffer.read",
+                "ide.git.read",
+                "ide.git.write",
+            ],
+        );
+        assert_eq!(check(&m, "d1", Some(&stored)), Verdict::Granted);
     }
 
     #[test]

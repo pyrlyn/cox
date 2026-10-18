@@ -26,10 +26,11 @@ pub use abi::{
 };
 
 pub use manifest::{
-    API_MAJOR, AgentDecl, AgentMode, Capabilities, CloudAgentDecl, CloudBackend, DebugAdapterDecl,
-    DesktopCaps, ExternalAgentDecl, FsCaps, IdeCaps, LanguageServerDecl, Limits, ManifestError,
-    McpDecl, ModelDecl, ModelTier, PluginManifest, PriceDecl, ProviderApi, ProviderAuth,
-    ProviderDecl, SkillDecl, Surface, TerminalCaps, UiCaps, is_package_path, is_plugin_id,
+    API_MAJOR, AgentDecl, AgentMode, BufferAccess, Capabilities, CloudAgentDecl, CloudBackend,
+    DebugAdapterDecl, DesktopCaps, ExternalAgentDecl, FsCaps, GitAccess, IdeCaps,
+    LanguageServerDecl, Limits, ManifestError, McpDecl, ModelDecl, ModelTier, PluginManifest,
+    PriceDecl, ProviderApi, ProviderAuth, ProviderDecl, SkillDecl, Surface, TerminalCaps, UiCaps,
+    is_package_path, is_plugin_id,
 };
 
 pub use ui::{MAX_IMAGE_BYTES, StyleToken, Widget, is_link};

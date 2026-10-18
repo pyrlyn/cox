@@ -13946,3 +13946,70 @@ The published shell-completions dependency exposed CI gates that needed to stay 
 What landed: regenerated `workspace-hack/Cargo.toml` with the existing cargo-hakari tool; replaced the missing local `.github/actions/sccache` reference with `pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979`; and updated the existing sccache wiring regression test to check the pinned reference, all inputs, and invocation order. The repository's license policy and dependency versions were left unchanged.
 
 Validation: the existing regression suite failed before the action update (1 failed, 5 passed) and passed afterward (6 passed). `cargo hakari generate --diff` is clean after regeneration. Comparison against HEAD found all 848 locked package name/version/source/checksum tuples unchanged; only generated workspace-hack dependency edges changed. `git diff --check` passed. `actionlint` could not run because no version is configured in mise; the reusable CI pipeline already runs its actionlint validation.
+
+### T4.1 IDE permission set (from Kerf)
+
+Model: MiMo Desktop / mimo · Status: done 2026-10-18 · Depends: — · Size: ~150 · Priority: P2 · Complexity: 3
+Goal: the buffer, LSP, DAP, index, terminal and git permission classes exist in `cox-plugin-api` as `[capabilities.ide]`, with validation, grant lines, JSON Schema and a design-doc section — Kerf T4.1's permission *classes* only (T4.2 owns the LSP/DAP manifest tables).
+Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin-api/src/lib.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md`, generated `docs/plugin.schema.json` and `docs/plugins.md` API index.
+Steps:
+1. `IdeCaps` nested under `Capabilities::ide`, six `bool` classes (`buffer`, `lsp`, `dap`, `index`, `terminal`, `git`), `deny_unknown_fields`, absent = empty = none requested.
+2. `IdeCaps::grant_lines` emits `ide.<class>`; `grant::capability_list` appends them (`ide.terminal` is never `terminal.keys`).
+3. Unit tests: each family present/absent, unknown key rejected, empty vs absent, grant-line namespace.
+4. Regenerate `docs/plugin.schema.json` and the `docs/plugins.md` API index; PL§16 documents what each class allows and what it does not (plugins still never spawn processes).
+Check:
+```bash
+mise exec -- cargo test -p cox-plugin-api -p cox-plugin
+mise exec -- cargo clippy -p cox-plugin-api -p cox-plugin --all-targets -- -D warnings
+mise exec -- cargo fmt --check -p cox-plugin-api -p cox-plugin
+```
+Done when: the Check is green, `plugin_schema_matches_committed_file` and `plugin_api_reference_covers_both_schemas` pass, and PL§16 names every class with its no-bypass rule. Named as Kerf's T4.1; cox's historical sandbox T4.1/T4.2 (invariant 11) are long done and live in `done.md`.
+Out of scope: LSP/DAP manifest tables (Kerf T4.2), host spawn logic, IDE host functions or ABI payloads, Kerf's own crates.
+
+Landed in #367 (df04e1fe), readiness 100% but never moved here; closed by T380's bookkeeping. T380 later turned `buffer` and `git` into read/write levels.
+
+### T70.1 Kerf T4.2: LSP and DAP manifest tables
+
+Model: MiMo Desktop / mimo · Status: done 2026-10-18 · Depends: — · Size: ~250 · Priority: P1 · Complexity: 3 · Files: `crates/cox-plugin-api/src/manifest.rs`, `docs/design/plugins.md` PL§2/§7e, `docs/plugin.schema.json`
+
+Matching Kerf `plan.md` T4.2. `[[language_servers]]` and `[[debug_adapters]]` in `PluginManifest`, its JSON Schema, validation and the plugin docs. The plugin declares a process; the host spawns it — the same "no bypass" rule as `[[mcp]]` (PL§7c/§10). Sibling Kerf T4.1 owns the IDE permission classes (buffer/lsp/dap/index/terminal/git); this card is the manifest side only.
+
+Landed: `LanguageServerDecl`/`DebugAdapterDecl` (`name`, `languages`, `globs` on LS, `command`, `args`, `env`, `config`) with `deny_unknown_fields` and `#[serde(default)]` so existing manifests parse; validation (non-empty `command`, `env` keys are env var names, id-joined name rule as `ExternalAgentDecl`, unique names); a data-only package may declare only these tables without `wasm`; schema + field-index drift tests; PL§7e field table, example and the spawn rule.
+
+Check: `language_server_tables_default_to_empty`, `language_server_and_debug_adapter_tables_parse_and_validate`, `language_server_tables_reject_unknown_keys`, `language_server_and_debug_adapter_reject_an_empty_command`, `language_server_rejects_a_bad_env_key_or_duplicate_name`, `manifest_allows_a_wasm_less_language_server_only_package`; `plugin_schema_matches_committed_file`, `plugin_api_reference_covers_both_schemas`; `cargo test -p cox-plugin-api`, clippy `-D warnings`, `fmt --check` green.
+
+Remaining (not this card): Kerf T1 may rename the tables; a download/install hint for LSP/DAP binaries (open, deliberately out of the struct); the host spawn, supervision and buffer caps (Kerf T1), and T4.1's permission classes.
+
+Landed in #367 (df04e1fe), readiness 100% but never moved here; closed by T380's bookkeeping. T380 later required each entry to have something to route on.
+
+### T380 Kerf T4: least-privilege IDE levels and routable LSP/DAP entries
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-19 · Depends: — · Size: ~60 + tests · Priority: P1 · Complexity: 2 · Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md` §3/§7e/§16 (plus the regenerated `docs/plugin.schema.json`, the generated API index in `docs/plugins.md` and its `docs/ru`, `docs/uk` copies, and the one-line re-export in `lib.rs`)
+
+Matching Kerf `plan.md` T4.1/T4.2, which take what #367 landed (`[capabilities.ide]`, `ide.*` lines, the LSP/DAP tables as they are) and tighten two things. Why: a bool `ide.buffer` or `ide.git` grants the write half to a plugin that only reads, and an LSP/DAP entry with nothing to route on is approved and never starts.
+
+Steps:
+1. `IdeCaps.buffer` becomes `Option<BufferAccess>` (`"read"` | `"edit"`, edit implies read), `IdeCaps.git` becomes `Option<GitAccess>` (`"read"` | `"write"`, write = stage and commit only). The old `true` spelling and any other word fail to parse. Nothing consumes these fields yet, so the break is cheap now.
+2. `IdeCaps::grant_lines` emits `ide.buffer.read`, `ide.buffer.edit`, `ide.git.read`, `ide.git.write`; a write level lists its read line too, so widening adds a line and the digest-bound grant asks again.
+3. `validate`: a `[[language_servers]]` entry needs `languages` or `globs`, a `[[debug_adapters]]` entry needs `languages` (`LanguageServerUnrouted`, `DebugAdapterUnrouted`).
+4. Tests: every level parses and maps to its lines, the flag spelling and unknown levels are refused, unrouted entries are refused, a read grant does not cover edit/write (`grant.rs`). Regenerate the schema and the API index; PL§3, §7e and §16 say the same.
+
+Check:
+```bash
+mise exec -- cargo test -p cox-plugin-api -p cox-plugin
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+Done when the Check is green and Kerf's architecture §4 describes these names.
+
+Check output:
+```
+$ mise exec -- cargo test -p cox-plugin-api -p cox-plugin
+test result: ok. 135 passed; 0 failed
+test result: ok. 67 passed; 0 failed
+$ mise exec -- cargo clippy -p cox-plugin-api -p cox-plugin --all-targets -- -D warnings
+Finished
+$ mise exec -- cargo fmt --check
+(clean)
+```
+Not green: `cargo clippy --workspace` stops in `cox-session` (`cox_config::load::default_tiers` missing since #364), the same failure `main` has; nothing in that crate uses the fields this card changed.

@@ -251,6 +251,8 @@ cox не загружает никаких других файлов. Cursor к�
 - manifest `FsCaps`: `read`, `write`
 - manifest `UiCaps`: `status`, `panel`, `overlay`, `commands`, `render`
 - manifest `IdeCaps`: `buffer`, `lsp`, `dap`, `index`, `terminal`, `git`
+- manifest `BufferAccess`: `read`, `edit`
+- manifest `GitAccess`: `read`, `write`
 - manifest `ProviderDecl`: `name`, `api`, `base_url`, `api_key_env`, `auth`
 - manifest `ProviderApi`: `chat`, `responses`, `plugin`
 - manifest `ProviderAuth`: `bearer`, `x-api-key`, `none`
