@@ -29,8 +29,9 @@ the URL, because it reads two documents.
 `crates/cox-protocol/default.toml` from `https://models.dev/api.json`. It
 only ever updates ids the two files already list — an id models.dev
 doesn't have, or whose provider section has no models.dev counterpart
-(`local`, `typesafe`), is reported on stdout and left unchanged, never
-dropped. Anthropic's four native rows are cross-checked against models.dev
+(`local`), is reported on stdout and left unchanged. The one row it drops is
+a `prices.toml` row that no `[providers.*].models` array lists any more (a
+model that moved to a plugin's own `[[models]]` table, T33.40.15). Anthropic's four native rows are cross-checked against models.dev
 but never overwritten from it (the vendor pricing page outranks a mirror);
 a difference is reported for a human to re-verify by hand. Each listed
 model also takes models.dev's `name` as its `display_name` (A111);

@@ -30,6 +30,8 @@ mod refine_cmd;
 mod resume;
 mod run;
 mod self_update;
+#[cfg(feature = "app-server")]
+mod serve_cmd;
 mod session;
 mod sessions;
 mod stats;
@@ -38,7 +40,7 @@ mod telemetry;
 #[cfg(feature = "voice")]
 mod voice_cmd;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Command, ConfigAction};
 
 /// `[y/N]` on stdin, same idiom as `session::offer_worktree_removal`; the
@@ -51,9 +53,20 @@ pub(crate) fn confirm(question: &str) -> bool {
     matches!(answer.trim(), "y" | "Y" | "yes")
 }
 
+fn completions(shell: shell_completions::Shell) -> anyhow::Result<()> {
+    let mut script = Vec::new();
+    shell_completions::generate(shell, Cli::command(), &mut script);
+    std::io::Write::write_all(&mut std::io::stdout().lock(), &script)?;
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
-    load_dotenv()?;
     let mut cli = Cli::parse();
+    // Completion generation must work even when local configuration is broken.
+    if let Some(Command::Completions { shell }) = &cli.command {
+        return completions(*shell);
+    }
+    load_dotenv()?;
     let mut cwd = match &cli.cwd {
         Some(dir) => dir.clone(),
         None => std::env::current_dir().unwrap_or_default(),
@@ -86,6 +99,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     match &cli.command {
+        Some(Command::Completions { shell }) => completions(*shell),
         Some(Command::Config(args)) => run_config(&cwd, &cli, &args.action),
         Some(Command::Doctor) => {
             let servers = session::mcp_servers(&loaded.config, &cwd).servers;
@@ -189,6 +203,16 @@ fn main() -> anyhow::Result<()> {
                 cox_app::server::ServeMode::Client,
             ))?;
             Ok(())
+        }
+        #[cfg(feature = "app-server")]
+        Some(Command::Serve(args)) => {
+            let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
+            serve_cmd::serve(&home, args.worker)
+        }
+        #[cfg(feature = "app-server")]
+        Some(Command::Attach(_)) => {
+            let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
+            serve_cmd::attach(&home)
         }
         Some(Command::Init(args)) => {
             let code = session::run_init(&cli, &cwd, args.force)?;

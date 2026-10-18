@@ -49,13 +49,14 @@ plugins = ["dep:cox-plugin", "dep:cox-plugin-api", "cox-session/plugins"]
 # T52.19: `cox app-server --stdio` serves the desktop app's `cox-app` over
 # the wire. cox-app builds on cox-session's plugin host, so this implies
 # `plugins`; the slim build drops both.
-app-server = ["dep:cox-app", "plugins"]
+app-server = ["dep:cox-app", "dep:cox-serve", "plugins"]
 # T54.5 (A123): push-to-talk dictation and `cox voice`. Off by default:
 # whisper.cpp is a C++ build (cmake) and audio capture links the platform's
 # sound stack (ALSA headers on Linux). `--features voice` turns it on.
 voice = ["dep:cox-voice"]
 
 [dependencies]
+shell-completions = "0.1.0"
 clap = { workspace = true }
 cox-protocol = { path = "../cox-protocol", version = "0.1.2" }
 cox-plugin = { path = "../cox-plugin", version = "0.1.2", optional = true }
@@ -95,6 +96,8 @@ cox-session = { path = "../cox-session", version = "0.1.2", default-features = f
 cox-target = { path = "../cox-target", version = "0.1.2" }
 # T52.19: the app-server surface; optional behind `app-server`.
 cox-app = { path = "../cox-app", version = "0.1.2", optional = true }
+# T66.23: `cox serve` and `cox attach --stdio`; behind the same feature.
+cox-serve = { path = "../cox-serve", version = "0.1.2", optional = true }
 # anyhow at the cox-crate boundary (AGENTS.md: "anyhow only in crates/cox"),
 # serde_json to build the CLI-flag override layer and `--json` output.
 anyhow = { workspace = true }

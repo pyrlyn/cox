@@ -1,3 +1,188 @@
+#### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
+
+Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Plan: `deps.rs` lets `cox-serve` depend on `cox-store` alone, so the supervisor's `App` is injected: `router::Workspace` answers `projects`/`sessions`/`search` as JSON, and T66.23 implements it over `cox_app`. `router.rs` owns one run loop (accept → `admit_peer` before the first line, the supervisor's events, `open` through `Supervisor::open`) and one task per connection that decodes each line as the app-server does (id 0 for a refused line), rewrites the request id per worker, and waits for its answer, so calls stay sequential per client. `worker.rs` writes stdin through a channel and, once the `open` reply names the session, hands every later stdout line to the router: responses go back to the caller under its own id, notifications to the session's one attached client. `open` is `Supervisor::open` (which already returns a live resume's id) then `attach`, so a live session never gets a second core; a successful `attach` takes the stream over and sends the previous client `ended`. `inbox` asks every worker and joins the lists. A client that disconnects gets `close` sent for its sessions (pump stops, controller keeps folding). `attach.rs`: connect to `COX_HOME/run/serve.sock`, check the server's uid with the same `admit_peer`, then `copy_bidirectional` with stdio. Tests run a fake worker through `/bin/sh`, as `supervisor`'s do, against a real socket in a tempdir.
+
+Goal: a client that connects to the supervisor's socket reaches the right worker, and exactly one client is attached to a session at a time. `docs/design/serve.md` S7, D1, D4 (the bridge), D6 and the trust boundaries. T66.18 supplies worker mode and T66.17's `attach`; T66.20 supplies the socket and `admit`; T66.21 supplies the workers.
+
+Files:
+- `crates/cox-serve/src/router.rs`
+- `crates/cox-serve/src/attach.rs`
+- `crates/cox-serve/src/lib.rs`
+
+Steps:
+1. The accept loop runs `admit(peer_uid, own_uid)` on every connection before its first line is read; a mismatch is dropped and logged.
+2. Workspace calls (`projects`, `sessions`, `search`) are answered by the supervisor's own `App`, which opens SQLite and nothing else; the supervisor never owns a `Session` and never claims a session lock.
+3. A call that names a session is routed by session id to that session's worker. An `open` whose `resume` names a live worker becomes `attach`, never a second core (F1, D6).
+4. One attached client per session: a new `attach` takes the stream over and the previous client gets `ended` for that session. A detach stops only the worker's pump, never its controller, so approvals and questions wait in the worker's inbox and `inbox` returns them on the next attach.
+5. Worker notifications are forwarded to the attached client. Every line from the socket is decoded and refused like any other app-server line.
+6. `attach.rs` is the `--stdio` bridge: `tokio::io::copy_bidirectional` between stdio and the socket, so ssh's own authentication decides who reaches the socket and cox opens no inbound port.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve router
+mise exec -- cargo nextest run -p cox --test deps
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `workspace_calls_need_no_worker`, `session_calls_reach_their_worker`, `a_second_attach_ends_the_first_stream`, `open_resume_of_a_live_worker_attaches`.
+
+Out of scope: the `cox serve` and `cox attach` commands and the hidden `--worker` flag (T66.23), the end-to-end test (T66.24), a TUI that attaches (D2: a separate later design), and Windows.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve: 25 passed (router: workspace_calls_need_no_worker, session_calls_reach_their_worker, a_second_attach_ends_the_first_stream, open_resume_of_a_live_worker_attaches, decode_reads_the_routing_fields; attach: the_bridge_copies_both_ways, no_supervisor_names_the_socket; the 18 earlier tests unchanged), 5 runs in a row
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check -p cox-serve: clean
+
+#### T33.40.12 Remove the built-in Jev client
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.5, T33.40.6 (parity: the provider and one advisor are served by the plugin) · Size: ~120 edited (the deleted `jev.rs` does not count) · Files: `crates/cox-provider/src/jev.rs` (deleted), `crates/cox-provider/src/lib.rs`, `crates/cox/src/session.rs`
+Goal: C1, step 1.
+- The `typesafe` arm of `backend_for_with` returns the plugin's `PluginProvider` when the plugin is loaded.
+- Otherwise it returns a typed "provided by plugin jev, not loaded" error, which the router step (T33.40.13) turns into fail-open.
+- `jev.rs`'s tests now live in `plugins/jev` (T33.40.2).
+Check: `rg -n 'jev' crates/cox-provider/src` is empty; `typesafe_backend_without_plugin_is_typed_error`; the three standard commands green.
+Plan:
+- The card's file list is stale: `backend_for_with` lives in `crates/cox-session/src/provider.rs`, and `assemble` there already returns the loaded plugin's priced `PluginProvider` before `backend_for_with` runs, so the `typesafe` arm only needs the error branch (a new `SessionError` variant).
+- Delete `crates/cox-provider/src/jev.rs` and its `pub mod jev` line; fix the crate header and the doc references (`deps.rs`, AGENTS.md, plan.md §1, toolchain.md, rust.md) that name it.
+- Replace `builtin_jev_used_when_plugin_absent` with `typesafe_backend_without_plugin_is_typed_error`; the doctor row no longer claims a built-in client.
+- jev.rs's seven tests already have equivalents in `plugins/jev` (`wire.rs` answer parsing, `provider.rs` body and `status_error`), so none is ported.
+- Verify: `-p cox-provider`, `-p cox-session`, `-p cox --test deps`, `-p cox --test plugins_jev`, clippy, fmt.
+
+Result:
+- `crates/cox-provider/src/jev.rs` and `pub mod jev` are gone; no cox-provider dependency became unused (`futures`, `thiserror` and `insta` were already unused before this task and are left alone).
+- `SessionError::PluginNotLoaded { section, plugin }` is the typed error; `backend_for_with`'s `typesafe` arm returns it. A loaded plugin never reaches the arm: `assemble` serves its priced `PluginProvider` first.
+- `typesafe_backend_without_plugin_is_typed_error` replaces `builtin_jev_used_when_plugin_absent`. The `typesafe client` doctor row says "provided by plugin jev, not loaded" instead of naming a built-in client (the warning level and install pointer stay with T33.40.14).
+- The seven `jev.rs` tests already have equivalents in `plugins/jev` (`wire.rs`: choice, score, Noul, missing and unknown answers; `provider.rs`: body mapping and `status_error`), so none was ported.
+- Not done: `ProviderId::Jev`, the router pin and the fail-open notice (T33.40.13); the `[providers.typesafe]` tombstone (T33.40.14).
+
+Check output:
+```
+$ rg -in jev crates/cox-provider/src: empty
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-provider -p cox-session -p cox-provider-anthropic
+     Summary 152 tests run: 152 passed, 0 skipped (includes typesafe_backend_without_plugin_is_typed_error)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox -p cox-app -p cox-acp
+     Summary 511 tests run: 511 passed, 5 skipped (plugins_jev 15/15 on a rerun; typesafe_table_overrides_plugin_transport timed out once under load, as known)
+$ mise exec -- cargo clippy -p cox-provider -p cox-session -p cox -p cox-provider-anthropic --all-targets -- -D warnings: clean
+$ mise exec -- cargo fmt --check: clean
+```
+
+#### T33.40.13 Router and `ProviderId` without Jev
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.12 · Size: ~120 · Files: `crates/cox-protocol/src/types.rs`, `crates/cox-core/src/router.rs`, `crates/cox-core/src/session.rs`
+Goal: C1, step 2.
+- `ProviderId::Jev` goes, replaced by T33.18's plugin bucket; it is never serialized in events (J§7).
+- The `typesafe` pin in `Router::pick` goes; plugin sections resolve generically.
+- A tier naming a legacy plugin provider (the table `("typesafe", "jev")`) with the plugin absent fails open (D14): one `Notice(Warn)` "Jev moved to a plugin: build `plugins/jev` and run `cox plugin install <dir>`", and that tier uses its `default.toml` provider and model for the session.
+Check: `legacy_typesafe_tier_without_plugin_uses_default_tier_with_notice`, `typesafe_tier_with_plugin_routes_to_plugin_section`, `unknown_provider_still_errors`; `docs/protocol.jsonschema` regenerated.
+
+Plan:
+- The card's file list is stale: the tier's client is built at session open in `cox-session`, not in `cox-core`, and a session whose `tiers.code.provider` is `typesafe` without the plugin would otherwise fail to open on `PluginNotLoaded`.
+- `cox-protocol`: delete `ProviderId::Jev`; the stored tag `jev` of an old ledger row still reads (as `Plugin("typesafe")`, the section that replaced it) so `cox stats` and `/cost` do not hit a `corrupt` row; the schema drops the `jev` const.
+- `cox-core/router.rs`: drop the `typesafe` arms of `pick` (id and pin); a `typesafe` tier with no loaded section is `UnknownProvider`, like any other unknown name. `session.rs`: drop the `Jev` arm of `provider_name`.
+- `cox-config`: `load::default_tiers()` reads `[tiers]` of the embedded `default.toml`.
+- `cox-session` (new `legacy_tier.rs`): after the ABI sections are built and before `assemble`, a tier naming a legacy section (`typesafe` -> plugin `jev`) that no loaded plugin serves takes the default tier's provider and model, on `config` and `base`, and one `Notice(Warn)` joins the plugin notices.
+- Verify: the three named tests (router ones in `cox-core`, the fallback ones in `cox-session`), `cargo test` of the touched crates, `just`-less schema regeneration, clippy and fmt.
+
+Result:
+- `ProviderId::Jev` is gone. A ledger row an old build wrote with the tag `jev` still reads, as `Plugin("typesafe")` (`legacy_jev_provider_tag_reads_as_the_typesafe_plugin_section`), so `cox stats` and `/cost` do not report it corrupt; the tag is never written again. `docs/protocol.jsonschema` did not change (it does not reach `ProviderId`).
+- `Router::pick` lost the `typesafe` id and pin arms; a loaded section resolves generically, and `typesafe` with no section is `UnknownProvider`.
+- The fail-open lives in `cox-session` (`legacy_tier.rs`, called from `open` after the ABI sections are built and before `assemble`), because `cox-core`'s router is pure and `assemble` would otherwise fail the open on `PluginNotLoaded`. A tier naming `typesafe` with no loaded plugin or declarative section takes the default tier's provider and model (`cox_config::load::default_tiers`); the user's effort, thinking and limits stay. One `Notice(Warn)` says "Jev moved to a plugin: build `plugins/jev` and run `cox plugin install <dir>`".
+- Not done: the `[providers.typesafe]` tombstone and the doctor row (T33.40.14).
+
+Check output:
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-protocol
+     Summary 121 tests run: 121 passed (includes legacy_jev_provider_tag_reads_as_the_typesafe_plugin_section and protocol_jsonschema_matches_committed_file)
+$ ... cargo nextest run -p cox-core -p cox-session -p cox-config
+     Summary 577 tests run: 577 passed, 1 skipped (includes legacy_typesafe_tier_without_plugin_uses_default_tier_with_notice, typesafe_tier_with_plugin_routes_to_plugin_section, unknown_provider_still_errors, open_moves_a_legacy_typesafe_tier_to_the_default)
+$ ... cargo nextest run -p cox --test deps --test plugins_jev
+     Summary 26 tests run: 25 passed (typesafe_table_overrides_plugin_transport timed out under load 60+, passed alone on rerun)
+$ ... cargo nextest run -p cox-store -p cox-plugin -p cox-provider -p cox-app
+     Summary 475 tests run: 475 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-protocol -p cox-core -p cox-session -p cox-config --all-targets -- -D warnings: clean
+$ mise exec -- cargo fmt --check: clean
+```
+
+#### T33.40.14 Config tombstone, `default.toml`, schema and doctor
+
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.13 · Size: ~150 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox/src/doctor.rs`, `crates/cox-protocol/default.toml` (config data; `docs/config.md` and the config schema are generated)
+Goal: C1, step 3. An old config loads.
+- `JevProviderConfig` becomes `LegacyTypesafe`: the same keys, still `deny_unknown_fields`, an `Option` with no default section.
+- It stays a named field, so the table can never fall into the flattened `custom` map as a chat-shaped `CompatibleProviderConfig` (J§7).
+- Its knobs feed the plugin's `typesafe` section. Its `models` rows join the config catalog layer.
+- The `[providers.typesafe]` block leaves `default.toml`.
+- The doctor's key check covers plugin provider sections generically. A leftover table without the plugin is a doctor warning with the install pointer.
+Check:
+- `old_typesafe_table_loads_with_notice` (a config file from before this change);
+- `typesafe_table_never_becomes_compatible_section`;
+- `unknown_key_in_typesafe_table_still_rejected`;
+- a doctor snapshot;
+- the config drift test and `every_flag_has_a_config_key` green.
+
+Result:
+- `JevProviderConfig` is `LegacyTypesafe`; `ProvidersConfig.typesafe` is an `Option<LegacyTypesafe>` (named field, `deny_unknown_fields`, no default section), so the table never reaches the flattened `custom` map. The `[providers.typesafe]` block is gone from `default.toml`.
+- The card's file list was stale; every reader of `providers.typesafe` follows the `Option`: `cox-config` (project guard, below), `cox-models` catalog layer (its `models` rows still join), `cox-plugin` `refuse_provider_hosts`, `cox-app` section list, `cox-session` `abi_transport`/`abi_section` (a table, when set, still configures the plugin's section), `Config::configured_model_ids` and `ProvidersConfig::models_for`.
+- The project guard now also reverts a project's `base_url`/`api_key_env` in the legacy table, against the user's table or the plugin's old defaults when the user has none, so a cloned repository still cannot redirect the plugin's host or key.
+- Notice: `legacy_tier::fall_back` adds one notice when the table is set and no plugin serves the section (`install_pointer` is shared with the doctor).
+- Doctor: the built-in key check no longer special-cases `typesafe`; a plugin-served section is `ok` there (`KeyRequirement::Plugin`) and a moved tier with no plugin is a warning with the install pointer. `crates/cox` replaces the `typesafe client` row with one `provider <name>` row per granted plugin section (key found or not, env var from the user's table over the manifest) and a `providers.typesafe` warning with the install pointer for a table nothing reads.
+- `docs/config.md` and `docs/config.jsonschema` regenerated by their drift tests' generators.
+- Tests: `old_typesafe_table_loads_with_notice` (cox-session), `typesafe_table_never_becomes_compatible_section`, `unknown_key_in_typesafe_table_still_rejected`, `project_config_cannot_redirect_the_legacy_typesafe_table` (cox-config), `plugin_section_is_not_an_unknown_provider`, `moved_section_without_plugin_warns_with_the_install_pointer`, doctor snapshots `doctor_provider_row_names_the_granted_plugin` and `doctor_warns_about_a_typesafe_table_without_a_granted_plugin`.
+
+Check output:
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run --workspace --no-fail-fast
+     Summary 2576 tests run: 2576 passed, 11 skipped (includes config_jsonschema_matches_committed_file, config_docs_config_md_matches_default_toml, config_every_flag_has_a_config_key, the deps and plugins_jev tests)
+$ mise exec -- cargo clippy -p cox-protocol -p cox-config -p cox-session -p cox-models -p cox-app -p cox-core -p cox-plugin -p cox --all-targets -- -D warnings: clean
+$ mise exec -- cargo check -p cox --no-default-features --all-targets: clean
+$ mise exec -- cargo fmt --all: clean
+```
+
+#### T33.40.6 `risk` advisor: raise only
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4, T33.40.6.1 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/plugins_jev.rs` (also touched: `plugins/jev/src/decide.rs`, `plugins/jev/plugin.toml`, `crates/cox-core/src/monotone.rs`)
+Goal: J§5.1. There is one request per tool batch. The state is the task, the cwd, the sandbox mode and, for each call, `tool`, `subject`, `input` and `classifier_risk`, never tool output. The questions are the `severity` Score and the `irreversible`, `external_effect` and `exfiltration` Nouls. The thresholds sit in `[plugins.jev.risk]` with the J§5.1 defaults. The advice is "raise to Destructive" or none, and the core keeps `max(builtin, advised)`. A raise is reported with confidence 1.0, since the guest's own thresholds are the gate, and its probabilities go in the advice note (A163). `capabilities.decide` gains `risk`.
+Check:
+- guest tests:
+  - `risk_state_never_contains_tool_output`;
+  - `risk_thresholds_raise_on_any_hazard`;
+  - `risk_low_answers_give_no_advice`;
+  - `risk_config_overrides_thresholds`;
+- e2e in `Auto` mode with a confining sandbox, where a scripted `git push origin main` (classifier: `Exec`) is auto-allowed without the plugin (A164):
+  - a high fixture gives `Ask`, headless denies, and `Advised { point: risk, applied: true }` is in the rollout;
+  - a low fixture leaves the call allowed;
+  - a wiremock delay past 200 ms leaves it allowed and records T33.40.6.1's late-answer `Notice`, with no `Advised` (A163);
+  - `one_jev_request_per_tool_batch` (the wiremock count for a batch of 3);
+- `risk_advice_cannot_lower_risk` still green.
+Plan:
+1. `plugins/jev/src/risk.rs`: the J§5.1 request (per item `<i>.severity` Score and `<i>.irreversible`/`<i>.external_effect`/`<i>.exfiltration` Nouls, state as the core sends it), `Thresholds` from `[plugins.jev.risk]` (serde, unknown keys and out-of-range values refused) and the verdict: `Answer::Items` with `Score 3.0` for a raised item and `Score 0.0` for the rest, confidence 1.0, probabilities in the note; no raise gives no advice.
+2. `decide.rs` keeps the call-out plumbing and delegates the question and the verdict to `risk.rs`; `lib.rs` reads the thresholds in `init` (an invalid table fails `init`, so the plugin is warned about and skipped) and `plugin.toml` gains `decide = ["risk"]`.
+3. `crates/cox/tests/plugins_jev.rs`: drop the manifest patch, the four e2e cases with a scripted `git push origin main` under `Auto` and `workspace-write`.
+4. Verify: `cargo test` in `plugins/` for the jev crate, `cargo nextest run -p cox --test plugins_jev`, `-p cox-core` monotone tests, clippy and fmt.
+
+Result: `plugins/jev/src/risk.rs` owns J§5.1. The request carries only the shared `task`, `cwd`, `workspace_roots` and `sandbox` and each call's `tool`, `subject`, `input` and `classifier_risk` (an allowlist, so a field the core adds later never leaks tool output), with four questions per item keyed `<i>.severity` (Score over the four `Risk` levels), `<i>.irreversible`, `<i>.external_effect` and `<i>.exfiltration` (Nouls). A call is raised when `irreversible ≥ 0.7`, `external_effect ≥ 0.7`, `exfiltration ≥ 0.5`, or `severity ≥ 2.5` with confidence `≥ 0.6`; `[plugins.jev.risk]` overrides any of them (`deny_unknown_fields`, values outside 0..=1 or 0..=3 refused, and a refused table fails `cox_init`, so the host warns and skips the plugin — the creator's choice). The advice is `Answer::Items` with `Score 3.0` for a raised call and `Score 0.0` (a no-op under `max(builtin, advised)`) for the rest, confidence 1.0 and the raised calls' probabilities in the note; no raise is no advice. `decide.rs` keeps only the call-out plumbing; a `risk` question with no items is silent. `plugin.toml` declares `decide = ["risk"]`, so the e2e rig no longer patches the manifest. The e2e runs need `--approve on-failure`: a headless run defaults to `never`, under which `Exec` is denied before `risk` could matter, and `[hooks] timeout_s = 1` makes the headless driver deny the raised call's ask within a second.
+Found and fixed in `cox-core` (`monotone.rs`, two lines plus a test): the late-answer `Notice` of T33.40.6.1 was not reachable through the plugin advisor. `PluginAdvisor` gives up on the same budget and returns silence; when both timers fire on one tick, `tokio::time::timeout` polls the inner future first and sees the silence, so the core reported `Silent`. Silence that arrives once the budget has passed is now `Late`. `advisor_silent_at_its_deadline_is_late` failed 3 of 3 runs without the fix. The late e2e therefore records both the core's Info `Notice` and the host's own `decision skipped: the call-out ran past the point's budget` warning.
+Not done: `typesafe_table_overrides_plugin_transport` (T33.40.4, unchanged) asserts the whole run takes under 4 s; it failed twice while the machine's load average was about 150 (plugin load alone took ~7 s) and passed once the load eased. No change was made to it.
+
+Check output:
+```
+$ (cd plugins && mise exec -- cargo test -p cox-plugin-jev --locked)
+     test result: ok. 25 passed (risk_state_never_contains_tool_output, risk_thresholds_raise_on_any_hazard, risk_low_answers_give_no_advice, risk_config_overrides_thresholds, risk_config_refuses_an_invalid_table, risk_questions_cover_every_item, ...)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test plugins_jev
+     Summary 15 tests run: 15 passed, 0 skipped (git_push_is_auto_allowed_without_the_plugin, high_risk_answer_asks_and_headless_denies, low_risk_answer_leaves_the_call_allowed, late_risk_answer_leaves_the_call_allowed_with_a_notice, one_jev_request_per_tool_batch)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-core -p cox-plugin
+     Summary 569 tests run: 569 passed, 1 skipped (includes risk_advice_cannot_lower_risk and advisor_silent_at_its_deadline_is_late)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test plugin_cli --test external_agents_cursor
+     passed (33 run with plugins_jev; the only failure was the load-sensitive timing above)
+$ mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings: clean
+$ (cd plugins && cargo clippy -p cox-plugin-jev --all-targets --locked -- -D warnings; cargo clippy -p cox-plugin-jev --target wasm32-unknown-unknown --locked -- -D warnings): clean
+$ mise exec -- cargo fmt --check -p cox-core -p cox; (cd plugins && cargo fmt --check -p cox-plugin-jev): clean
+
 #### T61.3 Bindings generator on the host dev profile, skipped when the library did not change
 
 Model: sonnet · Status: done 2026-10-17 · Depends: - · Size: ~40 · Priority: P1 · Complexity: 2
@@ -39,6 +224,92 @@ $ diff before.swift desktop/macos/build/bindings/cox_ffi.swift
 (empty: byte-identical)
 $ python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
 Ran 5 tests ... OK
+```
+
+#### T66.23 `cox serve` and `cox attach --stdio`
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the supervisor and the bridge are commands a person can run. `docs/design/serve.md` S8, D3, D4 item 7 and D8. `crates/cox` stays clap and dispatch only.
+
+Files:
+- `crates/cox/src/cli.rs`, `crates/cox/src/main.rs`
+- `crates/cox/Cargo.toml` (`cox-serve` as an optional workspace path dependency behind the existing `app-server` feature; the `deps.rs` rule T66.19 adds lists `crates/cox` as an allowed dependent)
+- `docs/app-server.md` (a "Resident sessions" section that names both commands, which `docs_name_every_subcommand` requires)
+
+Steps:
+1. `cox serve` runs the supervisor in the foreground; it does not daemonize. The hidden `--worker` flag, not shown in `--help`, runs `cox_app::server::serve` in worker mode over stdin and stdout, and is the argv T66.21's supervisor spawns through `current_exe()`.
+2. `cox attach --stdio` runs T66.22's bridge. It never starts a supervisor: with no `cox serve` running it fails, naming the socket path.
+3. On Windows both commands refuse with "not supported yet".
+4. The docs section states what is resident (a session lives in its worker until `end`), that a TUI session is never resident, and that the desktop app's ssh command stays `cox app-server --stdio` (D8).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test docs
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- serve --help
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- attach --stdio
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+The last `attach` run exits non-zero and names `COX_HOME/run/serve.sock`; `COX_HOME` is a scratch tree, never `~/.cox`.
+
+Done when `docs_name_every_subcommand` passes, `serve --help` does not list `--worker`, and `cox attach --stdio` with no supervisor fails naming the socket path.
+
+Out of scope: the end-to-end test (T66.24), the desktop app choosing `cox attach --stdio` for a host that runs `cox serve` (a P52 desktop card), and heartbeat (T66.13).
+
+Where the `Workspace` impl lives: `cox-serve` may depend on `cox-store` alone, so the router takes `projects`, `sessions` and `search` through `cox_serve::Workspace`. `cox_app::server::workspace_reply` (the wire is `cox-app`'s) decodes the call and encodes the `Reply`, and `cox_app::server::workspace_app` builds the supervisor's `App`; `crates/cox/src/serve_cmd.rs` holds the three-line `impl Workspace` over them, the only place the two crates meet. `deps.rs` gained a rule that only `crates/cox` depends on `cox-serve`. The supervisor reads the login shell environment once; each worker is `current_exe() serve --worker --home <home>`.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox --test serve_cmd --test docs --test deps: 19 passed (serve_help_hides_the_worker_flag, attach_needs_stdio, attach_without_a_supervisor_fails_naming_the_socket, docs_name_every_subcommand)
+cargo nextest run -p cox --bin cox / -p cox-app: the_workspace_impl_answers_workspace_calls_and_refuses_the_rest, workspace_reply_answers_the_three_workspace_calls_and_refuses_the_rest passed
+COX_HOME=/tmp/cx23 cox serve --help: lists no --worker
+COX_HOME=<long scratch path> cox attach --stdio: exit 1, "Error: cox serve is not reachable at <COX_HOME>/run/serve.sock: ..."
+COX_HOME=/tmp/cx23 cox serve & ; a projects request through cox attach --stdio answered {"kind":"projects","value":[]}; a second cox serve refused naming the holder; SIGTERM stopped the supervisor
+cargo clippy -p cox -p cox-app -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+
+#### T66.24 End-to-end: kill the client, reattach, and the rollout grows only by the turn
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3
+
+Goal: one test proves the point of the whole serve design: a session outlives its client and a reattach writes nothing to the rollout. `docs/design/serve.md` "Acceptance test for the later cards", S9 and D6.
+
+Files:
+- `crates/cox/tests/serve.rs` (test only)
+
+Steps:
+1. Against a scratch `COX_HOME` with the scripted provider (`COX_PROVIDER=scripted`, `COX_SCENARIO`, as `crates/cox/tests/remote.rs` sets them), start `cox serve` in the background and wait for `run/serve.sock`.
+2. Client A runs `cox attach --stdio`, sends `open` for a new session in a scratch cwd and counts the rollout's lines (M). It sends one prompt, reads patches until the turn ends, records the line count (N, with N > M) and the blocks it folded with `coalesce::apply`.
+3. Kill client A with SIGKILL and assert the worker still holds the lock (`Store::session_holder` is `Some`).
+4. Client B runs `cox attach --stdio` and sends `attach`. Assert `Opened.blocks` equals A's folded blocks, the rollout still has exactly N lines with `seq` running 1..=N without a repeat, and lines M+1..=N are that one turn's events from `TurnStarted` to `TurnDone`.
+5. SIGTERM to `cox serve`: assert the lock is free and the socket is removed.
+6. Every process the test starts is killed at the end, including on failure, through a drop guard (a test never leaves a process behind).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test serve
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Execution plan: `crates/cox/tests/serve.rs` only (`#[cfg(all(unix, feature = "app-server"))]`), under a short scratch home in `/tmp` because of `sun_path`. A drop guard owns `cox serve` and each client child and kills them. Readiness is polled with deadlines (the socket, then each reply line). Lines are built and read with `cox_app::wire`, patches folded with `cox_app::coalesce::apply`, the lock probed with `Store::session_holder`, and the rollout read from `Store::rollout_path`. Verify with five runs of the new test in a row, then the Check below.
+
+Done when `a_reattach_after_a_killed_client_writes_nothing_to_the_rollout` passes.
+
+Out of scope: a restarted worker's `StateChanged` line (a restart replays the rollout and appends one, D6; only a reattach must add nothing), a TUI attach, and Windows.
+
+Product fix found by the test: `cox serve` left `serve.sock` behind after SIGTERM, against this card and `docs/design/serve.md` S9. `Bound` now unlinks the file (a drop guard declared before the lock, so it goes while the lock is still held); `bind` still replaces a file a crash left. Narrow tests in `socket.rs`: `dropping_the_bound_socket_removes_its_file` (fails without the guard), `a_missing_socket_file_does_not_fail_the_drop`.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox --test serve --test serve_cmd --test deps: 15 passed (a_reattach_after_a_killed_client_writes_nothing_to_the_rollout 4.4 s)
+cargo test -p cox --test serve, five runs in a row: 5 passed (3.2 to 3.9 s each)
+cargo nextest run -p cox-serve: 27 passed
+cargo clippy -p cox -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
 ```
 
 #### T61.5.3 One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
@@ -115,6 +386,7 @@ Done when: the test count before and after is equal (`nextest list`); §4.3.9 ha
 Out of scope: other crates (T61.5.2, T61.5.3).
 
 Done: 24 files (the card said 21) are modules of `crates/cox-core/tests/it/main.rs`; `common/` and `scenarios/` stay in `tests/`, because `cox`, `cox-app` and `cox-tui` name their paths (`#[path = "../common/mod.rs"] mod common;` in `main.rs`, `use crate::common;` in the modules). The compact snapshot moved to `tests/it/snapshots/it__compact__...snap` (body unchanged, only the `source:` header line differs, since insta prefixes the crate name `it`); the scenario snapshots stay, their `snapshot_path` is now `../scenarios`. No `--test <name>` for cox-core existed outside `done.md`. Test count 431 before and after, identical names. Build phase of `-p cox-core --no-run` 28 s to 14 s (`research.md` §4.3.9). Checks: nextest `-p cox-core` 431 passed, `-p cox-app` 270 passed, clippy `-p cox-core -p cox-app --all-targets` and `fmt --check` clean (the whole workspace was not run: too heavy beside parallel agents).
+
 #### T61.6 CI: one feature set per target
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
@@ -122,6 +394,7 @@ Depends: T61.1 · Size: ~5 · Files: `.github/workflows/ci.yml`, `justfile`, `re
 Goal: the `rust` matrix compiles the workspace once per target: `build-command`, clippy and nextest use the same features, so nextest reuses the build.
 Check: pending the first CI run of this change (job log of `rust / aarch64-apple-darwin`: no `Compiling` line for a workspace crate after the build step). Local: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 mise exec -- cargo nextest run --workspace --all-features --no-run` finished with no errors; the all-features run passed except `plain_transcript_snapshot`.
 Done: `test-command` in `ci.yml` and `just check-all` now use `--all-features`, the feature set `build-command` already used (clippy already got it from the shared workflow's `feature-args` default), so nextest no longer compiles the default feature set a second time. Local `--all-features` run: 2566 of 2567 tests passed. `plain_transcript_snapshot` (crate `cox`) fails under the default features too (context percentage 1% in the snapshot, 2% in the output); not fixed here. `actionlint` reports only the existing `if: false` on the Windows job. §4.3.9 has a T61.6 table with the before CI times (PR run 38933123898: x86_64 Linux 1294 s, aarch64 Linux 1025 s, aarch64 macOS 1482 s); the after times are pending the first CI run of this change, so the card's "before and after" condition is not met until then.
+
 #### T66.8 `/refine` and `cox refine`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
@@ -200,6 +473,7 @@ $ mise exec -- cargo clippy -p cox-store --all-targets -- -D warnings   (clean)
 $ mise exec -- cargo fmt --check   (clean)
 ```
 Out of scope: writing files, which is T66.5.
+
 #### T66.11 `cox run -p --autonomous`: shell gates and the headless loop
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.10 · Size: ~180 · Priority: P2 · Complexity: 3
@@ -218,6 +492,30 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox autonomous
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when, against `COX_HOME=/tmp/cox-scratch` with the scripted provider, a gate that fails once and then passes yields exactly two turns and `GatesPassed`.
+
+Out of scope: goals that persist across runs.
+
+Execution plan:
+1. `cox-tools/src/gate.rs`: `ShellGateRunner` implements `GateRunner` over `bash::run_line` (the one spawn path: same sandbox wrap, env allowlist, PTY and group kill), with the session's `SandboxPolicy`, workspace roots, cwd and `Archive`. It archives the whole output before returning, caps the tail at a line-safe size with an `expand #id` trailer, and turns a spawn error, sandbox denial or timeout into a failed gate.
+2. `cox/src/cli.rs`: `--autonomous` on `RunArgs`, `requires = prompt`, conflicts with `--loop`.
+3. `cox/src/run.rs`: validate the `[autonomous]` policy before the session opens; `run_autonomous` drives one `UserTurn` at a time, asks `Driver::decide`, submits the `Continue` text as the next turn, and writes one `autonomous` stream-json record per decision and the stop reason to stderr and the `json` summary. Only an `Outcome` fold of `diff`/`Checkpoint` events feeds `files_changed`.
+4. Tests: gate runner unit tests (pass, fail with tail, timeout, archive-before-cap); `crates/cox/tests/autonomous.rs` e2e against the scripted provider and a scratch `COX_HOME`: a failing gate continues, a passing gate stops, no gates refuses the flag, the TUI never sees the flag.
+5. Docs: the `cox run` flag docs and any trycmd help snapshot.
+
+Files changed beyond the list: `crates/cox-core/src/session.rs` (`Session::archive()`, so the gates archive into the session's own store and the CLI opens no second one), `crates/cox/src/cli.rs` (the flag), `crates/cox/src/config_load.rs` (the flag-to-key map, required by `config_every_flag_has_a_config_key`), `docs/getting-started.md`. The e2e test is `crates/cox/tests/autonomous.rs` (the card's `tests/autonomous.rs` has no top-level `tests/`). `files_changed` is read from tool diffs and checkpoints, so a file changed only through `bash` is not seen as progress. A run that stops for any reason other than `gates_passed` or the turn's own stop exits 1.
+
+Check output:
+```
+mise exec -- cargo nextest run -p cox-tools -p cox-core -p cox   # 939 tests run; the only failures were config_every_flag_has_a_config_key (fixed by mapping the flag) and plain_transcript_snapshot (fails identically on the base commit, unrelated); rerun of -p cox: 220 run, 219 passed, plain_transcript_snapshot the one failure. New: cox::autonomous 5 tests, cox-tools gate::tests 6 tests, all passed
+mise exec -- cargo clippy -p cox -p cox-tools -p cox-core --all-targets -- -D warnings   # clean
+mise exec -- cargo fmt --check   # clean
+```
+
 #### T66.21 `cox-serve`: spawn workers, watch them, restart them, shut down
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Depends: T66.18, T66.19 · Size: ~190 · Priority: P2 · Complexity: 4
@@ -243,24 +541,17 @@ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 mise exec -- cargo fmt --check
 ```
 
-Done when, against `COX_HOME=/tmp/cox-scratch` with the scripted provider, a gate that fails once and then passes yields exactly two turns and `GatesPassed`.
+Done when these tests pass, with a fake worker program as `crates/cox/tests/remote.rs` fakes `ssh`: `a_crashed_worker_is_restarted_idle_with_resume`, `give_up_marks_the_session_failed`, `shutdown_ends_every_worker`, `the_cap_refuses_the_seventeenth_open`.
 
-Out of scope: goals that persist across runs.
+Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
 
-Execution plan:
-1. `cox-tools/src/gate.rs`: `ShellGateRunner` implements `GateRunner` over `bash::run_line` (the one spawn path: same sandbox wrap, env allowlist, PTY and group kill), with the session's `SandboxPolicy`, workspace roots, cwd and `Archive`. It archives the whole output before returning, caps the tail at a line-safe size with an `expand #id` trailer, and turns a spawn error, sandbox denial or timeout into a failed gate.
-2. `cox/src/cli.rs`: `--autonomous` on `RunArgs`, `requires = prompt`, conflicts with `--loop`.
-3. `cox/src/run.rs`: validate the `[autonomous]` policy before the session opens; `run_autonomous` drives one `UserTurn` at a time, asks `Driver::decide`, submits the `Continue` text as the next turn, and writes one `autonomous` stream-json record per decision and the stop reason to stderr and the `json` summary. Only an `Outcome` fold of `diff`/`Checkpoint` events feeds `files_changed`.
-4. Tests: gate runner unit tests (pass, fail with tail, timeout, archive-before-cap); `crates/cox/tests/autonomous.rs` e2e against the scripted provider and a scratch `COX_HOME`: a failing gate continues, a passing gate stops, no gates refuses the flag, the TUI never sees the flag.
-5. Docs: the `cox run` flag docs and any trycmd help snapshot.
-
-Files changed beyond the list: `crates/cox-core/src/session.rs` (`Session::archive()`, so the gates archive into the session's own store and the CLI opens no second one), `crates/cox/src/cli.rs` (the flag), `crates/cox/src/config_load.rs` (the flag-to-key map, required by `config_every_flag_has_a_config_key`), `docs/getting-started.md`. The e2e test is `crates/cox/tests/autonomous.rs` (the card's `tests/autonomous.rs` has no top-level `tests/`). `files_changed` is read from tool diffs and checkpoints, so a file changed only through `bash` is not seen as progress. A run that stops for any reason other than `gates_passed` or the turn's own stop exits 1.
-
-Check output:
+Check output (2026-10-17):
 ```
-mise exec -- cargo nextest run -p cox-tools -p cox-core -p cox   # 939 tests run; the only failures were config_every_flag_has_a_config_key (fixed by mapping the flag) and plain_transcript_snapshot (fails identically on the base commit, unrelated); rerun of -p cox: 220 run, 219 passed, plain_transcript_snapshot the one failure. New: cox::autonomous 5 tests, cox-tools gate::tests 6 tests, all passed
-mise exec -- cargo clippy -p cox -p cox-tools -p cox-core --all-targets -- -D warnings   # clean
-mise exec -- cargo fmt --check   # clean
+cargo nextest run -p cox-serve: 10 passed (supervisor: a_crashed_worker_is_restarted_idle_with_resume, give_up_marks_the_session_failed, shutdown_ends_every_worker, the_cap_refuses_the_seventeenth_open; worker: open_and_end_lines_match_the_wire, only_the_reply_to_the_supervisor_counts; the four restart tests); 15 more runs of the supervisor tests all passed
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+cargo hakari verify: workspace-hack works correctly
 ```
 
 #### T66.10 `[autonomous]` config, which a project cannot set
@@ -337,6 +628,24 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox-core autonomous
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when the tests, run with a fake `GateRunner`, show that:
+- a pass stops the run;
+- a fail followed by a pass stops on the second try;
+- the token limit stops the run while a gate is still failing;
+- an error does not continue;
+- an interrupt does not continue;
+- two no-progress continuations stop the run.
+
+Out of scope: config, the shell runner and the run loop (T66.10, T66.11). The TUI does not enter this loop.
+
+Done:
+- `cox_protocol::autonomous`: `AutonomousPolicy` (field names as T66.10's `[autonomous]` table, `Default` with step 1's values, `validate` returns `NoGates` or `BlankGate`), `GateResult`, the async `GateRunner` trait (infallible: a spawn failure, sandbox denial or timeout is a failed result) and `AutonomousStop` (`GatesPassed`, `GateRetriesExhausted`, `NoProgress`, `MaxContinuations`, `MaxTurns`, `MaxTokens`, `Timeout`, `TurnEnded{stop}`). Not reachable from `Event`, so `docs/protocol.jsonschema` is unchanged.
+- `cox_core::autonomous`: `Driver::new(policy)` rejects a gateless policy, so `decide` cannot run without one. `decide(&mut State, &TurnReport, &dyn GateRunner) -> Next` takes `&mut State` because the streak and per-gate failure counts live there; the clock is `TurnReport.elapsed`, a value. Order: a never-continue stop (no gate runs), gates in order (first failure wins; a pass wins even at a limit), the limits, the gate retries (a gate stops after `gate_retries + 1` failed checks), then the no-progress streak (2).
+- Check: `cargo nextest run -p cox-protocol -p cox-core` 571 passed, 1 skipped; `-E 'test(autonomous) | binary(autonomous)'` 20 passed. The card's `nextest run -p cox-core autonomous` filter matches test names only, so it runs the 3 unit tests; the integration binary needs `binary(autonomous)`. `cargo clippy -p cox-protocol -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean.
 
 #### T66.6 Core: a refine proposal from one cheap call, with the base prompt fixed
 
@@ -363,6 +672,24 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox-core refine
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when tests show that:
+- an edit aimed at the base prompt is refused;
+- malformed JSON is rejected;
+- a valid proposal parses;
+- after a refine, the base prompt bytes and `system[0..=2]` are byte-identical to before.
+
+Out of scope: applying edits or running a refine in the background automatically.
+
+Done:
+- `crates/cox-core/src/refine.rs`: `Session::propose_refine(text, digest)` sends one `memory`-job request through the shared `side_call` (route, ledger row, spend), with the user's text, the digest (written by the session layer) and the last 24 000 bytes of the transcript cut on a char boundary. It touches neither the history nor the prefix. `refine::parse` reads the answer as a `serde_json::Value` (no new dependency; a surrounding code fence is tolerated) and returns `Proposal { evidence, edits }` or `Rejected { reason }`; the reason is written by cox and never quotes the model. Any failure rejects the whole proposal: more than 5 edits, an unknown kind or action, an id outside `[a-z0-9-]{1,64}` (the existing `memory_extract::is_valid_name`, now `pub(crate)`), a kind or id naming the base prompt (`prompt`, `prompt-minimal`, `base`, `system`, or containing `base-prompt`/`system-prompt`), content missing on create/update, present on delete or over 4096 bytes, or one entry edited twice.
+- `crates/cox-core/src/prompts/refine.md`: the instructions, written for cox; the transcript and digest are framed as evidence, not instructions.
+- `prompt.md` and `prompt_minimal.md` stay `include_str!` constants in `context.rs`; nothing in this task can write them.
+Check: `cargo nextest run -p cox-core refine` 6 passed: `refine_refuses_an_edit_aimed_at_the_base_prompt`, `refine_rejects_malformed_json`, `refine_parses_a_valid_proposal_inside_a_code_fence`, `refine_rejects_a_proposal_out_of_bounds`, `refine_is_one_memory_call_and_leaves_the_cached_prefix_byte_identical` (`system[0..=2]` from `assemble` and the history are byte-identical before and after; one `memory` usage row), `refine_rejects_a_bad_answer_but_still_records_its_cost`. Whole `-p cox-core`: 437 passed. `cargo clippy -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: the workspace-wide clippy (only `cox-core` changed).
+
 #### T66.3 `agent` collect: a status and a capped preview by task id
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.2 · Size: ~150 · Priority: P1 · Complexity: 3
@@ -382,6 +709,21 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox-core subagent
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when a scripted-provider test shows:
+- the spawn result holds no answer text;
+- `collect` on a running task returns `running`;
+- after completion, `collect` returns a preview within the cap and the archive id;
+- `expand` returns the full body.
+
+Out of scope: a separate `task_output` tool; peer messages between children.
+
+Result: `tasks.rs` gains `TaskStatus` (`queued`, `running`, `done`, `error`, `cancelled`) and a per-session `Collect` record for each background subagent (name, status, the settled answer, the archive id), with `begin_collect`, `mark_running`, `settle_collect` and `collect_snapshot`, which waits on the existing `tasks_idle` notify up to `timeout_ms` and returns the records as they stand when time or the call's cancel token runs out. The record holds the answer `run_task` already capped (summary or cut, with `full answer: expand <id>` when T66.2 archived it), so `collect` adds no way around `result_cap_tokens`. A background spawn returns `structured` `{task_id, name, status: "queued"}` and no answer. `drive` marks each run `running` and settles it before the notice goes out: `cancelled` when the run was interrupted, `error` for a driver refusal or a failed run, else `done`; a woken finished child goes back to `running`, and a child that cannot resume is settled `error`. `pointer_line` takes a `collect` flag: a subagent's line ends with `| collect <task id>`, a detached `bash` line is unchanged. `agent(collect: [id or name, …], timeout_ms)` is checked before the concurrency slot is reserved; it takes at most 8 tasks and clamps the wait to 120 s, and an unknown id, an empty or non-string list, or `task` together with `collect` is denied. Its risk is `ReadOnly` and its subject `collect`. The input schema drops `required` (a top-level `anyOf` is refused by providers) and the description says `task` or `collect`. Foreground calls are unchanged. `docs/tools.md` names the new input. Tests (in `subagent.rs`, because a task id is unknown to a script): `background_spawn_returns_a_handle_and_no_answer`, `pointer_line_for_a_subagent_ends_with_collect_and_its_id`, `collect_returns_a_done_tasks_preview_by_id_and_by_name`, `collect_reports_queued_running_and_a_timeout_snapshot`, `collect_wakes_when_the_task_settles_before_the_timeout`, `collect_reports_error_for_a_refused_run_and_cancelled_for_an_interrupted_one`, `collect_preview_of_an_over_cap_answer_stays_within_the_cap_and_names_the_archive_row`, `collect_denies_unknown_tasks_mixed_calls_and_oversized_lists`, `collect_is_read_only_whatever_the_preset`; and `background_spawn_hands_out_a_collect_handle_and_the_pointer_names_it` through the loop in `tests/subagent.rs`. Not done: the macOS and TUI summary line for an `agent` call (`cox-app` `summary.rs`) still reads "Delegated to `collect`: " for a collect call, because that file is outside this card.
+Check output: `mise exec -- cargo nextest run -p cox-core` — 440 passed, 1 skipped; `mise exec -- cargo nextest run -p cox -E 'test(agent) or test(subagent)'` — 12 passed; `mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
 #### T66.18 Worker mode in `cox-app`'s server: one session, ended on EOF
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.17 · Size: ~80 · Priority: P2 · Complexity: 2
@@ -398,6 +740,18 @@ Steps:
 Check:
 ```bash
 mise exec -- cargo nextest run -p cox-app server
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Plan (Claude Code / sonnet-5.5): add `ServeMode` and a `mode` argument to `serve`, and `serve_stdio` passes `Client` after `load_login_env`. A `Worker` answers a second `open` (one that does not resume the held session) with an `Outcome::Err` reply, the wire's error type, before `App::open` runs; no new `AppError` variant, so `app.rs` stays untouched. `Server::stop` calls `LiveSession::end` instead of `close`. Tests in `crates/cox-app/tests/app.rs`: `a_worker_refuses_a_second_session` (the second open errs, the first session stays usable) and `eof_ends_every_session` (a detached `sleep` started by `bash` is dead after EOF). Verify: the Check below, then clippy and fmt.
+
+Done when `eof_ends_every_session` and `a_worker_refuses_a_second_session` pass.
+
+Out of scope: the `cox serve --worker` flag and the supervisor that spawns workers (later cards).
+
+Check: `mise exec -- cargo nextest run -p cox-app` passed (276 tests), including `eof_ends_every_session` (a background `bash` runs `exec sleep 300`; after the client's stdin closes the process is dead; with `stop` calling `close` again it is still alive after 5 s and the test fails) and `a_worker_refuses_a_second_session` (the second `open` answers an error naming one session, a `resume` of the held id attaches, the first session still answers `snapshot`; with `refuses` returning false the test fails). `-p cox --test docs` 5 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. `docs/app-server.md` now says EOF ends the sessions. `serve_stdio` takes the mode and `cox app-server --stdio` passes `Client`; the `--worker` flag is a later card.
+
 #### T66.20 `cox-serve`: run directory, singleton lock, socket and peer uid
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.19 · Size: ~170 · Priority: P2 · Complexity: 3
@@ -437,17 +791,6 @@ cargo nextest run -p cox-store lock: 7 passed (the existing lock tests, unchange
 cargo nextest run -p cox --test deps: passed (cox-serve may depend on cox-store alone)
 cargo clippy -p cox-serve -p cox-store --all-targets -- -D warnings: clean
 cargo fmt --check: clean
-Done when these tests pass, with a fake worker program as `crates/cox/tests/remote.rs` fakes `ssh`: `a_crashed_worker_is_restarted_idle_with_resume`, `give_up_marks_the_session_failed`, `shutdown_ends_every_worker`, `the_cap_refuses_the_seventeenth_open`.
-
-Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
-
-Check output (2026-10-17):
-```
-cargo nextest run -p cox-serve: 10 passed (supervisor: a_crashed_worker_is_restarted_idle_with_resume, give_up_marks_the_session_failed, shutdown_ends_every_worker, the_cap_refuses_the_seventeenth_open; worker: open_and_end_lines_match_the_wire, only_the_reply_to_the_supervisor_counts; the four restart tests); 15 more runs of the supervisor tests all passed
-cargo nextest run -p cox --test deps --test docs: 16 passed
-cargo clippy -p cox-serve --all-targets -- -D warnings: clean
-cargo fmt --check: clean
-cargo hakari verify: workspace-hack works correctly
 ```
 
 #### T66.19 New crate `cox-serve`: the restart policy
@@ -486,53 +829,6 @@ cargo clippy --workspace --all-targets -- -D warnings: clean
 cargo fmt --check: clean
 ```
 
-#### T66.18 Worker mode in `cox-app`'s server: one session, ended on EOF
-
-Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.17 · Size: ~80 · Priority: P2 · Complexity: 2
-
-Goal: the server can run as one session's worker, and on EOF every mode ends its sessions instead of only closing them, so detached bash processes are killed. `docs/design/serve.md` S3, D3 and F2.
-
-Files:
-- `crates/cox-app/src/server.rs`
-
-Steps:
-1. `ServeMode::{Client, Worker}` for `serve`. A worker refuses a second `open` and skips `load_login_env`.
-2. On EOF both modes end their sessions (F2).
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-app server
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when the tests, run with a fake `GateRunner`, show that:
-- a pass stops the run;
-- a fail followed by a pass stops on the second try;
-- the token limit stops the run while a gate is still failing;
-- an error does not continue;
-- an interrupt does not continue;
-- two no-progress continuations stop the run.
-
-Out of scope: config, the shell runner and the run loop (T66.10, T66.11). The TUI does not enter this loop.
-
-Done:
-- `cox_protocol::autonomous`: `AutonomousPolicy` (field names as T66.10's `[autonomous]` table, `Default` with step 1's values, `validate` returns `NoGates` or `BlankGate`), `GateResult`, the async `GateRunner` trait (infallible: a spawn failure, sandbox denial or timeout is a failed result) and `AutonomousStop` (`GatesPassed`, `GateRetriesExhausted`, `NoProgress`, `MaxContinuations`, `MaxTurns`, `MaxTokens`, `Timeout`, `TurnEnded{stop}`). Not reachable from `Event`, so `docs/protocol.jsonschema` is unchanged.
-- `cox_core::autonomous`: `Driver::new(policy)` rejects a gateless policy, so `decide` cannot run without one. `decide(&mut State, &TurnReport, &dyn GateRunner) -> Next` takes `&mut State` because the streak and per-gate failure counts live there; the clock is `TurnReport.elapsed`, a value. Order: a never-continue stop (no gate runs), gates in order (first failure wins; a pass wins even at a limit), the limits, the gate retries (a gate stops after `gate_retries + 1` failed checks), then the no-progress streak (2).
-- Check: `cargo nextest run -p cox-protocol -p cox-core` 571 passed, 1 skipped; `-E 'test(autonomous) | binary(autonomous)'` 20 passed. The card's `nextest run -p cox-core autonomous` filter matches test names only, so it runs the 3 unit tests; the integration binary needs `binary(autonomous)`. `cargo clippy -p cox-protocol -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean.
-Done when tests show that:
-- an edit aimed at the base prompt is refused;
-- malformed JSON is rejected;
-- a valid proposal parses;
-- after a refine, the base prompt bytes and `system[0..=2]` are byte-identical to before.
-
-Out of scope: applying edits or running a refine in the background automatically.
-
-Done:
-- `crates/cox-core/src/refine.rs`: `Session::propose_refine(text, digest)` sends one `memory`-job request through the shared `side_call` (route, ledger row, spend), with the user's text, the digest (written by the session layer) and the last 24 000 bytes of the transcript cut on a char boundary. It touches neither the history nor the prefix. `refine::parse` reads the answer as a `serde_json::Value` (no new dependency; a surrounding code fence is tolerated) and returns `Proposal { evidence, edits }` or `Rejected { reason }`; the reason is written by cox and never quotes the model. Any failure rejects the whole proposal: more than 5 edits, an unknown kind or action, an id outside `[a-z0-9-]{1,64}` (the existing `memory_extract::is_valid_name`, now `pub(crate)`), a kind or id naming the base prompt (`prompt`, `prompt-minimal`, `base`, `system`, or containing `base-prompt`/`system-prompt`), content missing on create/update, present on delete or over 4096 bytes, or one entry edited twice.
-- `crates/cox-core/src/prompts/refine.md`: the instructions, written for cox; the transcript and digest are framed as evidence, not instructions.
-- `prompt.md` and `prompt_minimal.md` stay `include_str!` constants in `context.rs`; nothing in this task can write them.
-Check: `cargo nextest run -p cox-core refine` 6 passed: `refine_refuses_an_edit_aimed_at_the_base_prompt`, `refine_rejects_malformed_json`, `refine_parses_a_valid_proposal_inside_a_code_fence`, `refine_rejects_a_proposal_out_of_bounds`, `refine_is_one_memory_call_and_leaves_the_cached_prefix_byte_identical` (`system[0..=2]` from `assemble` and the history are byte-identical before and after; one `memory` usage row), `refine_rejects_a_bad_answer_but_still_records_its_cost`. Whole `-p cox-core`: 437 passed. `cargo clippy -p cox-core --all-targets -- -D warnings` and `cargo fmt --check` clean. Not run: the workspace-wide clippy (only `cox-core` changed).
 #### T33.45.10 Docs: Russian and Ukrainian translations
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
@@ -542,6 +838,7 @@ Goal: the three-part plugin API reference exists in Russian and Ukrainian beside
 - `crates/cox/tests/docs.rs`: `docs_relative_links_resolve` also walks `docs/ru` and `docs/uk`; `plugin_docs_translations_match_the_english_page` compares the heading levels, every fenced block byte for byte, the generated field-index bullets, the relative links and the in-page anchors with the English page; `a_translation_missing_a_heading_fails_the_parity_check` proves the check fails on a missing heading or an edited block.
 Check: both cover all three parts and every heading of the English page; `just test` green.
 Check output: `cargo nextest run -p cox --test docs` 7 passed, including `plugin_docs_translations_match_the_english_page` and `a_translation_missing_a_heading_fails_the_parity_check`; `cargo clippy -p cox --test docs -- -D warnings` and `cargo fmt --check` clean. `just docs-check` runs the same `docs` test binary.
+
 #### T63.2 CI: re-run only the Swift packages a change can affect
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
@@ -560,6 +857,7 @@ Check:
 - `ruby -ryaml` loads `ci.yml`; `bash -n` passes. actionlint and shellcheck are not installed in this checkout (mise shims without a version).
 - Baseline for `desktop-macos` on pull requests with every package run (successful runs 38941648537, 38941652721, 38943380391, 38943832554, 38944038140, 38945470792): 52.6, 53.9, 55.2, 59.7, 63.1, 63.7 min, median 57.5 min. Many later runs were cancelled or queued, so no newer sample.
 - Pending CI on this pull request: the first push runs all six packages and stores a key; a push touching only `crates/cox-tools/src/git.rs` should show five "skipped" and `CoxCore` tested; a push touching only a `CoxUI` source should run `CoxUI` and `CoxTranscript`. Their job times are the "after" column. `research.md` §4.3.9 does not exist on `main` yet (T61.1, #312), so the before/after rows are added there once it lands.
+
 #### T61.8 Optimized build scripts and proc macros in dev
 
 Model: Claude Code / haiku-5.5 · Status: done 2026-10-17
@@ -567,13 +865,6 @@ Depends: T61.1 · Size: ~5 · Files: none (rejected; `Cargo.toml` unchanged, `re
 Goal: decide by measurement whether `[profile.dev.build-override] opt-level = 3` speeds the dev build (diesel, serde, schemars, uniffi and clap macros; typify's `build.rs`).
 Check: `MISE_SCCACHE_PROBE=1 CARGO_BUILD_JOBS=4 mise exec -- cargo build --workspace --timings`, clean `target/`, on the kept variant (no override). Output: `real 300.23 s, user 1023.86 s, sys 81.67 s`; load 18.95 before, 37.69 at the end (a 1-minute average that includes the build); the report is `target/cargo-timings/cargo-timing.html`. Top build-script run: `aws-lc-sys` 86.4 s. Top proc-macro crate: `diesel_derives` 12.2 s, `typify-impl` 11.4 s, `uniffi_macros` 8.9 s.
 Done: verdict rejected; the override is not kept. Clean builds (`rm -rf target`, A, B, A, B): A 322.37 s and 306.22 s (mean 314.3 s), B 379.04 s and 303.48 s (mean 341.3 s, +8.6 %), inside the 16 to 76 s spread of each variant. Incremental (`touch crates/cox-tui/src/lib.rs`): medians A 5.45 s, B 5.00 s, with the first run after each clean at 10 to 12 s in both. Neither path shows a speedup, and the clean build is not shown to be not slower, so the rule (keep only if both are not slower) rejects it. Rows, loads, commands and the top units are in `research.md` §4.3.9.
-Plan (Claude Code / sonnet-5.5): add `ServeMode` and a `mode` argument to `serve`, and `serve_stdio` passes `Client` after `load_login_env`. A `Worker` answers a second `open` (one that does not resume the held session) with an `Outcome::Err` reply, the wire's error type, before `App::open` runs; no new `AppError` variant, so `app.rs` stays untouched. `Server::stop` calls `LiveSession::end` instead of `close`. Tests in `crates/cox-app/tests/app.rs`: `a_worker_refuses_a_second_session` (the second open errs, the first session stays usable) and `eof_ends_every_session` (a detached `sleep` started by `bash` is dead after EOF). Verify: the Check below, then clippy and fmt.
-
-Done when `eof_ends_every_session` and `a_worker_refuses_a_second_session` pass.
-
-Out of scope: the `cox serve --worker` flag and the supervisor that spawns workers (later cards).
-
-Check: `mise exec -- cargo nextest run -p cox-app` passed (276 tests), including `eof_ends_every_session` (a background `bash` runs `exec sleep 300`; after the client's stdin closes the process is dead; with `stop` calling `close` again it is still alive after 5 s and the test fails) and `a_worker_refuses_a_second_session` (the second `open` answers an error naming one session, a `resume` of the held id attaches, the first session still answers `snapshot`; with `refuses` returning false the test fails). `-p cox --test docs` 5 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. `docs/app-server.md` now says EOF ends the sessions. `serve_stdio` takes the mode and `cox app-server --stdio` passes `Client`; the `--worker` flag is a later card.
 
 #### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
 
@@ -634,6 +925,8 @@ $ mise exec -- cargo nextest run -p cox --test docs
     PASS cox::docs docs_relative_links_resolve
     PASS cox::docs docs_name_every_subcommand
     Summary: 5 tests run: 5 passed, 0 skipped
+```
+
 #### T33.40.6.1 Core: one batched `risk` question per tool batch
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.21, T33.40.1 · Size: ~120 · Files: `crates/cox-core/src/turn.rs`, `crates/cox-core/src/monotone.rs`, `plugins/jev/src/decide.rs`, `crates/cox/tests/plugins_jev.rs`, `crates/cox-plugin-api/src/abi.rs` (doc comment only) (regenerated: `docs/protocol.jsonschema`, `docs/plugin-abi.schema.json`)
@@ -667,53 +960,7 @@ $ mise exec -- cargo clippy -p cox-core -p cox -p cox-plugin-api --all-targets -
 $ (cd plugins && mise exec -- cargo clippy -p cox-plugin-jev -p cox-plugin-sdk --all-targets --locked -- -D warnings; cargo clippy -p cox-plugin-jev --target wasm32-unknown-unknown --locked -- -D warnings): clean
 $ mise exec -- cargo fmt --check; (cd plugins && mise exec -- cargo fmt --check): clean
 ```
-Done when a scripted-provider test shows:
-- the spawn result holds no answer text;
-- `collect` on a running task returns `running`;
-- after completion, `collect` returns a preview within the cap and the archive id;
-- `expand` returns the full body.
 
-Out of scope: a separate `task_output` tool; peer messages between children.
-
-Result: `tasks.rs` gains `TaskStatus` (`queued`, `running`, `done`, `error`, `cancelled`) and a per-session `Collect` record for each background subagent (name, status, the settled answer, the archive id), with `begin_collect`, `mark_running`, `settle_collect` and `collect_snapshot`, which waits on the existing `tasks_idle` notify up to `timeout_ms` and returns the records as they stand when time or the call's cancel token runs out. The record holds the answer `run_task` already capped (summary or cut, with `full answer: expand <id>` when T66.2 archived it), so `collect` adds no way around `result_cap_tokens`. A background spawn returns `structured` `{task_id, name, status: "queued"}` and no answer. `drive` marks each run `running` and settles it before the notice goes out: `cancelled` when the run was interrupted, `error` for a driver refusal or a failed run, else `done`; a woken finished child goes back to `running`, and a child that cannot resume is settled `error`. `pointer_line` takes a `collect` flag: a subagent's line ends with `| collect <task id>`, a detached `bash` line is unchanged. `agent(collect: [id or name, …], timeout_ms)` is checked before the concurrency slot is reserved; it takes at most 8 tasks and clamps the wait to 120 s, and an unknown id, an empty or non-string list, or `task` together with `collect` is denied. Its risk is `ReadOnly` and its subject `collect`. The input schema drops `required` (a top-level `anyOf` is refused by providers) and the description says `task` or `collect`. Foreground calls are unchanged. `docs/tools.md` names the new input. Tests (in `subagent.rs`, because a task id is unknown to a script): `background_spawn_returns_a_handle_and_no_answer`, `pointer_line_for_a_subagent_ends_with_collect_and_its_id`, `collect_returns_a_done_tasks_preview_by_id_and_by_name`, `collect_reports_queued_running_and_a_timeout_snapshot`, `collect_wakes_when_the_task_settles_before_the_timeout`, `collect_reports_error_for_a_refused_run_and_cancelled_for_an_interrupted_one`, `collect_preview_of_an_over_cap_answer_stays_within_the_cap_and_names_the_archive_row`, `collect_denies_unknown_tasks_mixed_calls_and_oversized_lists`, `collect_is_read_only_whatever_the_preset`; and `background_spawn_hands_out_a_collect_handle_and_the_pointer_names_it` through the loop in `tests/subagent.rs`. Not done: the macOS and TUI summary line for an `agent` call (`cox-app` `summary.rs`) still reads "Delegated to `collect`: " for a collect call, because that file is outside this card.
-Check output: `mise exec -- cargo nextest run -p cox-core` — 440 passed, 1 skipped; `mise exec -- cargo nextest run -p cox -E 'test(agent) or test(subagent)'` — 12 passed; `mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
-#### T66.17 App-server wire: `attach`, `end` and `inbox`; detach keeps the fold
-
-Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Depends: T66.16 · Size: ~140 · Priority: P2 · Complexity: 3
-
-Goal: a client can detach and reattach to a session the server holds, and one session never gets a second core. `docs/design/serve.md` S2, D1, D2 and F1.
-
-Files:
-- `crates/cox-app/src/wire.rs`
-- `crates/cox-app/src/server.rs`
-- `docs/app-server.md` (the call list); generated: `docs/app-server.schema.json`
-
-Steps:
-1. `Call::Attach`, `Call::End` and `Call::Inbox`, with `Reply::Inbox`.
-2. `close` stops the pump and sends `ended`, but no longer closes the controller.
-3. `open` with `resume` of an id this server already holds attaches instead of calling `App::open` again (F1).
-
-Plan (Claude Code / sonnet-5.5): `wire.rs` gets the three calls and `Reply::Inbox`, plus the round-trip entries; the schema is regenerated by deleting `docs/app-server.schema.json` and rerunning the drift test. In `server.rs` each session's pump becomes a `JoinHandle` in `pumps` (so a detach can abort and await it: no stale batch is sent after the snapshot). `close` aborts the pump and queues `ended` after the response, and leaves the controller and the canvas pull alone (`LiveSession::close` would close both for good). `attach` and a repeated `open` of a held id abort the old pump, answer `Opened` from the snapshot and start a new pump. `end` runs `LiveSession::end` and forgets the session; a live pump ends itself with `ended`, a detached one gets `ended` queued. Tests go in `crates/cox-app/tests/app.rs` beside the existing `serve` tests, because their scripted-provider and pipe helpers live there. The call list in `docs/app-server.md` gains three lines.
-
-Check: `mise exec -- cargo nextest run -p cox-app server wire` passed, including `app_server_schema_drift` (`docs/app-server.schema.json` regenerated by the drift test) and `wire_round_trips_every_message` for the three calls and `Reply::Inbox`. The four named tests pass in `cox-app::app`: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core` (fails with `left: 2, right: 1` StateChanged lines when `open` skips the held-id check), `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`. Whole `-p cox-app` run 274 passed; `-p cox --test remote --test docs` 6 passed. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean.
-
-Done when these tests pass: `close_then_attach_streams_from_the_snapshot`, `open_of_an_open_session_attaches_instead_of_a_second_core`, `end_ends_the_session`, `inbox_returns_an_item_that_arrived_while_detached`; and the schema drift test is green.
-
-Out of scope: the supervisor, the socket and worker mode (T66.18 and later cards).
-
-Done when these tests pass: `delays_double_from_250ms_to_a_30s_cap`, `gives_up_after_five_consecutive_failures`, `thirty_seconds_of_life_resets_the_count`, `a_clean_exit_is_never_restarted`.
-
-Execution plan: add `crates/cox-serve` (std only, `publish = false`, workspace lints); `restart.rs` holds named consts, `Policy` and `Decision`; the fifth consecutive failure gives up, so the 30 s cap is reachable only through the pure `delay` function and is tested there. Register the AGENTS.md row, the crates.md row and a `deps.rs` rule that `cox-serve` has no workspace dependency (the members line is the `crates/*` glob, so it needed no edit).
-
-Out of scope: spawning processes and the socket (T66.20, T66.21).
-
-Check output (2026-10-17):
-```
-cargo nextest run -p cox-serve restart: 4 passed (delays_double_from_250ms_to_a_30s_cap, gives_up_after_five_consecutive_failures, thirty_seconds_of_life_resets_the_count, a_clean_exit_is_never_restarted)
-cargo nextest run -p cox --test deps --test docs: 16 passed
-cargo clippy --workspace --all-targets -- -D warnings: clean
-cargo fmt --check: clean
-```
 #### T61.7 sccache for local builds and the in-repository CI jobs
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17
@@ -724,6 +971,8 @@ Goal: dependencies compiled in one worktree are reused by another without sharin
 - Test: `scripts/test_sccache_config.py` pins the variables and the wiring (config-only change, so the assertion on the config is the test).
 Check: `python3 -m unittest discover -s scripts -p 'test_sccache_config.py'` ran 6 tests, OK. `mise exec -- env` shows `RUSTC_WRAPPER`, `CMAKE_C_COMPILER_LAUNCHER`, `CMAKE_CXX_COMPILER_LAUNCHER` set to the mise sccache and `SCCACHE_CACHE_SIZE=10G`. `cargo build -p cox-config` in a second worktree with an empty `target/`: 667 hits of 670 requests, 35 to 36 s with the cache against 105 to 106 s without it (research.md §4.3.9, T61.7).
 Done: §4.3.9 has the clean build of the second worktree with and without sccache.
+
+
 
 #### T33.36 Kotlin: thin PDK, template, example
 
@@ -1347,7 +1596,6 @@ Check:
 - `cargo nextest run -p cox-sandbox`: 31 run, 31 passed (6 new in `open::tests`).
 - `cargo clippy -p cox-sandbox -p cox-tools --all-targets -- -D warnings`: clean.
 
-
 #### T64.7 Revert a project-added or changed `mcp.servers`
 
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-16 · Priority: P1 · Complexity: 2 · Files: `crates/cox-config/src/load.rs`, `crates/cox-protocol/src/config.rs`, `crates/cox-protocol/default.toml`, `crates/cox-mcp/src/trust.rs`, `crates/cox-app/src/settings.rs`, `desktop/macos/Packages/CoxModel/Sources/CoxClient/Dropped.swift`, `docs/config.md`, `docs/config.jsonschema`, `plan.md`
@@ -1406,7 +1654,6 @@ Check:
 - `cargo nextest run -p cox-permission`: 16 run, 16 passed. `cargo nextest run -p cox-core --test permission --test policy_matrix`: 98 run, 98 passed.
 - `cargo clippy -p cox-permission --all-targets -- -D warnings`: clean.
 - `cargo fmt --check`: clean.
-
 
 #### T64.15.2 Open the read side of `read`, `edit`, `write` and `apply_patch` through `open_confined`
 
@@ -1737,7 +1984,6 @@ $ mise exec -- cargo fmt --check
 clean
 ```
 
-
 #### T33.14.2 Filesystem preopens
 
 Split from T33.14 by the creator 2026-10-03 because the preopens waited on T33.43; the `cox_http` half is T33.14.1.
@@ -1770,7 +2016,6 @@ $ mise exec -- cargo fmt -p cox-plugin -p cox-session (check) -> clean
 Model: Claude Code / sonnet-5.5 · Status: done 2026-10-03 · Depends: — · Size: an audit (~40 lines in `docs/design/desktop-windows.md` or this card) plus one sub-card per move · Files: see the sub-cards
 Goal: CoxModel is ~5 000 lines of Swift (stores, settings fields, remote hosts, completion, markdown helpers). Anything there that decides rather than renders (validation, ordering, text built from state, settings field rules) would have to be written a second time in C#. List each such piece with its file, and card its move into `cox-app` (with an FFI forwarder, A90) as T58.4.n; the Swift store then calls the forwarder. Pure view state stays in each client.
 Check: the audit list is in the card; each T58.4.n has a `cox-app` test and the macOS package tests still pass (`swift test` in each package under `desktop/macos/Packages`).
-
 
 Audit: (2026-09-29; `desktop/macos/Packages/CoxModel`, 5 081 lines of source in 56 files; Swift paths below are under `desktop/macos/Packages/CoxModel/Sources/`, and in the sub-cards under `desktop/macos/Packages/` unless they start with `desktop/`). 28 pieces decide and move (T58.4.1–T58.4.28), 17 stay in each client, 10 more belong to M2/M3 and are not carded (A127 (2)). A move is a Rust card (the rule in `cox-app` with its test, plus the `cox-ffi` record fields in `types.rs` or a one-expression forwarder, A90) and a Swift card (the `CoxClient` value, the `CoxCore` conversion, the store); a Swift side that needs a fourth file is split into plumbing and switch. Each store keeps its public shape, so the app and CoxUI do not change, and the Swift tests of a moved rule move to its Rust test.
 
@@ -2689,6 +2934,7 @@ Files: `Cargo.toml`.
 Steps: (1) The root manifest is virtual, so `default-run` (a `[package]` key) is not available; add `default-members = ["crates/cox"]` to `[workspace]`, which is the set bare `cargo run`/`build` resolve against. `kitty_probe` stays where it is: every test/lint command in `AGENTS.md`, `justfile` and CI already passes `--workspace` or `-p`, so it is still built and `CARGO_BIN_EXE_kitty_probe` still resolves.
 Check:
 ```bash
+
 # doctor exits 1 without an API key; the Check is that `cox` ran at all.
 out="$(COX_HOME="$(mktemp -d)" mise exec -- cargo run -q -- doctor 2>&1 || true)"
 grep -q '^toolchain: ' <<<"$out"
@@ -6078,7 +6324,6 @@ Not done:
 
 #### T45.1 A child inherits the parent's live permission mode
 
-
 Model: Claude Code / opus-5.5 · Depends: - · Size: ~70 · Priority: P0 · Complexity: 3
 
 Goal: a subagent is never wider than its parent at spawn time.
@@ -6443,7 +6688,6 @@ Check output:
 
 #### T39.2 Core keeps a tool call's signature in history and the rollout
 
-
 - Model: Claude Code / opus-5.5
 - Status: done 2026-09-28
 - Depends: T39.1
@@ -6492,7 +6736,6 @@ Check output:
   - The real binary, with a scratch `COX_HOME` and the scripted provider, ran a `read` tool turn and a `--continue` resume; the scratch dir was removed afterwards. The scripted provider emits no signature, so this covers only the unsigned path.
 
 #### T41.1 `[lsp]` config and its project-config guard
-
 
 - Model: Claude Code / opus-5.5
 - Depends: -
@@ -11740,15 +11983,18 @@ Check: `cargo test -p cox --lib self_update`.
 The default `Read(~/.ssh/**)` / `Read(~/.aws/**)` denies guarded only the `read` tool: `bash: cat ~/.ssh/id_rsa` classifies as `Risk::ReadOnly` (auto-allowed, no approval) and the sandbox grants global file-read, so the key text entered the model's context — exactly what the deny existed to prevent. No Bash command rule can enumerate every reader (`cat`, `head`, `grep`, redirections, …). Found by the 2026-10-07 audit. Fix: `Engine::decide` now cross-checks read-path deny rules against the absolute paths a read-only call names — the whole subject and every simple command of a split line, `~` expanded, quotes and punctuation trimmed, opaque lines included via their raw text. `Write(...)`-scoped rules do not fire, so the guard answers exactly what a read rule denies.
 Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P0 · Complexity: 2 · Files: `crates/cox-permission/src/lib.rs`, `crates/cox-permission/src/rules.rs`
 Check: `cargo test -p cox-permission` — 8 passed (3 new: literal, tilde, quoted, chained and `~/.aws` variants; unaffected commands; opaque `eval` line); `cargo test -p cox-core --test permission` — 81 passed.
+
 #### T62.4 build and test commands are no longer classified read-only
 
 `bash/classify.rs` called `cargo check|test|build|clippy|doc` and `npm|pnpm|yarn test` `Risk::ReadOnly`, so in Default mode they auto-ran: the model could first edit `build.rs` or a `pretest` hook and then "run tests", executing its own code with no approval prompt — code execution approved as read-only, with only the sandbox limiting the blast radius. Found by the 2026-10-07 audit. Fix: the read-only cargo set narrows to `metadata` and `tree` (manifest readers that run nothing), and the npm/pnpm/yarn test arm is gone; everything else builds or executes, so it classifies `Exec` and meets the same approval path as any other execution. Under a confining sandbox the engine still auto-allows `Exec`, so the sandboxed flow is unchanged.
 Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/bash/classify.rs`, `crates/cox-tools/tests/bash.rs`
 Check: `cargo test -p cox-tools --test bash` — 11 passed (table updated: `cargo metadata`/`cargo tree` ReadOnly; `cargo test`/`cargo check`/`npm test` Exec); `cargo test -p cox-core` — all suites green.
+
 #### T62.2 edit's whitespace fallback no longer panics on overlapping windows with replace_all
 `crates/cox-tools/src/edit.rs` `apply_replace` spliced every fallback window against the original byte offsets, right-to-left; two windows that overlap (lines that normalize identically) with a shorter `new` made the left window's `end_byte` run past the shrunken string — `replace_range` panicked with "range end index out of range", against the project's no-panic rule, and the code's own comment admitted it. Found by the 2026-10-07 audit. Fix: `replace_all` keeps only non-overlapping windows (a dropped window's lines sit inside the one already replaced); the single-match path is unchanged. The regression test seeds three lines that normalize identically and asserts the exact output; verified it panics on the pre-fix code.
 Model: ZCode / GLM-5.3 · Status: done 2026-10-07 · Priority: P1 · Complexity: 2 · Files: `crates/cox-tools/src/edit.rs`, `crates/cox-tools/tests/edit.rs`
 Check: `cargo test -p cox-tools --test edit` — 6 passed (new: `edit_replace_all_overlapping_fallback_windows_do_not_panic`).
+
 #### T69.7 Optional content-hash anchors for `edit`, beside `old_string`
 
 Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
@@ -12061,7 +12307,6 @@ Check: `mise exec -- cargo nextest run -p cox-store -p cox-tools -p cox-protocol
 
 Not done: the whole-workspace nextest and clippy were not run (only the three crates this touches); no run of the binary against a scratch `COX_HOME` (the store tests open a real SQLite file in a tempdir). Memory `apply_patch` calls are not counted as touched (their subject is not one file).
 
-
 #### T62.6 pid-reuse race in the bash kill path
 
 `crates/cox-tools/src/bash/mod.rs`: the leader was reaped as soon as it exited, yet the run still `killpg`s its group afterwards to catch grandchildren, so once the pid was free a reused id could send that signal to an unrelated process group. Fix: the exit is awaited with `waitid(WNOWAIT)` (called through `libc`, since nix wraps it only on Linux and the BSDs), which leaves the zombie unreaped and its pid, and so its group id, reserved; every group signal is sent first and the leader is reaped only after that, synchronously when it exited, on a detached thread otherwise, and in `Abandoned`'s drop. A pid race cannot be forced deterministically in a test, so the regression test pins the mechanism: the wait leaves the status reapable.
@@ -12370,6 +12615,7 @@ Risks: SwiftLint matches `included` against the file's absolute path, both from 
 
 Out of scope: rules for the other packages; a semantic linter (Harmonize, SolidLikeARock) — revisit only if a textual rule misses a real case.
 Check: `swiftlint lint --no-cache --quiet LintFixtures/Rejected/no_ui_import_in_core.swift` — fails with `(no_ui_import_in_core)`; `... no_appkit_type_in_core.swift` — fails with `(no_appkit_type_in_core)`; the six older `LintFixtures/Rejected` files still fail with their own rules; `LintFixtures/Accepted` — `--strict` passes; `swiftlint lint --strict --no-cache --quiet Packages/CoxModel/Sources Packages/CoxCore/Sources` — exit 0 (two existing strict-mode violations fixed: a 124-column comment in `TurnCosts.swift`, and `Convert.swift` at 482 lines with a file-level `swiftlint:disable file_length` and a why-comment); `swift build --build-system swiftbuild` in `Packages/CoxModel` with a temporary `import AppKit` in `SessionStore.swift` — exit 1, `error: No UI framework in CoxModel or CoxCore ... (no_ui_import_in_core)`, file reverted; the clean package then builds, `Build complete!`. CoxCore's `swift build` was not run (it needs `build/CoxFFI.xcframework`).
+
 #### T56.4 `Engine` asks before code leaves the machine: `CloudAgent(<repo>)`
 
 Model: Claude Code / sonnet · Status: done 2026-10-08 · Priority: P3 · Complexity: 3 · Depends: the creator's terms go-ahead (A123 (5)) · Size: ~140 · Files: `crates/cox-permission/src/rules.rs`, `crates/cox-permission/src/policy.rs`, `crates/cox-permission/src/lib.rs`
@@ -12475,6 +12721,7 @@ Out of scope: collecting a background answer, which is T66.3.
 
 Result: `run_task` writes the full answer with `parent.archive.put` (tool `agent`, subject the task label, a fresh `CallId` because a woken child has no call of its own) only when `len/4 > result_cap_tokens`, before `summarize` runs. The summary or cut then ends with `full answer: expand <id>`, ahead of the worktree trailer. An under-cap answer is unchanged. `TaskOutcome.archive` feeds `Event::TaskCompleted { archive }` on the foreground and background paths, and the background completion detail uses the new `tasks::agent_detail` (`$cost, full output: expand <id>`, the wording detached `bash` uses; it replaces `cost_detail`). A failed archive write only drops the trailer; the cap still applies. Tests: `over_cap_child_answer_is_archived_before_the_parent_sees_it` (archive row byte for byte, parent result is the summary plus the id), `agent_detail_names_the_archive_row_only_when_there_is_one`; `subagent_result_over_cap_is_summarised_on_the_summarize_job` now expects the trailer. Not done: `result.truncate(cap * 4)` can still split a multi-byte character (fixed later by T66.15); no real-binary run (the change is covered by the scripted provider).
 Check output: `mise exec -- cargo nextest run -p cox-core subagent` — 31 passed; `mise exec -- cargo nextest run -p cox-core` — 366 passed, 1 skipped; `mise exec -- cargo clippy --workspace --all-targets -- -D warnings` clean; `mise exec -- cargo fmt --check` clean.
+
 #### T66.15 Cut the subagent result cap on a char boundary
 
 Model: Claude Code / opus · Status: done 2026-10-09 · Depends: — · Size: ~30 · Priority: P1 · Complexity: 1
@@ -12878,6 +13125,7 @@ Check: a throwaway program parsed 34 headers (lists vs comma strings, YAML 1.1 b
 Check output: `mise exec -- cargo nextest run -p cox-ext`: 61 tests run, 61 passed. `cargo fmt --check` clean. `cargo deny --locked check`: advisories ok, bans ok, licenses ok, sources ok (no RUSTSEC-2024-0449 ignore). `cargo hakari verify`: workspace-hack works correctly (hakari added `anstyle`). `Cargo.lock`: + serde-saphyr 1.3.0, granit-parser, annotate-snippets, arraydeque, nohash-hasher; − serde_yaml, unsafe-libyaml. `cargo clippy --workspace --all-targets --exclude cox-plugin-fixtures --exclude cox -- -D warnings` and `cargo clippy -p cox --bins -- -D warnings` clean. Real binary: `COX_HOME=<scratch> cox ext list` in a scratch project lists a skill with `allowed-tools: Read, Bash grep` and list/number metadata and an agent with a string `tools`, and skips an agent with `disabled: yes`, as before.
 
 Not done: `cargo clippy --workspace --all-targets` fails in `cox-plugin-fixtures`, also on `main`: `crates/cox-plugin-api` now depends on `workspace-hack` (cargo-hakari commit), which `plugins/Cargo.lock` lacks, so the `--locked` guest build stops. Not part of this task.
+
 #### T63.4 Dependency injection through swift-dependencies
 
 Model: Claude Code / opus-5.5 · Status: done 2026-10-13 · Depends: — · Size: ~350 across T63.4.1–T63.4.3 below (`AGENTS.md` task size) · Priority: P2 · Complexity: 4
@@ -13149,15 +13397,6 @@ Check output (2026-10-13, Xcode 27, macOS 27):
 - `just desktop-app`: built `desktop/macos/build/Cox.app`; the build log has no `SwiftSyntax` target.
 - `Cox -CoxFixture desktop/macos/Fixtures/edit.json` and `Cox -CoxProject <worktree>` with a scratch `COX_HOME` and `COX_KEYRING=off`: both stayed up until killed, nothing on stderr; the live launch made `cox.db` in the scratch home.
 - Not checked by hand: the Shortcuts list (the App Intents files are unchanged and build) and the CoxUI and CoxTranscript snapshot packages (unchanged; CI runs them).
-#### T33.45.6 App core: notifications, links and images
-
-Depends: T33.45.5 · Files: `crates/cox-app/src/plugin_ui.rs`, `crates/cox-app/src/app.rs`, `crates/cox-app/src/wire.rs` · Design: `docs/design/plugins.md` §15, A134
-
-Check: a plugin notice with actions reaches `Host::notify`'s test double and its action runs the command; a remote link goes through `confirm_open_url`; the app-server wire round-trips the new payloads.
-
-Status: done 2026-10-13 · `cox-plugin-api`: `ui::is_link` is the one rule for a plugin link (`https://` or a relative path with an optional `:line`, at most 2048 bytes, no control or space character; the form only, so `cox-render`'s `plugin_form` from #218 can call it instead of keeping its own copy) and `is_package_path` is shared by the manifest and the image path. `cox-plugin`: `cox_desktop_notify` is wired (desktop surface and `desktop.notify` grant, level capped at `warn`, strings cleaned, at most two buttons, one notice per 10 s per plugin, queued until the app binds `LivePlugins::on_desktop_notice`); `Live` keeps the package directory and `package_image` reads a package PNG (regular file, no symlink, at most 256 KiB). `cox-app`: `SpanView.link` (only a followable link reaches the UI) and `WidgetView::Image { alt, png }` through the same `view_in` (a per-tree image budget of 1 MiB, otherwise the `alt` line); `PluginUi::alert` turns a notice into a sanitized `PluginAlert` whose buttons name granted commands, `Host::plugin_notice` (default false) posts it or the session tells it as a transcript notice, `PluginUi::action` runs any granted command id; `plugin_ui::click` / `LiveSession::open_link` open an `https://` link through `Host::open_url` (on a served session that is `open_url` to the client, which confirms) and confine a path to the workspace; `RemoteSession::open_link` goes through `Host::confirm_open_url`; wire: `ServerEvent::PluginNotice`, `Call::PluginAction`, `Reply::Acted`, `docs/app-server.schema.json` regenerated. `cox-ffi` mirrors list the two new `WidgetView`/`SpanView` shapes. Not done here (T33.45.7): the Swift side (`PluginConvert.swift` switch on `.image`, `AppHost.pluginNotice`, a notification with buttons, a link click).
-
-Check output: `mise exec -- cargo nextest run -p cox-plugin-api -p cox-plugin -p cox-session -p cox-app -p cox-ffi` — 491 passed, including `desktop_notice_reaches_the_sink_cleaned_capped_and_trimmed`, `a_plugin_notice_reaches_the_host_and_its_button_runs_the_command`, `a_notice_button_runs_a_granted_command_and_an_ungranted_one_is_dropped`, `a_remote_plugin_notice_reaches_the_local_host_and_a_link_click_asks_first`, `wire_round_trips_every_message` and `app_server_schema_drift`; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean; `COX_HOME=<scratch> cargo run -- doctor` and `plugin list` run.
 
 #### T33.46.1 Manifest and grant: `[[skills]]`
 
@@ -13265,7 +13504,6 @@ Deviations: about 310 lines of code (plus about 190 of tests) against 200, in th
 
 Check output: `mise exec -- cargo nextest run -p cox-app -p cox-session` — 345 passed, with `a_canvas_sends_only_changed_frames`, `a_slow_canvas_stops_after_three_misses` (a spinning `cox_canvas` under `call_ms` 50), `a_click_reaches_the_plugin_only_on_a_drawn_frame` (a spinning `cox_canvas_select`: an unknown frame and a bad value return at once, a drawn frame waits its 500 ms), `a_canvas_attachment_is_sanitized`, `canvas_calls_fail_open_and_refuse_a_bad_click` and `a_plugin_tool_names_its_plugin`; clippy `-D warnings` and `cargo fmt --check` clean.
 
-
 #### T33.47.5 Wire and remote sessions
 
 Depends: T33.47.4 · Files: `crates/cox-app/src/wire.rs`, `crates/cox-app/src/remote.rs` (plus `docs/app-server.schema.json`) · Design: `docs/design/plugin-canvas.md` §7
@@ -13281,7 +13519,6 @@ Status: done 2026-10-14 · Commit "feat: T33.47.5 canvas over the app-server wir
 Deviations: four source files, not two: `server.rs` answers the new calls (its `match` on `Call` is exhaustive), and `plugin_ui.rs` gains the shared client checks rather than a copy in `remote.rs`. About 230 lines of code plus about 200 of tests.
 
 Check output: `mise exec -- cargo nextest run -p cox-app` — 272 passed, with `wire_round_trips_every_message`, `app_server_schema_drift` (schema regenerated), `wire_has_no_secret_message`, `an_over_size_remote_canvas_is_capped_by_the_client` (14 frames and a bad id from the server: 12 kept, widths clamped, titles and plugin sanitized, another session's update not delivered) and `remote_canvas_replies_are_checked_again` (an `onclick` attribute dropped, an attachment sanitized, an over-size one refused); clippy `-D warnings` and `cargo fmt --check` clean.
-
 
 #### T33.47.6 FFI
 
@@ -13528,8 +13765,6 @@ Deviations: none.
 
 Check output: `cargo nextest run -p cox-ffi --test app closing_the_session_ends_the_canvas_pull` failed before the fix (the pull did not end in 5 s); after it, `cargo nextest run -p cox-ffi -p cox-app` — 289 passed; clippy `-D warnings` and `cargo fmt --check` clean.
 
-
-
 ### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
 
 Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 99,197,840 bytes (+27.5%). The creator approved accepting the security-mandated size increase; updated only the Darwin-arm64 binary-size baseline. Startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. After regenerating the stale workspace-hack, the rebuilt release measured 99,197,840 bytes and the footprint check passed.
@@ -13537,7 +13772,6 @@ Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49
 ### T33.43. Bump Extism and Wasmtime to patched releases and drop fixed advisory ignores
 
 Updated workspace Extism to 1.41.0 and the direct Wasmtime feature-unifier to 49.0.3, removing fixed Wasmtime advisory ignores. Preserved the exception-handling feature and confirmed the direct Wasmtime dependency remains necessary to unify Extism's `anyhow` feature without enabling all defaults. Cargo audit and cargo-deny report no actionable vulnerabilities; remaining allowed warnings are unchanged. Focused and workspace tests, clippy, and fmt pass. The security update adds a mandatory `wasmtime-wasi` dependency and increases the release binary from 77,799,856 to 99,197,840 bytes (+27.5%). The creator approved accepting the security-mandated size increase; updated only the Darwin-arm64 binary-size baseline. Startup, first-frame, RSS baselines and the 20% regression threshold are unchanged. After regenerating the stale workspace-hack, the rebuilt release measured 99,197,840 bytes and the footprint check passed.
-
 
 #### T69.4 Budgeted `quick_check` when the store opens
 
@@ -13630,6 +13864,85 @@ $ mise exec -- cargo fmt --check -p cox-core
 clean
 ```
 
+#### T33.40.15 Catalog, prices and vendor script without Jev
+
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.14, T33.16 · Size: ~110 · Files: `crates/cox-models/src/catalog.rs`, `crates/cox-models/src/price.rs`, `scripts/vendor/src/cox_vendor/models.py` (+ its tests; `prices.toml` is regenerated by the script, A48)
+Goal: C1, step 4.
+- The `typesafe` special cases in `Catalog::load` and `price.rs` go.
+- `cox-vendor models` stops keeping `jev-latest` as a known exception, and its re-run drops the row from `prices.toml`.
+- Jev's price and window now come only from the plugin row. `cox doctor` shows `source = plugin:jev`, and T30.27's price-sync row stays green.
+Check: `jev_price_comes_from_plugin_row`, `catalog_without_plugin_has_no_jev_row`, the vendor pytest suite, `just vendor models --check` clean.
+
+Result:
+- `cox-vendor models` (`build_prices_toml`) drops a `prices.toml` row that no `[providers.*].models` array lists any more, with a report line; module docs and the vendor README say so, and `typesafe` is no longer named as a section without a models.dev counterpart. Fixture row `jev-latest` plus `test_a_price_row_no_section_lists_is_dropped_and_reported` and `test_dropping_an_orphan_row_is_stable_on_a_rerun` (the first fails without the change).
+- `crates/cox-provider/prices.toml` regenerated by `uv run --project scripts/vendor cox-vendor models` (A48, separate `chore(vendor)` commit): `jev-latest` is gone. The same run took models.dev's current rates for `deepseek-v4-pro` and `deepseek/deepseek-v4-pro`, which the script reports and which no other file pins.
+- `cox-models`: `price.rs` asserts `jev-latest` is absent (23 rows). `catalog.rs` had no Jev-specific code left; the one `typesafe` overlay is T33.40.14's tombstone (an old config's `models` rows join the config layer, as that card requires), so it stays, now commented, and `config_overrides_plugin_row` keeps covering it. New tests read the shipped `plugins/jev/plugin.toml`: `jev_price_comes_from_plugin_row` (both rows, `plugin:jev`, 64k window, 0.042 / 0.0) and `catalog_without_plugin_has_no_jev_row`.
+- `cox doctor`: the `catalog prices` row now builds its catalog with the granted plugins' `[[models]]` (`granted_plugin_models`), so a configured `jev-latest` stays priced once the built-in row is gone (T30.27 stays green); the `plugin <id>` row adds `models from plugin:<id>: ...`, which is the `source = plugin:jev` the design asks for. `doctor_prices_jev_from_the_plugin_row` (end to end, real jev package) covers both.
+
+```
+$ uv run --project scripts/vendor pytest scripts/vendor/tests -q
+60 passed
+$ uv run --project scripts/vendor cox-vendor models --check
+models: up to date
+$ mise exec -- cargo nextest run -p cox-models
+23 tests run: 23 passed
+$ mise exec -- cargo nextest run -p cox --test plugins_jev
+16 tests run: 16 passed
+$ mise exec -- cargo nextest run -p cox-models -p cox-provider -p cox-session -p cox-config -p cox-core -p cox-app -p cox --lib --test deps --test docs
+605 tests run: 605 passed
+$ mise exec -- cargo clippy -p cox-models -p cox --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check -p cox-models -p cox
+clean
+```
+
+#### T33.40.16 Docs and plan sweep after the removal
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 2 · Depends: T33.40.15 · Size: ~80 · Files: `docs/design/providers.md`, `docs/design/crates.md`, `docs/design/v0.2-jev.md` (+ `plan.md`)
+Goal: no doc describes a built-in Jev.
+- `providers.md` loses the Jev family.
+- `crates.md` loses the `cox-provider-jev` row.
+- `v0.2-jev.md` gets a closing note that the integration shipped as the `jev` plugin (A52, T33.40), with the eval verdicts.
+- In `plan.md`, T32.15 is dropped with a reason, and the PL§2 example uses `name = "typesafe"`.
+- Also fixed (found by the Check): the unused `Api::Jev` variant of `cox_models::effort::Api`, and doc comments in `cox-provider-http` and `cox-session` that still described a built-in Jev.
+- T32.15 was already recorded as dropped in this file (with the reason, per A52 decision 12), and the PL§2 example already uses `name = "typesafe"`; both were verified, not changed.
+- The eval verdicts are not in `v0.2-jev.md`: E1 (T33.40.7) needs a live key and has not run. The closing note says so; T33.40.7 owns adding the verdicts.
+Check: `rg -n -i 'jev|typesafe' crates docs` now matches only: the plugin (`plugins/jev` tests and `crates/cox-plugin*`, ABI and manifest docs, `plugins_jev.rs`, fixtures); the tombstone (`LegacyTypesafe`, `[providers.typesafe]` loading in `cox-protocol`, `cox-config`, `cox-session`, `cox-app`, `cox-models` catalog and its tests, `docs/config.jsonschema`); the migration notice (`cox doctor`, `legacy_tier.rs`, its snapshots, `ProviderId` ledger tag `"jev"`); and history (`docs/design/v0.2-jev.md`, `docs/design/plugins.md`, the `providers.md` tombstone mention). `docs/ru` and `docs/uk` had no Jev mentions.
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test docs
+7 tests run: 7 passed
+$ cargo nextest run -p cox --test ide ; -p cox-models ; -p cox-protocol -E 'test(config)' ; -p cox-tui -E 'test(keymap_table_matches_docs)' ; -p cox-provider-http -p cox-session
+3 + 23 + 20 + 1 + 123 tests run: all passed
+```
+
 ### T71.1 Format the app-server test calls
 
 The workspace `cargo fmt --check` failed on two overlong `tokio::join!` expressions in `crates/cox-app/src/server.rs`. Rustfmt wrapped both calls across lines; behavior is unchanged. `CARGO_BUILD_JOBS=2 mise exec -- cargo fmt --check` passes. `cox-app` tests and Clippy were not run because compiling its dependency graph reduced free disk to 9.8 GiB; the build was stopped before tests ran.
+
+### T379. Add shell completions through the shared crate
+
+Use the local `shell-completions` crate in `packages/crates/rust`. Preserve rtok scripts and ketch package-name completion and installation behavior. Add `cox completions <shell>` without loading configuration, credentials, telemetry or a session.
+
+Execution plan: establish existing completion tests; extract the clap generator and Clink implementation with regression tests into the shared crate; connect consumers through local Cargo paths; update dependency inventories; run focused tests, formatting and clippy. Application-specific installation policies and ketch dynamic package lookup stay with their owners. Done when generation has one owner and the three CLI surfaces pass their checks.
+
+Validation: The two new binary tests failed before implementation and passed afterward, covering six shells, invalid configuration, no application state writes, and shell validation. All 119 CLI unit tests and 11 dependency-boundary tests passed. All-target clippy passed. The command documentation test passed; the existing plugin translation parity test failed. Workspace formatting still reports unchanged cox-app/src/server.rs; the changed cox package is formatted.
+
+Reused `clap_complete` and the existing rtok Clink generator. No replacement library or custom generator was introduced. Local path dependencies resolve in the standard apps/packages layout.
+
+### T379.1. Consume the published shell-completions crate
+
+Use the managed crates.io release so an independent checkout builds without sibling repositories. The `cox` binary now uses the published `shell-completions` 0.1.0 dependency. Execution plan: replace the local Cargo path with the published version, resolve Cargo.lock only after publication, preserve existing dependency versions, format the two app-server test joins required by CI, synchronize language-neutral plugin API index lines in the RU and UK docs, verify locked metadata outside the sibling layout, and run completion checks through CI.
+
+Validation: `cargo metadata --format-version 1` and `cargo metadata --locked --format-version 1` passed. Standalone `cargo metadata --locked` passed from a temporary archive with the current manifest and lockfile overlaid (38 workspace members, 832 packages; `shell-completions` resolved from crates.io). `Cargo.lock` changed only by adding the registry source and checksum for `shell-completions` 0.1.0; no other versions or dependency edges changed. The focused registry-backed checks passed: completion integration tests (2), CLI unit tests (4), `plugin_docs_translations_match_the_english_page` (1), and `cargo fmt --all -- --check`.
+
+The two app-server test joins were formatted for CI. The Russian and Ukrainian plugin API field indexes now match the English index exactly; translated prose was preserved. The registry dependency and its lockfile resolution are ready for the PR checks.
+
+
+### T379.2. Restore completions PR CI gates
+
+The published shell-completions dependency exposed CI gates that needed to stay enforced. Preserve the explicit license policy, synchronize generated workspace-hack dependencies without changing locked package versions, and resolve the missing desktop macOS sccache action reference using an existing shared action.
+
+What landed: regenerated `workspace-hack/Cargo.toml` with the existing cargo-hakari tool; replaced the missing local `.github/actions/sccache` reference with `pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979`; and updated the existing sccache wiring regression test to check the pinned reference, all inputs, and invocation order. The repository's license policy and dependency versions were left unchanged.
+
+Validation: the existing regression suite failed before the action update (1 failed, 5 passed) and passed afterward (6 passed). `cargo hakari generate --diff` is clean after regeneration. Comparison against HEAD found all 848 locked package name/version/source/checksum tuples unchanged; only generated workspace-hack dependency edges changed. `git diff --check` passed. `actionlint` could not run because no version is configured in mise; the reusable CI pipeline already runs its actionlint validation.

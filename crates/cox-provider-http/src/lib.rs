@@ -10,7 +10,7 @@
 //! stream ([`retry`]).
 //!
 //! Stripped out of `cox-provider` (T32.12; `docs/design/crates.md` reuse
-//! (d)) because Anthropic, OpenAI, Jev and any wire cox-provider gains next
+//! (d)) because Anthropic, OpenAI and any wire cox-provider gains next
 //! all need these three without the rest of any one wire's own
 //! dependencies. `cox-provider` re-exports `http`, `retry` and `sse` at
 //! their old paths, so `cox_provider::http::resolve_key_with` and

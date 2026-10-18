@@ -4,9 +4,10 @@
 
 // The app's remote workspaces (DT§4.4, T52.21, T68.5): each target File › Connect to Target… or
 // `desktop.remote_hosts` named (an ssh host alias is the target `ssh:<alias>`), whether its
-// connection holds, and its sessions as a sidebar group of their own. Beside `AppStore`, not in it: the registry holds open sessions whatever
-// core they came from, this store holds the connections a remote one opens through. The saved
-// list is user config; a project config cannot set it (the project-config guard).
+// connection holds, and its sessions as a sidebar group of their own. Beside `AppStore`, not in it:
+// the registry holds open sessions whatever core they came from, this store holds the connections a
+// remote one opens through. The saved list is user config; a project config cannot set it (the
+// project-config guard).
 
 import CoxClient
 import Foundation

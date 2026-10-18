@@ -4,51 +4,34 @@
 //! into advice. The host gates, ledgers and retries the call, so the guest
 //! never reaches the paid endpoint itself. Pure, so it tests on the host.
 //!
-//! The one question is a minimal `risk` severity Score (T33.40.4): enough to
-//! drive the provider path end to end. The core asks once per tool batch
-//! (T33.40.6.1), so the request carries every item and the one Score is
-//! the answer for each of them. The J5.1 question set and thresholds are
-//! T33.40.6, which also adds `decide = ["risk"]` to the manifest; until
-//! then no session grants this plugin a decision point.
-
-use std::collections::BTreeMap;
+//! What is asked and how the answers read are `risk`'s (T33.40.6, J§5.1);
+//! this module only moves the request out and the reply back.
 
 use cox_plugin_sdk::{
-    Advice, Answer, CallTarget, DecideOut, DecidePoint, DecideResume, ModelCall, OwnProvider,
+    Advice, CallTarget, DecideOut, DecidePoint, DecideResume, ModelCall, OwnProvider,
     Question as Asked, Value,
 };
 use serde_json::json;
 
-use crate::wire::{self, Question, SystemOneRequest};
+use crate::risk::{self, Thresholds};
+use crate::wire::{self, SystemOneRequest};
 
 /// The `[[provider]]` section a call-out names (`plugin.toml`).
 pub const SECTION: &str = "typesafe";
 /// The stable model a call-out asks for (J5).
 pub const MODEL: &str = "jev-1.13.0";
-/// The key the severity question and its answer travel under.
-const SEVERITY: &str = "severity";
 
-/// `cox_decide`: a call-out for a `risk` question, silence for any other.
+/// `cox_decide`: a call-out for a `risk` question about at least one call,
+/// silence for anything else. The core asks `risk` once per tool batch
+/// (T33.40.6.1), so a question with no items has nothing to judge.
 pub fn decide(asked: &Asked) -> DecideOut {
-    if asked.point != DecidePoint::Risk {
+    if asked.point != DecidePoint::Risk || asked.items.is_empty() {
         return DecideOut::Advice(None);
     }
-    let severity = Question::Score {
-        instructions: json!("How severe is running this tool call?"),
-        // Mirrors `Risk` low to high, so the score reads as a risk level.
-        levels: [
-            "only reads",
-            "writes inside the workspace",
-            "runs a process",
-            "destroys data or reaches beyond its subject",
-        ]
-        .map(String::from)
-        .to_vec(),
-    };
     let body = SystemOneRequest::new(
-        with_items(asked),
+        risk::state(asked),
         MODEL,
-        BTreeMap::from([(SEVERITY.to_string(), severity)]),
+        risk::questions(asked.items.len()),
     );
     // The host overwrites tier, job and model (PL§7d); the rest is a
     // `cox_protocol::types::Request` whose one user message is the body
@@ -82,53 +65,22 @@ pub fn decide(asked: &Asked) -> DecideOut {
     }
 }
 
-/// `asked.state` with each item's state under `items`, so a batched question
-/// reaches System One whole; a single question's state as it is.
-fn with_items(asked: &Asked) -> Value {
-    if asked.items.is_empty() {
-        return asked.state.clone();
-    }
-    let items: Vec<Value> = asked.items.iter().map(|i| i.state.clone()).collect();
-    let mut state = asked.state.clone();
-    match state.as_object_mut() {
-        Some(shared) => {
-            shared.insert("items".into(), Value::Array(items));
-            state
-        }
-        None => json!({ "shared": state, "items": items }),
-    }
-}
-
-/// `cox_decide_resume`: the severity Score as advice, or silence when the
-/// reply carries none. A batched question gets the same Score for each
-/// item, the shape `Question::fits` asks for.
-pub fn resume(resumed: &DecideResume) -> Option<Advice> {
+/// `cox_decide_resume`: the reply judged against `thresholds`, or silence
+/// when it does not parse or flags no call.
+pub fn resume(resumed: &DecideResume, thresholds: &Thresholds) -> Option<Advice> {
     let body: String = resumed
         .events
         .iter()
         .filter(|e| e.get("type").and_then(Value::as_str) == Some("text_delta"))
         .filter_map(|e| e.get("text").and_then(Value::as_str))
         .collect();
-    match wire::parse(&body).ok()?.remove(SEVERITY)? {
-        wire::Answer::Score {
-            score, confidence, ..
-        } => Some(Advice {
-            answer: match resumed.question.items.len() {
-                0 => Answer::Score { value: score },
-                n => Answer::Items {
-                    answers: vec![Answer::Score { value: score }; n],
-                },
-            },
-            confidence: Some(confidence),
-            note: None,
-        }),
-        _ => None,
-    }
+    let answers = wire::parse(&body).ok()?;
+    risk::verdict(&answers, resumed.question.items.len(), thresholds)
 }
 
 #[cfg(test)]
 mod tests {
-    use cox_plugin_sdk::QuestionItem;
+    use cox_plugin_sdk::{Answer, QuestionItem};
 
     use super::*;
 
@@ -141,25 +93,15 @@ mod tests {
             items: subjects
                 .iter()
                 .map(|s| QuestionItem {
-                    state: json!({ "tool": "write", "subject": s }),
+                    state: json!({ "tool": "bash", "subject": s }),
                     options: vec![],
                 })
                 .collect(),
         }
     }
 
-    fn asked(point: DecidePoint) -> Asked {
-        Asked {
-            point,
-            state: json!({ "tool": "write", "subject": "notes.txt" }),
-            options: vec![],
-            items: vec![],
-        }
-    }
-
-    #[test]
-    fn risk_question_calls_out_to_the_own_section() {
-        let DecideOut::Call { call } = decide(&asked(DecidePoint::Risk)) else {
+    fn body(out: DecideOut) -> Value {
+        let DecideOut::Call { call } = out else {
             panic!("a call-out");
         };
         assert_eq!(
@@ -174,71 +116,57 @@ mod tests {
         let text = call.request["messages"][0]["content"][0]["text"]
             .as_str()
             .expect("one text block");
-        let body: Value = serde_json::from_str(text).expect("System One JSON");
-        assert_eq!(body["state"]["subject"], "notes.txt");
-        assert_eq!(body["questions"]["severity"]["type"], "score");
+        serde_json::from_str(text).expect("System One JSON")
     }
 
     #[test]
-    fn other_points_are_silent() {
-        assert_eq!(decide(&asked(DecidePoint::Route)), DecideOut::Advice(None));
+    fn risk_question_calls_out_to_the_own_section() {
+        let body = body(decide(&batch(&["ls", "git push origin main"])));
+        assert_eq!(body["state"]["cwd"], "/w");
+        assert_eq!(body["state"]["items"][1]["subject"], "git push origin main");
+        assert_eq!(body["questions"]["1.severity"]["type"], "score");
+        assert_eq!(body["questions"]["1.irreversible"]["type"], "noul");
     }
 
     #[test]
-    fn resume_reads_the_severity_score() {
-        let reply = json!({
-            "answers": { "severity": {
-                "type": "score", "score": 1.2, "confidence": 0.9,
-                "legend": {}, "probabilities": {}
-            }}
-        });
+    fn other_points_and_empty_batches_are_silent() {
+        let mut route = batch(&["ls"]);
+        route.point = DecidePoint::Route;
+        assert_eq!(decide(&route), DecideOut::Advice(None));
+        assert_eq!(decide(&batch(&[])), DecideOut::Advice(None));
+    }
+
+    #[test]
+    fn resume_raises_only_the_flagged_call() {
+        let noul = |p: f64| json!({ "type": "noul", "noul": p });
+        let score = json!({ "type": "score", "score": 1.0, "confidence": 0.9,
+                            "legend": {}, "probabilities": {} });
+        let reply = json!({ "answers": {
+            "0.severity": score, "0.irreversible": noul(0.1),
+            "0.external_effect": noul(0.1), "0.exfiltration": noul(0.1),
+            "1.severity": score, "1.irreversible": noul(0.2),
+            "1.external_effect": noul(0.95), "1.exfiltration": noul(0.1),
+        }});
+        let question = batch(&["ls", "git push origin main"]);
         let resumed = DecideResume {
-            question: asked(DecidePoint::Risk),
+            question: question.clone(),
             events: vec![
                 json!({ "type": "retrying", "attempt": 1, "after_ms": 1 }),
                 json!({ "type": "text_delta", "text": reply.to_string() }),
             ],
         };
-        let advice = resume(&resumed).expect("advice");
-        assert_eq!(advice.answer, Answer::Score { value: 1.2 });
-        assert_eq!(advice.confidence, Some(0.9));
+        let advice = resume(&resumed, &Thresholds::default()).expect("a raise");
+        assert_eq!(
+            advice.answer,
+            Answer::Items {
+                answers: vec![Answer::Score { value: 0.0 }, Answer::Score { value: 3.0 }]
+            }
+        );
+        assert!(question.fits(&advice.answer));
         let empty = DecideResume {
             events: vec![],
             ..resumed
         };
-        assert_eq!(resume(&empty), None);
-    }
-
-    #[test]
-    fn batched_risk_question_answers_each_item() {
-        let question = batch(&["a.txt", "b.txt"]);
-        let DecideOut::Call { call } = decide(&question) else {
-            panic!("a call-out");
-        };
-        let text = call.request["messages"][0]["content"][0]["text"]
-            .as_str()
-            .expect("one text block");
-        let body: Value = serde_json::from_str(text).expect("System One JSON");
-        assert_eq!(body["state"]["cwd"], "/w");
-        assert_eq!(body["state"]["items"][1]["subject"], "b.txt");
-        let reply = json!({
-            "answers": { "severity": {
-                "type": "score", "score": 0.4, "confidence": 0.9,
-                "legend": {}, "probabilities": {}
-            }}
-        });
-        let resumed = DecideResume {
-            question: question.clone(),
-            events: vec![json!({ "type": "text_delta", "text": reply.to_string() })],
-        };
-        let advice = resume(&resumed).expect("advice");
-        let score = Answer::Score { value: 0.4 };
-        assert_eq!(
-            advice.answer,
-            Answer::Items {
-                answers: vec![score.clone(), score]
-            }
-        );
-        assert!(question.fits(&advice.answer));
+        assert_eq!(resume(&empty, &Thresholds::default()), None);
     }
 }
