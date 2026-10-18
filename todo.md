@@ -1,5 +1,6 @@
 # Todo
 
+- T4.1. IDE permission set (from Kerf)
 - T33.36. Kotlin: thin PDK, template, example
 - T33.40.6. `risk` advisor: raise only
 - T33.40.7. Eval E1: risk escalation against the classifier alone
