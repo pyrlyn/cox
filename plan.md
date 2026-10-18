@@ -2436,37 +2436,6 @@ Done when these tests pass, with a fake worker program as `crates/cox/tests/remo
 
 Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
 
-#### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
-
-Model: opus · Status: open · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
-
-Goal: a client that connects to the supervisor's socket reaches the right worker, and exactly one client is attached to a session at a time. `docs/design/serve.md` S7, D1, D4 (the bridge), D6 and the trust boundaries. T66.18 supplies worker mode and T66.17's `attach`; T66.20 supplies the socket and `admit`; T66.21 supplies the workers.
-
-Files:
-- `crates/cox-serve/src/router.rs`
-- `crates/cox-serve/src/attach.rs`
-- `crates/cox-serve/src/lib.rs`
-
-Steps:
-1. The accept loop runs `admit(peer_uid, own_uid)` on every connection before its first line is read; a mismatch is dropped and logged.
-2. Workspace calls (`projects`, `sessions`, `search`) are answered by the supervisor's own `App`, which opens SQLite and nothing else; the supervisor never owns a `Session` and never claims a session lock.
-3. A call that names a session is routed by session id to that session's worker. An `open` whose `resume` names a live worker becomes `attach`, never a second core (F1, D6).
-4. One attached client per session: a new `attach` takes the stream over and the previous client gets `ended` for that session. A detach stops only the worker's pump, never its controller, so approvals and questions wait in the worker's inbox and `inbox` returns them on the next attach.
-5. Worker notifications are forwarded to the attached client. Every line from the socket is decoded and refused like any other app-server line.
-6. `attach.rs` is the `--stdio` bridge: `tokio::io::copy_bidirectional` between stdio and the socket, so ssh's own authentication decides who reaches the socket and cox opens no inbound port.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-serve router
-mise exec -- cargo nextest run -p cox --test deps
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when these tests pass: `workspace_calls_need_no_worker`, `session_calls_reach_their_worker`, `a_second_attach_ends_the_first_stream`, `open_resume_of_a_live_worker_attaches`.
-
-Out of scope: the `cox serve` and `cox attach` commands and the hidden `--worker` flag (T66.23), the end-to-end test (T66.24), a TUI that attaches (D2: a separate later design), and Windows.
-
 #### T66.23 `cox serve` and `cox attach --stdio`
 
 Model: sonnet · Status: open · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
