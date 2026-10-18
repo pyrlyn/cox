@@ -16,6 +16,9 @@
 # Output, all gitignored under desktop/macos/build/:
 #   CoxFFI.xcframework/   the library, its C header and module.modulemap
 #   bindings/cox_ffi.swift the generated Swift over that module
+#   CoxFFI.xcframework/.source-sha256 the sha256 of the library packaged, written
+#                         last: a run whose library hashes the same prints
+#                         "unchanged" and stops (T61.3)
 #
 # The deployment target is set explicitly: without it the library inherits
 # the build machine's macOS version and the app's link warns or fails on an
@@ -40,13 +43,25 @@ lib="$target_dir/$TARGET/$PROFILE/libcox_ffi.a"
 # stay out of it.
 cargo build -p cox-ffi --lib --profile "$PROFILE" --target "$TARGET"
 
+# The stamp is the only thing that says the packaged XCFramework came from this
+# archive. Anything but an exact match (no stamp, a corrupt one, the bindings
+# gone) falls through to a rebuild, so a half-finished earlier run never skips.
+stamp="$out/CoxFFI.xcframework/.source-sha256"
+sha="$(shasum -a 256 "$lib" | cut -d' ' -f1)"
+if [ -f "$stamp" ] && [ -f "$out/bindings/cox_ffi.swift" ] \
+  && [ "$(cat "$stamp")" = "$sha" ]; then
+  echo "unchanged: $out/CoxFFI.xcframework"
+  exit 0
+fi
+
 # Library mode: the generator reads the exported metadata from the built
-# archive. Same profile and target, so only uniffi and cox-ffi rebuild. Not `-q`:
-# the first build of the generator takes minutes and would otherwise look hung.
+# archive passed as --library, so its own profile and target do not matter.
+# The host dev profile is built once and reused, where the dist/aarch64 pair
+# would relink it after every Rust change. Not `-q`: the first build of the
+# generator takes minutes and would otherwise look hung.
 gen="$(mktemp -d)"
 trap 'rm -rf "$gen"' EXIT
-cargo run -p cox-ffi --features bindgen --bin uniffi-bindgen \
-  --profile "$PROFILE" --target "$TARGET" -- \
+cargo run -p cox-ffi --features bindgen --bin uniffi-bindgen -- \
   generate --library "$lib" --language swift --out-dir "$gen/swift"
 
 # -create-xcframework wants a headers directory holding only the header and
@@ -59,5 +74,6 @@ xcodebuild -create-xcframework \
   -library "$lib" -headers "$gen/headers" \
   -output "$out/CoxFFI.xcframework"
 cp "$gen/swift/cox_ffi.swift" "$out/bindings/"
+printf '%s\n' "$sha" > "$stamp"
 
 echo "$out/CoxFFI.xcframework"

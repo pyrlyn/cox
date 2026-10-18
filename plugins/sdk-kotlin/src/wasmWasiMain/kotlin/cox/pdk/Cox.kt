@@ -5,8 +5,10 @@
 // `JsonElement`s: their shapes are docs/plugin-abi.schema.json, and typed
 // classes would need the serialization compiler plugin in every plugin build.
 //
-// Nothing here may reach WASI (println, clocks, random): cox runs plugins
-// with WASI off (plan.md A55), so a WASI import fails the module's load.
+// A plugin built on it sets `wasi = true` in plugin.toml: Kotlin's own
+// stdlib imports `wasi_snapshot_preview1::random_get` (`Any.hashCode` seeds
+// `Random.Default`, research.md P45), and cox links WASI only on request,
+// with no environment and no preopens (plan.md A63).
 package cox.pdk
 
 import kotlin.wasm.WasmImport

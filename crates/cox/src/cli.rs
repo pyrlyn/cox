@@ -587,7 +587,7 @@ pub enum PluginAction {
     New {
         /// The plugin id; also the scaffolded directory's default name.
         name: String,
-        /// `rust`, `go` and `dart` have templates (PL§13); headless defaults to `rust`.
+        /// `rust`, `go`, `kotlin` and `dart` have templates (PL§13); headless defaults to `rust`.
         #[arg(long, default_value = "rust")]
         lang: crate::plugin_new::Lang,
         /// Where to write the package; defaults to `./<name>`.

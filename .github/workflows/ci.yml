@@ -215,8 +215,8 @@ jobs:
   # Guest-language examples that need a toolchain of their own (PL§13):
   # each is `#[ignore]`d in the main `rust` job with a reason naming
   # `just plugin-examples <lang>`, so a missing toolchain here is a CI
-  # failure rather than a silently skipped test. Dart (T33.38) and Go
-  # (T33.34) today; kotlin joins this job once T33.36 lands.
+  # failure rather than a silently skipped test: Dart (T33.38), Go (T33.34)
+  # and Kotlin (T33.36).
   plugin-examples:
     needs: config
     if: >-
@@ -232,21 +232,23 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      # Go and TinyGo at the versions plugins/mise.toml pins. Before the
-      # sccache step, which sets RUSTC_WRAPPER after mise's [env] does. No
-      # shims: the template test runs `go` from a scratch dir, where a shim
-      # finds no config; the real bin dirs go on PATH instead.
+      # Go, TinyGo, Java and Gradle at the versions plugins/mise.toml pins.
+      # Before the sccache step, which sets RUSTC_WRAPPER after mise's [env]
+      # does. No shims: the template tests run `go` and `gradle` from a
+      # scratch dir, where a shim finds no config; the real bin dirs go on
+      # PATH instead.
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           working_directory: plugins
-          install_args: go tinygo
+          install_args: go tinygo java gradle
           add_shims_to_path: false
 
       # mise 2026.10 no longer resolves a tool from `plugins/mise.toml` when
-      # the template test runs `tinygo` from a temp dir ("No version is set
-      # for shim"). Pin the same versions globally so any cwd resolves them.
-      - name: pin Go and TinyGo globally
-        run: mise use -g go@1.27.2 tinygo@0.43.0
+      # a template test runs `tinygo` from a temp dir ("No version is set
+      # for shim"); the Kotlin template test likewise runs `gradle` from a temp
+      # dir. Pin the same versions globally so any cwd resolves them.
+      - name: pin Go, TinyGo, Java and Gradle globally
+        run: mise use -g go@1.27.2 tinygo@0.43.0 java@27.0.0 gradle@9.8.0
 
       - uses: pyrlyn/ci/.github/actions/sccache@main
         with:
@@ -294,6 +296,21 @@ jobs:
           PLUGIN_TOOLS_PATH="$(cd plugins && eval "$(mise env -s bash)" && printf '%s' "$PATH")"
           export PLUGIN_TOOLS_PATH
           cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
+
+      # Stages plugin.toml and example_kotlin.wasm in build/plugin. No
+      # daemon, so the job leaves no Gradle process running.
+      - name: build the Kotlin example
+        run: |
+          cd plugins/examples/kotlin
+          gradle --no-daemon -q pluginPackage
+
+      # Also scaffolds `cox plugin new --lang kotlin` and builds it with
+      # Gradle, which needs the same real PATH as the Go template test.
+      - name: kotlin plugin example e2e
+        run: |
+          PLUGIN_TOOLS_PATH="$(cd plugins && eval "$(mise env -s bash)" && printf '%s' "$PATH")"
+          export PLUGIN_TOOLS_PATH
+          cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_kotlin)'
 
   deny:
     needs: config
@@ -449,6 +466,9 @@ jobs:
         run: python3 -m unittest discover -s scripts/desktop -p 'test_swift_test_select.py'
       - name: sccache wiring
         run: python3 -m unittest discover -s scripts -p 'test_sccache_config.py'
+
+      - name: xcframework.sh skip stamp
+        run: python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
 
       - name: swiftlint fixtures
         working-directory: desktop/macos
