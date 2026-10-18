@@ -42,7 +42,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
-| T4.1 | in progress | P2 | 3 | 80% | MiMo Desktop / mimo |
+| T4.1 | in progress | P2 | 3 | 100% | MiMo Desktop / mimo |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
@@ -130,7 +130,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | in progress | P2 | 3 | 70% | Claude / sonnet-5.5 |
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | in progress | P2 | 1 | 90% | Claude / haiku-5.5 |
-| T70.1 | in progress | P1 | 3 | 90% | MiMo Desktop / mimo |
+| T70.1 | in progress | P1 | 3 | 100% | MiMo Desktop / mimo |
 
 ## Reference
 
