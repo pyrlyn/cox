@@ -1739,19 +1739,22 @@ async fn a_turn_intent_is_refused_while_the_provider_is_not_ready() {
     assert!(texts(&session).is_empty(), "no turn started");
 }
 
-/// A background shell that records its pid and then sleeps for good.
+/// A background shell that names itself after its working directory, records
+/// that name and then sleeps for good. A name rather than `$$`: under bwrap's
+/// `--unshare-pid` the shell's pid is the sandbox's, which the host cannot see.
 const DETACHED_SLEEP: &str = r#"
 [[turn]]
 text = "Starting."
-tool_calls = [{ name = "bash", input = { command = "echo $$ > shell.pid && exec sleep 300", background = true } }]
+tool_calls = [{ name = "bash", input = { command = "echo \"$PWD/detached\" > shell.pid && exec -a \"$PWD/detached\" sleep 300", background = true } }]
 
 [[turn]]
 text = "Done."
 "#;
 
-fn alive(pid: &str) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", pid])
+fn alive(name: &str) -> bool {
+    std::process::Command::new("pgrep")
+        .args(["-f", "--", name])
+        .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|status| status.success())
@@ -1778,21 +1781,21 @@ async fn eof_ends_every_session() {
         )
         .await;
         turn_ends(&mut lines, session).await;
-        let pid = loop {
-            if let Some(pid) = std::fs::read_to_string(&pid_file)
+        let name = loop {
+            if let Some(name) = std::fs::read_to_string(&pid_file)
                 .ok()
                 .filter(|text| text.ends_with('\n'))
             {
-                break pid.trim().to_owned();
+                break name.trim().to_owned();
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         };
-        assert!(alive(&pid), "the detached shell is running before EOF");
+        assert!(alive(&name), "the detached shell is running before EOF");
         drop(to_server);
         while lines.next_line().await.ok().flatten().is_some() {}
-        pid
+        name
     };
-    let (pid, served) = tokio::join!(
+    let (name, served) = tokio::join!(
         client,
         serve(app, ServeMode::Client, events, server_in, server_out)
     );
@@ -1800,7 +1803,7 @@ async fn eof_ends_every_session() {
     // Ending cancels the turn tokens, which kills the group asynchronously.
     let mut gone = false;
     for _ in 0..250 {
-        if !alive(&pid) {
+        if !alive(&name) {
             gone = true;
             break;
         }
@@ -1808,7 +1811,9 @@ async fn eof_ends_every_session() {
     }
     if !gone {
         // Leave nothing behind when the assertion below fails.
-        let _ = std::process::Command::new("kill").arg(&pid).status();
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "--", &name])
+            .status();
     }
     assert!(gone, "EOF ended the session, so its detached shell died");
 }
