@@ -51,7 +51,7 @@ class Workflows(unittest.TestCase):
             "read-only": "sccache-read-only",
         }.items():
             self.assertIn(f"{action_input}: ${{{{ inputs.{caller_input} }}}}", text)
-        self.assertLess(text.index(shared), text.index("scripts/desktop/xcframework.sh"))
+        self.assertLess(text.index(shared), text.index("run: bash scripts/desktop/xcframework.sh"))
 
     def test_the_pr_desktop_job_passes_the_backend_read_only_on_pull_requests(self):
         text = (ROOT / ".github/workflows/ci.yml").read_text()

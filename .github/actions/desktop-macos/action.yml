@@ -24,6 +24,11 @@ inputs:
   sccache-read-only:
     description: "'true' reads the cache but never writes it (pull requests)"
     default: 'false'
+  # Off unless the caller asks: a release build (T37.32.3) stays a from-source build, as it
+  # already runs without sccache, so a signed DMG never carries a library another run built.
+  ffi-cache:
+    description: "'true' restores CoxFFI.xcframework from a run with the same Rust inputs"
+    default: 'false'
 
 runs:
   using: composite
@@ -65,11 +70,38 @@ runs:
           swift-${{ runner.os }}-${{ runner.arch }}-xcode27-${{ hashFiles('desktop/macos/Packages/*/Package.resolved', 'desktop/macos/project.yml', 'desktop/macos/Packages/*/Package.swift') }}-
           swift-${{ runner.os }}-${{ runner.arch }}-xcode27-
 
-    - uses: pyrlyn/ci/.github/actions/setup-rust@main
+    # The library and bindings are a pure function of the Rust sources (workspace-hack's feature
+    # unification and .cargo/config.toml's env included) and the build script, so a
+    # pull request that touches no Rust restores them and skips the whole Rust build. Exact key
+    # only (no restore-keys): a near miss would hand the app a framework built from other sources.
+    # xcframework.sh builds `dist` alone today; the env name keeps a profile choice out of a
+    # shared key if it ever returns, and a `dist` build never restores another profile's output.
+    - name: CoxFFI.xcframework cache
+      id: ffi
+      if: inputs.ffi-cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          desktop/macos/build/CoxFFI.xcframework
+          desktop/macos/build/bindings
+        key: coxffi-${{ runner.os }}-${{ env.COX_FFI_PROFILE || 'dist' }}-${{ hashFiles('crates/**', 'workspace-hack/**', 'Cargo.toml', 'Cargo.lock', '.cargo/config.toml', 'mise.toml', 'scripts/desktop/xcframework.sh') }}
 
-    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+    # A hit still needs mise: the callers' Cox.app step runs `mise exec` for XcodeGen, and
+    # setup-rust is what installed mise on a miss. Only XcodeGen is installed here, not Rust.
+    - name: mise without Rust
+      if: steps.ffi.outputs.cache-hit == 'true'
+      uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      with:
+        install_args: aqua:yonaskolb/XcodeGen
 
-    - uses: pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge (as ci.yml)
+    - if: steps.ffi.outputs.cache-hit != 'true'
+      uses: pyrlyn/ci/.github/actions/setup-rust@main
+
+    - if: steps.ffi.outputs.cache-hit != 'true'
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+    - if: steps.ffi.outputs.cache-hit != 'true'
+      uses: pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge (as ci.yml)
       with:
         access-key-id: ${{ inputs.sccache-access-key-id }}
         secret-access-key: ${{ inputs.sccache-secret-access-key }}
@@ -78,9 +110,11 @@ runs:
         read-only: ${{ inputs.sccache-read-only }}
 
     - name: CoxFFI.xcframework
+      if: steps.ffi.outputs.cache-hit != 'true'
       shell: bash
       run: bash scripts/desktop/xcframework.sh
 
+    # Not conditioned: a restored framework is checked like a built one.
     - name: arm64 only
       shell: bash
       run: |
