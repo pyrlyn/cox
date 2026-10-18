@@ -244,10 +244,11 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 - manifest `PluginManifest`: `api`, `surfaces`, `id`, `version`, `name`, `description`, `wasm`, `wasi`, `limits`, `capabilities`, `provider`, `models`, `mcp`, `external_agents`, `cloud_agents`, `agents`, `skills`
 - manifest `Surface`: `terminal`, `desktop`, `headless`, `acp`
 - manifest `Limits`: `memory_mib`, `call_ms`
-- manifest `Capabilities`: `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui`
+- manifest `Capabilities`: `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui`, `ide`
 - manifest `ModelTier`: `cheap`, `code`
 - manifest `FsCaps`: `read`, `write`
 - manifest `UiCaps`: `status`, `panel`, `overlay`, `commands`, `render`
+- manifest `IdeCaps`: `buffer`, `lsp`, `dap`, `index`, `terminal`, `git`
 - manifest `ProviderDecl`: `name`, `api`, `base_url`, `api_key_env`, `auth`
 - manifest `ProviderApi`: `chat`, `responses`, `plugin`
 - manifest `ProviderAuth`: `bearer`, `x-api-key`, `none`

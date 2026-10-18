@@ -92,6 +92,14 @@
           "palette": false,
           "notify": false,
           "canvas": false
+        },
+        "ide": {
+          "buffer": false,
+          "lsp": false,
+          "dap": false,
+          "index": false,
+          "terminal": false,
+          "git": false
         }
       }
     },
@@ -320,6 +328,18 @@
             "notify": false,
             "canvas": false
           }
+        },
+        "ide": {
+          "description": "IDE permission classes (Kerf T4.1): the buffer, LSP, DAP, index,\nterminal-panel and git gates. Nested so a cox-only manifest stays\nvalid: an absent table is every field false.",
+          "$ref": "#/$defs/IdeCaps",
+          "default": {
+            "buffer": false,
+            "lsp": false,
+            "dap": false,
+            "index": false,
+            "terminal": false,
+            "git": false
+          }
         }
       },
       "additionalProperties": false
@@ -440,6 +460,43 @@
         },
         "canvas": {
           "description": "The canvas pane of static HTML frames (`docs/design/plugin-canvas.md`).",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "IdeCaps": {
+      "description": "`capabilities.ide`: the IDE permission classes Kerf adds to cox's model\n(T4.1). Each flag is a class, not a process: a plugin that holds `lsp` or\n`dap` is a *client* of servers the **host** spawned from a declared\ncommand (T4.2 owns those tables). None of these lets a WASM guest spawn a\nprocess — PL§10's no-bypass rule still holds.\n\nEmpty vs absent: both mean \"no class requested\", matching every other\n`#[serde(default)]` flag in [`Capabilities`]. There is no `Option` here\nbecause a present-but-false flag is the same grant as an absent one.",
+      "type": "object",
+      "properties": {
+        "buffer": {
+          "description": "Read and edit open text buffers through the host's buffer API. Not a\nfilesystem grant (`fs` is) and not a shell.",
+          "type": "boolean",
+          "default": false
+        },
+        "lsp": {
+          "description": "Language-server client against servers the host spawned. Not a\nprocess spawn and not a language server of its own.",
+          "type": "boolean",
+          "default": false
+        },
+        "dap": {
+          "description": "Debug-adapter client against adapters the host spawned. Not a\nprocess spawn and not a debugger launch.",
+          "type": "boolean",
+          "default": false
+        },
+        "index": {
+          "description": "Symbol and reference queries against the host's semantic index. Does\nnot replace the core's own index (Kerf's semantic layer stays the\nsource of truth).",
+          "type": "boolean",
+          "default": false
+        },
+        "terminal": {
+          "description": "Terminal-panel I/O through the host's terminal. Distinct from\n[`TerminalCaps`] (terminal-only UI contributions) and from a shell.",
+          "type": "boolean",
+          "default": false
+        },
+        "git": {
+          "description": "Git status/diff integration through the host's git facade. Does not\nrun `git` as a process from the guest.",
           "type": "boolean",
           "default": false
         }
