@@ -24,6 +24,11 @@ inputs:
   sccache-read-only:
     description: "'true' reads the cache but never writes it (pull requests)"
     default: 'false'
+  # Off unless the caller asks: a release build (T37.32.3) stays a from-source build, as it
+  # already runs without sccache, so a signed DMG never carries a library another run built.
+  ffi-cache:
+    description: "'true' restores CoxFFI.xcframework from a run with the same Rust inputs"
+    default: 'false'
 
 runs:
   using: composite
@@ -65,19 +70,21 @@ runs:
           swift-${{ runner.os }}-${{ runner.arch }}-xcode27-${{ hashFiles('desktop/macos/Packages/*/Package.resolved', 'desktop/macos/project.yml', 'desktop/macos/Packages/*/Package.swift') }}-
           swift-${{ runner.os }}-${{ runner.arch }}-xcode27-
 
-    # The library and bindings are a pure function of the Rust sources and the build script, so a
+    # The library and bindings are a pure function of the Rust sources (workspace-hack's feature
+    # unification and .cargo/config.toml's env included) and the build script, so a
     # pull request that touches no Rust restores them and skips the whole Rust build. Exact key
     # only (no restore-keys): a near miss would hand the app a framework built from other sources.
     # xcframework.sh builds `dist` alone today; the env name keeps a profile choice out of a
     # shared key if it ever returns, and a `dist` build never restores another profile's output.
     - name: CoxFFI.xcframework cache
       id: ffi
+      if: inputs.ffi-cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           desktop/macos/build/CoxFFI.xcframework
           desktop/macos/build/bindings
-        key: coxffi-${{ runner.os }}-${{ env.COX_FFI_PROFILE || 'dist' }}-${{ hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', 'mise.toml', 'scripts/desktop/xcframework.sh') }}
+        key: coxffi-${{ runner.os }}-${{ env.COX_FFI_PROFILE || 'dist' }}-${{ hashFiles('crates/**', 'workspace-hack/**', 'Cargo.toml', 'Cargo.lock', '.cargo/config.toml', 'mise.toml', 'scripts/desktop/xcframework.sh') }}
 
     # A hit still needs mise: the callers' Cox.app step runs `mise exec` for XcodeGen, and
     # setup-rust is what installed mise on a miss. Only XcodeGen is installed here, not Rust.

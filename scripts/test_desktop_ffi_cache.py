@@ -34,10 +34,27 @@ class FfiCache(unittest.TestCase):
         self.assertIn("actions/cache@", block)
         for part in ["runner.os", "COX_FFI_PROFILE"]:
             self.assertIn(part, block)
-        for path in ["crates/**", "Cargo.toml", "Cargo.lock", "mise.toml", "scripts/desktop/xcframework.sh"]:
+        for path in [
+            "crates/**",
+            "workspace-hack/**",
+            "Cargo.toml",
+            "Cargo.lock",
+            ".cargo/config.toml",
+            "mise.toml",
+            "scripts/desktop/xcframework.sh",
+        ]:
             self.assertIn(f"'{path}'", block)
         for path in ["CoxFFI.xcframework", "desktop/macos/build/bindings"]:
             self.assertIn(path, block)
+
+    def test_only_the_pr_job_opts_in_and_release_builds_from_source(self):
+        self.assertIn("if: inputs.ffi-cache == 'true'", step("id: ffi"))
+        self.assertIn("ffi-cache:\n    description", ACTION.read_text())
+        self.assertIn("default: 'false'", ACTION.read_text().split("ffi-cache:", 1)[1].split("\n\n", 1)[0])
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        self.assertIn("ffi-cache: 'true'", ci)
+        release = (ROOT / ".github" / "workflows" / "desktop-build.yml").read_text()
+        self.assertNotIn("ffi-cache", release)
 
     def test_a_near_miss_never_restores_a_framework(self):
         self.assertNotIn("restore-keys", step("id: ffi"))
