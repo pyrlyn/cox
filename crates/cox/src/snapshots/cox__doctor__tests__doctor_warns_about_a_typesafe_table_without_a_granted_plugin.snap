@@ -1,0 +1,6 @@
+---
+source: crates/cox/src/doctor.rs
+expression: "rows.iter().map(human).collect::<Vec<_>>().join(\"\\n\")"
+---
+providers.typesafe: ⚠ the table is ignored: plugin jev is not loaded
+  fix: build `plugins/jev` and run `cox plugin install <dir>`

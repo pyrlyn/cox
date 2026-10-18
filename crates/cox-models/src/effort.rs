@@ -23,8 +23,6 @@ pub enum Api {
     /// OpenAI Chat Completions and the servers that speak it: top-level
     /// `reasoning_effort`.
     Chat,
-    /// TypeSafe Jev: a decision model with no effort field.
-    Jev,
 }
 
 /// What a wire sends for a request's effort.
@@ -59,7 +57,6 @@ pub fn effort_for(api: Api, effort: Effort, caps: &Capabilities) -> Option<WireE
         }),
         Api::Responses => Some(plain),
         Api::Chat => (caps.reasoning_effort_param == Some(true)).then_some(plain),
-        Api::Jev => None,
     }
 }
 
@@ -95,8 +92,6 @@ mod tests {
         (Api::Chat, Some(true), None, None),
         (Api::Chat, None, Some(true), Some(false)),
         (Api::Chat, Some(true), Some(true), Some(false)),
-        (Api::Jev, None, None, None),
-        (Api::Jev, Some(true), Some(true), None),
     ];
 
     #[test]

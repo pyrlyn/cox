@@ -53,9 +53,17 @@ impl CheckResult {
 #[derive(Debug, PartialEq)]
 enum KeyRequirement<'a> {
     /// The section's name, the env var its `api_key_env` names, and whether
-    /// a missing key is fatal: Anthropic and Jev fail without one;
-    /// OpenAI-shaped sections run keyless against a local server.
+    /// a missing key is fatal: Anthropic fails without one; OpenAI-shaped
+    /// sections run keyless against a local server.
     Key(&'a str, &'a str, bool),
+    /// A plugin serves the section (`providers.abi`); its key is checked by
+    /// the plugin's own `provider <name>` doctor row, which knows the env
+    /// var from the manifest.
+    Plugin(&'a str),
+    /// A section that moved into a plugin which is not loaded: a session
+    /// moves the tier to the default one, so this is a warning, with the
+    /// install pointer.
+    Moved(&'a str, String),
     /// `local` never sends a key.
     None,
     /// No `[providers.<name>]` section: the session refuses to start, so
@@ -68,7 +76,6 @@ fn key_requirement(config: &cox_protocol::Config) -> KeyRequirement<'_> {
     let p = &config.providers;
     match section {
         "anthropic" => KeyRequirement::Key(section, p.anthropic.api_key_env.as_str(), true),
-        "typesafe" => KeyRequirement::Key(section, p.typesafe.api_key_env.as_str(), true),
         "openai" => KeyRequirement::Key(section, p.openai.api_key_env.as_str(), false),
         "local" => KeyRequirement::None,
         // T30.15: same optional-key shape as `openai` — LM Studio runs
@@ -76,7 +83,11 @@ fn key_requirement(config: &cox_protocol::Config) -> KeyRequirement<'_> {
         "lmstudio" => KeyRequirement::Key(section, p.lmstudio.api_key_env.as_str(), false),
         _ => match p.custom.get(section) {
             Some(c) => KeyRequirement::Key(section, c.api_key_env.as_str(), false),
-            None => KeyRequirement::UnknownProvider(section),
+            None if p.abi.contains(section) => KeyRequirement::Plugin(section),
+            None => match crate::install_pointer(section) {
+                Some(pointer) => KeyRequirement::Moved(section, pointer),
+                None => KeyRequirement::UnknownProvider(section),
+            },
         },
     }
 }
@@ -94,6 +105,22 @@ fn check_api_keys_with(
             return CheckResult::ok(
                 "API keys",
                 "the code tier's provider needs no key".to_string(),
+            );
+        }
+        KeyRequirement::Plugin(section) => {
+            return CheckResult::ok(
+                "API keys",
+                format!("tiers.code.provider `{section}` is served by a plugin"),
+            );
+        }
+        KeyRequirement::Moved(section, pointer) => {
+            return CheckResult::warn(
+                "API keys",
+                format!(
+                    "tiers.code.provider `{section}` moved to a plugin that is not loaded; \
+                     a session uses the default tier instead"
+                ),
+                pointer,
             );
         }
         KeyRequirement::UnknownProvider(section) => {
@@ -249,6 +276,37 @@ mod tests {
         // stays out of the assertion message: it is the failure output
         // CodeQL treats as a log, and a key check's text is sensitive.
         assert!(result.fix.contains(&format!("-s cox -a {section}")));
+    }
+
+    /// T33.40.14: a plugin-served section needs no `[providers.*]` table and
+    /// the built-in key check no longer special-cases `typesafe`.
+    #[test]
+    fn plugin_section_is_not_an_unknown_provider() {
+        let mut config = cox_protocol::Config::default();
+        config.tiers.code.provider = "typesafe".into();
+        assert!(matches!(
+            key_requirement(&config),
+            KeyRequirement::Moved("typesafe", _)
+        ));
+        config.providers.abi.insert("typesafe".into());
+        assert_eq!(key_requirement(&config), KeyRequirement::Plugin("typesafe"));
+        let result = check_api_keys_with(&config, |_, _| {
+            panic!("a plugin's key is checked by its own row")
+        });
+        assert_eq!(result.status, "ok");
+    }
+
+    #[test]
+    fn moved_section_without_plugin_warns_with_the_install_pointer() {
+        let mut config = cox_protocol::Config::default();
+        config.tiers.code.provider = "typesafe".into();
+        let result = check_api_keys_with(&config, |_, _| {
+            panic!("a moved section needs no key lookup")
+        });
+        assert_eq!(result.status, "warn");
+        // No message argument: CodeQL reads printing a key-check result as
+        // logging the key, though the result never holds one.
+        assert!(result.fix.contains("cox plugin install"));
     }
 
     #[test]
