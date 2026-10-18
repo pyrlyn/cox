@@ -1,0 +1,22 @@
+// The cox Kotlin PDK is not published yet (PL§14 decision 1), so it comes
+// from a cox checkout through a composite build: `coxSdk` in
+// gradle.properties, or `-PcoxSdk=…`, names that checkout's
+// plugins/sdk-kotlin.
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+    }
+}
+
+rootProject.name = "{{id}}"
+includeBuild(
+    providers.gradleProperty("coxSdk").orNull
+        ?: error("set coxSdk in gradle.properties to a cox checkout's plugins/sdk-kotlin"),
+)

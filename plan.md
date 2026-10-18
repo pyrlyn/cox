@@ -44,7 +44,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | --- | --- | --- | --- | --- | --- |
 | T4.1 | in progress | P2 | 3 | 100% | MiMo Desktop / mimo |
 | T32.17 | in progress | P2 | 3 | 80% | Claude / opus-5.5 |
-| T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
@@ -113,8 +112,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T61.2 | todo | P1 | 2 | 0% | |
-| T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
@@ -210,6 +207,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | `cox-plugin` | the WASM host: discovery, package digest, grant check, one worker per plugin, host functions (`cox:host/v1`), and the protocol-trait adapters `PluginHooks`, `WasmTool`, `PluginProvider`, `EventTap`, `Advisor` (A52, P33) | extism 1.30.0 (`default-features = false`: no ureq, no URL or file loading; `wasmtime-exceptions` on, A61), wasmtime 43 (declared only for the `anyhow` feature extism needs without its defaults), sha2 (package digest), figment (`plugin.toml`), reqwest 0.12 (`cox_http`, T33.14.1), tokio-util (`Provider` cancellation, T33.18); linked into `crates/cox` behind the default-on `plugins` feature (A55) |
 | `cox-plugin-sdk` (`plugins/sdk`, the separate guest workspace, never a `crates/*` member) | the Rust guest SDK (T33.27): typed wrappers for every PL§4 export and `cox:host/v1` host function, the `register!` macro, and the wire (`{"Ok"\|"Err"}` host replies) that other-language guests copy; builds for `wasm32-unknown-unknown` | extism-pdk 1.4.1 (`default-features = false`: no extism `http`, no msgpack), cox-plugin-api (path) |
 | `plugins/sdk-go` (Go module `github.com/pyrlyn/cox/plugins/sdk-go`, outside cargo) | the Go guest SDK (T33.34): `cox.Export` for every PL§4 export, one wrapper per `cox:host/v1` function plus `cox_desktop_notify`, `*HostError` for an `AbiError`, the common ABI payload types; the pure wire builds and tests on the host, the extism memory calls only for `GOOS=wasip1` | github.com/extism/go-pdk v1.1.3 (BSD-3-Clause); Go 1.27.2 and TinyGo 0.43.0 from `plugins/mise.toml` |
+| `plugins/sdk-kotlin` (Gradle build `io.github.listepo.cox:sdk-kotlin`, outside cargo, taken by `includeBuild`) | the Kotlin guest PDK (T33.36): `Cox.export` for every PL§4 export, one wrapper per `cox:host/v1` function, `HostException` for an `AbiError`; payloads stay `JsonElement`s over the raw `extism:host/env` imports, since no maintained Kotlin extism PDK exists | org.jetbrains.kotlinx:kotlinx-serialization-json 1.11.0 (Apache-2.0); Kotlin Gradle plugin 2.4.20, Gradle 9.8.0 and OpenJDK 27.0.0 from `plugins/mise.toml` |
 | `cox-voice` | push-to-talk dictation (P54, A123): `Transcriber` (whisper.cpp through `whisper-rs`, model loaded once), `Recorder` (default input device, mono, resampled to 16 kHz, capped length), and the `Dictation` impl the TUI receives. Its own crate under D1: a heavy C++ build and platform audio. Behind `crates/cox`'s `voice` feature, off by default; audio never leaves the process | whisper-rs 0.16.0 (Unlicense; whisper.cpp MIT; cmake), cpal 0.18.2 (Apache-2.0), rubato 5.0.0 (MIT OR Apache-2.0) |
 | `cox-cursor-cloud` | the Cursor Cloud Agents API client (P56, A123; P56 under way, terms go-ahead given 2026-10-03): hand-written wire types (A40 step 3, never generated from or copied out of Cursor's unlicensed OpenAPI file), create/run/stream/cancel/usage. The one place a socket to `api.cursor.com` opens; not a `Provider`; the host driver that maps runs to task events lives in `cox-session` | cox-provider-http (reqwest, eventsource-stream), serde; no new dependency |
 
@@ -862,13 +860,6 @@ Every card in this phase:
 - runs the three standard commands.
 
 Host unit tests use inline WAT (R§4.3.5 P15); no `.wasm` is ever committed. **Blockers** (everything after them depends on them): T33.1, T33.2, T33.3, T33.5, T33.6.
-
-#### T33.36 Kotlin: thin PDK, template, example
-
-Depends: T33.35, A61 (extism `wasmtime-exceptions` is on; `exception_handling_module_loads`), T33.43 (Kotlin's stdlib imports `wasi_snapshot_preview1::random_get`, and the host keeps WASI off until then, A55, A63) · Size: ~200 · Files: `plugins/sdk-kotlin/src/…/Cox.kt`, `plugins/examples/kotlin/src/…/Main.kt`, `plugins/templates/kotlin/*.tmpl`; `plugins/mise.toml` gets java, gradle and kotlin
-Goal: a cox-owned minimal Kotlin PDK over the raw extism imports (there is no maintained one, R§4.3.5 P30), the same example, and `--lang kotlin`.
-Draft: the PDK (`plugins/sdk-kotlin`, ~150 lines over the raw extism imports and `cox:host/v1`) and the example (`plugins/examples/kotlin`, id `example-kotlin`, same behaviour as the Rust example, `gradle pluginPackage`) build with Kotlin 2.4.20, Gradle 9.8.0 and OpenJDK 27.0.0 and are kept on branch `wip/t33.36-kotlin`. Left to do once WASI is on: templates, `Lang::Kotlin`, `PLUGIN_LANGS`, `just plugin-examples kotlin`, the CI step, the e2e, docs and `toolchain.md` rows.
-Check: `plugin_example_kotlin` is ignored with its reason locally and runs in the CI job.
 
 #### T33.40 Jev as the first plugin
 
@@ -1855,62 +1846,9 @@ Every card in this phase:
 
 Rationale in §6 A140. Found by reading the build configuration (2026-10-07), not yet measured: the XCFramework always builds with the `dist` profile (fat LTO, one codegen unit), also under `just desktop-open`'s watcher and in CI's `swift test` job, and its `uniffi-bindgen` binary is linked the same way; the workspace has 79 integration-test binaries (`cox-core` 21, `cox` 19, `cox-tui` 15), each linked against the whole tree; `Swatinem/rust-cache` never caches workspace members, so each desktop CI job rebuilds all 35 crates; the CI matrix builds with `--all-features` and tests without them, so each target compiles the workspace twice; the six Swift packages are tested one by one, each in its own `.build`, so `CoxModel` compiles up to five times; the SwiftLint build-tool plugin runs on every build of every target.
 
-**Order.** T61.1 first (the baseline every later card compares against). Then T61.2 → T61.3 → T61.4 (the desktop path, the largest gain). T61.5.1–T61.5.3, T61.6, T61.7 and T61.9 are independent of each other. T61.8, T61.10 and T61.11 last; each may end as "rejected" with the measurement that rejected it.
+**Order.** T61.1 first (the baseline every later card compares against). Then T61.3 → T61.4 (the desktop path, the largest gain). T61.5.1–T61.5.3, T61.6, T61.7 and T61.9 are independent of each other. T61.8, T61.10 and T61.11 last; each may end as "rejected" with the measurement that rejected it.
 
 Timings go to a new `research.md` §4.3.9 "Build times", in the shape of R§4.3.4: each row is the median of 5 runs, with the machine, load average and commit. A card whose change gains nothing measurable is reverted and closed with that row.
-
-#### T61.2 Fast profile for the XCFramework outside a release
-
-Model: sonnet · Status: open · Depends: T61.1 · Size: ~40 · Priority: P1 · Complexity: 2
-
-Goal: `just desktop-open`, `just desktop-app` and CI's `desktop-macos` job build `cox-ffi` without fat LTO; only a DMG and the desktop build workflow use `dist` (A15: what ships is `dist`).
-
-Files:
-- `Cargo.toml`
-- `scripts/desktop/xcframework.sh`
-- `justfile`
-
-Steps:
-1. `[profile.ffi-dev]` in `Cargo.toml`: `inherits = "release"`, `lto = false`, `codegen-units = 16`, `incremental = true`, `debug = "line-tables-only"`, with a comment saying why it exists next to `dist`.
-2. `xcframework.sh` takes the profile from `COX_FFI_PROFILE` (default `ffi-dev`), validates it against `ffi-dev|dist` and prints which one it built.
-3. `just desktop-dmg` and `.github/workflows/desktop-build.yml` set `COX_FFI_PROFILE=dist` (the workflow is a one-line `env:`; it does not count as a source file).
-
-Check:
-```bash
-just desktop-xcframework
-COX_FFI_PROFILE=dist just desktop-xcframework
-just desktop-app
-```
-
-Done when: §4.3.9 has the incremental `just desktop-xcframework` time before and after; the DMG still comes from `dist` (the script's printed profile in the workflow log).
-
-Out of scope: the bindings generator (T61.3), caching (T61.4).
-
-#### T61.3 Bindings generator on the host dev profile, skipped when the library did not change
-
-Model: sonnet · Status: open · Depends: T61.2 · Size: ~40 · Priority: P1 · Complexity: 2
-
-Goal: `uniffi-bindgen` is built once in the dev profile for the host, and `xcframework.sh` regenerates the bindings and the XCFramework only when `libcox_ffi.a` changed.
-
-Files:
-- `scripts/desktop/xcframework.sh`
-
-Steps:
-1. Run the generator with `cargo run -p cox-ffi --features bindgen --bin uniffi-bindgen` and no `--profile`/`--target`: library mode reads the metadata from the archive passed as `--library`, so the generator's own profile does not matter.
-2. After `cargo build`, hash the library (`shasum -a 256`) and compare with `desktop/macos/build/CoxFFI.xcframework/.source-sha256`; on a match print "unchanged" and exit 0. Write the stamp after a successful `-create-xcframework`.
-
-Check:
-```bash
-just desktop-xcframework
-cp desktop/macos/build/bindings/cox_ffi.swift "$TMPDIR/before.swift"
-just desktop-xcframework   # prints "unchanged"
-git stash && just desktop-xcframework && git stash pop
-diff "$TMPDIR/before.swift" desktop/macos/build/bindings/cox_ffi.swift
-```
-
-Done when: the bindings are byte-identical to the ones the `dist`-profile generator wrote; a second run with no Rust change is a no-op; §4.3.9 has the time of that no-op.
-
-Out of scope: CI caching (T61.4).
 
 #### T61.4 CI: cache the XCFramework and SwiftPM
 

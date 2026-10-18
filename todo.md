@@ -2,7 +2,6 @@
 
 - T4.1. IDE permission set (from Kerf)
 - T32.17. `cox-config` loads through the shared `config-schema` crate
-- T33.36. Kotlin: thin PDK, template, example
 - T33.40.6. `risk` advisor: raise only
 - T33.40.7. Eval E1: risk escalation against the classifier alone
 - T33.40.9. `route` advisor: downgrade only
@@ -70,8 +69,6 @@
 - T58.28. Packaging
 - T58.29. UI automation smoke test
 - T58.30. Snapshot spike: WinUI controls to PNG
-- T61.2. Fast profile for the XCFramework outside a release
-- T61.3. Bindings generator on the host dev profile, skipped when the library did not change
 - T61.4. CI: cache the XCFramework and SwiftPM
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
