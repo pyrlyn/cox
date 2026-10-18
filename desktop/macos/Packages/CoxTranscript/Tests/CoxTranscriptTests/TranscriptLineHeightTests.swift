@@ -98,7 +98,7 @@ struct TranscriptLineHeightTests {
     host.show(crossBlockSelection: true, text: (textSize, lineHeight))
     host.fitToText()
     // Anti-aliasing differs slightly between machines; a real change moves far more pixels.
-    assertSnapshot(
+    try assertVersionedSnapshot(
       of: try host.image(), as: .image(precision: 0.995, perceptualPrecision: 0.98),
       named: "\(Int(textSize * 10))-\(Int(lineHeight * 100))",
       testName: "atTwoSizesAndLineHeights")

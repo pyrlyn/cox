@@ -13595,3 +13595,6 @@ $ mise exec -- cargo fmt --check -p cox-core
 clean
 ```
 
+### T71.1 Format the app-server test calls
+
+The workspace `cargo fmt --check` failed on two overlong `tokio::join!` expressions in `crates/cox-app/src/server.rs`. Rustfmt wrapped both calls across lines; behavior is unchanged. `CARGO_BUILD_JOBS=2 mise exec -- cargo fmt --check` passes. `cox-app` tests and Clippy were not run because compiling its dependency graph reduced free disk to 9.8 GiB; the build was stopped before tests ran.
