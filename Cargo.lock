@@ -1124,6 +1124,7 @@ dependencies = [
  "cox-protocol",
  "cox-provider",
  "cox-sanitize",
+ "cox-serve",
  "cox-session",
  "cox-store",
  "cox-target",
@@ -8061,8 +8062,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f7c12eac7bb587801590f6a67ff0bc84d0748513864b71108e4b311cc3df694"
 dependencies = [
  "bitflags 2.13.2",
+ "hashbrown 0.17.1",
  "indexmap 2.14.2",
  "semver",
+ "serde",
 ]
 
 [[package]]
@@ -9031,7 +9034,7 @@ dependencies = [
  "url",
  "uuid",
  "wasm-encoder 0.258.3",
- "wasmparser 0.258.3",
+ "wasmparser 0.259.0",
  "wasmtime-environ",
  "wasmtime-internal-core",
  "winapi",

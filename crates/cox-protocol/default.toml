@@ -78,14 +78,6 @@ load = false                        # true = load the model at session start if 
 timeout_s = 600                     # local prefill is slow, same rationale as `local`
 max_retries = 4
 
-[providers.typesafe]
-base_url = "https://api.typesafe.ai"   # client appends /v1/systemone
-api_key_env = "TYPESAFE_API_KEY"        # else keyring entry "cox/typesafe"
-model = "jev-latest"
-timeout_s = 30
-max_retries = 2
-models = [{id="jev-latest", context_window=128000, efforts=["low"]}]   # decisions are cheap-tier only
-
 # Type-2 (compatible) providers: OpenAI-Chat-shaped APIs, no code per vendor
 # (docs/design/providers.md). Point a tier at one: tiers.code.provider = "deepseek".
 

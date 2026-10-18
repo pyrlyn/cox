@@ -35,6 +35,7 @@ pub mod doctor;
 pub mod env;
 #[cfg(feature = "plugins")]
 pub mod external_agents;
+mod legacy_tier;
 pub mod lineage;
 pub mod mcp;
 #[cfg(feature = "plugins")]
@@ -50,6 +51,7 @@ pub mod targets;
 pub mod testing;
 pub mod tools;
 
+pub use legacy_tier::install_pointer;
 pub use lineage::{Follow, fork, handoff, resume};
 pub use mcp::{mcp_auth, mcp_servers};
 #[cfg(feature = "plugins")]
@@ -80,6 +82,14 @@ pub enum SessionError {
     },
     #[error("unknown provider `{0}` in tiers.code")]
     UnknownProvider(String),
+    /// A section whose client lives in a plugin, with that plugin not
+    /// loaded (T33.40.12). A typed variant, not `UnknownProvider`, so the
+    /// router can fail open on it and name the install step (T33.40.13).
+    #[error(
+        "provider `{section}` is provided by plugin {plugin}, not loaded; \
+         build `plugins/{plugin}` and run `cox plugin install <dir>`"
+    )]
+    PluginNotLoaded { section: String, plugin: String },
     #[error("unknown api `{api}` for provider `{owner}` (want \"chat\" or \"responses\")")]
     UnknownApi { api: String, owner: String },
     /// T37.34 (A67): another process drives session `id`; one writer per
@@ -318,6 +328,20 @@ pub async fn open_reporting(
     };
     #[cfg(not(feature = "plugins"))]
     let abi_raw = std::collections::HashMap::new();
+    // T33.40.13: a tier left on the retired built-in `typesafe` client moves
+    // to the default tier before `assemble` would fail on it, and one
+    // notice says why (D14). A declarative plugin section of that name
+    // counts as loaded too.
+    let mut legacy_notices = Vec::new();
+    if let Some(defaults) = cox_config::load::default_tiers() {
+        let loaded = abi_raw
+            .keys()
+            .chain(config.providers.custom.keys())
+            .cloned()
+            .collect();
+        legacy_notices = legacy_tier::fall_back(&mut config, &loaded, &defaults);
+        legacy_tier::fall_back(&mut base, &loaded, &defaults);
+    }
     let served = provider::lmstudio_served(&config).await?;
     let (provider, abi) = match &served {
         Some(s) => {
@@ -351,6 +375,7 @@ pub async fn open_reporting(
     // warnings land after that borrow ends.
     #[cfg(feature = "plugins")]
     plugins.notices.extend(abi_warnings);
+    plugins.notices.extend(legacy_notices);
     config.providers.abi = abi.keys().cloned().collect();
     let mdir = memory_dir_for(&base, &home, cwd);
     // T27.3: a worktree session's project is still the main checkout, so
@@ -768,6 +793,48 @@ mod tests {
                 vec![work.path().to_path_buf()],
                 "an empty root list became cwd"
             );
+        });
+    }
+
+    /// T33.40.13: a config that still names the retired built-in `typesafe`
+    /// client opens, with the tier moved to the default one.
+    #[test]
+    fn open_moves_a_legacy_typesafe_tier_to_the_default() {
+        let home = tempfile::tempdir().expect("home");
+        let work = tempfile::tempdir().expect("work");
+        let scenario = work.path().join("scenario.toml");
+        std::fs::write(&scenario, "[[turn]]\ntext = \"hi\"\n").expect("scenario");
+        let mut config = Config::default();
+        config.mcp.enabled = false;
+        config.plugins.enabled = false;
+        config.hooks.enabled = false;
+        config.tiers.code.provider = "typesafe".into();
+        config.tiers.code.model = "jev-latest".into();
+        let spec = SessionSpec {
+            config,
+            cwd: work.path().to_path_buf(),
+            home: home.path().to_path_buf(),
+            worktree: false,
+            answer: None,
+            questions: false,
+            resume: None,
+            mcp_login: None,
+            plugin_ui: None,
+            client: None,
+            surface: "test".into(),
+            tools: Vec::new(),
+        };
+        let scenario = scenario.display().to_string();
+        let vars = [
+            ("COX_PROVIDER", Some("scripted")),
+            ("COX_SCENARIO", Some(scenario.as_str())),
+        ];
+        cox_config::load::temp_env(&vars, || {
+            let rt = tokio::runtime::Runtime::new().expect("runtime");
+            let opened = rt.block_on(open(spec)).expect("the session opens");
+            let default = cox_config::load::default_tiers().expect("defaults").code;
+            assert_eq!(opened.config.tiers.code.provider, default.provider);
+            assert_eq!(opened.config.tiers.code.model, default.model);
         });
     }
 

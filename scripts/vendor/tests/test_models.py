@@ -242,6 +242,26 @@ def test_unknown_id_in_prices_toml_is_reported_and_kept(isolated_files, capsys):
     assert rows["qwen3-coder"]["source_url"] == "local inference, no billing"
 
 
+def test_a_price_row_no_section_lists_is_dropped_and_reported(isolated_files, capsys):
+    # `jev-latest` is in the fixture prices.toml but in no default.toml
+    # section: its price now comes from the jev plugin's own `[[models]]`.
+    prices, default = isolated_files
+    assert "jev-latest" in prices.read_text()
+    models.run(fetch=fetching())
+    out = capsys.readouterr().out
+    assert "`jev-latest` is listed by no [providers.*] section, dropped" in out
+    ids = [r["id"] for r in tomlkit.parse(prices.read_text())["model"]]
+    assert "jev-latest" not in ids
+    # Rows a section does list, with or without a models.dev counterpart, stay.
+    assert "qwen3-coder" in ids and "kimi-k2.7-code" in ids
+
+
+def test_dropping_an_orphan_row_is_stable_on_a_rerun(isolated_files):
+    # The fixture is needed for its isolated copies, not its paths.
+    models.run(fetch=fetching())
+    assert models.run(check=True, fetch=fetching()) is False
+
+
 def test_anthropic_discrepancy_is_reported_and_the_row_is_never_overwritten(isolated_files, capsys):
     prices, default = isolated_files
     models.run(fetch=fetching())

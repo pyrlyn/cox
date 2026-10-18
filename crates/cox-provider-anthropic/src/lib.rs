@@ -110,7 +110,7 @@ impl AnthropicProvider {
     /// Authentication"). Prefer [`Self::new`] at session startup for the
     /// real Anthropic API, which always needs a key; this stays for tests
     /// and any caller that already resolved (or deliberately skipped) one
-    /// (mirrors `JevProvider::with_key`) — `backend_for_with` in
+    /// — `backend_for_with` in
     /// `crates/cox-session/src/provider.rs` builds through this so a test can inject
     /// the lookup instead of ever reaching the real keyring (A49, T30.28).
     pub fn with_key(

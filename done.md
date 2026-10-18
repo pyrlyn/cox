@@ -1,3 +1,188 @@
+#### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
+
+Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
+
+Plan: `deps.rs` lets `cox-serve` depend on `cox-store` alone, so the supervisor's `App` is injected: `router::Workspace` answers `projects`/`sessions`/`search` as JSON, and T66.23 implements it over `cox_app`. `router.rs` owns one run loop (accept → `admit_peer` before the first line, the supervisor's events, `open` through `Supervisor::open`) and one task per connection that decodes each line as the app-server does (id 0 for a refused line), rewrites the request id per worker, and waits for its answer, so calls stay sequential per client. `worker.rs` writes stdin through a channel and, once the `open` reply names the session, hands every later stdout line to the router: responses go back to the caller under its own id, notifications to the session's one attached client. `open` is `Supervisor::open` (which already returns a live resume's id) then `attach`, so a live session never gets a second core; a successful `attach` takes the stream over and sends the previous client `ended`. `inbox` asks every worker and joins the lists. A client that disconnects gets `close` sent for its sessions (pump stops, controller keeps folding). `attach.rs`: connect to `COX_HOME/run/serve.sock`, check the server's uid with the same `admit_peer`, then `copy_bidirectional` with stdio. Tests run a fake worker through `/bin/sh`, as `supervisor`'s do, against a real socket in a tempdir.
+
+Goal: a client that connects to the supervisor's socket reaches the right worker, and exactly one client is attached to a session at a time. `docs/design/serve.md` S7, D1, D4 (the bridge), D6 and the trust boundaries. T66.18 supplies worker mode and T66.17's `attach`; T66.20 supplies the socket and `admit`; T66.21 supplies the workers.
+
+Files:
+- `crates/cox-serve/src/router.rs`
+- `crates/cox-serve/src/attach.rs`
+- `crates/cox-serve/src/lib.rs`
+
+Steps:
+1. The accept loop runs `admit(peer_uid, own_uid)` on every connection before its first line is read; a mismatch is dropped and logged.
+2. Workspace calls (`projects`, `sessions`, `search`) are answered by the supervisor's own `App`, which opens SQLite and nothing else; the supervisor never owns a `Session` and never claims a session lock.
+3. A call that names a session is routed by session id to that session's worker. An `open` whose `resume` names a live worker becomes `attach`, never a second core (F1, D6).
+4. One attached client per session: a new `attach` takes the stream over and the previous client gets `ended` for that session. A detach stops only the worker's pump, never its controller, so approvals and questions wait in the worker's inbox and `inbox` returns them on the next attach.
+5. Worker notifications are forwarded to the attached client. Every line from the socket is decoded and refused like any other app-server line.
+6. `attach.rs` is the `--stdio` bridge: `tokio::io::copy_bidirectional` between stdio and the socket, so ssh's own authentication decides who reaches the socket and cox opens no inbound port.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-serve router
+mise exec -- cargo nextest run -p cox --test deps
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when these tests pass: `workspace_calls_need_no_worker`, `session_calls_reach_their_worker`, `a_second_attach_ends_the_first_stream`, `open_resume_of_a_live_worker_attaches`.
+
+Out of scope: the `cox serve` and `cox attach` commands and the hidden `--worker` flag (T66.23), the end-to-end test (T66.24), a TUI that attaches (D2: a separate later design), and Windows.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox-serve: 25 passed (router: workspace_calls_need_no_worker, session_calls_reach_their_worker, a_second_attach_ends_the_first_stream, open_resume_of_a_live_worker_attaches, decode_reads_the_routing_fields; attach: the_bridge_copies_both_ways, no_supervisor_names_the_socket; the 18 earlier tests unchanged), 5 runs in a row
+cargo nextest run -p cox --test deps --test docs: 16 passed
+cargo clippy -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check -p cox-serve: clean
+
+#### T33.40.12 Remove the built-in Jev client
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.5, T33.40.6 (parity: the provider and one advisor are served by the plugin) · Size: ~120 edited (the deleted `jev.rs` does not count) · Files: `crates/cox-provider/src/jev.rs` (deleted), `crates/cox-provider/src/lib.rs`, `crates/cox/src/session.rs`
+Goal: C1, step 1.
+- The `typesafe` arm of `backend_for_with` returns the plugin's `PluginProvider` when the plugin is loaded.
+- Otherwise it returns a typed "provided by plugin jev, not loaded" error, which the router step (T33.40.13) turns into fail-open.
+- `jev.rs`'s tests now live in `plugins/jev` (T33.40.2).
+Check: `rg -n 'jev' crates/cox-provider/src` is empty; `typesafe_backend_without_plugin_is_typed_error`; the three standard commands green.
+Plan:
+- The card's file list is stale: `backend_for_with` lives in `crates/cox-session/src/provider.rs`, and `assemble` there already returns the loaded plugin's priced `PluginProvider` before `backend_for_with` runs, so the `typesafe` arm only needs the error branch (a new `SessionError` variant).
+- Delete `crates/cox-provider/src/jev.rs` and its `pub mod jev` line; fix the crate header and the doc references (`deps.rs`, AGENTS.md, plan.md §1, toolchain.md, rust.md) that name it.
+- Replace `builtin_jev_used_when_plugin_absent` with `typesafe_backend_without_plugin_is_typed_error`; the doctor row no longer claims a built-in client.
+- jev.rs's seven tests already have equivalents in `plugins/jev` (`wire.rs` answer parsing, `provider.rs` body and `status_error`), so none is ported.
+- Verify: `-p cox-provider`, `-p cox-session`, `-p cox --test deps`, `-p cox --test plugins_jev`, clippy, fmt.
+
+Result:
+- `crates/cox-provider/src/jev.rs` and `pub mod jev` are gone; no cox-provider dependency became unused (`futures`, `thiserror` and `insta` were already unused before this task and are left alone).
+- `SessionError::PluginNotLoaded { section, plugin }` is the typed error; `backend_for_with`'s `typesafe` arm returns it. A loaded plugin never reaches the arm: `assemble` serves its priced `PluginProvider` first.
+- `typesafe_backend_without_plugin_is_typed_error` replaces `builtin_jev_used_when_plugin_absent`. The `typesafe client` doctor row says "provided by plugin jev, not loaded" instead of naming a built-in client (the warning level and install pointer stay with T33.40.14).
+- The seven `jev.rs` tests already have equivalents in `plugins/jev` (`wire.rs`: choice, score, Noul, missing and unknown answers; `provider.rs`: body mapping and `status_error`), so none was ported.
+- Not done: `ProviderId::Jev`, the router pin and the fail-open notice (T33.40.13); the `[providers.typesafe]` tombstone (T33.40.14).
+
+Check output:
+```
+$ rg -in jev crates/cox-provider/src: empty
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-provider -p cox-session -p cox-provider-anthropic
+     Summary 152 tests run: 152 passed, 0 skipped (includes typesafe_backend_without_plugin_is_typed_error)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox -p cox-app -p cox-acp
+     Summary 511 tests run: 511 passed, 5 skipped (plugins_jev 15/15 on a rerun; typesafe_table_overrides_plugin_transport timed out once under load, as known)
+$ mise exec -- cargo clippy -p cox-provider -p cox-session -p cox -p cox-provider-anthropic --all-targets -- -D warnings: clean
+$ mise exec -- cargo fmt --check: clean
+```
+
+#### T33.40.13 Router and `ProviderId` without Jev
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.12 · Size: ~120 · Files: `crates/cox-protocol/src/types.rs`, `crates/cox-core/src/router.rs`, `crates/cox-core/src/session.rs`
+Goal: C1, step 2.
+- `ProviderId::Jev` goes, replaced by T33.18's plugin bucket; it is never serialized in events (J§7).
+- The `typesafe` pin in `Router::pick` goes; plugin sections resolve generically.
+- A tier naming a legacy plugin provider (the table `("typesafe", "jev")`) with the plugin absent fails open (D14): one `Notice(Warn)` "Jev moved to a plugin: build `plugins/jev` and run `cox plugin install <dir>`", and that tier uses its `default.toml` provider and model for the session.
+Check: `legacy_typesafe_tier_without_plugin_uses_default_tier_with_notice`, `typesafe_tier_with_plugin_routes_to_plugin_section`, `unknown_provider_still_errors`; `docs/protocol.jsonschema` regenerated.
+
+Plan:
+- The card's file list is stale: the tier's client is built at session open in `cox-session`, not in `cox-core`, and a session whose `tiers.code.provider` is `typesafe` without the plugin would otherwise fail to open on `PluginNotLoaded`.
+- `cox-protocol`: delete `ProviderId::Jev`; the stored tag `jev` of an old ledger row still reads (as `Plugin("typesafe")`, the section that replaced it) so `cox stats` and `/cost` do not hit a `corrupt` row; the schema drops the `jev` const.
+- `cox-core/router.rs`: drop the `typesafe` arms of `pick` (id and pin); a `typesafe` tier with no loaded section is `UnknownProvider`, like any other unknown name. `session.rs`: drop the `Jev` arm of `provider_name`.
+- `cox-config`: `load::default_tiers()` reads `[tiers]` of the embedded `default.toml`.
+- `cox-session` (new `legacy_tier.rs`): after the ABI sections are built and before `assemble`, a tier naming a legacy section (`typesafe` -> plugin `jev`) that no loaded plugin serves takes the default tier's provider and model, on `config` and `base`, and one `Notice(Warn)` joins the plugin notices.
+- Verify: the three named tests (router ones in `cox-core`, the fallback ones in `cox-session`), `cargo test` of the touched crates, `just`-less schema regeneration, clippy and fmt.
+
+Result:
+- `ProviderId::Jev` is gone. A ledger row an old build wrote with the tag `jev` still reads, as `Plugin("typesafe")` (`legacy_jev_provider_tag_reads_as_the_typesafe_plugin_section`), so `cox stats` and `/cost` do not report it corrupt; the tag is never written again. `docs/protocol.jsonschema` did not change (it does not reach `ProviderId`).
+- `Router::pick` lost the `typesafe` id and pin arms; a loaded section resolves generically, and `typesafe` with no section is `UnknownProvider`.
+- The fail-open lives in `cox-session` (`legacy_tier.rs`, called from `open` after the ABI sections are built and before `assemble`), because `cox-core`'s router is pure and `assemble` would otherwise fail the open on `PluginNotLoaded`. A tier naming `typesafe` with no loaded plugin or declarative section takes the default tier's provider and model (`cox_config::load::default_tiers`); the user's effort, thinking and limits stay. One `Notice(Warn)` says "Jev moved to a plugin: build `plugins/jev` and run `cox plugin install <dir>`".
+- Not done: the `[providers.typesafe]` tombstone and the doctor row (T33.40.14).
+
+Check output:
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-protocol
+     Summary 121 tests run: 121 passed (includes legacy_jev_provider_tag_reads_as_the_typesafe_plugin_section and protocol_jsonschema_matches_committed_file)
+$ ... cargo nextest run -p cox-core -p cox-session -p cox-config
+     Summary 577 tests run: 577 passed, 1 skipped (includes legacy_typesafe_tier_without_plugin_uses_default_tier_with_notice, typesafe_tier_with_plugin_routes_to_plugin_section, unknown_provider_still_errors, open_moves_a_legacy_typesafe_tier_to_the_default)
+$ ... cargo nextest run -p cox --test deps --test plugins_jev
+     Summary 26 tests run: 25 passed (typesafe_table_overrides_plugin_transport timed out under load 60+, passed alone on rerun)
+$ ... cargo nextest run -p cox-store -p cox-plugin -p cox-provider -p cox-app
+     Summary 475 tests run: 475 passed, 2 skipped
+$ mise exec -- cargo clippy -p cox-protocol -p cox-core -p cox-session -p cox-config --all-targets -- -D warnings: clean
+$ mise exec -- cargo fmt --check: clean
+```
+
+#### T33.40.14 Config tombstone, `default.toml`, schema and doctor
+
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.13 · Size: ~150 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox/src/doctor.rs`, `crates/cox-protocol/default.toml` (config data; `docs/config.md` and the config schema are generated)
+Goal: C1, step 3. An old config loads.
+- `JevProviderConfig` becomes `LegacyTypesafe`: the same keys, still `deny_unknown_fields`, an `Option` with no default section.
+- It stays a named field, so the table can never fall into the flattened `custom` map as a chat-shaped `CompatibleProviderConfig` (J§7).
+- Its knobs feed the plugin's `typesafe` section. Its `models` rows join the config catalog layer.
+- The `[providers.typesafe]` block leaves `default.toml`.
+- The doctor's key check covers plugin provider sections generically. A leftover table without the plugin is a doctor warning with the install pointer.
+Check:
+- `old_typesafe_table_loads_with_notice` (a config file from before this change);
+- `typesafe_table_never_becomes_compatible_section`;
+- `unknown_key_in_typesafe_table_still_rejected`;
+- a doctor snapshot;
+- the config drift test and `every_flag_has_a_config_key` green.
+
+Result:
+- `JevProviderConfig` is `LegacyTypesafe`; `ProvidersConfig.typesafe` is an `Option<LegacyTypesafe>` (named field, `deny_unknown_fields`, no default section), so the table never reaches the flattened `custom` map. The `[providers.typesafe]` block is gone from `default.toml`.
+- The card's file list was stale; every reader of `providers.typesafe` follows the `Option`: `cox-config` (project guard, below), `cox-models` catalog layer (its `models` rows still join), `cox-plugin` `refuse_provider_hosts`, `cox-app` section list, `cox-session` `abi_transport`/`abi_section` (a table, when set, still configures the plugin's section), `Config::configured_model_ids` and `ProvidersConfig::models_for`.
+- The project guard now also reverts a project's `base_url`/`api_key_env` in the legacy table, against the user's table or the plugin's old defaults when the user has none, so a cloned repository still cannot redirect the plugin's host or key.
+- Notice: `legacy_tier::fall_back` adds one notice when the table is set and no plugin serves the section (`install_pointer` is shared with the doctor).
+- Doctor: the built-in key check no longer special-cases `typesafe`; a plugin-served section is `ok` there (`KeyRequirement::Plugin`) and a moved tier with no plugin is a warning with the install pointer. `crates/cox` replaces the `typesafe client` row with one `provider <name>` row per granted plugin section (key found or not, env var from the user's table over the manifest) and a `providers.typesafe` warning with the install pointer for a table nothing reads.
+- `docs/config.md` and `docs/config.jsonschema` regenerated by their drift tests' generators.
+- Tests: `old_typesafe_table_loads_with_notice` (cox-session), `typesafe_table_never_becomes_compatible_section`, `unknown_key_in_typesafe_table_still_rejected`, `project_config_cannot_redirect_the_legacy_typesafe_table` (cox-config), `plugin_section_is_not_an_unknown_provider`, `moved_section_without_plugin_warns_with_the_install_pointer`, doctor snapshots `doctor_provider_row_names_the_granted_plugin` and `doctor_warns_about_a_typesafe_table_without_a_granted_plugin`.
+
+Check output:
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run --workspace --no-fail-fast
+     Summary 2576 tests run: 2576 passed, 11 skipped (includes config_jsonschema_matches_committed_file, config_docs_config_md_matches_default_toml, config_every_flag_has_a_config_key, the deps and plugins_jev tests)
+$ mise exec -- cargo clippy -p cox-protocol -p cox-config -p cox-session -p cox-models -p cox-app -p cox-core -p cox-plugin -p cox --all-targets -- -D warnings: clean
+$ mise exec -- cargo check -p cox --no-default-features --all-targets: clean
+$ mise exec -- cargo fmt --all: clean
+```
+
+#### T33.40.6 `risk` advisor: raise only
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4, T33.40.6.1 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/plugins_jev.rs` (also touched: `plugins/jev/src/decide.rs`, `plugins/jev/plugin.toml`, `crates/cox-core/src/monotone.rs`)
+Goal: J§5.1. There is one request per tool batch. The state is the task, the cwd, the sandbox mode and, for each call, `tool`, `subject`, `input` and `classifier_risk`, never tool output. The questions are the `severity` Score and the `irreversible`, `external_effect` and `exfiltration` Nouls. The thresholds sit in `[plugins.jev.risk]` with the J§5.1 defaults. The advice is "raise to Destructive" or none, and the core keeps `max(builtin, advised)`. A raise is reported with confidence 1.0, since the guest's own thresholds are the gate, and its probabilities go in the advice note (A163). `capabilities.decide` gains `risk`.
+Check:
+- guest tests:
+  - `risk_state_never_contains_tool_output`;
+  - `risk_thresholds_raise_on_any_hazard`;
+  - `risk_low_answers_give_no_advice`;
+  - `risk_config_overrides_thresholds`;
+- e2e in `Auto` mode with a confining sandbox, where a scripted `git push origin main` (classifier: `Exec`) is auto-allowed without the plugin (A164):
+  - a high fixture gives `Ask`, headless denies, and `Advised { point: risk, applied: true }` is in the rollout;
+  - a low fixture leaves the call allowed;
+  - a wiremock delay past 200 ms leaves it allowed and records T33.40.6.1's late-answer `Notice`, with no `Advised` (A163);
+  - `one_jev_request_per_tool_batch` (the wiremock count for a batch of 3);
+- `risk_advice_cannot_lower_risk` still green.
+Plan:
+1. `plugins/jev/src/risk.rs`: the J§5.1 request (per item `<i>.severity` Score and `<i>.irreversible`/`<i>.external_effect`/`<i>.exfiltration` Nouls, state as the core sends it), `Thresholds` from `[plugins.jev.risk]` (serde, unknown keys and out-of-range values refused) and the verdict: `Answer::Items` with `Score 3.0` for a raised item and `Score 0.0` for the rest, confidence 1.0, probabilities in the note; no raise gives no advice.
+2. `decide.rs` keeps the call-out plumbing and delegates the question and the verdict to `risk.rs`; `lib.rs` reads the thresholds in `init` (an invalid table fails `init`, so the plugin is warned about and skipped) and `plugin.toml` gains `decide = ["risk"]`.
+3. `crates/cox/tests/plugins_jev.rs`: drop the manifest patch, the four e2e cases with a scripted `git push origin main` under `Auto` and `workspace-write`.
+4. Verify: `cargo test` in `plugins/` for the jev crate, `cargo nextest run -p cox --test plugins_jev`, `-p cox-core` monotone tests, clippy and fmt.
+
+Result: `plugins/jev/src/risk.rs` owns J§5.1. The request carries only the shared `task`, `cwd`, `workspace_roots` and `sandbox` and each call's `tool`, `subject`, `input` and `classifier_risk` (an allowlist, so a field the core adds later never leaks tool output), with four questions per item keyed `<i>.severity` (Score over the four `Risk` levels), `<i>.irreversible`, `<i>.external_effect` and `<i>.exfiltration` (Nouls). A call is raised when `irreversible ≥ 0.7`, `external_effect ≥ 0.7`, `exfiltration ≥ 0.5`, or `severity ≥ 2.5` with confidence `≥ 0.6`; `[plugins.jev.risk]` overrides any of them (`deny_unknown_fields`, values outside 0..=1 or 0..=3 refused, and a refused table fails `cox_init`, so the host warns and skips the plugin — the creator's choice). The advice is `Answer::Items` with `Score 3.0` for a raised call and `Score 0.0` (a no-op under `max(builtin, advised)`) for the rest, confidence 1.0 and the raised calls' probabilities in the note; no raise is no advice. `decide.rs` keeps only the call-out plumbing; a `risk` question with no items is silent. `plugin.toml` declares `decide = ["risk"]`, so the e2e rig no longer patches the manifest. The e2e runs need `--approve on-failure`: a headless run defaults to `never`, under which `Exec` is denied before `risk` could matter, and `[hooks] timeout_s = 1` makes the headless driver deny the raised call's ask within a second.
+Found and fixed in `cox-core` (`monotone.rs`, two lines plus a test): the late-answer `Notice` of T33.40.6.1 was not reachable through the plugin advisor. `PluginAdvisor` gives up on the same budget and returns silence; when both timers fire on one tick, `tokio::time::timeout` polls the inner future first and sees the silence, so the core reported `Silent`. Silence that arrives once the budget has passed is now `Late`. `advisor_silent_at_its_deadline_is_late` failed 3 of 3 runs without the fix. The late e2e therefore records both the core's Info `Notice` and the host's own `decision skipped: the call-out ran past the point's budget` warning.
+Not done: `typesafe_table_overrides_plugin_transport` (T33.40.4, unchanged) asserts the whole run takes under 4 s; it failed twice while the machine's load average was about 150 (plugin load alone took ~7 s) and passed once the load eased. No change was made to it.
+
+Check output:
+```
+$ (cd plugins && mise exec -- cargo test -p cox-plugin-jev --locked)
+     test result: ok. 25 passed (risk_state_never_contains_tool_output, risk_thresholds_raise_on_any_hazard, risk_low_answers_give_no_advice, risk_config_overrides_thresholds, risk_config_refuses_an_invalid_table, risk_questions_cover_every_item, ...)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test plugins_jev
+     Summary 15 tests run: 15 passed, 0 skipped (git_push_is_auto_allowed_without_the_plugin, high_risk_answer_asks_and_headless_denies, low_risk_answer_leaves_the_call_allowed, late_risk_answer_leaves_the_call_allowed_with_a_notice, one_jev_request_per_tool_batch)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-core -p cox-plugin
+     Summary 569 tests run: 569 passed, 1 skipped (includes risk_advice_cannot_lower_risk and advisor_silent_at_its_deadline_is_late)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test plugin_cli --test external_agents_cursor
+     passed (33 run with plugins_jev; the only failure was the load-sensitive timing above)
+$ mise exec -- cargo clippy -p cox-core -p cox --all-targets -- -D warnings: clean
+$ (cd plugins && cargo clippy -p cox-plugin-jev --all-targets --locked -- -D warnings; cargo clippy -p cox-plugin-jev --target wasm32-unknown-unknown --locked -- -D warnings): clean
+$ mise exec -- cargo fmt --check -p cox-core -p cox; (cd plugins && cargo fmt --check -p cox-plugin-jev): clean
+
 #### T61.3 Bindings generator on the host dev profile, skipped when the library did not change
 
 Model: sonnet · Status: done 2026-10-17 · Depends: - · Size: ~40 · Priority: P1 · Complexity: 2
@@ -39,6 +224,92 @@ $ diff before.swift desktop/macos/build/bindings/cox_ffi.swift
 (empty: byte-identical)
 $ python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
 Ran 5 tests ... OK
+```
+
+#### T66.23 `cox serve` and `cox attach --stdio`
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: the supervisor and the bridge are commands a person can run. `docs/design/serve.md` S8, D3, D4 item 7 and D8. `crates/cox` stays clap and dispatch only.
+
+Files:
+- `crates/cox/src/cli.rs`, `crates/cox/src/main.rs`
+- `crates/cox/Cargo.toml` (`cox-serve` as an optional workspace path dependency behind the existing `app-server` feature; the `deps.rs` rule T66.19 adds lists `crates/cox` as an allowed dependent)
+- `docs/app-server.md` (a "Resident sessions" section that names both commands, which `docs_name_every_subcommand` requires)
+
+Steps:
+1. `cox serve` runs the supervisor in the foreground; it does not daemonize. The hidden `--worker` flag, not shown in `--help`, runs `cox_app::server::serve` in worker mode over stdin and stdout, and is the argv T66.21's supervisor spawns through `current_exe()`.
+2. `cox attach --stdio` runs T66.22's bridge. It never starts a supervisor: with no `cox serve` running it fails, naming the socket path.
+3. On Windows both commands refuse with "not supported yet".
+4. The docs section states what is resident (a session lives in its worker until `end`), that a TUI session is never resident, and that the desktop app's ssh command stays `cox app-server --stdio` (D8).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test docs
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- serve --help
+COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- attach --stdio
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+The last `attach` run exits non-zero and names `COX_HOME/run/serve.sock`; `COX_HOME` is a scratch tree, never `~/.cox`.
+
+Done when `docs_name_every_subcommand` passes, `serve --help` does not list `--worker`, and `cox attach --stdio` with no supervisor fails naming the socket path.
+
+Out of scope: the end-to-end test (T66.24), the desktop app choosing `cox attach --stdio` for a host that runs `cox serve` (a P52 desktop card), and heartbeat (T66.13).
+
+Where the `Workspace` impl lives: `cox-serve` may depend on `cox-store` alone, so the router takes `projects`, `sessions` and `search` through `cox_serve::Workspace`. `cox_app::server::workspace_reply` (the wire is `cox-app`'s) decodes the call and encodes the `Reply`, and `cox_app::server::workspace_app` builds the supervisor's `App`; `crates/cox/src/serve_cmd.rs` holds the three-line `impl Workspace` over them, the only place the two crates meet. `deps.rs` gained a rule that only `crates/cox` depends on `cox-serve`. The supervisor reads the login shell environment once; each worker is `current_exe() serve --worker --home <home>`.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox --test serve_cmd --test docs --test deps: 19 passed (serve_help_hides_the_worker_flag, attach_needs_stdio, attach_without_a_supervisor_fails_naming_the_socket, docs_name_every_subcommand)
+cargo nextest run -p cox --bin cox / -p cox-app: the_workspace_impl_answers_workspace_calls_and_refuses_the_rest, workspace_reply_answers_the_three_workspace_calls_and_refuses_the_rest passed
+COX_HOME=/tmp/cx23 cox serve --help: lists no --worker
+COX_HOME=<long scratch path> cox attach --stdio: exit 1, "Error: cox serve is not reachable at <COX_HOME>/run/serve.sock: ..."
+COX_HOME=/tmp/cx23 cox serve & ; a projects request through cox attach --stdio answered {"kind":"projects","value":[]}; a second cox serve refused naming the holder; SIGTERM stopped the supervisor
+cargo clippy -p cox -p cox-app -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
+```
+
+#### T66.24 End-to-end: kill the client, reattach, and the rollout grows only by the turn
+
+Model: Claude Code / sonnet · Status: done 2026-10-17 · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3
+
+Goal: one test proves the point of the whole serve design: a session outlives its client and a reattach writes nothing to the rollout. `docs/design/serve.md` "Acceptance test for the later cards", S9 and D6.
+
+Files:
+- `crates/cox/tests/serve.rs` (test only)
+
+Steps:
+1. Against a scratch `COX_HOME` with the scripted provider (`COX_PROVIDER=scripted`, `COX_SCENARIO`, as `crates/cox/tests/remote.rs` sets them), start `cox serve` in the background and wait for `run/serve.sock`.
+2. Client A runs `cox attach --stdio`, sends `open` for a new session in a scratch cwd and counts the rollout's lines (M). It sends one prompt, reads patches until the turn ends, records the line count (N, with N > M) and the blocks it folded with `coalesce::apply`.
+3. Kill client A with SIGKILL and assert the worker still holds the lock (`Store::session_holder` is `Some`).
+4. Client B runs `cox attach --stdio` and sends `attach`. Assert `Opened.blocks` equals A's folded blocks, the rollout still has exactly N lines with `seq` running 1..=N without a repeat, and lines M+1..=N are that one turn's events from `TurnStarted` to `TurnDone`.
+5. SIGTERM to `cox serve`: assert the lock is free and the socket is removed.
+6. Every process the test starts is killed at the end, including on failure, through a drop guard (a test never leaves a process behind).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox --test serve
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Execution plan: `crates/cox/tests/serve.rs` only (`#[cfg(all(unix, feature = "app-server"))]`), under a short scratch home in `/tmp` because of `sun_path`. A drop guard owns `cox serve` and each client child and kills them. Readiness is polled with deadlines (the socket, then each reply line). Lines are built and read with `cox_app::wire`, patches folded with `cox_app::coalesce::apply`, the lock probed with `Store::session_holder`, and the rollout read from `Store::rollout_path`. Verify with five runs of the new test in a row, then the Check below.
+
+Done when `a_reattach_after_a_killed_client_writes_nothing_to_the_rollout` passes.
+
+Out of scope: a restarted worker's `StateChanged` line (a restart replays the rollout and appends one, D6; only a reattach must add nothing), a TUI attach, and Windows.
+
+Product fix found by the test: `cox serve` left `serve.sock` behind after SIGTERM, against this card and `docs/design/serve.md` S9. `Bound` now unlinks the file (a drop guard declared before the lock, so it goes while the lock is still held); `bind` still replaces a file a crash left. Narrow tests in `socket.rs`: `dropping_the_bound_socket_removes_its_file` (fails without the guard), `a_missing_socket_file_does_not_fail_the_drop`.
+
+Check output (2026-10-17):
+```
+cargo nextest run -p cox --test serve --test serve_cmd --test deps: 15 passed (a_reattach_after_a_killed_client_writes_nothing_to_the_rollout 4.4 s)
+cargo test -p cox --test serve, five runs in a row: 5 passed (3.2 to 3.9 s each)
+cargo nextest run -p cox-serve: 27 passed
+cargo clippy -p cox -p cox-serve --all-targets -- -D warnings: clean
+cargo fmt --check: clean
 ```
 
 #### T61.5.3 One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app`
@@ -13591,6 +13862,58 @@ $ mise exec -- cargo clippy -p cox-core --all-targets -- -D warnings
 clean
 $ mise exec -- cargo fmt --check -p cox-core
 clean
+```
+
+#### T33.40.15 Catalog, prices and vendor script without Jev
+
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 3 · Depends: T33.40.14, T33.16 · Size: ~110 · Files: `crates/cox-models/src/catalog.rs`, `crates/cox-models/src/price.rs`, `scripts/vendor/src/cox_vendor/models.py` (+ its tests; `prices.toml` is regenerated by the script, A48)
+Goal: C1, step 4.
+- The `typesafe` special cases in `Catalog::load` and `price.rs` go.
+- `cox-vendor models` stops keeping `jev-latest` as a known exception, and its re-run drops the row from `prices.toml`.
+- Jev's price and window now come only from the plugin row. `cox doctor` shows `source = plugin:jev`, and T30.27's price-sync row stays green.
+Check: `jev_price_comes_from_plugin_row`, `catalog_without_plugin_has_no_jev_row`, the vendor pytest suite, `just vendor models --check` clean.
+
+Result:
+- `cox-vendor models` (`build_prices_toml`) drops a `prices.toml` row that no `[providers.*].models` array lists any more, with a report line; module docs and the vendor README say so, and `typesafe` is no longer named as a section without a models.dev counterpart. Fixture row `jev-latest` plus `test_a_price_row_no_section_lists_is_dropped_and_reported` and `test_dropping_an_orphan_row_is_stable_on_a_rerun` (the first fails without the change).
+- `crates/cox-provider/prices.toml` regenerated by `uv run --project scripts/vendor cox-vendor models` (A48, separate `chore(vendor)` commit): `jev-latest` is gone. The same run took models.dev's current rates for `deepseek-v4-pro` and `deepseek/deepseek-v4-pro`, which the script reports and which no other file pins.
+- `cox-models`: `price.rs` asserts `jev-latest` is absent (23 rows). `catalog.rs` had no Jev-specific code left; the one `typesafe` overlay is T33.40.14's tombstone (an old config's `models` rows join the config layer, as that card requires), so it stays, now commented, and `config_overrides_plugin_row` keeps covering it. New tests read the shipped `plugins/jev/plugin.toml`: `jev_price_comes_from_plugin_row` (both rows, `plugin:jev`, 64k window, 0.042 / 0.0) and `catalog_without_plugin_has_no_jev_row`.
+- `cox doctor`: the `catalog prices` row now builds its catalog with the granted plugins' `[[models]]` (`granted_plugin_models`), so a configured `jev-latest` stays priced once the built-in row is gone (T30.27 stays green); the `plugin <id>` row adds `models from plugin:<id>: ...`, which is the `source = plugin:jev` the design asks for. `doctor_prices_jev_from_the_plugin_row` (end to end, real jev package) covers both.
+
+```
+$ uv run --project scripts/vendor pytest scripts/vendor/tests -q
+60 passed
+$ uv run --project scripts/vendor cox-vendor models --check
+models: up to date
+$ mise exec -- cargo nextest run -p cox-models
+23 tests run: 23 passed
+$ mise exec -- cargo nextest run -p cox --test plugins_jev
+16 tests run: 16 passed
+$ mise exec -- cargo nextest run -p cox-models -p cox-provider -p cox-session -p cox-config -p cox-core -p cox-app -p cox --lib --test deps --test docs
+605 tests run: 605 passed
+$ mise exec -- cargo clippy -p cox-models -p cox --all-targets -- -D warnings
+clean
+$ mise exec -- cargo fmt --check -p cox-models -p cox
+clean
+```
+
+#### T33.40.16 Docs and plan sweep after the removal
+
+Model: Claude Code / sonnet-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 2 · Depends: T33.40.15 · Size: ~80 · Files: `docs/design/providers.md`, `docs/design/crates.md`, `docs/design/v0.2-jev.md` (+ `plan.md`)
+Goal: no doc describes a built-in Jev.
+- `providers.md` loses the Jev family.
+- `crates.md` loses the `cox-provider-jev` row.
+- `v0.2-jev.md` gets a closing note that the integration shipped as the `jev` plugin (A52, T33.40), with the eval verdicts.
+- In `plan.md`, T32.15 is dropped with a reason, and the PL§2 example uses `name = "typesafe"`.
+- Also fixed (found by the Check): the unused `Api::Jev` variant of `cox_models::effort::Api`, and doc comments in `cox-provider-http` and `cox-session` that still described a built-in Jev.
+- T32.15 was already recorded as dropped in this file (with the reason, per A52 decision 12), and the PL§2 example already uses `name = "typesafe"`; both were verified, not changed.
+- The eval verdicts are not in `v0.2-jev.md`: E1 (T33.40.7) needs a live key and has not run. The closing note says so; T33.40.7 owns adding the verdicts.
+Check: `rg -n -i 'jev|typesafe' crates docs` now matches only: the plugin (`plugins/jev` tests and `crates/cox-plugin*`, ABI and manifest docs, `plugins_jev.rs`, fixtures); the tombstone (`LegacyTypesafe`, `[providers.typesafe]` loading in `cox-protocol`, `cox-config`, `cox-session`, `cox-app`, `cox-models` catalog and its tests, `docs/config.jsonschema`); the migration notice (`cox doctor`, `legacy_tier.rs`, its snapshots, `ProviderId` ledger tag `"jev"`); and history (`docs/design/v0.2-jev.md`, `docs/design/plugins.md`, the `providers.md` tombstone mention). `docs/ru` and `docs/uk` had no Jev mentions.
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test docs
+7 tests run: 7 passed
+$ cargo nextest run -p cox --test ide ; -p cox-models ; -p cox-protocol -E 'test(config)' ; -p cox-tui -E 'test(keymap_table_matches_docs)' ; -p cox-provider-http -p cox-session
+3 + 23 + 20 + 1 + 123 tests run: all passed
 ```
 
 ### T71.1 Format the app-server test calls

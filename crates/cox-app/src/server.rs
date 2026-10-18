@@ -150,6 +150,36 @@ pub async fn serve_stdio(home: Option<PathBuf>, mode: ServeMode) -> Result<(), S
     serve(app, mode, events, tokio::io::stdin(), tokio::io::stdout()).await
 }
 
+/// The supervisor's `App` (`docs/design/serve.md` D3): it answers the
+/// workspace calls and opens SQLite, nothing else. Its host has no client to
+/// notify, so what it would push is dropped with the channel.
+pub fn workspace_app(home: Option<PathBuf>) -> Result<Arc<App>, AppError> {
+    let (host, _events) = ServerHost::channel();
+    App::new(home, host)
+}
+
+/// Answers a `projects`, `sessions` or `search` call from the wire (`{"method",
+/// "params"}`) with its reply (`{"kind", "value"}`), or an error text. Here
+/// and not in `cox-serve` because the wire types are this crate's, and
+/// `cox-serve` may not link it (`deps.rs`); any other method is refused, since
+/// the supervisor routes those to a worker.
+pub fn workspace_reply(app: &App, call: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let call: Call = serde_json::from_value(call.clone()).map_err(|e| e.to_string())?;
+    let workspace = app.workspace();
+    let text = |e: crate::workspace::WorkspaceError| e.to_string();
+    let reply = match call {
+        Call::Projects { limit } => Reply::Projects(workspace.projects(limit).map_err(text)?),
+        Call::Sessions { project, limit } => {
+            Reply::Sessions(workspace.sessions(&project, limit).map_err(text)?)
+        }
+        Call::Search { query, limit } => {
+            Reply::Search(workspace.search(&query, limit).map_err(text)?)
+        }
+        _ => return Err("this call needs a session".into()),
+    };
+    serde_json::to_value(reply).map_err(|e| e.to_string())
+}
+
 /// Serves `input`'s requests until it closes, then ends every session and
 /// flushes what the client has not read yet.
 pub async fn serve<R, W>(
@@ -564,6 +594,31 @@ mod tests {
         let info = host_info();
         assert_eq!(info.os, "windows");
         assert_eq!(info.sandbox, None);
+    }
+
+    #[test]
+    fn workspace_reply_answers_the_three_workspace_calls_and_refuses_the_rest() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let app = workspace_app(Some(home.path().join(".cox"))).expect("app");
+        let call = |text: &str| serde_json::from_str(text).expect("json");
+        let projects =
+            workspace_reply(&app, &call(r#"{"method":"projects","params":{"limit":5}}"#));
+        assert_eq!(
+            projects,
+            Ok(serde_json::json!({"kind": "projects", "value": []}))
+        );
+        let search = workspace_reply(
+            &app,
+            &call(r#"{"method":"search","params":{"query":"x","limit":5}}"#),
+        );
+        assert_eq!(
+            search,
+            Ok(serde_json::json!({"kind": "search", "value": []}))
+        );
+        let inbox = workspace_reply(&app, &call(r#"{"method":"inbox"}"#));
+        assert_eq!(inbox, Err("this call needs a session".to_owned()));
+        let bad = workspace_reply(&app, &call(r#"{"method":"projects","params":{}}"#));
+        assert!(bad.is_err(), "{bad:?}");
     }
 
     #[test]

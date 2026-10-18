@@ -73,8 +73,9 @@ pub enum SocketError {
     },
 }
 
-/// A bound supervisor socket. Dropping it closes the socket and releases the
-/// singleton lock; the socket file stays and is replaced by the next holder.
+/// A bound supervisor socket. Dropping it closes the socket, unlinks its file
+/// and then releases the singleton lock. A crash leaves the file, which the
+/// next holder replaces in `bind`.
 #[derive(Debug)]
 pub struct Bound {
     /// The listening socket, ready for `tokio::net::UnixListener::from_std`.
@@ -83,13 +84,35 @@ pub struct Bound {
     pub path: PathBuf,
     /// The effective uid every accepted peer is compared with.
     pub uid: u32,
+    // Before `_lock` (fields drop in order): the file goes while this
+    // process still holds the lock, so it can never remove a successor's.
+    _unlink: Unlink,
     _lock: SessionLock,
+}
+
+/// Removes the socket file on drop; `Bound`'s listener cannot carry a `Drop`
+/// because the serve loop moves it out.
+#[derive(Debug)]
+struct Unlink(PathBuf);
+
+impl Drop for Unlink {
+    fn drop(&mut self) {
+        match std::fs::remove_file(&self.0) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            // A leftover file is replaced by the next holder, so a failure
+            // here is only worth a log line.
+            Err(error) => {
+                tracing::warn!(%error, path = %self.0.display(), "could not remove the socket")
+            }
+        }
+    }
 }
 
 /// Takes the singleton and binds `COX_HOME/run/serve.sock`, owner-only.
 pub fn bind(home: &Path) -> Result<Bound, SocketError> {
+    let path = path(home);
     let run = home.join("run");
-    let path = run.join("serve.sock");
     // Before anything is created, so a refusal leaves no trace.
     check_len(&path)?;
     let uid = own_uid();
@@ -115,10 +138,16 @@ pub fn bind(home: &Path) -> Result<Bound, SocketError> {
         .map_err(|source| io_err("chmod", &path, source))?;
     Ok(Bound {
         listener,
+        _unlink: Unlink(path.clone()),
         path,
         uid,
         _lock: lock,
     })
+}
+
+/// Where the supervisor of `home` (`COX_HOME`) listens.
+pub fn path(home: &Path) -> PathBuf {
+    home.join("run").join("serve.sock")
 }
 
 /// The effective uid of this process.
@@ -271,6 +300,26 @@ mod tests {
             std::os::unix::net::UnixStream::connect(&bound.path).is_ok(),
             "the new listener answers, not the stale file"
         );
+    }
+
+    #[test]
+    fn dropping_the_bound_socket_removes_its_file() {
+        let home = tempfile::tempdir().expect("home");
+        let bound = bind(home.path()).expect("bind");
+        let path = bound.path.clone();
+        assert!(path.exists());
+        drop(bound);
+        assert!(!path.exists(), "a clean shutdown leaves no socket file");
+        // The lock went with it, so the next supervisor binds at once.
+        assert!(bind(home.path()).is_ok());
+    }
+
+    #[test]
+    fn a_missing_socket_file_does_not_fail_the_drop() {
+        let home = tempfile::tempdir().expect("home");
+        let bound = bind(home.path()).expect("bind");
+        std::fs::remove_file(&bound.path).expect("remove");
+        drop(bound);
     }
 
     #[test]

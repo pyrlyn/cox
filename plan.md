@@ -44,16 +44,10 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | --- | --- | --- | --- | --- | --- |
 | T4.1 | in progress | P2 | 3 | 100% | MiMo Desktop / mimo |
 | T32.17 | in progress | P2 | 3 | 80% | Claude / opus-5.5 |
-| T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
-| T33.40.12 | todo | P2 | 3 | 0% | |
-| T33.40.13 | todo | P2 | 3 | 0% | |
-| T33.40.14 | todo | P2 | 3 | 0% | |
-| T33.40.15 | todo | P2 | 3 | 0% | |
-| T33.40.16 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
@@ -119,7 +113,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | in progress | P2 | 3 | 70% | Claude / sonnet-5.5 |
 | T68.10 | in progress | P2 | 1 | 90% | Claude / haiku-5.5 |
 | T70.1 | in progress | P1 | 3 | 100% | MiMo Desktop / mimo |
-
 ## Reference
 
 Name: **cox** — the coxswain steers the boat and calls the strokes; the crew (models, tools, MCP servers) does the rowing. Binary `cox`, crates `cox-*`, home `~/.cox/`.
@@ -866,30 +859,11 @@ Host unit tests use inline WAT (R§4.3.5 P15); no `.wasm` is ever committed. **B
 Rationale: A25/P21, evidence `research.md` §4.3.6 (cited below as J§n/Jn). These seventeen cards test the ABI-form provider, the models, and the decision-point capabilities end to end against a real (wiremocked) use case, prove or refute PL§12 falsifier 3, and carry out `docs/design/plugins.md` §14 decision 8 (C1): the built-in `typesafe` client leaves the core once the plugin reaches parity. T33.18, T33.20 and T33.21 above already carry the amendments this use case needed.
 
 
-#### T33.40.6 `risk` advisor: raise only
-
-Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/it/plugins_jev.rs`
-Goal: J§5.1. There is one request per tool batch. The state is the task, the cwd, the sandbox mode and, for each call, `tool`, `subject`, `input` and `classifier_risk`, never tool output. The questions are the `severity` Score and the `irreversible`, `external_effect` and `exfiltration` Nouls. The thresholds sit in `[plugins.jev.risk]` with the J§5.1 defaults. The advice is "raise to Destructive" or none, and the core keeps `max(builtin, advised)`. `capabilities.decide` gains `risk`.
-Depends: T33.21 (as amended: ask only when the outcome could change), T33.40.1, T33.40.4, T33.40.6.1 · Size: ~190 · Files: `plugins/jev/src/risk.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/plugins_jev.rs`
-Goal: J§5.1. There is one request per tool batch. The state is the task, the cwd, the sandbox mode and, for each call, `tool`, `subject`, `input` and `classifier_risk`, never tool output. The questions are the `severity` Score and the `irreversible`, `external_effect` and `exfiltration` Nouls. The thresholds sit in `[plugins.jev.risk]` with the J§5.1 defaults. The advice is "raise to Destructive" or none, and the core keeps `max(builtin, advised)`. A raise is reported with confidence 1.0, since the guest's own thresholds are the gate, and its probabilities go in the advice note (A163). `capabilities.decide` gains `risk`.
-Check:
-- guest tests:
-  - `risk_state_never_contains_tool_output`;
-  - `risk_thresholds_raise_on_any_hazard`;
-  - `risk_low_answers_give_no_advice`;
-  - `risk_config_overrides_thresholds`;
-- e2e in `Auto` mode with a confining sandbox, where a scripted `git push --force origin main` is auto-allowed without the plugin:
-  - a high fixture gives `Ask`, headless denies, and `Advised { point: risk, applied: true }` is in the rollout;
-  - a low fixture leaves the call allowed;
-  - a wiremock delay past 200 ms leaves it allowed and records T33.40.6.1's late-answer `Notice`, with no `Advised` (A163);
-  - `one_jev_request_per_tool_batch` (the wiremock count for a batch of 3);
-- `risk_advice_cannot_lower_risk` still green.
-
 #### T33.40.7 Eval E1: risk escalation against the classifier alone
 
 Depends: T33.40.6 · Size: ~200 · Files: `evals/src/cox_evals/jev_risk.py`, `evals/tests/test_jev_risk.py`, `evals/risk/commands.yaml` (data)
 Goal: measure J§5.1 against the no-Jev baseline at a hard budget cap.
-- The corpus has about 300 labelled commands: must-ask (force push, publish, deploy, remote delete, pipe-to-shell, credential exfiltration) and benign (build, test, grep, formatting, local git). The labels and a one-line reason are in the file.
+- The corpus has about 300 labelled commands: must-ask (remote push such as `git push origin main`, A164; publish, deploy, remote delete, pipe-to-shell, credential exfiltration) and benign (build, test, grep, formatting, local git). The labels and a one-line reason are in the file.
 - Each command is one scripted bash call in `Auto` mode with the sandbox on. The scripted provider costs $0, and Jev is live.
 - The run is repeated without the plugin as the baseline.
 Plan:
@@ -957,59 +931,6 @@ Goal: one page for users. It covers:
 - the E1/E2 results and the defaults they justify;
 - the migration from `[providers.typesafe]` (J§7).
 Check: `doc_examples` parses every `toml` block on the page against `Config` or the plugin manifest schema and fails on drift.
-
-#### T33.40.12 Remove the built-in Jev client
-
-Depends: T33.40.5, T33.40.6 (parity: the provider and one advisor are served by the plugin) · Size: ~120 edited (the deleted `jev.rs` does not count) · Files: `crates/cox-provider/src/jev.rs` (deleted), `crates/cox-provider/src/lib.rs`, `crates/cox/src/session.rs`
-Goal: C1, step 1.
-- The `typesafe` arm of `backend_for_with` returns the plugin's `PluginProvider` when the plugin is loaded.
-- Otherwise it returns a typed "provided by plugin jev, not loaded" error, which the router step (T33.40.13) turns into fail-open.
-- `jev.rs`'s tests now live in `plugins/jev` (T33.40.2).
-Check: `rg -n 'jev' crates/cox-provider/src` is empty; `typesafe_backend_without_plugin_is_typed_error`; the three standard commands green.
-
-#### T33.40.13 Router and `ProviderId` without Jev
-
-Depends: T33.40.12 · Size: ~120 · Files: `crates/cox-protocol/src/types.rs`, `crates/cox-core/src/router.rs`, `crates/cox-core/src/session.rs`
-Goal: C1, step 2.
-- `ProviderId::Jev` goes, replaced by T33.18's plugin bucket; it is never serialized in events (J§7).
-- The `typesafe` pin in `Router::pick` goes; plugin sections resolve generically.
-- A tier naming a legacy plugin provider (the table `("typesafe", "jev")`) with the plugin absent fails open (D14): one `Notice(Warn)` "Jev moved to a plugin: build `plugins/jev` and run `cox plugin install <dir>`", and that tier uses its `default.toml` provider and model for the session.
-Check: `legacy_typesafe_tier_without_plugin_uses_default_tier_with_notice`, `typesafe_tier_with_plugin_routes_to_plugin_section`, `unknown_provider_still_errors`; `docs/protocol.jsonschema` regenerated.
-
-#### T33.40.14 Config tombstone, `default.toml`, schema and doctor
-
-Depends: T33.40.13 · Size: ~150 · Files: `crates/cox-protocol/src/config.rs`, `crates/cox/src/doctor.rs`, `crates/cox-protocol/default.toml` (config data; `docs/config.md` and the config schema are generated)
-Goal: C1, step 3. An old config loads.
-- `JevProviderConfig` becomes `LegacyTypesafe`: the same keys, still `deny_unknown_fields`, an `Option` with no default section.
-- It stays a named field, so the table can never fall into the flattened `custom` map as a chat-shaped `CompatibleProviderConfig` (J§7).
-- Its knobs feed the plugin's `typesafe` section. Its `models` rows join the config catalog layer.
-- The `[providers.typesafe]` block leaves `default.toml`.
-- The doctor's key check covers plugin provider sections generically. A leftover table without the plugin is a doctor warning with the install pointer.
-Check:
-- `old_typesafe_table_loads_with_notice` (a config file from before this change);
-- `typesafe_table_never_becomes_compatible_section`;
-- `unknown_key_in_typesafe_table_still_rejected`;
-- a doctor snapshot;
-- the config drift test and `every_flag_has_a_config_key` green.
-
-#### T33.40.15 Catalog, prices and vendor script without Jev
-
-Depends: T33.40.14, T33.16 · Size: ~110 · Files: `crates/cox-models/src/catalog.rs`, `crates/cox-models/src/price.rs`, `scripts/vendor/src/cox_vendor/models.py` (+ its tests; `prices.toml` is regenerated by the script, A48)
-Goal: C1, step 4.
-- The `typesafe` special cases in `Catalog::load` and `price.rs` go.
-- `cox-vendor models` stops keeping `jev-latest` as a known exception, and its re-run drops the row from `prices.toml`.
-- Jev's price and window now come only from the plugin row. `cox doctor` shows `source = plugin:jev`, and T30.27's price-sync row stays green.
-Check: `jev_price_comes_from_plugin_row`, `catalog_without_plugin_has_no_jev_row`, the vendor pytest suite, `just vendor models --check` clean.
-
-#### T33.40.16 Docs and plan sweep after the removal
-
-Depends: T33.40.15 · Size: ~80 · Files: `docs/design/providers.md`, `docs/design/crates.md`, `docs/design/v0.2-jev.md` (+ `plan.md`)
-Goal: no doc describes a built-in Jev.
-- `providers.md` loses the Jev family.
-- `crates.md` loses the `cox-provider-jev` row.
-- `v0.2-jev.md` gets a closing note that the integration shipped as the `jev` plugin (A52, T33.40), with the eval verdicts.
-- In `plan.md`, T32.15 is dropped with a reason, and the PL§2 example uses `name = "typesafe"`.
-Check: `rg -n -i 'jev|typesafe' crates docs` matches only the plugin, the tombstone, the migration notice and the history. All docs drift tests are green.
 
 #### T33.40.17 Optional: record live fixtures (needs the creator's key)
 
@@ -1962,8 +1883,6 @@ Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeI
 - Prime's prompt prose;
 - the `HarnessEntry` and `GoalState` schemas;
 - the `pa-daemon` JSONL socket dialect.
-
-
 #### T66.13 Heartbeat re-entry for a resident session
 
 Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 3
@@ -1975,97 +1894,6 @@ Goal: a resident session can receive a recurring prompt (idea: `pa-core/src/cron
 Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 2
 
 Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
-
-#### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
-
-Model: opus · Status: open · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
-
-Goal: a client that connects to the supervisor's socket reaches the right worker, and exactly one client is attached to a session at a time. `docs/design/serve.md` S7, D1, D4 (the bridge), D6 and the trust boundaries. T66.18 supplies worker mode and T66.17's `attach`; T66.20 supplies the socket and `admit`; T66.21 supplies the workers.
-
-Files:
-- `crates/cox-serve/src/router.rs`
-- `crates/cox-serve/src/attach.rs`
-- `crates/cox-serve/src/lib.rs`
-
-Steps:
-1. The accept loop runs `admit(peer_uid, own_uid)` on every connection before its first line is read; a mismatch is dropped and logged.
-2. Workspace calls (`projects`, `sessions`, `search`) are answered by the supervisor's own `App`, which opens SQLite and nothing else; the supervisor never owns a `Session` and never claims a session lock.
-3. A call that names a session is routed by session id to that session's worker. An `open` whose `resume` names a live worker becomes `attach`, never a second core (F1, D6).
-4. One attached client per session: a new `attach` takes the stream over and the previous client gets `ended` for that session. A detach stops only the worker's pump, never its controller, so approvals and questions wait in the worker's inbox and `inbox` returns them on the next attach.
-5. Worker notifications are forwarded to the attached client. Every line from the socket is decoded and refused like any other app-server line.
-6. `attach.rs` is the `--stdio` bridge: `tokio::io::copy_bidirectional` between stdio and the socket, so ssh's own authentication decides who reaches the socket and cox opens no inbound port.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-serve router
-mise exec -- cargo nextest run -p cox --test deps
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when these tests pass: `workspace_calls_need_no_worker`, `session_calls_reach_their_worker`, `a_second_attach_ends_the_first_stream`, `open_resume_of_a_live_worker_attaches`.
-
-Out of scope: the `cox serve` and `cox attach` commands and the hidden `--worker` flag (T66.23), the end-to-end test (T66.24), a TUI that attaches (D2: a separate later design), and Windows.
-
-#### T66.23 `cox serve` and `cox attach --stdio`
-
-Model: sonnet · Status: open · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
-
-Goal: the supervisor and the bridge are commands a person can run. `docs/design/serve.md` S8, D3, D4 item 7 and D8. `crates/cox` stays clap and dispatch only.
-
-Files:
-- `crates/cox/src/cli.rs`, `crates/cox/src/main.rs`
-- `crates/cox/Cargo.toml` (`cox-serve` as an optional workspace path dependency behind the existing `app-server` feature; the `deps.rs` rule T66.19 adds lists `crates/cox` as an allowed dependent)
-- `docs/app-server.md` (a "Resident sessions" section that names both commands, which `docs_name_every_subcommand` requires)
-
-Steps:
-1. `cox serve` runs the supervisor in the foreground; it does not daemonize. The hidden `--worker` flag, not shown in `--help`, runs `cox_app::server::serve` in worker mode over stdin and stdout, and is the argv T66.21's supervisor spawns through `current_exe()`.
-2. `cox attach --stdio` runs T66.22's bridge. It never starts a supervisor: with no `cox serve` running it fails, naming the socket path.
-3. On Windows both commands refuse with "not supported yet".
-4. The docs section states what is resident (a session lives in its worker until `end`), that a TUI session is never resident, and that the desktop app's ssh command stays `cox app-server --stdio` (D8).
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox --test docs
-COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- serve --help
-COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- attach --stdio
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-The last `attach` run exits non-zero and names `COX_HOME/run/serve.sock`; `COX_HOME` is a scratch tree, never `~/.cox`.
-
-Done when `docs_name_every_subcommand` passes, `serve --help` does not list `--worker`, and `cox attach --stdio` with no supervisor fails naming the socket path.
-
-Out of scope: the end-to-end test (T66.24), the desktop app choosing `cox attach --stdio` for a host that runs `cox serve` (a P52 desktop card), and heartbeat (T66.13).
-
-#### T66.24 End-to-end: kill the client, reattach, and the rollout grows only by the turn
-
-Model: sonnet · Status: open · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3
-
-Goal: one test proves the point of the whole serve design: a session outlives its client and a reattach writes nothing to the rollout. `docs/design/serve.md` "Acceptance test for the later cards", S9 and D6.
-
-Files:
-- `crates/cox/tests/serve.rs` (test only)
-
-Steps:
-1. Against a scratch `COX_HOME` with the scripted provider (`COX_PROVIDER=scripted`, `COX_SCENARIO`, as `crates/cox/tests/remote.rs` sets them), start `cox serve` in the background and wait for `run/serve.sock`.
-2. Client A runs `cox attach --stdio`, sends `open` for a new session in a scratch cwd and counts the rollout's lines (M). It sends one prompt, reads patches until the turn ends, records the line count (N, with N > M) and the blocks it folded with `coalesce::apply`.
-3. Kill client A with SIGKILL and assert the worker still holds the lock (`Store::session_holder` is `Some`).
-4. Client B runs `cox attach --stdio` and sends `attach`. Assert `Opened.blocks` equals A's folded blocks, the rollout still has exactly N lines with `seq` running 1..=N without a repeat, and lines M+1..=N are that one turn's events from `TurnStarted` to `TurnDone`.
-5. SIGTERM to `cox serve`: assert the lock is free and the socket is removed.
-6. Every process the test starts is killed at the end, including on failure, through a drop guard (a test never leaves a process behind).
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox --test serve
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `a_reattach_after_a_killed_client_writes_nothing_to_the_rollout` passes.
-
-Out of scope: a restarted worker's `StateChanged` line (a restart replays the rollout and appends one, D6; only a reattach must add nothing), a TUI attach, and Windows.
 
 ### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
 
@@ -2544,6 +2372,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 
 - A161 §3 P66 (new T66.16–T66.18), by the creator (2026-10-17): the first three implementation cards from `docs/design/serve.md` (T66.12), its proposals S1–S3. S1 corrects `docs/app-server.md`, which promises that a turn survives a dropped client; S2 adds `attach`, `end` and `inbox` to the app-server wire and makes `open` of a held session attach (F1: two cores for one session); S3 adds worker mode and ends sessions on EOF (F2). Why: they need no new crate or dependency and fix two bugs the design found. S4–S9 (`cox-serve`, the socket, supervision, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
 - A162 §3 P66 (new T66.19–T66.21), by the creator (2026-10-17): the next three implementation cards from `docs/design/serve.md`, its proposals S4–S6. S4 adds the crate `cox-serve` with a pure restart policy; S5 adds its run directory, singleton lock and owner-only socket with a peer-uid check (D4), extracting `lock::claim_path` in cox-store so one lock implementation serves both; S6 adds worker supervision and shutdown. Why: a new crate, because process supervision and the socket's trust boundary must stay out of `cox-app` (linked into the macOS app) and out of `crates/cox`. No new dependency. S7–S9 (router and bridge, `cox serve`, the TUI attach) wait for a later amendment. No §0 decision changes.
+- A164 §3 P33 (T33.40.6 and T33.40.7 amended), by the creator (2026-10-17): T33.40.6/T33.40.7 e2e use `git push origin main` (classifier: Exec) instead of `git push --force origin main`, which the classifier already rates Destructive so `risk` is never asked.
 - A160 §3 P32 (new T32.17), by the creator (2026-10-13, for Mailune X1; numbered A155 on its branch, renumbered on merge because main's A155 is T33.46): `cox-config` consumes the shared `config-schema` crate (layering with named layers and per-key provenance, the `COX_*` env layer, comment-preserving edits) that was extracted from it, rtok and ketch, and drops its own copy. Why: the workspace rule against duplicated code across projects. Effect: one card; `config-schema` replaces `cox-config`'s direct `figment` and `toml_edit` dependencies. No §0 decision changes.
 - A165 §3 P66 (new T66.22–T66.24), by the creator (2026-10-17): the last three implementation cards from `docs/design/serve.md`, its proposals S7–S9. S7 adds the router and the `--stdio` bridge to `cox-serve` (workspace calls answered by the supervisor's own `App`, session calls routed by id to their worker, an `open` of a live session turned into `attach`, one attached client per session with `ended` for the one displaced); S8 adds the `cox serve` and `cox attach --stdio` commands, the hidden `--worker` flag and the docs section; S9 is the end-to-end test that kills a client, reattaches and checks that the rollout grows only by the turn. Why: they finish the chain T66.16–T66.21 so that a session outlives the client that opened it (D1, D4, D6). T66.22 depends on T66.18, T66.20 and T66.21, because serve.md S7 depends on S2, S5 and S6. No split: each card fits within 500 non-test lines. No new external dependency, so no `plan.md` §1 row is needed (serve.md requires none); `cox-serve` is already added by A162. T66.13 (heartbeat) and T66.14 still wait for their own later amendment. No §0 decision changes.
 
