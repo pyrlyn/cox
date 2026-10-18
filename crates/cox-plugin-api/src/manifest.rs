@@ -4,6 +4,8 @@
 //! one definition; reading the file and the checks that need the filesystem
 //! (the `id` matches its directory) stay with the loader in `cox-plugin`.
 
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -34,10 +36,10 @@ pub struct PluginManifest {
     #[serde(default)]
     pub description: String,
     /// The module to load, relative to the package directory. Absent only
-    /// for a data-only package — `[[mcp]]` servers, `[[agents]]` files
-    /// and/or `[[skills]]` folders (PL§13/§14, T33.38, T45.3, T33.46):
-    /// `validate` then requires
-    /// `capabilities` to be its default and `provider`/`models`/
+    /// for a data-only package — `[[mcp]]` servers, `[[language_servers]]`,
+    /// `[[debug_adapters]]`, `[[agents]]` files and/or `[[skills]]` folders
+    /// (PL§13/§14, T33.38, T45.3, T33.46, Kerf T4.2): `validate` then
+    /// requires `capabilities` to be its default and `provider`/`models`/
     /// `external_agents` to be empty, since every other capability class
     /// needs a wasm export to back it.
     pub wasm: Option<String>,
@@ -59,6 +61,15 @@ pub struct PluginManifest {
     /// `[[mcp]]` server declarations (PL§7c).
     #[serde(default)]
     pub mcp: Vec<McpDecl>,
+    /// `[[language_servers]]` entries: a language server process the plugin
+    /// declares and the host spawns (Kerf T4.2, PL§7e). Same "no bypass"
+    /// rule as `[[mcp]]`: the guest never starts a process.
+    #[serde(default)]
+    pub language_servers: Vec<LanguageServerDecl>,
+    /// `[[debug_adapters]]` entries: a Debug Adapter Protocol process the
+    /// plugin declares and the host spawns (Kerf T4.2, PL§7e).
+    #[serde(default)]
+    pub debug_adapters: Vec<DebugAdapterDecl>,
     /// `[[external_agents]]` entries: a plugin-brought external agent CLI
     /// driven over ACP or `stream-json` (P35, EA§1 in
     /// `docs/design/external-agents.md`).
@@ -427,6 +438,66 @@ pub struct McpDecl {
     pub url: Option<String>,
 }
 
+/// A `[[language_servers]]` entry (Kerf T4.2, PL§7e): a language server the
+/// plugin declares and the **host** spawns, never a wasm export — the same
+/// "no bypass" rule as `[[mcp]]` and `[[external_agents]]`. The command is a
+/// program inside the package (covered by the digest) or on PATH (shown
+/// verbatim at approval); the host wraps it under the session sandbox and
+/// caps its stdout/stderr buffers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LanguageServerDecl {
+    /// Server name; unique in the package, joined as `<id>-<name>`.
+    pub name: String,
+    /// Language ids it serves (`"rust"`, `"python"`), matched against the
+    /// buffer language. Empty with `globs` empty means never selected.
+    #[serde(default)]
+    pub languages: Vec<String>,
+    /// Glob patterns it serves, matched against workspace-relative paths.
+    #[serde(default)]
+    pub globs: Vec<String>,
+    /// Program inside the package or on PATH. Non-empty.
+    pub command: String,
+    /// Arguments for `command`.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment the host sets on the child. Keys are env var names and
+    /// values are literals; the host starts from an empty environment plus
+    /// these (as `cox-mcp` clears its child's env). Secrets stay out: a key
+    /// is named through `key_env` on a decl that has one, never written here.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// Optional server configuration the host passes on initialize (LSP
+    /// `initializationOptions` / a settings blob). Opaque to the host.
+    #[serde(default)]
+    pub config: Option<serde_json::Value>,
+}
+
+/// A `[[debug_adapters]]` entry (Kerf T4.2, PL§7e): a Debug Adapter Protocol
+/// process the plugin declares and the host spawns. Same shape and spawn
+/// rule as [`LanguageServerDecl`]; `languages` is the buffer languages it
+/// debugs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DebugAdapterDecl {
+    /// Adapter name; unique in the package, joined as `<id>-<name>`.
+    pub name: String,
+    /// Language ids it debugs (`"rust"`, `"python"`).
+    #[serde(default)]
+    pub languages: Vec<String>,
+    /// Program inside the package or on PATH. Non-empty.
+    pub command: String,
+    /// Arguments for `command`.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment the host sets on the child; see [`LanguageServerDecl::env`].
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// Optional adapter configuration the host passes at launch. Opaque.
+    #[serde(default)]
+    pub config: Option<serde_json::Value>,
+}
+
 /// A `[[external_agents]]` entry (EA§1): a host-spawned external agent CLI,
 /// never a WASM export — a guest cannot open a process (EA§2).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -564,13 +635,26 @@ pub enum ManifestError {
     /// A `key_env` is not an env var name.
     #[error("key_env {0:?} must be an env var name such as CURSOR_API_KEY, not a value")]
     KeyEnv(String),
+    /// An `env` map key is not an env var name.
+    #[error("env key {0:?} must be an env var name such as RUST_LOG, not a value")]
+    EnvName(String),
     /// `wasm` is absent, but the manifest declares something besides
-    /// `[[mcp]]` servers, `[[agents]]` files and `[[skills]]` folders: only
-    /// a data-only package may omit `wasm`.
+    /// `[[mcp]]` servers, `[[language_servers]]`, `[[debug_adapters]]`,
+    /// `[[agents]]` files and `[[skills]]` folders: only a data-only package
+    /// may omit `wasm`.
     #[error(
-        "wasm is required unless the package only declares [[mcp]], [[agents]] and [[skills]] (PL§13/§14)"
+        "wasm is required unless the package only declares [[mcp]], [[language_servers]], [[debug_adapters]], [[agents]] and [[skills]] (PL§13/§14)"
     )]
     MissingWasm,
+    /// A `[[language_servers]]`/`[[debug_adapters]]` `command` is empty.
+    #[error("{0:?} needs a non-empty command")]
+    EmptyCommand(String),
+    /// Two `[[language_servers]]` entries share a name.
+    #[error("[[language_servers]] name {0:?} is declared twice")]
+    DuplicateLanguageServer(String),
+    /// Two `[[debug_adapters]]` entries share a name.
+    #[error("[[debug_adapters]] name {0:?} is declared twice")]
+    DuplicateDebugAdapter(String),
     /// An `[[agents]]` file is absolute, climbs out with `..`, or is not a
     /// `.md` file.
     #[error("[[agents]] file {0:?} must be a relative .md path inside the package, with no ..")]
@@ -609,8 +693,8 @@ impl PluginManifest {
             return Err(ManifestError::Id(self.id.clone()));
         }
         if self.wasm.is_none() {
-            // `[[mcp]]`, `[[agents]]` and `[[skills]]` need no wasm export
-            // to back them.
+            // `[[mcp]]`, `[[language_servers]]`, `[[debug_adapters]]`,
+            // `[[agents]]` and `[[skills]]` need no wasm export to back them.
             let data_only = self.capabilities == Capabilities::default()
                 && self.provider.is_empty()
                 && self.models.is_empty()
@@ -672,6 +756,37 @@ impl PluginManifest {
             }
             if server.command.is_some() == server.url.is_some() {
                 return Err(ManifestError::McpTransport(server.name.clone()));
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for ls in &self.language_servers {
+            // Same "fits after prefixing" rule as an `[[external_agents]]` name.
+            if ls.name.contains("__") || !is_tool_name(&format!("{}-{}", self.id, ls.name)) {
+                return Err(ManifestError::ToolName(ls.name.clone()));
+            }
+            if !seen.insert(ls.name.as_str()) {
+                return Err(ManifestError::DuplicateLanguageServer(ls.name.clone()));
+            }
+            if ls.command.trim().is_empty() {
+                return Err(ManifestError::EmptyCommand(ls.name.clone()));
+            }
+            if let Some(bad) = ls.env.keys().find(|k| !is_env_var_name(k)) {
+                return Err(ManifestError::EnvName(bad.clone()));
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for dap in &self.debug_adapters {
+            if dap.name.contains("__") || !is_tool_name(&format!("{}-{}", self.id, dap.name)) {
+                return Err(ManifestError::ToolName(dap.name.clone()));
+            }
+            if !seen.insert(dap.name.as_str()) {
+                return Err(ManifestError::DuplicateDebugAdapter(dap.name.clone()));
+            }
+            if dap.command.trim().is_empty() {
+                return Err(ManifestError::EmptyCommand(dap.name.clone()));
+            }
+            if let Some(bad) = dap.env.keys().find(|k| !is_env_var_name(k)) {
+                return Err(ManifestError::EnvName(bad.clone()));
             }
         }
         for agent in &self.external_agents {
@@ -1439,5 +1554,135 @@ key_env = "CURSOR_API_KEY"
         ] {
             assert!(!is_package_path(bad), "{bad}");
         }
+    }
+
+    /// Kerf T4.2: the `[[language_servers]]`/`[[debug_adapters]]` tables are
+    /// absent from an existing manifest and default to empty.
+    #[test]
+    fn language_server_tables_default_to_empty() {
+        let m = example();
+        assert!(m.language_servers.is_empty());
+        assert!(m.debug_adapters.is_empty());
+        assert_eq!(m.validate(), Ok(()));
+    }
+
+    /// Kerf T4.2's full example: both tables parse, validate and round-trip.
+    const IDE_PROCESS: &str = r#"
+[[language_servers]]
+name = "rust-analyzer"
+languages = ["rust"]
+globs = ["**/*.rs"]
+command = "bin/rust-analyzer"
+args = ["--stdio"]
+env = { RUST_LOG = "error" }
+config = { diagnostics = { enable = true } }
+
+[[debug_adapters]]
+name = "codelldb"
+languages = ["rust"]
+command = "bin/codelldb"
+args = ["--port", "0"]
+"#;
+
+    #[test]
+    fn language_server_and_debug_adapter_tables_parse_and_validate() {
+        let m = parse(&format!("{EXAMPLE}\n{IDE_PROCESS}")).expect("the Kerf T4.2 example parses");
+        assert_eq!(
+            m.language_servers,
+            vec![LanguageServerDecl {
+                name: "rust-analyzer".into(),
+                languages: vec!["rust".into()],
+                globs: vec!["**/*.rs".into()],
+                command: "bin/rust-analyzer".into(),
+                args: vec!["--stdio".into()],
+                env: BTreeMap::from([("RUST_LOG".into(), "error".into())]),
+                config: Some(serde_json::json!({ "diagnostics": { "enable": true } })),
+            }]
+        );
+        assert_eq!(
+            m.debug_adapters,
+            vec![DebugAdapterDecl {
+                name: "codelldb".into(),
+                languages: vec!["rust".into()],
+                command: "bin/codelldb".into(),
+                args: vec!["--port".into(), "0".into()],
+                env: BTreeMap::new(),
+                config: None,
+            }]
+        );
+        assert_eq!(m.validate(), Ok(()));
+    }
+
+    #[test]
+    fn language_server_tables_reject_unknown_keys() {
+        for field in ["language_ids", "download", "stdio"] {
+            let toml = format!(
+                "{EXAMPLE}\n{}",
+                IDE_PROCESS.replace(
+                    "command = \"bin/rust-analyzer\"",
+                    &format!("{field} = \"x\"\ncommand = \"bin/rust-analyzer\"")
+                )
+            );
+            let err = parse(&toml).expect_err("an unknown key is refused");
+            assert!(err.contains("unknown field"), "{field}: {err}");
+        }
+    }
+
+    #[test]
+    fn language_server_and_debug_adapter_reject_an_empty_command() {
+        for table in ["language_servers", "debug_adapters"] {
+            let toml = format!("{EXAMPLE}\n[[{table}]]\nname = \"x\"\ncommand = \"\"\n");
+            let m = parse(&toml).expect("an empty command is still a string");
+            assert_eq!(m.validate(), Err(ManifestError::EmptyCommand("x".into())));
+        }
+    }
+
+    #[test]
+    fn language_server_rejects_a_bad_env_key_or_duplicate_name() {
+        let mut m = parse(&format!("{EXAMPLE}\n{IDE_PROCESS}")).expect("parses");
+        m.language_servers[0].env = BTreeMap::from([("RUST-LOG".into(), "error".into())]);
+        assert_eq!(m.validate(), Err(ManifestError::EnvName("RUST-LOG".into())));
+        let mut m = parse(&format!("{EXAMPLE}\n{IDE_PROCESS}")).expect("parses");
+        m.language_servers.push(m.language_servers[0].clone());
+        assert_eq!(
+            m.validate(),
+            Err(ManifestError::DuplicateLanguageServer(
+                "rust-analyzer".into()
+            ))
+        );
+        let mut m = parse(&format!("{EXAMPLE}\n{IDE_PROCESS}")).expect("parses");
+        m.debug_adapters.push(m.debug_adapters[0].clone());
+        assert_eq!(
+            m.validate(),
+            Err(ManifestError::DuplicateDebugAdapter("codelldb".into()))
+        );
+    }
+
+    /// Kerf T4.2: like `[[mcp]]`, a package whose only content is language
+    /// servers and debug adapters needs no `plugin.wasm`.
+    #[test]
+    fn manifest_allows_a_wasm_less_language_server_only_package() {
+        let toml = r#"
+api = 1
+id = "ide-kit"
+version = "0.1.0"
+name = "IDE kit"
+
+[[language_servers]]
+name = "rust-analyzer"
+languages = ["rust"]
+command = "bin/rust-analyzer"
+
+[[debug_adapters]]
+name = "codelldb"
+languages = ["rust"]
+command = "bin/codelldb"
+"#;
+        let m = parse(toml).expect("a wasm-less ls/dap-only manifest parses");
+        assert_eq!(m.wasm, None);
+        assert_eq!(m.validate(), Ok(()));
+        let with_tool = format!("{toml}\n[capabilities]\ntools = [\"summarise\"]\n");
+        let m = parse(&with_tool).expect("structurally valid");
+        assert_eq!(m.validate(), Err(ManifestError::MissingWasm));
     }
 }

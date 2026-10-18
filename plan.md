@@ -130,6 +130,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T68.8 | in progress | P2 | 3 | 70% | Claude / sonnet-5.5 |
 | T68.9 | in progress | P1 | 2 | 0% | Claude / sonnet-5.5 |
 | T68.10 | in progress | P2 | 1 | 90% | Claude / haiku-5.5 |
+| T70.1 | in progress | P1 | 3 | 90% | MiMo Desktop / mimo |
 
 ## Reference
 
@@ -2801,6 +2802,20 @@ Remaining for the Windows host agent: `cox-session`, `cox-app` and `cox` are not
 Model: Claude / haiku-5.5 · Status: in progress · Depends: T68.5, T68.6, T68.7 · Size: ~150 (doc) · Priority: P2 · Complexity: 1
 
 Goal: `docs/targets.md` (each kind, how to put `cox` on it, what the trust rules above mean for a user, the sandbox inside a container), `docs/app-server.md` narrowed to the wire, `docs/config.md`, README links. Done when every target kind has a worked example and `docs/app-server.md` no longer explains ssh setup.
+
+### P70 — Kerf IDE plugin contract (goal: cox-plugin-api carries the manifest tables Kerf needs to declare host-spawned language servers and debug adapters)
+
+#### T70.1 Kerf T4.2: LSP and DAP manifest tables
+
+Model: MiMo Desktop / mimo · Status: in progress · Depends: — · Size: ~250 · Priority: P1 · Complexity: 3 · Files: `crates/cox-plugin-api/src/manifest.rs`, `docs/design/plugins.md` PL§2/§7e, `docs/plugin.schema.json`
+
+Matching Kerf `plan.md` T4.2. `[[language_servers]]` and `[[debug_adapters]]` in `PluginManifest`, its JSON Schema, validation and the plugin docs. The plugin declares a process; the host spawns it — the same "no bypass" rule as `[[mcp]]` (PL§7c/§10). Sibling Kerf T4.1 owns the IDE permission classes (buffer/lsp/dap/index/terminal/git); this card is the manifest side only.
+
+Landed: `LanguageServerDecl`/`DebugAdapterDecl` (`name`, `languages`, `globs` on LS, `command`, `args`, `env`, `config`) with `deny_unknown_fields` and `#[serde(default)]` so existing manifests parse; validation (non-empty `command`, `env` keys are env var names, id-joined name rule as `ExternalAgentDecl`, unique names); a data-only package may declare only these tables without `wasm`; schema + field-index drift tests; PL§7e field table, example and the spawn rule.
+
+Check: `language_server_tables_default_to_empty`, `language_server_and_debug_adapter_tables_parse_and_validate`, `language_server_tables_reject_unknown_keys`, `language_server_and_debug_adapter_reject_an_empty_command`, `language_server_rejects_a_bad_env_key_or_duplicate_name`, `manifest_allows_a_wasm_less_language_server_only_package`; `plugin_schema_matches_committed_file`, `plugin_api_reference_covers_both_schemas`; `cargo test -p cox-plugin-api`, clippy `-D warnings`, `fmt --check` green.
+
+Remaining (not this card): Kerf T1 may rename the tables; a download/install hint for LSP/DAP binaries (open, deliberately out of the struct); the host spawn, supervision and buffer caps (Kerf T1), and T4.1's permission classes.
 
 ---
 

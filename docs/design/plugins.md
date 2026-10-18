@@ -33,7 +33,7 @@ A plugin is a directory. Its id is `^[a-z][a-z0-9-]{1,23}$` with no `__`.
 <id>/
   plugin.toml          manifest (§2)
   plugin.wasm          the module the manifest names
-  bin/…                optional: executables an [[mcp]] entry names (§7c)
+  bin/…                optional: executables an [[mcp]], [[language_servers]] or [[debug_adapters]] entry names (§7c, §7e)
   README.md            optional
 ```
 
@@ -164,6 +164,20 @@ name = "gh"
 command = "bin/gh-mcp-${target}" # inside the package, or a PATH program shown verbatim at approval
 args = ["--stdio"]
 
+[[language_servers]]             # §7e (Kerf T4.2): host-spawned LSP process
+name = "rust-analyzer"
+languages = ["rust"]
+globs = ["**/*.rs"]
+command = "bin/rust-analyzer"
+args = ["--stdio"]
+env = { RUST_LOG = "error" }
+config = { diagnostics = { enable = true } }
+
+[[debug_adapters]]               # §7e (Kerf T4.2): host-spawned DAP process
+name = "codelldb"
+languages = ["rust"]
+command = "bin/codelldb"
+
 [[agents]]                       # T45.3: a subagent definition, same format as .cox/agents/*.md
 name = "reviewer"                # dispatched as agent(preset: "reviewer")
 file = "agents/reviewer.md"
@@ -182,7 +196,8 @@ Validation (T33.1 and T33.4):
 - a `ui.render` target outside the plugin's own tools needs an explicit `tool:<name>`, which approval shows as "changes how <name> looks";
 - an `[[agents]]` `file` is a relative `.md` path with no `..`, `\` or `:` component, and names are unique (T45.3);
 - a `[[skills]]` `name` is 1–64 lowercase letters, digits and `-`; its `dir` is a relative path with no `..`, `\` or `:` component whose last component is the name (the folder `cox-ext` requires); names are unique (T33.46);
-- `wasm` may be omitted only by a data-only package: `[[mcp]]`, `[[agents]]` and/or `[[skills]]`, nothing else;
+- a `[[language_servers]]`/`[[debug_adapters]]` `command` is non-empty, `env` keys are env var names, and names are unique (§7e, Kerf T4.2);
+- `wasm` may be omitted only by a data-only package: `[[mcp]]`, `[[language_servers]]`, `[[debug_adapters]]`, `[[agents]]` and/or `[[skills]]`, nothing else;
 - unknown keys are an error. The manifest is ours, so `deny_unknown_fields` applies, as in `Config` (`crates/cox-protocol/src/config.rs:35`);
 - `surfaces` and the surface tables `[capabilities.terminal]` and `[capabilities.desktop]` follow §15.5; `ui.keys` is an alias of `terminal.keys`;
 - `[capabilities.ide]` (§16) is the IDE permission classes. Absent and an all-`false` table are the same: no class requested. Unknown keys inside it are an error like every other table.
@@ -206,7 +221,7 @@ There is no general kv table today (`schema.rs:13-87`). A narrow `PluginStore` t
 - `NeedsApproval { added, removed }`: a new digest, or wider capabilities.
 - `Disabled`.
 
-The granted list (T33.6) is a sorted JSON array of strings, one line per capability: `events:<tag>`, `hooks:<name>`, `tools:<name>`, `invoke:<name>`, `net:<host>`, `fs.read:<root>`, `fs.write:<root>`, `decide:<point>`, `ui.render:<target>`, the flags `wasi`, `context`, `kv`, `ui.status`, `ui.panel`, `ui.overlay`, `ui.commands`, `ui.keys`, `model:cheap` or `model:code`, the IDE classes `ide.buffer`, `ide.lsp`, `ide.dap`, `ide.index`, `ide.terminal` and `ide.git` (§16), plus one line per `[[provider]]` (`provider:<name> <base_url> key=<env>`), `[[mcp]]` (`mcp:<name> <command args | url>`) `[[external_agents]]` entry (`agent:<name> <argv> key=<env>`), `[[agents]]` entry (`subagent:<name> <file>`, T45.3) and `[[skills]]` entry (`skill:<name> <dir>`, T33.46). The model tier is the one ordered entry: a `model:code` grant covers a `model:cheap` request. A row whose `capabilities` is not such an array grants nothing, and a store read error counts as no grant. `Disabled` wins over the digest check. A project `.cox/config.toml` may turn `plugins.enabled` off but never on (the project-config guard list).
+The granted list (T33.6) is a sorted JSON array of strings, one line per capability: `events:<tag>`, `hooks:<name>`, `tools:<name>`, `invoke:<name>`, `net:<host>`, `fs.read:<root>`, `fs.write:<root>`, `decide:<point>`, `ui.render:<target>`, the flags `wasi`, `context`, `kv`, `ui.status`, `ui.panel`, `ui.overlay`, `ui.commands`, `ui.keys`, `model:cheap` or `model:code`, the IDE classes `ide.buffer`, `ide.lsp`, `ide.dap`, `ide.index`, `ide.terminal` and `ide.git` (§16), plus one line per `[[provider]]` (`provider:<name> <base_url> key=<env>`), `[[mcp]]` (`mcp:<name> <command args | url>`), `[[language_servers]]` (`lsp:<name> <command args>`, §7e), `[[debug_adapters]]` (`dap:<name> <command args>`, §7e), `[[external_agents]]` entry (`agent:<name> <argv> key=<env>`), `[[agents]]` entry (`subagent:<name> <file>`, T45.3) and `[[skills]]` entry (`skill:<name> <dir>`, T33.46). The model tier is the one ordered entry: a `model:code` grant covers a `model:cheap` request. A row whose `capabilities` is not such an array grants nothing, and a store read error counts as no grant. `Disabled` wins over the digest check. A project `.cox/config.toml` may turn `plugins.enabled` off but never on (the project-config guard list).
 
 By surface:
 
@@ -353,6 +368,39 @@ For both forms:
 
 Raw `cox_http` to a paid API would bypass the ledger and the budget, and would need the key inside the guest. Manifest validation therefore refuses a `net` entry that matches the host of any configured provider section. Talking to a provider goes through a provider section or `cox_model_call`.
 
+**7e. Language servers and debug adapters (Kerf T4.2).** `[[language_servers]]` and `[[debug_adapters]]` declare a process the **host** spawns — the plugin never does (§10 "No bypass", same rule as `[[mcp]]` and `[[external_agents]]`). The plugin returns the command; the core checks the grant, wraps the argv under the session sandbox policy and runs it with hard caps on the stdout/stderr buffers. A language server speaks LSP over stdio; a debug adapter speaks DAP. Both are external processes like an MCP stdio server, not wasm exports.
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `name` | string, required | unique in the package; fits `[a-zA-Z0-9_-]{1,64}` as `<id>-<name>`; no `__` |
+| `languages` | array of strings | language ids it serves/debugs (`"rust"`); empty (with `globs` empty on an LS) means never selected |
+| `globs` | array of strings | `[[language_servers]]` only: workspace-relative glob patterns it serves |
+| `command` | string, required | non-empty; program inside the package (covered by the digest) or on PATH (shown verbatim at approval) |
+| `args` | array of strings | arguments for `command` |
+| `env` | table of string → string | keys are env var names (`[A-Za-z_][A-Za-z0-9_]*`); the host starts from an empty environment plus these. Secrets are named through a `key_env` field on a decl that has one, never written as values here |
+| `config` | optional table/JSON blob | opaque to the host; passed as LSP `initializationOptions` or the adapter's launch config |
+
+Example (`plugin.toml`):
+
+```toml
+[[language_servers]]
+name = "rust-analyzer"
+languages = ["rust"]
+globs = ["**/*.rs"]
+command = "bin/rust-analyzer"
+args = ["--stdio"]
+env = { RUST_LOG = "error" }
+config = { diagnostics = { enable = true } }
+
+[[debug_adapters]]
+name = "codelldb"
+languages = ["rust"]
+command = "bin/codelldb"
+args = ["--port", "0"]
+```
+
+A package of only `[[language_servers]]`/`[[debug_adapters]]` (with `[[mcp]]`, `[[agents]]`, `[[skills]]`) is data-only and needs no `plugin.wasm`. Open, not in this table: a download/install hint (checksummed binary fetch, as `ketch` does for LSP/DAP binaries). T4.1 owns the matching permission classes (buffer/lsp/dap/index/terminal/git); this section is the manifest side only. Spawn, supervision, restart policy and buffer caps are host work (Kerf T1), not plugin API.
+
 ## 8. TUI contributions
 
 **Widget tree** (`cox-plugin-api::ui`). It is declarative and closed:
@@ -416,7 +464,7 @@ The desktop app draws the same slots, renderers and commands. Keys are terminal-
   - No fuel metering: epoch interruption (P13) is cheaper and enough.
 - **Filesystem.** Only WASI preopens from `fs`. Each root passes `cox_tools::path::confine` at load. `.git` and `.cox` are never writable (D7), and read grants mount `ro:` (P11). WASI is on only when `wasi = true` or `fs` is set. The `WasiCtx` has no environment and no arguments (P16). Implemented in `crates/cox-plugin/src/fs.rs` (T33.14.2): `cox-plugin` may not depend on `cox-sandbox`, so the session injects `confine`. `$WORKSPACE` mounts at `/workspace` and `$PLUGIN_DATA` (`<home>/plugin-data/<id>/`, created on demand) at `/data`, each with the manifest's sub-path appended. A WASI mount cannot hide a subdirectory, so an `fs.write` root is refused when it is inside `.git`/`.cox` or any of them exists anywhere beneath it (a walk capped at 50 000 entries; a larger tree is refused too): write `$WORKSPACE/out`, not `$WORKSPACE`, in a repository. A root also granted for write is not mounted a second time as `ro:`. A grant with no session roots fails the load.
 - **Network.** Only `cox_http`, only to allow-listed hosts, capped by `max_http_response_bytes`. extism's own `http_request` is compiled out (P5), and a test proves it refuses.
-- **No bypass.** No host function spawns a process, opens a file, writes the terminal, reads the keyring or decides a permission. MCP stdio servers (§7c) and external-agent CLI processes (`[[external_agents]]`, P35, `docs/design/external-agents.md`) are the only processes a plugin brings, and both run under the same sandbox wrap, spawned by the host, never by a WASM guest.
+- **No bypass.** No host function spawns a process, opens a file, writes the terminal, reads the keyring or decides a permission. MCP stdio servers (§7c), external-agent CLI processes (`[[external_agents]]`, P35, `docs/design/external-agents.md`) and language-server / debug-adapter processes (`[[language_servers]]`, `[[debug_adapters]]`, §7e, Kerf T4.2) are the only processes a plugin brings, and all run under the same sandbox wrap, spawned by the host with hard caps on their stdout/stderr buffers, never by a WASM guest.
 - **Untrusted output.** Everything a plugin returns is untrusted like MCP output: tool descriptions and results go to the model through the normal archive and truncate path, and everything shown in the terminal is sanitized.
 - **Fail open (D14).**
   - A load failure, a trap, a timeout or invalid JSON is `Notice(Warn)` plus absence.
@@ -537,7 +585,7 @@ The surface is fixed when the session opens. A remote session is a desktop sessi
 Everything `api = 1` had before this section, minus `keys`:
 
 - **Exports:** `cox_init`, `cox_on_event`, `cox_hook`, `cox_decide`/`cox_decide_resume`, `cox_tool_subject`/`cox_tool_risk`/`cox_tool_call`, `cox_provider_stream`, `cox_command`, `cox_render`, `cox_render_item`, `cox_shutdown` (§4).
-- **Manifest:** `[capabilities]` `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui.status`, `ui.panel`, `ui.overlay`, `ui.commands`, `ui.render`; `[[provider]]`, `[[models]]`, `[[mcp]]`, `[[external_agents]]`, `[[agents]]` (§2).
+- **Manifest:** `[capabilities]` `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui.status`, `ui.panel`, `ui.overlay`, `ui.commands`, `ui.render`; `[[provider]]`, `[[models]]`, `[[mcp]]`, `[[language_servers]]`, `[[debug_adapters]]`, `[[external_agents]]`, `[[agents]]` (§2, §7e).
 - **Host functions** in `cox:host/v1`: `cox_log`, `cox_notify`, `cox_kv_*`, `cox_context`, `cox_invoke_tool`, `cox_model_call`, `cox_http`, `cox_output`/`cox_cancelled`, `cox_redraw` (§4).
 - **Widgets and slots:** the closed `Widget` tree with `StyleToken` roles (§8); the `status.left`/`status.right`, `panel` and `overlay` slots; `tool:`/`item:` renderers; `/<id>:<name>` commands. Sizes are in cells: the TUI's grid, the app's `font.monoCode` cells (`PluginWidgetView`, DS§6.3).
 - **Layout rules both hosts already apply alike** are shared, not terminal-only: a status segment is at most 24 cells and plugin segments drop first when the row is narrow (`SEGMENT_COLS` in `crates/cox-tui/src/status.rs` and in `crates/cox-app/src/plugin_ui.rs`; the app's `SessionToolbar` drops them first through `ViewThatFits`, DS§6.4); the panel is at most 8 rows (`PANEL_ROWS` in both); the overlay is `Modal::Plugin` in the TUI and a sheet that Esc closes in the app (DS§6.4 `PluginPanel`). They are host layout, not API: a plugin only receives `RenderIn { width, height }`.

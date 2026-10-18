@@ -176,6 +176,23 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
         });
         out.insert(format!("mcp:{} {target}", m.name));
     }
+    // `[[language_servers]]` / `[[debug_adapters]]` (Kerf T4.2, PL§7e) are
+    // processes the host spawns after the grant; the line names the command
+    // so approving it is informed and any change asks again.
+    for ls in &manifest.language_servers {
+        let argv = std::iter::once(ls.command.as_str())
+            .chain(ls.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.insert(format!("lsp:{} {argv}", ls.name));
+    }
+    for dap in &manifest.debug_adapters {
+        let argv = std::iter::once(dap.command.as_str())
+            .chain(dap.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.insert(format!("dap:{} {argv}", dap.name));
+    }
     for a in &manifest.external_agents {
         let argv = std::iter::once(a.command.as_str())
             .chain(a.args.iter().map(String::as_str))
@@ -248,6 +265,8 @@ mod tests {
             provider: Vec::new(),
             models: Vec::new(),
             mcp: Vec::new(),
+            language_servers: Vec::new(),
+            debug_adapters: Vec::new(),
             external_agents: Vec::new(),
             cloud_agents: Vec::new(),
             agents: Vec::new(),
