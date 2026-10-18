@@ -40,7 +40,6 @@ Seventeen new crates (`cox-models` comes from T30.24 (U4)), twenty-seven in tota
 | `cox-provider-http` | `http.rs`, `retry.rs`, `sse.rs` (~500) | (d) shared by every wire | protocol |
 | `cox-provider-anthropic` | `anthropic/*` (~2.1k) | (a)(c) typify build step | protocol, models, provider-http |
 | `cox-provider-openai` | `openai/*` (~2.2k) | (a)(c) async-openai | protocol, models, provider-http |
-| `cox-provider-jev` | `jev.rs` | (c) | protocol, models, provider-http |
 | `cox-provider-testkit` | `scripted.rs`, `replay.rs` (~750) | (d) dev-dependency of every test | protocol |
 | `cox-telemetry` | `cox/telemetry.rs` | (a) five otel crates | — |
 | `cox-serve` | T66.19 (new, `serve.md` S4), T66.20 (`socket`, S5), T66.21 (`supervisor`, S6), T66.22 (`router`, `attach`, S7) | (b) process supervision and the socket's trust boundary stay out of `cox-app` (linked into the macOS app) and `crates/cox`; the pure restart policy, the run directory, singleton lock and owner-only socket, the worker processes, then the router and the `attach --stdio` bridge (tokio, serde_json for the wire envelope; the workspace calls go through an injected `Workspace`) | store (`lock::claim_path`) |
@@ -81,7 +80,7 @@ Order:
 2. C3 `cox-sandbox`, C4 `cox-syntax`, C5 `cox-search`, C6 `cox-patch`, C7 `cox-web`.
 3. C8 `cox-permission`, C9 `cox-telemetry`, C10 `cox-tokens`.
 4. C11 `cox-provider-testkit`, C12 `cox-provider-http`.
-5. The provider wires after T30.21–T30.26 (U1–U6), so they move once, already unified: C13 anthropic, C14 openai, C15 jev.
+5. The provider wires after T30.21–T30.26 (U1–U6), so they move once, already unified: C13 anthropic, C14 openai.
 6. C16 `cox-config` last. Its `anyhow` becomes a `thiserror` enum, because AGENTS.md keeps `anyhow` in `crates/cox` only.
 
 ## Falsifier

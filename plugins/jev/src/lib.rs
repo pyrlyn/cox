@@ -9,14 +9,15 @@
 //!   host target.
 //! - [`provider`] — `cox_provider_stream` for the `typesafe` section
 //!   (T33.40.3): System One over `cox_http`, pure behind two closures.
-//! - [`decide`] — the two-phase `cox_decide`/`cox_decide_resume` (T33.40.4)
-//!   with one minimal `risk` question.
+//! - [`decide`] — the two-phase `cox_decide`/`cox_decide_resume` (T33.40.4).
+//! - [`risk`] — the J§5.1 `risk` advisor (T33.40.6): the batch's questions,
+//!   the `[plugins.jev.risk]` thresholds and the raise-only verdict.
 //!
-//! The full `risk` advisor (T33.40.6) and the `route` advisor (T33.40.9)
-//! land in later cards, and `capabilities.decide` with them.
+//! The `route` advisor (T33.40.9) lands in a later card.
 
 pub mod decide;
 pub mod provider;
+pub mod risk;
 pub mod wire;
 
 /// The `wasm32-unknown-unknown` exports (PL§4), gated so the pure [`wire`]
@@ -24,6 +25,7 @@ pub mod wire;
 /// "the extism-pdk glue sits behind `cfg(target_arch = "wasm32")`").
 #[cfg(target_arch = "wasm32")]
 mod guest {
+    use std::sync::Mutex;
     use std::sync::atomic::AtomicBool;
 
     use cox_plugin_sdk::{
@@ -32,15 +34,24 @@ mod guest {
     };
 
     use crate::provider::{self, StreamError};
+    use crate::risk::{self, Thresholds};
 
     /// Whether this instance already warned about a tier routed to
     /// `typesafe`: one notice per loaded plugin, not one per request (J13).
     static WARNED: AtomicBool = AtomicBool::new(false);
 
-    /// No contributions beyond the manifest yet: the decision points
-    /// (`decide`/`context`) are later cards. An `init` export is still
-    /// required first (`docs/plugins.md`).
-    fn init(_: InitIn) -> Result<InitOut, SdkError> {
+    /// `[plugins.jev.risk]` as `init` read it, kept for every resume of the
+    /// session this instance serves.
+    static THRESHOLDS: Mutex<Option<Thresholds>> = Mutex::new(None);
+
+    /// Refuses an invalid `[plugins.jev.risk]`, so the host warns and skips
+    /// the plugin rather than judge calls by defaults the user overrode.
+    fn init(input: InitIn) -> Result<InitOut, SdkError> {
+        let thresholds =
+            risk::thresholds(&input.config).map_err(|e| SdkError::Wire(e.to_string()))?;
+        if let Ok(mut slot) = THRESHOLDS.lock() {
+            *slot = Some(thresholds);
+        }
         Ok(InitOut::default())
     }
 
@@ -56,7 +67,12 @@ mod guest {
     }
 
     fn decide_resume(resumed: DecideResume) -> Result<Option<Advice>, SdkError> {
-        Ok(crate::decide::resume(&resumed))
+        let thresholds = THRESHOLDS
+            .lock()
+            .ok()
+            .and_then(|t| t.clone())
+            .unwrap_or_default();
+        Ok(crate::decide::resume(&resumed, &thresholds))
     }
 
     cox_plugin_sdk::register!(
@@ -93,6 +109,7 @@ mod tests {
             let price = model.price.as_ref().expect("a price row");
             assert_eq!((price.input, price.output), (0.042, 0.0), "J7");
         }
+        assert_eq!(manifest.capabilities.decide, ["risk"], "T33.40.6");
         assert_eq!(manifest.validate(), Ok(()));
     }
 }

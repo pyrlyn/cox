@@ -330,10 +330,10 @@ pub fn refuse_provider_hosts(
         &providers.openai.base_url,
         &providers.local.base_url,
         &providers.lmstudio.base_url,
-        &providers.typesafe.base_url,
     ];
     let hosts = native
         .into_iter()
+        .chain(providers.typesafe.iter().map(|t| &t.base_url))
         .chain(providers.custom.values().map(|c| &c.base_url))
         .chain(manifest.provider.iter().map(|p| &p.base_url))
         .filter_map(|base| Url::parse(base).ok()?.host_str().map(str::to_owned));
