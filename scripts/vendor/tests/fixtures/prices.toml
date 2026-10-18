@@ -89,3 +89,12 @@ cache_write = 0.0
 cache_read = 0.0
 verified_on = "2026-09-04"
 source_url = "local inference, no billing"
+
+[[model]]
+id = "jev-latest"
+input = 0.042
+output = 0.0
+cache_write = 0.0
+cache_read = 0.0
+verified_on = "2026-09-20"
+source_url = "https://example.test/jev"

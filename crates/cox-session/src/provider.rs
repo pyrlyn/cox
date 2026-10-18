@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cox_protocol::Config;
-use cox_protocol::config::Transport;
+use cox_protocol::config::{LegacyTypesafe, Transport};
 use cox_protocol::traits::Provider;
 use cox_provider::anthropic::{AnthropicProvider, CacheTtl};
 use cox_provider::openai::chat::OpenAiChatProvider;
@@ -95,11 +95,19 @@ pub(crate) fn assemble(
 }
 
 /// The native `[providers.<name>]` table an ABI section shares its name
-/// with: only `typesafe`, whose client is moving into the Jev plugin
-/// (T33.40). While both exist one name serves one client, so every field
-/// of the table configures the plugin's section (T33.40.4, T33.40.5).
+/// with: only `typesafe`, whose built-in client is gone (T33.40.12). Every
+/// field of the leftover table configures the plugin's section (T33.40.5).
 pub(crate) fn abi_transport(config: &Config, section: &str) -> Option<Transport> {
-    (section == "typesafe").then(|| config.providers.typesafe.transport())
+    legacy_table(config, section).map(|t| t.transport())
+}
+
+/// The leftover `[providers.typesafe]` table, when `section` is its name.
+fn legacy_table<'a>(config: &'a Config, section: &str) -> Option<&'a LegacyTypesafe> {
+    config
+        .providers
+        .typesafe
+        .as_ref()
+        .filter(|_| section == "typesafe")
 }
 
 /// [`abi_transport`] with the table's default `model`, as the plugin host
@@ -109,12 +117,13 @@ pub(crate) fn abi_section(
     config: &Config,
     section: &str,
 ) -> Option<cox_plugin::provider::SectionConfig> {
-    let t = abi_transport(config, section)?;
+    let legacy = legacy_table(config, section)?;
+    let t = legacy.transport();
     Some(cox_plugin::provider::SectionConfig {
         base_url: t.base_url,
         api_key_env: t.api_key_env,
         timeout_s: t.timeout_s,
-        model: config.providers.typesafe.model.clone(),
+        model: legacy.model.clone(),
     })
 }
 
@@ -138,17 +147,17 @@ pub(crate) fn provider_for_served(
 
 /// The real client `tiers.code.provider` names, before pricing: one lookup
 /// from the section to (api shape, `&Transport`) to a constructor (T30.23),
-/// instead of a bespoke arm per family. Anthropic and Jev stay their own
-/// arms because they carry section-specific knobs no OpenAI-shaped section
-/// has (cache TTL/fallbacks; a decision model); every `api = "chat"` or
+/// instead of a bespoke arm per family. Anthropic stays its own arm
+/// because it carries section-specific knobs no OpenAI-shaped section
+/// has (cache TTL/fallbacks); `typesafe` is a typed error, its client being
+/// a plugin's (T33.40.12); every `api = "chat"` or
 /// `"responses"` section — native `openai`/`local` and any Type-2 compatible
 /// section alike — goes through the one `openai_shaped` constructor.
 ///
 /// Takes the credential lookup as `resolve` (A49, T30.28): every arm
-/// resolves its key through it — `AnthropicProvider::with_key`/
-/// `JevProvider::with_key` take the already-resolved key instead of
-/// resolving it themselves, and `openai_shaped` takes `resolve` straight
-/// through — so [`provider_for_with`]'s caller decides whether that is the
+/// resolves its key through it — `AnthropicProvider::with_key` takes the
+/// already-resolved key instead of resolving it itself, and `openai_shaped`
+/// takes `resolve` straight through — so [`provider_for_with`]'s caller decides whether that is the
 /// real `cox_provider::http::resolve_key` or a test's fake lookup.
 fn backend_for_with(
     config: &Config,
@@ -228,28 +237,14 @@ fn backend_for_with(
                 max_context,
             )?))
         }
-        // Jev is type-1 native (System One wire, T21.1): its own client,
-        // not an OpenAI shape. A missing key fails `Auth` rather than
-        // building keyless — that is the fail-open path, read as auth, not
-        // transport.
-        "typesafe" => {
-            let t = &config.providers.typesafe;
-            let transport = t.transport();
-            let api_key = resolve(&transport.api_key_env, "typesafe")?;
-            // 128k, same as before T30.25, when the catalog has no row —
-            // expected, since Jev/TypeSafe models have no models.dev
-            // counterpart (`cox-vendor models` never touches this section).
-            let max_context = catalog
-                .get(&t.model)
-                .and_then(|row| row.context_window)
-                .unwrap_or(128_000);
-            Ok(Arc::new(cox_provider::jev::JevProvider::with_key(
-                &transport,
-                api_key,
-                t.model.clone(),
-                max_context,
-            )?))
-        }
+        // The Jev client lives in the `jev` plugin (T33.40). `assemble`
+        // serves a loaded plugin's section before it gets here, so reaching
+        // this arm means the plugin is absent, ungranted or the build has no
+        // plugin host.
+        "typesafe" => Err(SessionError::PluginNotLoaded {
+            section: "typesafe".into(),
+            plugin: "jev".into(),
+        }),
         "openai" => {
             let o = &config.providers.openai;
             // No `context_window` field on the native section (it relies
@@ -475,23 +470,34 @@ mod tests {
         assert_eq!(p.id(), ProviderId::Local);
     }
 
-    /// T33.40.5: with no Jev plugin loaded the ABI map is empty and the
-    /// `typesafe` section keeps its built-in client.
+    /// T33.40.12: with no Jev plugin loaded the ABI map is empty and the
+    /// `typesafe` section has no client left in the core, so it fails with
+    /// the typed error the router turns into fail-open (T33.40.13), never
+    /// with a missing-key `Auth` error.
     #[test]
-    fn builtin_jev_used_when_plugin_absent() {
+    fn typesafe_backend_without_plugin_is_typed_error() {
         let mut cfg = Config::default();
         cfg.tiers.code.provider = "typesafe".into();
         let models: &[cox_models::PluginModels] = &[];
-        let (primary, map) = assemble(
+        let err = match assemble(
             &cfg,
             |_, _| Ok("sk-test".to_string()),
             None,
             models,
             AbiProviders::new(),
-        )
-        .expect("the built-in Jev client builds from a resolved key");
-        assert_eq!(primary.id(), ProviderId::Jev);
-        assert!(map.is_empty());
+        ) {
+            Ok(_) => panic!("the typesafe section has no built-in client"),
+            Err(e) => e,
+        };
+        assert!(
+            matches!(&err, SessionError::PluginNotLoaded { section, plugin }
+                if section == "typesafe" && plugin == "jev"),
+            "{err:?}"
+        );
+        assert!(
+            err.to_string()
+                .contains("provided by plugin jev, not loaded")
+        );
     }
 
     /// T33.40.5: every field of `[providers.typesafe]` reaches the plugin's
@@ -500,10 +506,14 @@ mod tests {
     #[test]
     fn typesafe_table_supplies_the_plugin_section() {
         let mut cfg = Config::default();
-        cfg.providers.typesafe.base_url = "http://127.0.0.1:9".into();
-        cfg.providers.typesafe.api_key_env = "MY_JEV_KEY".into();
-        cfg.providers.typesafe.timeout_s = 7;
-        cfg.providers.typesafe.model = "jev-1.13.0".into();
+        assert_eq!(abi_section(&cfg, "typesafe"), None, "no table, no override");
+        cfg.providers.typesafe = Some(LegacyTypesafe {
+            base_url: "http://127.0.0.1:9".into(),
+            api_key_env: "MY_JEV_KEY".into(),
+            timeout_s: 7,
+            model: "jev-1.13.0".into(),
+            ..LegacyTypesafe::default()
+        });
         assert_eq!(
             abi_section(&cfg, "typesafe"),
             Some(cox_plugin::provider::SectionConfig {

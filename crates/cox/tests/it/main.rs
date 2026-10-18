@@ -21,8 +21,11 @@ mod plain;
 mod plugin_cli;
 mod plugin_example_dart;
 mod plugin_example_go;
+mod plugin_example_kotlin;
 mod plugin_new_cli;
 mod plugins;
 mod plugins_jev;
 mod run_cli;
 mod subagent_messaging;
+#[cfg(feature = "plugins")]
+mod wasm_example;

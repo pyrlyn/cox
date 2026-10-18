@@ -48,7 +48,7 @@ let package = Package(
         "CoxUI",
         .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
       ],
-      exclude: ["__Snapshots__"],
+      exclude: ["Snapshots"],
       plugins: [swiftLint]
     ),
   ]

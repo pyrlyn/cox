@@ -2,9 +2,8 @@
 //! questions}` request and `{answers, usage}` response, typed and pure —
 //! no network, no `extism-pdk`, so it builds and tests on the host target
 //! the same as `wasm32-unknown-unknown` (T33.40.2). Ported from
-//! `crates/cox-provider/src/jev.rs`, which leaves the core once this plugin
-//! reaches parity (T33.40.12), with two fixes the port made against the
-//! vendor docs rather than the old code:
+//! the former `crates/cox-provider/src/jev.rs` (deleted by T33.40.12), with
+//! two fixes the port made against the vendor docs rather than the old code:
 //!
 //! - a Noul's certainty is `|2p − 1|`, computed here, never read off a
 //!   `confidence` field the API does not send for Noul (J11);
@@ -52,7 +51,7 @@ pub struct SystemOneRequest {
 
 impl SystemOneRequest {
     /// Builds a request, capping `state` per J6. `model` falls back to
-    /// [`DEFAULT_MODEL`] when empty, the same default `crates/cox-provider/src/jev.rs`
+    /// [`DEFAULT_MODEL`] when empty, the same default the former built-in client
     /// used for an unnamed tier.
     pub fn new(
         state: Value,

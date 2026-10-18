@@ -1511,7 +1511,7 @@ impl std::fmt::Display for ModelId {
 /// `Plugin` carries the ABI section name (T33.18). It is not `Copy`, and it
 /// serializes as `plugin:<section>` — the same shape as `Job::Plugin` — so
 /// the ledger's text column stays a JSON string (`cox_store::to_tag`) and
-/// does not collide with `jev` or a compatible section's `local` tag.
+/// does not collide with a compatible section's `local` tag.
 /// `provider_name` returns the bare section name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderId {
@@ -1521,8 +1521,6 @@ pub enum ProviderId {
     OpenAi,
     /// A local OpenAI-compatible server (Ollama, vLLM, LM Studio, …).
     Local,
-    /// TypeSafe System One API (Jev decision model, T21.1).
-    Jev,
     /// An external CLI agent from a plugin (EA§6, T35.5): billed on the
     /// user's own plan, so its ledger rows are `$0` and never priced here.
     External,
@@ -1537,7 +1535,6 @@ impl ProviderId {
             Self::Anthropic => std::borrow::Cow::Borrowed("anthropic"),
             Self::OpenAi => std::borrow::Cow::Borrowed("openai"),
             Self::Local => std::borrow::Cow::Borrowed("local"),
-            Self::Jev => std::borrow::Cow::Borrowed("jev"),
             Self::External => std::borrow::Cow::Borrowed("external"),
             Self::Plugin(name) => std::borrow::Cow::Owned(format!("plugin:{name}")),
         }
@@ -1557,7 +1554,10 @@ impl<'de> Deserialize<'de> for ProviderId {
             "anthropic" => Ok(Self::Anthropic),
             "openai" => Ok(Self::OpenAi),
             "local" => Ok(Self::Local),
-            "jev" => Ok(Self::Jev),
+            // The built-in Jev client wrote this tag before it became a
+            // plugin (T33.40.12); its section is `typesafe`. Old ledger
+            // rows must keep reading, or `cox stats` calls them corrupt.
+            "jev" => Ok(Self::Plugin("typesafe".to_string())),
             "external" => Ok(Self::External),
             other => match other.strip_prefix("plugin:") {
                 Some(name) if !name.is_empty() => Ok(Self::Plugin(name.to_string())),
@@ -1567,7 +1567,6 @@ impl<'de> Deserialize<'de> for ProviderId {
                         "anthropic",
                         "openai",
                         "local",
-                        "jev",
                         "external",
                         "plugin:<section>",
                     ],
@@ -1589,7 +1588,6 @@ impl JsonSchema for ProviderId {
                 { "type": "string", "const": "anthropic" },
                 { "type": "string", "const": "openai" },
                 { "type": "string", "const": "local" },
-                { "type": "string", "const": "jev" },
                 { "type": "string", "const": "external" },
                 { "type": "string", "pattern": "^plugin:.+$" }
             ]
@@ -1831,6 +1829,18 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
+
+    /// T33.40.13: a ledger row written by the retired built-in Jev client
+    /// still reads, as the plugin section that replaced it.
+    #[test]
+    fn legacy_jev_provider_tag_reads_as_the_typesafe_plugin_section() {
+        let id: ProviderId = serde_json::from_str("\"jev\"").expect("legacy tag");
+        assert_eq!(id, ProviderId::Plugin("typesafe".into()));
+        assert_eq!(
+            serde_json::to_string(&id).expect("tag"),
+            "\"plugin:typesafe\""
+        );
+    }
 
     fn sample_usage() -> Usage {
         Usage {

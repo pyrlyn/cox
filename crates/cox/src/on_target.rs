@@ -147,7 +147,13 @@ pub fn run(cli: &Cli, config: &Config, on: &str) -> anyhow::Result<i32> {
         .stdin
         .take()
         .ok_or_else(|| anyhow::anyhow!("the launcher has no stdin"))?;
-    writeln!(remote_stdin, "{}", serde_json::to_string(&prompt)?)?;
+    // why: a launcher that exits before reading the prompt (a refused argv,
+    // an unreachable host) closes the pipe; its exit code says why, our
+    // EPIPE does not.
+    match writeln!(remote_stdin, "{}", serde_json::to_string(&prompt)?) {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return exit_code(child.wait()?),
+        written => written?,
+    }
     // why: our stdin is the remote approvals channel; the thread is left to
     // die with the process, as a terminal stdin never reaches EOF.
     std::thread::spawn(move || {

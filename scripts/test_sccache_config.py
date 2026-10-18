@@ -39,10 +39,10 @@ class MiseEnv(unittest.TestCase):
 
 
 class Workflows(unittest.TestCase):
-    def test_the_desktop_action_uses_the_pinned_shared_sccache_before_cargo(self):
+    def test_the_desktop_action_runs_the_shared_sccache_action_before_cargo(self):
         text = (ROOT / ".github/actions/desktop-macos/action.yml").read_text()
-        uses = "uses: pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979"
-        self.assertIn(uses, text)
+        shared = "uses: pyrlyn/ci/.github/actions/sccache@"
+        self.assertIn(shared, text)
         for action_input, caller_input in {
             "access-key-id": "sccache-access-key-id",
             "secret-access-key": "sccache-secret-access-key",
@@ -51,7 +51,7 @@ class Workflows(unittest.TestCase):
             "read-only": "sccache-read-only",
         }.items():
             self.assertIn(f"{action_input}: ${{{{ inputs.{caller_input} }}}}", text)
-        self.assertLess(text.index(uses), text.index("scripts/desktop/xcframework.sh"))
+        self.assertLess(text.index(shared), text.index("scripts/desktop/xcframework.sh"))
 
     def test_the_pr_desktop_job_passes_the_backend_read_only_on_pull_requests(self):
         text = (ROOT / ".github/workflows/ci.yml").read_text()

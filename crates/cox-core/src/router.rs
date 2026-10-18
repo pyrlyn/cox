@@ -126,7 +126,9 @@ impl Router {
         let name = tc.provider.as_str();
         // An ABI section wins over a built-in of the same name, so a
         // legacy `typesafe` tier follows the plugin once it is loaded
-        // (T33.18) instead of the native Jev client.
+        // (T33.18). Without it the name is unknown here: session assembly
+        // moves such a tier to the default one before any route is picked
+        // (T33.40.13).
         let provider = if config.providers.abi.contains(name) {
             ProviderId::Plugin(name.to_string())
         } else {
@@ -140,9 +142,6 @@ impl Router {
                 // here keeps this route label and the live provider's id (the
                 // ledger row's `provider` field) in agreement.
                 "lmstudio" => ProviderId::Anthropic,
-                // Jev is type-1 native (System One wire, T21.1): its own id so
-                // the ledger row reads as a decision call, not an LLM turn.
-                "typesafe" => ProviderId::Jev,
                 // Type-2 (compatible) providers are OpenAI-Chat-shaped by
                 // construction, so they ride the `Local` family id — the
                 // ledger's "OpenAI-compatible" bucket, where the model string
@@ -163,10 +162,9 @@ impl Router {
         // without also editing every tier model. Native tiers carry their
         // own configured model. An empty section default falls back to the
         // tier model rather than sending an empty id.
-        // An ABI section has no built-in pin: `providers.typesafe.model`
-        // is `jev-latest`, and applying it would send the plugin a model
-        // it did not declare. The tier model (or a session override) is
-        // what the guest is asked for.
+        // An ABI section has no built-in pin: a plugin is asked for the
+        // tier model (or a session override), not for a model it did not
+        // declare.
         let pinned = if config.providers.abi.contains(name) {
             None
         } else {
@@ -175,11 +173,8 @@ impl Router {
                 // Same pin rule as `local`, but `lmstudio.model` is normally
                 // left empty (T30.15: pin through `tiers.code.model` /
                 // `--tier code=<model>` instead) — an empty pin falls through
-                // to `tc.model` below, same as an unset `local`/`typesafe` one.
+                // to `tc.model` below, same as an unset `local` one.
                 "lmstudio" => Some(config.providers.lmstudio.model.clone()),
-                // Same pin rule as `local`: a bare `tiers.<t>.provider =
-                // "typesafe"` flip works without editing every tier model.
-                "typesafe" => Some(config.providers.typesafe.model.clone()),
                 other => config.providers.custom.get(other).map(|c| c.model.clone()),
             }
         };
@@ -346,14 +341,12 @@ mod tests {
         cfg
     }
 
-    /// T33.18: an ABI section name, including a legacy `typesafe` tier,
-    /// resolves to `ProviderId::Plugin` and keeps the tier model. Without
-    /// the registration, `typesafe` stays the built-in Jev client.
+    /// T33.18: an ABI section name resolves to `ProviderId::Plugin` and
+    /// keeps the tier model.
     #[test]
     fn plugin_provider_section_resolves_by_name() {
         let mut cfg = Config::default();
         cfg.providers.abi.insert("acme".into());
-        cfg.providers.abi.insert("typesafe".into());
         cfg.tiers.code.provider = "acme".into();
         cfg.tiers.code.model = "acme-model".into();
         let route = Router::pick(&cfg, Job::Main, Tier::Code, &Overrides::default(), true)
@@ -364,21 +357,44 @@ mod tests {
         assert_eq!(tag, serde_json::json!("plugin:acme"));
         let back: ProviderId = serde_json::from_value(tag).expect("round trip");
         assert_eq!(back, ProviderId::Plugin("acme".into()));
+    }
 
+    /// T33.40.13: a legacy `typesafe` tier follows the plugin section once
+    /// it is loaded, and the tier model is not replaced by the retired
+    /// `providers.typesafe.model` pin.
+    #[test]
+    fn typesafe_tier_with_plugin_routes_to_plugin_section() {
+        let mut cfg = Config::default();
+        cfg.providers.abi.insert("typesafe".into());
         cfg.tiers.code.provider = "typesafe".into();
         cfg.tiers.code.model = "tier-model".into();
         let route = Router::pick(&cfg, Job::Main, Tier::Code, &Overrides::default(), true)
             .expect("plugin typesafe routes");
         assert_eq!(route.provider, ProviderId::Plugin("typesafe".into()));
         assert_eq!(route.model.0, "tier-model");
-        assert_ne!(route.model.0, cfg.providers.typesafe.model);
+        assert_ne!(
+            route.model.0,
+            cox_protocol::config::LegacyTypesafe::default().model
+        );
+    }
 
-        let mut plain = Config::default();
-        plain.tiers.code.provider = "typesafe".into();
-        let route = Router::pick(&plain, Job::Main, Tier::Code, &Overrides::default(), true)
-            .expect("built-in typesafe routes");
-        assert_eq!(route.provider, ProviderId::Jev);
-        assert_eq!(route.model.0, plain.providers.typesafe.model);
+    /// T33.40.13: with no section loaded `typesafe` is an unknown name like
+    /// any other; session assembly moves such a tier off it first.
+    #[test]
+    fn unknown_provider_still_errors() {
+        for name in ["typesafe", "weird"] {
+            let mut cfg = Config::default();
+            cfg.tiers.code.provider = name.into();
+            let err = Router::pick(&cfg, Job::Main, Tier::Code, &Overrides::default(), true)
+                .expect_err("unknown provider");
+            assert_eq!(
+                err,
+                RouteError::UnknownProvider {
+                    tier: Tier::Code,
+                    name: name.into()
+                }
+            );
+        }
     }
 
     #[test]
