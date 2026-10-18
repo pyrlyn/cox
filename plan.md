@@ -43,6 +43,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
 | T4.1 | in progress | P2 | 3 | 100% | MiMo Desktop / mimo |
+| T32.17 | in progress | P2 | 3 | 80% | Claude / opus-5.5 |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
@@ -184,9 +185,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 | Crate | Owns | Key deps (pinned in T0.1; versions verified in R§4.5) |
 |-------|------|------|
 | `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15 |
-| `cox-config` | the one config owner (T32.16; split out of `cox`): figment layering (default/user/project/env/flag), validation, `cox config set` editing and the `docs/config.jsonschema` drift test. Errors are a `thiserror` enum | figment, toml_edit 0.25, thiserror |
-| `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents, cloud agent drivers (T56.6); login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell), cox-cursor-cloud and futures (T56.6: the cloud agent driver and its run stream; both already in the tree) |
-| `cox-config` | the one config owner (T32.16; split out of `cox`): figment layering (default/user/project/env/flag), validation, `cox config set` editing and the `docs/config.jsonschema` drift test. Errors are a `thiserror` enum | figment, toml_edit 0.25, thiserror |
+| `cox-config` | the one config owner (T32.16; split out of `cox`): layering (default/user/project/env/flag) through the shared `config-schema` crate (T32.17), validation, `cox config set` editing and the `docs/config.jsonschema` drift test. Errors are a `thiserror` enum | config-schema 0.1 (figment and toml_edit inside it), schemars, thiserror |
 | `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents, cloud agent drivers (T56.6); login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell), cox-cursor-cloud and futures (T56.6: the cloud agent driver and its run stream; both already in the tree), similar 3.2 (T66.8: the unified diff a refine review shows; already a workspace dependency) |
 | `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
 | `cox-ffi` | the macOS app's UniFFI surface (T37.14): one tokio runtime, `App` and `SessionHandle` objects, the foreign `AppHost` trait, `#[uniffi::remote]` mirrors of cox-app types, a fixture recorder. `staticlib` + `lib`; the only crate that depends on uniffi | uniffi 0.32.2 (proc-macros, no UDL; default features off); dev: syn 3.0.5 (`full`, `parsing`; T37.39.1: `tests/forward_only.rs` parses the FFI sources); async-trait (MIT OR Apache-2.0): the async `AppHost` methods UniFFI exports (P51, P52) |
@@ -844,6 +843,22 @@ Every card in this phase:
 
 No logic changes. At most three crates are touched. Moved lines do not count toward the 200-LOC limit; edited lines do.
 Common check: the three commands in AGENTS.md are green, `deps.rs` has the crate's rule, and the card's own line holds.
+
+#### T32.17 `cox-config` loads through the shared `config-schema` crate
+
+Model: Claude / opus-5.5 · Status: in progress · Depends: — · Size: ~200 (plus tests) · Files: `crates/cox-config/src/{load,cmd,lib}.rs`, `crates/cox-config/Cargo.toml`, `Cargo.toml`, `Cargo.lock`, `workspace-hack/Cargo.toml`, `toolchain.md`
+Goal: `config-schema` 0.1 (crates.io, `pyrlyn/crates-packages`) was extracted from this crate, rtok's `config/layers.rs` and ketch's `toml_file.rs`; `cox-config` consumes it instead of keeping its own copy (A160, the creator's approval for Mailune X1). Not a `git mv` card like the rest of P32: it deletes code the shared crate now owns. Behaviour stays the same: the layer order, `source_of`, `COX_*` handling, the A138 check in `cox config set` and the `ConfigError`/`CoreError::Config` variants; the existing `cox-config` and `crates/cox` config tests pass unchanged.
+
+Plan:
+1. `load.rs`: the layers go through `config_schema::Layers` (`toml_text` default, `file` user and project, `env` with an `EnvLayer` over `default.toml`'s key tree and the same ignore list, `overrides` for `COX_HOME` and the flags). Delete `Named`, `env_key`, `default_key_tree` and `to_core_error`; `find_git_root` keeps its canonical path over `config_schema::git_root`. `Layers` merges only, so the imported Claude layers keep figment's `adjoin` reading in a small JSON step (lists add, the lower layers win elsewhere), and `source_of` reports the lower layer for a key they only extended, as `adjoin` did. Array keys keep reading a `COX_*` value as TOML, not as a comma list.
+2. `cmd.rs`: `set` and `set_json_in` plan the edit with `config_schema::plan_edit_foreign`, check the result with `check_user_toml` (A138), then `Edit::apply`; delete the private `parse_value`, `toml_from_json` and the table walk.
+3. `lib.rs`: `ConfigError` keeps its variants; `InvalidToml` carries the parser's message as text, and `config_schema::Error` maps onto the existing variants.
+4. Manifests: `config-schema = "0.1"` in the workspace, `cox-config` drops its direct `figment` and `toml_edit`; `cargo hakari generate`; `toolchain.md` and §1.1. The workspace `rust.md` row is the creator's to add.
+
+Blocked: `config-schema` 0.1.0 is not on crates.io yet (the release run of `pyrlyn/crates-packages` on 2026-10-13 stopped on an untagged head). Steps 1–3 are done and tested against a local copy of the crate's d515d92 source; `Cargo.lock` and `workspace-hack/Cargo.toml` are regenerated, and the gates rerun, once the registry has it.
+
+Check: `mise exec -- cargo nextest run -p cox-config -p cox -p cox-app`, then the three commands in AGENTS.md, `cargo hakari verify` and `cargo deny --locked check`; a real `cox config show --sources` and `cox config set` against a scratch `COX_HOME`.
+Out of scope: `docs/config.jsonschema` keeps `schemars::schema_for!` (`config_schema::schema_text` drops `null` from `Option` types, which would change the committed schema and the desktop Settings screen's input).
 
 ### P33 — WASM plugins (goal: one package adds a status segment, a hook, a deferred tool and a provider without a cox release; §1.15 invariants 1, 8, 10 and 15–17 green; ≤ 50 ms warm start per plugin)
 

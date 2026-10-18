@@ -1009,6 +1009,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "config-schema"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86954634b6c48b4336b02a6602756405f8bd1a53a5f7b0349937b6260fa96522"
+dependencies = [
+ "figment",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml_edit 0.25.15+spec-1.1.0",
+]
+
+[[package]]
 name = "console"
 version = "0.16.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1198,8 +1212,8 @@ dependencies = [
 name = "cox-config"
 version = "0.1.2"
 dependencies = [
+ "config-schema",
  "cox-protocol",
- "figment",
  "schemars 1.2.2",
  "serde_json",
  "tempfile",
@@ -8947,6 +8961,7 @@ dependencies = [
  "event-listener",
  "event-listener-strategy",
  "fastrand",
+ "figment",
  "fnv",
  "form_urlencoded",
  "futures",
@@ -8956,7 +8971,6 @@ dependencies = [
  "futures-task",
  "futures-util",
  "getrandom 0.2.17",
- "getrandom 0.3.4",
  "getrandom 0.4.3",
  "gimli 0.34.0",
  "hashbrown 0.16.1",
@@ -8965,7 +8979,6 @@ dependencies = [
  "hyper-rustls",
  "hyper-util",
  "indexmap 2.14.2",
- "itertools 0.13.0",
  "itertools 0.14.0",
  "libc",
  "linux-raw-sys",
@@ -9036,7 +9049,6 @@ dependencies = [
  "winapi",
  "windows",
  "windows-core",
- "windows-sys 0.52.0",
  "windows-sys 0.61.2",
  "winnow 0.7.15",
  "winnow 1.0.4",
