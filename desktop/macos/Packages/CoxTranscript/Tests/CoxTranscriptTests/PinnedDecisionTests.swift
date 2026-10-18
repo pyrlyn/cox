@@ -72,7 +72,7 @@ struct PinnedDecisionTests {
     let host = waiting.host(dark: dark)
     defer { host.close() }
     // Anti-aliasing differs slightly between machines; a real change moves far more pixels.
-    assertSnapshot(
+    try assertVersionedSnapshot(
       of: try host.image(), as: .image(precision: 0.995, perceptualPrecision: 0.98),
       named: dark ? "dark-solid" : "light-solid",
       testName: "aWaitingApprovalIsPinnedAboveTheComposer")
