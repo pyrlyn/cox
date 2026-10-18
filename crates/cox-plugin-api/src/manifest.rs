@@ -299,15 +299,17 @@ pub struct DesktopCaps {
 /// process — PL§10's no-bypass rule still holds.
 ///
 /// Empty vs absent: both mean "no class requested", matching every other
-/// `#[serde(default)]` flag in [`Capabilities`]. There is no `Option` here
-/// because a present-but-false flag is the same grant as an absent one.
+/// `#[serde(default)]` flag in [`Capabilities`]. `buffer` and `git` are
+/// levels rather than flags (T380) because their write half is the dangerous
+/// one: a plugin that only reads must not hold the right to change.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IdeCaps {
-    /// Read and edit open text buffers through the host's buffer API. Not a
-    /// filesystem grant (`fs` is) and not a shell.
+    /// Open text buffers through the host's buffer API: `"read"` or
+    /// `"edit"` (edit implies read). Not a filesystem grant (`fs` is) and not
+    /// a shell.
     #[serde(default)]
-    pub buffer: bool,
+    pub buffer: Option<BufferAccess>,
     /// Language-server client against servers the host spawned. Not a
     /// process spawn and not a language server of its own.
     #[serde(default)]
@@ -325,24 +327,52 @@ pub struct IdeCaps {
     /// [`TerminalCaps`] (terminal-only UI contributions) and from a shell.
     #[serde(default)]
     pub terminal: bool,
-    /// Git status/diff integration through the host's git facade. Does not
-    /// run `git` as a process from the guest.
+    /// The repository through the host's git facade: `"read"` (status, diff,
+    /// log) or `"write"` (stage and commit only; implies read). Checkout,
+    /// branch, reset and push are not grantable, because they change the
+    /// working tree or the remote under the user. The guest never runs `git`.
     #[serde(default)]
-    pub git: bool,
+    pub git: Option<GitAccess>,
+}
+
+/// `capabilities.ide.buffer`: how far a plugin may touch open buffers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum BufferAccess {
+    /// Read buffer text.
+    Read,
+    /// Read, and apply edits through the host's undoable edit path.
+    Edit,
+}
+
+/// `capabilities.ide.git`: how far a plugin may touch the repository.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum GitAccess {
+    /// Status, diff and log.
+    Read,
+    /// Read, plus stage and commit.
+    Write,
 }
 
 impl IdeCaps {
     /// The grant-line names of every requested class, in declaration order
     /// (PL§3: one sorted line per capability). `ide.` prefixes the class so
-    /// `ide.terminal` never reads as the unrelated `terminal.keys`.
+    /// `ide.terminal` never reads as the unrelated `terminal.keys`. A write
+    /// level also lists its read line, so widening read to edit or write adds
+    /// a line and the digest-bound grant asks again.
     pub fn grant_lines(&self) -> Vec<String> {
+        let buffer_edit = self.buffer == Some(BufferAccess::Edit);
+        let git_write = self.git == Some(GitAccess::Write);
         [
-            ("ide.buffer", self.buffer),
+            ("ide.buffer.read", self.buffer.is_some()),
+            ("ide.buffer.edit", buffer_edit),
             ("ide.lsp", self.lsp),
             ("ide.dap", self.dap),
             ("ide.index", self.index),
             ("ide.terminal", self.terminal),
-            ("ide.git", self.git),
+            ("ide.git.read", self.git.is_some()),
+            ("ide.git.write", git_write),
         ]
         .into_iter()
         .filter(|(_, on)| *on)
@@ -450,7 +480,8 @@ pub struct LanguageServerDecl {
     /// Server name; unique in the package, joined as `<id>-<name>`.
     pub name: String,
     /// Language ids it serves (`"rust"`, `"python"`), matched against the
-    /// buffer language. Empty with `globs` empty means never selected.
+    /// buffer language. `languages` and `globs` may not both be empty: such
+    /// a server could never start (T380).
     #[serde(default)]
     pub languages: Vec<String>,
     /// Glob patterns it serves, matched against workspace-relative paths.
@@ -482,7 +513,7 @@ pub struct LanguageServerDecl {
 pub struct DebugAdapterDecl {
     /// Adapter name; unique in the package, joined as `<id>-<name>`.
     pub name: String,
-    /// Language ids it debugs (`"rust"`, `"python"`).
+    /// Language ids it debugs (`"rust"`, `"python"`). Non-empty (T380).
     #[serde(default)]
     pub languages: Vec<String>,
     /// Program inside the package or on PATH. Non-empty.
@@ -655,6 +686,14 @@ pub enum ManifestError {
     /// Two `[[debug_adapters]]` entries share a name.
     #[error("[[debug_adapters]] name {0:?} is declared twice")]
     DuplicateDebugAdapter(String),
+    /// A `[[language_servers]]` entry names neither `languages` nor `globs`,
+    /// so no buffer could ever start it.
+    #[error("[[language_servers]] {0:?} needs languages or globs, or it never starts")]
+    LanguageServerUnrouted(String),
+    /// A `[[debug_adapters]]` entry has no `languages`, so no debug session
+    /// could ever start it.
+    #[error("[[debug_adapters]] {0:?} needs languages, or it never starts")]
+    DebugAdapterUnrouted(String),
     /// An `[[agents]]` file is absolute, climbs out with `..`, or is not a
     /// `.md` file.
     #[error("[[agents]] file {0:?} must be a relative .md path inside the package, with no ..")]
@@ -773,6 +812,9 @@ impl PluginManifest {
             if let Some(bad) = ls.env.keys().find(|k| !is_env_var_name(k)) {
                 return Err(ManifestError::EnvName(bad.clone()));
             }
+            if ls.languages.is_empty() && ls.globs.is_empty() {
+                return Err(ManifestError::LanguageServerUnrouted(ls.name.clone()));
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         for dap in &self.debug_adapters {
@@ -787,6 +829,9 @@ impl PluginManifest {
             }
             if let Some(bad) = dap.env.keys().find(|k| !is_env_var_name(k)) {
                 return Err(ManifestError::EnvName(bad.clone()));
+            }
+            if dap.languages.is_empty() {
+                return Err(ManifestError::DebugAdapterUnrouted(dap.name.clone()));
             }
         }
         for agent in &self.external_agents {
@@ -1088,7 +1133,7 @@ args = ["--stdio"]
         assert_eq!(absent.capabilities.ide, IdeCaps::default());
         assert_eq!(absent.capabilities.ide.grant_lines(), [] as [String; 0]);
         let empty =
-            parse(&EXAMPLE.replace("[limits]", "[capabilities.ide]\nbuffer = false\n\n[limits]"))
+            parse(&EXAMPLE.replace("[limits]", "[capabilities.ide]\nlsp = false\n\n[limits]"))
                 .expect("an empty ide table parses");
         assert_eq!(empty.capabilities.ide, IdeCaps::default());
         assert_eq!(empty.validate(), Ok(()));
@@ -1096,33 +1141,101 @@ args = ["--stdio"]
 
     #[test]
     fn ide_caps_parse_per_family_and_validate() {
-        for key in ["buffer", "lsp", "dap", "index", "terminal", "git"] {
+        let cases: [(&str, IdeCaps, &[&str]); 8] = [
+            (
+                "buffer = \"read\"",
+                IdeCaps {
+                    buffer: Some(BufferAccess::Read),
+                    ..IdeCaps::default()
+                },
+                &["ide.buffer.read"],
+            ),
+            (
+                "buffer = \"edit\"",
+                IdeCaps {
+                    buffer: Some(BufferAccess::Edit),
+                    ..IdeCaps::default()
+                },
+                &["ide.buffer.read", "ide.buffer.edit"],
+            ),
+            (
+                "lsp = true",
+                IdeCaps {
+                    lsp: true,
+                    ..IdeCaps::default()
+                },
+                &["ide.lsp"],
+            ),
+            (
+                "dap = true",
+                IdeCaps {
+                    dap: true,
+                    ..IdeCaps::default()
+                },
+                &["ide.dap"],
+            ),
+            (
+                "index = true",
+                IdeCaps {
+                    index: true,
+                    ..IdeCaps::default()
+                },
+                &["ide.index"],
+            ),
+            (
+                "terminal = true",
+                IdeCaps {
+                    terminal: true,
+                    ..IdeCaps::default()
+                },
+                &["ide.terminal"],
+            ),
+            (
+                "git = \"read\"",
+                IdeCaps {
+                    git: Some(GitAccess::Read),
+                    ..IdeCaps::default()
+                },
+                &["ide.git.read"],
+            ),
+            (
+                "git = \"write\"",
+                IdeCaps {
+                    git: Some(GitAccess::Write),
+                    ..IdeCaps::default()
+                },
+                &["ide.git.read", "ide.git.write"],
+            ),
+        ];
+        for (line, expected, lines) in cases {
             let toml = EXAMPLE.replace(
                 "[limits]",
-                &format!("[capabilities.ide]\n{key} = true\n\n[limits]"),
+                &format!("[capabilities.ide]\n{line}\n\n[limits]"),
             );
             let m = parse(&toml).expect("the family parses");
-            let mut expected = IdeCaps::default();
-            match key {
-                "buffer" => expected.buffer = true,
-                "lsp" => expected.lsp = true,
-                "dap" => expected.dap = true,
-                "index" => expected.index = true,
-                "terminal" => expected.terminal = true,
-                "git" => expected.git = true,
-                _ => unreachable!(),
-            }
-            assert_eq!(m.capabilities.ide, expected, "{key}");
-            assert_eq!(m.validate(), Ok(()), "{key}");
-            assert_eq!(
-                m.capabilities.ide.grant_lines(),
-                [format!("ide.{key}")],
-                "{key}"
-            );
+            assert_eq!(m.capabilities.ide, expected, "{line}");
+            assert_eq!(m.validate(), Ok(()), "{line}");
             // Only the named class is granted; a false sibling is not a line.
-            assert_eq!(m.capabilities.ide.grant_lines().len(), 1, "{key}");
-            let empty = IdeCaps::default();
-            assert_eq!(empty.grant_lines(), [] as [String; 0], "{key}");
+            assert_eq!(m.capabilities.ide.grant_lines(), lines, "{line}");
+        }
+    }
+
+    /// T380: `buffer` and `git` are levels, so the old flag spelling and any
+    /// level that is not read/edit or read/write are refused, never widened.
+    #[test]
+    fn ide_buffer_and_git_refuse_a_flag_or_an_unknown_level() {
+        for line in [
+            "buffer = true",
+            "buffer = \"write\"",
+            "git = true",
+            "git = \"push\"",
+            "git = \"checkout\"",
+        ] {
+            let toml = EXAMPLE.replace(
+                "[limits]",
+                &format!("[capabilities.ide]\n{line}\n\n[limits]"),
+            );
+            assert!(parse(&toml).is_err(), "{line} must not parse");
         }
     }
 
@@ -1626,6 +1739,30 @@ args = ["--port", "0"]
             let err = parse(&toml).expect_err("an unknown key is refused");
             assert!(err.contains("unknown field"), "{field}: {err}");
         }
+    }
+
+    /// T380: an entry nothing can route to would be approved and never start,
+    /// so validation refuses it rather than leaving a dead grant line.
+    #[test]
+    fn language_server_and_debug_adapter_need_something_to_route_on() {
+        let mut m = parse(&format!("{EXAMPLE}\n{IDE_PROCESS}")).expect("parses");
+        m.language_servers[0].languages.clear();
+        assert_eq!(m.validate(), Ok(()), "globs alone route a server");
+        m.language_servers[0].globs.clear();
+        assert_eq!(
+            m.validate(),
+            Err(ManifestError::LanguageServerUnrouted(
+                "rust-analyzer".into()
+            ))
+        );
+        let mut m = parse(&format!("{EXAMPLE}\n{IDE_PROCESS}")).expect("parses");
+        m.language_servers[0].globs.clear();
+        assert_eq!(m.validate(), Ok(()), "languages alone route a server");
+        m.debug_adapters[0].languages.clear();
+        assert_eq!(
+            m.validate(),
+            Err(ManifestError::DebugAdapterUnrouted("codelldb".into()))
+        );
     }
 
     #[test]
