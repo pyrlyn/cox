@@ -1330,6 +1330,8 @@ pub(crate) mod tests {
             provider: Vec::new(),
             models: Vec::new(),
             mcp: Vec::new(),
+            language_servers: Vec::new(),
+            debug_adapters: Vec::new(),
             external_agents: Vec::new(),
             cloud_agents: Vec::new(),
             agents: Vec::new(),

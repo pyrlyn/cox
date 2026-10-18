@@ -1,0 +1,15 @@
+---
+source: crates/cox-tui/tests/it/agents.rs
+assertion_line: 145
+expression: "buffer_to_string(&render(&state, 60, 10))"
+---
+› hi from the sibling session
+
+
+
+
+
+
+
+> Esc close · PageUp scroll up · PageDown scroll down
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [default] · 2 agents!

@@ -114,11 +114,45 @@ it stops after `N` turns or once the session hits `budget.session_usd`,
 whichever comes first. `Ctrl+C` between iterations exits cleanly with
 whatever already ran.
 
+## Refine
+
+`/refine <text> [--global]` asks the cheap model to propose a change to
+prompt notes, memory, skills or subagent definitions from `text` and the
+session so far. The proposal opens as a diff and nothing is written until
+you press `y` (or `Enter`); `n` or `Esc` drops it. The change is local to
+this session unless you pass `--global`, which writes what every session
+reads. Skills and subagents are read when a session opens, so those edits
+show up in the next one.
+
+`/refine list` shows this session's refines, newest first. `/refine undo
+[<event id>]` reverses the given one, or the newest applied local one; a
+refine that changed the global entries is undone only with `--global`.
+
+The same history is available outside the TUI: `cox refine list [--session
+<id>]` (default: the newest session in this directory) and `cox refine undo
+<event id> [--global]`. Proposing and applying stay in the TUI, where the
+diff is reviewed.
+## Autonomous runs
+
+`cox run -p "…" --autonomous` runs the shell commands in `[autonomous] gates`
+(your own config; a project config cannot set them) after each turn. While one
+fails, the run starts another turn with the end of its output, within
+`max_continuations`, `max_turns`, `max_tokens`, `timeout_secs` and
+`gate_retries`; a run with no gates is refused. Every gate runs in the same
+sandbox as the `bash` tool, its full output is archived (`cox expand`), and a
+gate over `gate_timeout_secs` counts as failed. Under `--output-format
+stream-json` each decision is one `{"type":"autonomous","decision":…}` record,
+and the stop reason is printed on stderr and kept in the `json` summary.
+`gates_passed` means only that every gate exited 0, not that the task is
+done. A run that stops for any other reason of its own exits 1. Not
+combinable with `--loop`.
+
 ## What to read next
 
 | Doc | Contents |
 | --- | --- |
 | [config.md](config.md) | Every configuration key |
+| [examples.md](examples.md) | Command-line recipes: config, headless runs, sessions and stats, the MCP server |
 | [tools.md](tools.md) | Built-in tools, risk, subjects |
 | [observability.md](observability.md) | Traces, metrics, OTLP backends |
 | [ide.md](ide.md) | Zed, JetBrains, Neovim via ACP |

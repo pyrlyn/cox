@@ -1,0 +1,11 @@
+# T66.11: the first turn only talks, so the gate (`test -f marker.txt`)
+# fails; the driver's second turn writes the marker and the gate passes.
+[[turn]]
+text = "first try"
+
+[[turn]]
+text = "writing the marker"
+tool_calls = [{ name = "write", input = { path = "marker.txt", content = "ok" } }]
+
+[[turn]]
+text = "fixed"

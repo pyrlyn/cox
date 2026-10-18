@@ -16,6 +16,7 @@ cox-protocol = { path = "../cox-protocol", version = "0.1.2" }
 # T0.3/T32.17: config layering (default/user/project/env/flag) with
 # provenance, and `cox config set` edits that keep the file's comments.
 config-schema = { workspace = true }
+toml_edit = { workspace = true }
 # The CLI-flag and Claude-settings layers arrive as JSON trees; `show`
 # flattens the effective config through JSON.
 serde_json = { workspace = true }

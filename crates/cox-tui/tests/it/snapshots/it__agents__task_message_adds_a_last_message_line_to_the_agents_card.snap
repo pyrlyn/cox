@@ -1,0 +1,5 @@
+---
+source: crates/cox-tui/tests/it/agents.rs
+expression: "rows.join(\"\\n\")"
+---
+explore: find the flaky test · preset explore · tier cheap · cost - · elapsed 0.7s · running · last: found it: flaky_sleep in tests/shell.rs

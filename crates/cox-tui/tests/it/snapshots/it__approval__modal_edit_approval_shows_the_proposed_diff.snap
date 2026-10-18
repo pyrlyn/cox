@@ -1,0 +1,18 @@
+---
+source: crates/cox-tui/tests/it/approval.rs
+expression: frame
+---
+
+
+ approve edit src/lib.rs?
+  ± src/lib.rs  +1 −1
+  --- src/lib.rs
+  +++ src/lib.rs
+  @@ -1,2 +1,2 @@
+   fn keep() {}
+  -fn old() -> u8 { 1 }
+  +fn new() -> u8 { 2 }
+ write risk needs approval
+ [y]es  [s]ession  [n]o
+> Enter choose · Esc close · Up previous · Down next
+- · ctx ▱▱▱▱▱ 0% · $0.00/5 · [default]

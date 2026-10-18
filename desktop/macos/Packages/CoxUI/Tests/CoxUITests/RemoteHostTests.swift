@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// T52.21's CoxUI check (DS§6.4, DT§4.4): the Connect to Host sheet, empty and after a failed
-// connect, and a remote host's sidebar group, connected and disconnected, each in
-// light/dark × Solid/Frosted.
+// T52.21's CoxUI check (DS§6.4, DT§4.4): a remote host's sidebar group, connected and
+// disconnected, in light/dark × Solid/Frosted. The Connect to Target sheet is in
+// `ConnectTargetSheetTests`.
 
 import SwiftUI
 import Testing
@@ -13,17 +13,6 @@ import Testing
 
 @MainActor
 @Suite struct RemoteHostSnapshotTests {
-  @Test(arguments: Variant.all) func connectSheet(_ variant: Variant) throws {
-    try assertCoxSnapshot(
-      PreviewPane { ConnectHostSheet(state: .init()) { _ in } }, variant,
-      named: "empty.\(variant.name)")
-    try assertCoxSnapshot(
-      PreviewPane {
-        ConnectHostSheet(state: PreviewState.connectHostFailed, host: "devbox") { _ in }
-      },
-      variant, named: "failed.\(variant.name)")
-  }
-
   @Test(arguments: Variant.all) func hostGroup(_ variant: Variant) throws {
     try assertCoxSnapshot(
       Sidebar(state: PreviewState.hostSidebar) { _ in }.frame(height: Size.windowMinHeight),

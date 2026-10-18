@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use config_schema::{TomlValue, parse_value, plan_edit_foreign, value_from_json};
 use serde_json::Value as JsonValue;
+use toml_edit::{DocumentMut, Item, Table};
 
 use crate::ConfigError;
 use crate::load::{self as config_load, LoadedConfig};
@@ -174,10 +175,13 @@ pub fn append_allow_rule_in(path: &Path, rule: &str) -> Result<bool, ConfigError
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e.into()),
     };
-    let mut doc: DocumentMut = existing.parse().map_err(|error| ConfigError::InvalidToml {
-        path: target.clone(),
-        error,
-    })?;
+    let mut doc: DocumentMut =
+        existing
+            .parse()
+            .map_err(|error: toml_edit::TomlError| ConfigError::InvalidToml {
+                path: target.clone(),
+                message: error.to_string(),
+            })?;
     let permissions = doc
         .as_table_mut()
         .entry("permissions")

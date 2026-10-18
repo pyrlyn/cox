@@ -583,7 +583,7 @@ Jev's price (J7) is under 0.1 % of a typical coding session ($0.5–5 at the J19
 There is no key and no network, and the keychain is never touched (A49, A51).
 
 - **Guest unit tests (host target).** The wire, the state builders, the question sets, the thresholds and the Noul certainty are pure Rust in `plugins/jev/src/*.rs`. extism-pdk glue sits behind `cfg(target_arch = "wasm32")`. `cargo test --manifest-path plugins/Cargo.toml -p cox-plugin-jev` runs in the `plugins` CI job. The fixtures are the documented response shapes (J1, J2, and the ones `jev.rs`'s tests already use), inline as in `jev.rs`.
-- **Host e2e (`tests/plugins_jev.rs`).**
+- **Host e2e (`tests/it/plugins_jev.rs`).**
   - `crates/cox-plugin-fixtures/build.rs` builds the plugin, as T33.28 builds the example.
   - The real binary runs against a scratch `COX_HOME`. Main turns come from `COX_PROVIDER=scripted`.
   - Jev is a wiremock server on 127.0.0.1 whose `/v1/systemone` returns fixture bodies, reached through `[providers.typesafe] base_url` in the scratch config.
@@ -667,6 +667,181 @@ Codex (D4), not "drive Cursor as a model". The creator resolved the
 resulting question by deciding Cursor is a **plugin** (P35, `plan.md` §6
 A54), driving the CLI's two official headless modes, never the desktop
 session and never one of the unofficial proxies named above.
+
+### 4.3.9 Build times (T61.1, measured 2026-10-17)
+
+Source: this repository at `main` 5efb2ba4 (https://github.com/pyrlyn/cox/commit/5efb2ba4), plus the T61.1 claim commit, which changes no code. Machine: Apple M3 Max, 16 cores (12 performance, 4 efficiency), 64 GiB RAM, macOS 27.0.1 (26A434), Xcode 27.1 (27A9275), Swift 6.4 (`swift --version`). Toolchain from `mise.toml`: Rust 1.98.1, cargo-nextest 0.9.143, just 1.58.0, Node 24.21.0, and sccache 0.18.0 as `RUSTC_WRAPPER` through mise (local cache 10 GiB, `~/Library/Caches/Mozilla.sccache`).
+
+**Conditions.** The machine was shared: other agents ran vitest, an Astro build and Simulator processes during the session. Load averages are recorded per row (1-minute, before → after). Rows 1–2 started at load 27 and 54, so their numbers are the least clean. Every row is one run, not the median of 5 that the P61 header asks for; five clean builds per row was not feasible in one session, so differences under about 10 % are noise. The "clean" rows use a warm sccache (70–97 % hits, from earlier builds on this machine). Row 8 repeats the clean workspace build with the wrapper bypassed, as the cold reference. CI times are from the GitHub API, not measured locally.
+
+**Rust (`cargo` with `--timings`; HTML reports kept under the worktree's `target/`, not in git).**
+
+| # | Measurement | Command | `Finished` | Wall | Load before → after | sccache hits / requests |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | clean `cargo build --workspace` | `cargo clean`, then `cargo build --workspace --timings` | 2m 09s | 129.6 s | 27 → 70 | 770 / 1094 |
+| 2 | incremental, after `touch crates/cox-core/src/turn.rs` | `cargo build --workspace --timings` | 18.07 s | 20.3 s | 54 → 50 | 0 (incremental, not cached) |
+| 3 | `cargo nextest run --workspace --no-run`, clean | `cargo clean`, then the command with `--timings` | 1m 27s | 96.7 s | 20 → 62 | 1098 / 1133 |
+| 4 | same, after the same touch | `cargo nextest run --workspace --no-run --timings` | 28.99 s | 45.0 s | 31 → 40 | 0 |
+| 5 | `cargo build -p cox-ffi --lib --profile dist --target aarch64-apple-darwin`, clean | `cargo clean`, then the command with `--timings` | 2m 09s | 131.0 s | 28 → 46 | 790 / 1024 |
+| 6 | same, after the same touch | same command | 13.44 s | 14.0 s | 18 → 19 | 0 |
+| 7 | full `just desktop-xcframework`, clean | `cargo clean`, then the recipe (the script's cargo calls take no `--timings`) | 1m 28s (cox-ffi, dist) + 1m 11s (uniffi-bindgen, dist) | 167.5 s | 19 → 23 | 901 / 1074 |
+| 8 | extra: clean `cargo build --workspace`, sccache bypassed | `cargo clean`, then `env RUSTC_WRAPPER= cargo build --workspace --timings` | 2m 27s | 147.7 s | 9 → 54 | workspace crates: 0 requests; 25 requests went through sccache (all hits; not traced, probably the nested cargo in `cox-plugin-fixtures`' build script) |
+
+**Swift (`swift build --build-tests --build-system swiftbuild`, one package at a time, `.build` removed first; wall time includes the SwiftPM fetch from its shared cache).**
+
+| Package | Wall | `Build complete` | Note |
+| --- | --- | --- | --- |
+| `CoxCore` | 45.0 s | 28.6 s | linker warning `__eh_frame section too large (max 16MB)` for `CoxCoreTests-product` |
+| `CoxModel` | 43.2 s | 24.5 s | |
+| `CoxPlatform` | 68.7 s | 45.9 s | |
+| `CoxTranscript` | 41.4 s | 26.8 s | |
+| `CoxTranscriptText` | 35.1 s | 23.2 s | |
+| `CoxUI` | 38.9 s | 23.0 s | |
+| **sum** | **272.2 s** | | run one after another, not in parallel |
+
+**Desktop app (`just desktop-app`, Debug, ad-hoc signed; the app is built, not launched).**
+
+| Measurement | Wall | Result |
+| --- | --- | --- |
+| clean: `rm -rf desktop/macos/build`, then the recipe (xcframework step with the Rust target already warm from row 7, XcodeGen, xcodebuild) | 83.3 s | exit 0; 49 `warning:` lines; xcodebuild printed three `error: the following command failed with exit code 0 but produced no further output` lines, and the build still exited 0 |
+| incremental: one-line change in `desktop/macos/Packages/CoxUI/Sources/CoxUI/Molecules/ProjectDropZone.swift:50` (a trailing comment), then the recipe | 30.5 s | exit 0; 11 `warning:` lines. The change was reverted with `git checkout`; the worktree is clean and nothing was committed |
+
+**CI (GitHub Actions, job times from `gh run view --json jobs`: `completedAt` minus `startedAt` of the latest attempt, read 2026-10-17).**
+
+| Job | Last green on `main` | Last green on a pull request |
+| --- | --- | --- |
+| `rust / aarch64-apple-darwin` | 6 min 44 s (404 s), run https://github.com/pyrlyn/cox/actions/runs/37258328643 (CI, `workflow_dispatch`, 2026-10-05) | 24 min 42 s (1482 s), run https://github.com/pyrlyn/cox/actions/runs/38933123898 (2026-10-16, PR `t69.3-readonly-metadata-dirs`) |
+| `desktop-macos` | 35 min 55 s (2155 s), same run as above | 56 min 18 s (3378 s), same run as the PR row above |
+
+The CI workflow runs on `pull_request` and `workflow_dispatch` only (`.github/workflows/ci.yml:4-9`), and no CI run on `main` is newer than 2026-10-05. The `pipeline` workflow on runs on `main` skips its `rust` job (for example run https://github.com/pyrlyn/cox/actions/runs/38886359637). The `main` and PR rows are therefore 11 days and two triggers apart; they are not like for like.
+
+**CI, T61.6 (one feature set per target: `test-command` and `just check-all` use `--all-features`, as `build-command` already did).** Before: the PR run https://github.com/pyrlyn/cox/actions/runs/38933123898 (2026-10-16), with the default-feature nextest step, job times from `gh run view 38933123898 --repo pyrlyn/cox --json jobs` (`completedAt` minus `startedAt`, read 2026-10-17). After: pending the first CI run of this change (the CI queue was hours deep when T61.6 was written, so no after time exists yet).
+
+| Job | Before (PR run 38933123898) | After (T61.6) |
+| --- | --- | --- |
+| `rust / x86_64-unknown-linux-gnu` | 21 min 34 s (1294 s) | pending first CI run of this change |
+| `rust / aarch64-unknown-linux-gnu` | 17 min 05 s (1025 s) | pending first CI run of this change |
+| `rust / aarch64-apple-darwin` | 24 min 42 s (1482 s) | pending first CI run of this change |
+
+**Top five crates by compile time (clean workspace, `UNIT_DATA` of `cargo-timing.html`).** Each value is the sum of a crate's build-script compile, build-script run and library units. Units run in parallel, so these are CPU-time shares, not wall shares (the report's unit total is 1714 s cold for a 147 s build).
+
+| Rank | Crate | Cold (row 8) | Warm sccache (row 1) |
+| --- | --- | --- | --- |
+| 1 | `aws-lc-sys` 0.45.0 | 100.1 s | 80.0 s |
+| 2 | `cranelift-codegen` 0.136.3 | 47.4 s | 34.1 s |
+| 3 | `whisper-rs-sys` 0.15.0 | 43.4 s | 47.8 s |
+| 4 | `zstd-sys` 2.1.0 | 37.4 s | 44.7 s |
+| 5 | `wasmtime` 49.0.3 | 29.2 s | 19.2 s |
+
+Below the top two the order changes between the two runs: `onig_sys` 25.1 s cold and 43.9 s warm, `ring` 16.3 s and 42.7 s. Those build-script runs swing with machine load, so only the top two are stable. The largest workspace members are `cox-plugin-fixtures` (20.8 s cold; its build script runs a nested `wasm32` cargo build), `cox` (16.9 s, bin and lib), `cox-provider-anthropic` (12.9 s), `cox-plugin` (10.0 s) and `cox-store` (9.9 s).
+
+**Findings.**
+
+- **The P61 premise about `dist` does not hold on `main`.** The card (plan.md, P61) says the XCFramework builds with fat LTO and one codegen unit. `Cargo.toml` says otherwise: `[profile.dist]` is `inherits = "dev"` with no `lto` or `codegen-units` (`Cargo.toml:238-239`, from commit ae5ed7bd "build(release): dev builds, published as prereleases (#189)", whose comment says so explicitly). The dist `cox-ffi` build therefore costs the same as the dev workspace (row 5 against row 1: 131 s against 130 s). Incremental dist after a touch is 13 s (row 6). T61.2 step 1 needs re-checking against this before it is claimed.
+- **sccache is a small part of the clean numbers.** Bypassing it adds 18 s to the clean workspace build (row 8 against row 1). The expensive units are build-script runs (the C builds of `aws-lc-sys` and `zstd-sys`) and workspace crates, which the wrapper does not serve.
+- **An incremental edit is cheap.** One touched file in `cox-core` rebuilds the workspace in 18 s (row 2), the nextest test build in 29 s (row 4) and the dist library in 13 s (row 6). A one-line Swift edit in `CoxUI` rebuilds the app in 31 s.
+- **The six package builds add up to more than the app.** Built one by one they take 272 s, but the clean app build takes 83 s. The likely reason is that each package builds its own copy of the shared dependencies, which is the duplication T61.9 targets (not verified here).
+
+**One integration-test binary for `cox-core` (T61.5.1, measured 2026-10-17, same machine and toolchain).** The 24 `crates/cox-core/tests/*.rs` files became modules of `tests/it/main.rs`, so nextest links 1 test binary instead of 24 (plus the lib's unit-test binary in both cases). Both runs: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4`, warm sccache, every dependency already built, `cargo clean -p cox-core` immediately before, then `cargo nextest run -p cox-core --no-run`. One run each, not a median, on a machine under load from two other agents, so a gap of this size (about 2x) is the signal and the exact seconds are not.
+
+| Layout | `Finished` | Wall | Load average (1-minute) before → after | `clean -p cox-core` removed |
+| --- | --- | --- | --- | --- |
+| before: 24 test binaries | 21.92 s | 28 s | 47 → 39 | 315 files, 789.8 MiB |
+| after: `tests/it` | 10.86 s | 14 s | 41 → 39 | 181 files, 216.4 MiB |
+
+Test count (`cargo nextest list -p cox-core`): 431 before and 431 after, and the sets of names are identical once the old binary name is read as the new module name. `nextest run -p cox-core`: 431 passed; `-p cox-app` (which includes `tests/common/mod.rs` by path): 270 passed.
+
+**One integration-test binary for `cox` (T61.5.2, measured 2026-10-17, same method).** 16 of the 22 `crates/cox/tests/*.rs` files became modules of `tests/it/main.rs`; `docs`, `ide`, `deps`, `trycmd`, `tui_e2e` and `remote` stay separate, so nextest links 7 test binaries instead of 22 (the `cox` bin and the two helper bins are in both). Both runs: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4`, warm sccache, dependencies built, `cargo clean -p cox` immediately before, then `cargo nextest run -p cox --no-run`. One run each, on a loaded machine; the gap is small because sccache serves most of the link inputs, so treat it as a direction, not a figure.
+
+| Layout | `Finished` | Wall | Load average (1-minute) before → after | `clean -p cox` removed |
+| --- | --- | --- | --- | --- |
+| before: 22 test binaries | 8.35 s | 10 s | 14.9 → 14.5 | 336 files, 974.5 MiB |
+| after: `tests/it` + 6 | 6.42 s | 9 s | 12.1 → 11.0 | 206 files, 780.8 MiB |
+
+Test count (`cargo nextest list -p cox`): 215 before and 215 after, and the sets of names are identical once the old binary name is read as the new module name. `nextest run -p cox`: 214 passed, 1 failed (`plain_transcript_snapshot`, failing on `main` too, with the same snapshot diff before and after), 5 ignored.
+
+**T61.8: `[profile.dev.build-override] opt-level = 3` (measured 2026-10-17, rustc 1.98.1 `48a229cea 2026-09-01`, cargo 1.98.1 `797e8a9bc 2026-08-05`).**
+**One integration-test binary for `cox-tui`, `cox-tools`, `cox-ext` and `cox-app` (T61.5.3, measured 2026-10-17, same method).** `cox-tui` (14 of 15 files; `screenshots` stays because `just screenshots` names it), `cox-tools` (all 7) and `cox-ext` (all 6) became `tests/it/main.rs`; in `cox-app` only `intents` and `scenarios` did, because `app`, `best_of`, `external` and `mcp_login` call `set_var`/`remove_var`. Each crate: `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4`, warm sccache, dependencies built, `cargo clean -p <crate>` immediately before, then `cargo nextest run -p <crate> --no-run`. One run each, and the machine load swung between 9 and 37 across the runs (load column), so the gaps are directions, not figures; the load for `cox-tools`, `cox-ext` and the `cox-app` "before" rows was two to four times the "after" load.
+
+| Crate | Layout | `Finished` | Wall | Load average (1-minute) | `clean -p` removed |
+| --- | --- | --- | --- | --- | --- |
+| `cox-tui` | before: 17 test suites | 4.40 s | 5 s | 8.7 | 191 files, 256.4 MiB |
+| `cox-tui` | after: 4 | 2.93 s | 4 s | 8.9 | 170 files, 145.2 MiB |
+| `cox-tools` | before: 8 | 14.42 s | 20 s | 35.6 | 110 files, 155.9 MiB |
+| `cox-tools` | after: 2 | 9.78 s | 13 s | 24.7 | 131 files, 166.9 MiB |
+| `cox-ext` | before: 7 | 6.56 s | 8 s | 35.7 | 96 files, 82.0 MiB |
+| `cox-ext` | after: 2 | 2.03 s | 3 s | 15.7 | 100 files, 76.2 MiB |
+| `cox-app` | before: 7 | 17.09 s | 21 s | 37.7 | 135 files, 1.1 GiB |
+| `cox-app` | after: 6 | 7.80 s | 10 s | 10.5 | 177 files, 1.1 GiB |
+
+Test count (`cargo nextest list -p <crate>`, tests listed): `cox-tui` 298 and 298, `cox-tools` 266 and 266, `cox-ext` 66 and 66, `cox-app` 270 and 270; the sets of names are identical once the old binary name is read as the new module name. `nextest run`: 298, 265 (1 skipped, as before), 66 and 270 passed. The workspace-wide build-phase time the card asks for was not measured: the run was told to build one crate at a time.
+
+Question: does optimizing build scripts and proc macros in `dev` speed the dev build? Variant A is `main` as it is (`Cargo.toml:226-238`); variant B adds the two lines `[profile.dev.build-override]` and `opt-level = 3` after the `[profile.dev.package."*"]` block. Commands: `rm -rf target` (clean) or `touch crates/cox-tui/src/lib.rs` (incremental), then `/usr/bin/time -p mise exec -- cargo build --workspace`, run as `MISE_SCCACHE_PROBE=1 CARGO_BUILD_JOBS=4` in this worktree's own `target/` (`RUSTC_WRAPPER` verified empty under the probe). Order A, B, A, B, with each clean run followed by its two incremental runs. The driver script is kept outside the repository. Load is the 1-, 5- and 15-minute `uptime` average taken before each run; the machine was shared, with other agents' builds running.
+
+| Variant | Clean run | `real` | `user` | Load before (1 / 5 / 15 min) |
+| --- | --- | --- | --- | --- |
+| A (no override) | 1 | 322.37 s | 1061.11 s | 9.30 / 10.13 / 10.60 |
+| B (override) | 1 | 379.04 s | 1138.98 s | 9.32 / 9.88 / 10.31 |
+| A | 2 | 306.22 s | 1032.15 s | 23.24 / 19.86 / 15.31 |
+| B | 2 | 303.48 s | 1029.54 s | 18.33 / 17.33 / 15.46 |
+
+Clean means: A 314.3 s, B 341.3 s (B +27.0 s, +8.6 %). The two runs of each variant differ by 16 to 76 s, so the difference is inside the run-to-run spread, and it is not explained by load (B's slowest run started at the lowest load).
+
+| Variant | Incremental run | `real` | Load before (1 / 5 / 15 min) |
+| --- | --- | --- | --- |
+| A | 1 (first after clean) | 10.07 s | 10.51 / 10.13 / 10.41 |
+| A | 2 | 4.87 s | 9.52 / 9.93 / 10.34 |
+| A | 3 | 6.03 s | 18.44 / 17.32 / 15.44 |
+| A | 4 | 4.83 s | 17.93 / 17.23 / 15.42 |
+| B | 1 (first after clean) | 11.55 s | 23.77 / 19.83 / 15.23 |
+| B | 2 | 4.90 s | 20.65 / 19.30 / 15.09 |
+| B | 3 | 5.10 s | 14.05 / 13.98 / 14.38 |
+| B | 4 | 4.72 s | 15.41 / 14.26 / 14.48 |
+
+Incremental medians: A 5.45 s, B 5.00 s. Means: A 6.45 s, B 6.57 s. Only the first incremental after a clean is slow (10 to 12 s); the other runs are 4.7 to 6.0 s in both variants, so the incremental path shows no speedup and no clear slowdown.
+
+**Check (T61.8 card, `--timings`, run once on the kept variant A, clean target, load 18.95 before and 37.69 at the end, the latter a 1-minute average that includes the build):** `real 300.23 s`, `user 1023.86 s`, `sys 81.67 s`. Largest build-script run units in `target/cargo-timings/cargo-timing.html`: `aws-lc-sys` 86.4 s, `cox-plugin-fixtures` 17.4 s, `zstd-sys` 14.8 s, `whisper-rs-sys` 11.4 s, `libsqlite3-sys` 9.8 s, `onig_sys` 8.0 s. Largest proc-macro crate compile units: `diesel_derives` 12.2 s, `typify-impl` 11.4 s, `uniffi_macros` 8.9 s, `serde_derive` 6.2 s, `schemars_derive` 5.0 s, `clap_derive` 4.7 s. These unit durations overlap across parallel jobs, so they are shares of work, not wall time.
+
+**Verdict: rejected, `Cargo.toml` unchanged.** The clean build is not shown to be not slower (B's mean is 8.6 % higher, inside the spread), and neither path shows a speedup. The rule is to keep the override only if both are not slower and it speeds the build; it does neither here. The override stays out of `Cargo.toml`. The proc macros and build scripts that dominate the build (`aws-lc-sys`, `diesel_derives`, `typify-impl`) are not sped up by it on this machine at this sample size.
+**T61.7: a second worktree reuses the first one's dependencies (measured 2026-10-17).** `cargo build -p cox-config` with `CARGO_BUILD_JOBS=4` (the crate pulls in 670 compiler requests: 310 C/C++, 126 assembler, 231 Rust), sccache 0.18.0 on a fresh `SCCACHE_DIR` and its own server port so the user's cache was untouched, rustc 1.98.1, Apple M3 Max on a shared machine (load per row). Two worktrees of one checkout, each with its own empty `target/`.
+
+| # | Measurement | Wall | Load (1 min) | sccache |
+| --- | --- | --- | --- | --- |
+| 1 | worktree A, cold cache | 155 s | 15 | 0 hits / 667 misses |
+| 2 | worktree B, fresh `target/`, cache from row 1 | 71 s | 42 | 597 hits, 70 new misses (69 Rust: the workspace path crates, whose absolute path differs per worktree; 1 C) |
+| 3 | worktree B, fresh `target/`, warm cache, repeated twice | 36 s, 35 s | 7, 8 | 667 hits of 670 requests in each run |
+| 4 | worktree B, fresh `target/`, no sccache, repeated twice | 106 s, 105 s | 12, 9 | none: `MISE_SCCACHE_PROBE=1 mise exec -- cargo build -p cox-config`, 0 compile requests |
+
+Reading: a second worktree with an empty `target/` builds this crate in 35 to 36 s with the shared cache and in 105 to 106 s without it (rows 3 and 4), about three times faster; only the workspace path crates recompile (row 2). Row 2's 71 s is the load of 42 at that moment, not the cache. The loads of rows 3 and 4 are lower than row 1's, so the gap between warm and cold is not only the cache, but it is far larger than the load difference. Two traps found while measuring: under `mise exec`, an `RUSTC_WRAPPER=` set in the calling shell is overridden by `mise.toml`'s `[env]` template, so the cache is on whatever the shell says; the way to turn it off is `MISE_SCCACHE_PROBE=1` (an earlier pair of "no sccache" runs of this session, 36 s and 34 s, still went through sccache and are not reported); and the cache hits C/C++ (`cc` crate and CMake) compiles too, which is most of the 670 requests.
+#### T61.11 Feature-unification rebuilds (repo at ffa246b5, checked 2026-10-17)
+
+Setup: Apple M3 Max, 16 cores, load average 36–74 (other builds running), rustc 1.98.1 (48a229cea 2026-09-01), cargo 1.98.1 (797e8a9bc 2026-08-05), cargo-nextest 0.9.143, cargo-hakari 0.9.39, sccache 0.18.0 as `RUSTC_WRAPPER`, `CARGO_BUILD_JOBS=4`, the worktree's own `target/`. The metric is a count, not a time, so load does not skew it: every `compiler-artifact` message of `cargo nextest run … --no-run --cargo-message-format json` with `"fresh": false` whose package is not a workspace member. `just check-all` was run as its cargo command, `cargo nextest run --workspace`, without the swarfr step.
+
+| Step | Dependency units rebuilt |
+|---|---|
+| `check-all` build from an empty `target/` | 683 (all; 3 min 35 s with a warm sccache) |
+| `just test --changed-since HEAD~1` from the claim commit (resolves to `--workspace -E 'rdeps(=cox-tui)'`; from ffa246b5 itself `HEAD~1` touches `mise.toml`, so it is the plain `--workspace` run) | 0 (857 units fresh) |
+| `just test --changed-since HEAD` after a one-line edit in `cox-ffi` / `cox-tui` / `cox-plugin-api` | 0 / 0 / 0 |
+| `check-all` build again after those | 0 (857 units fresh) |
+
+Why it is zero by construction: `just test` (`scripts/changed_tests.py`, unchanged since P37, before hakari landed in #212) always passes `--workspace` to cargo and narrows only the tests it runs, with nextest's `-E 'rdeps(=…)'` filterset. Cargo therefore resolves the same feature set as `just check-all`, and no dependency is rebuilt in either direction.
+
+A hand-typed `-p` build is a different case, outside T61.11. Measured after the full build, in the same `target/`:
+
+| Command (`--no-run`) | Dependency units rebuilt, first run | Second run |
+|---|---|---|
+| `-p cox --test deps` (the card's Check) | 0 | — |
+| `-p cox-sanitize`, `-p cox-target` | 0 | — |
+| `-p cox-app` | 1 (`insta`) | — |
+| `-p cox-tui` | 6 (`crossterm`, `ratatui`, `ratatui-crossterm`, `tui-textarea-2`, `derive_more`, `derive_more-impl`) | 0 |
+| `-p cox-plugin-api` | 27 (serde, syn, toml, schemars, figment and their deps) | 0 |
+| `-p cox-ffi` | 35 (tokio, hyper, reqwest, rmcp, wasmtime, extism, uniffi and their deps) | 0 |
+
+These come from the deliberate holes in `.config/hakari.toml`: `cox-plugin-api` is a `final-excludes` member (it must stay free of workspace dependencies and wasm32-clean), and `crossterm` and `uniffi` are `traversal-excludes`, so the hack crate does not pull the terminal toolkit or UniFFI into crates whose graphs `crates/cox/tests/deps.rs` keeps clean. Cargo keeps each feature set's artifacts under its own hash, so each variant is built once per `target/` and every later switch is free (second-run column, and the final `check-all` build above).
+
+Cargo's own alternative, `resolver.feature-unification = "workspace"`, is still unstable in 1.98.1: it needs `-Z feature-unification` (tracking issue rust-lang/cargo#14774, RFC 3692), https://doc.rust-lang.org/1.98.1/cargo/reference/unstable.html#feature-unification, checked 2026-10-17. The pinned stable cargo refuses the flag ("the `-Z` flag is only accepted on the nightly channel of Cargo"). So cargo-hakari stays; `cargo hakari verify`, `cargo hakari generate --diff` and `cargo hakari manage-deps --dry-run` report the hack crate current.
+
+Verdict: T61.11 closed as not needed — zero rebuilds between `just test` and `just check-all`; no change to `Cargo.toml`, the hack crate or `.config/hakari.toml`.
 
 ### 4.4 Routing evidence (D5)
 Copilot's auto model selection is praised because it is explicit, priced (10 % discount) and switchable; Claude Code's Haiku delegation is complained about because it is silent. aider's `--weak-model` (commits, summaries) and OpenCode's small model for titles are the same pattern. Jobs that tolerate a small model, by consensus of the surveyed tools: titles, summaries, commit messages, compaction, search/explore, tool-result summarisation, classification. Effect-size numbers from the survey ("4.2× savings", "Codex 3–4× fewer tokens than Claude Code") are unsourced and dropped. [med]
@@ -766,8 +941,8 @@ the noisiest; the call rows are within budget by an order of magnitude.
 ### 4.8 `diagnostics` with a real rust-analyzer (T41.9, checked 2026-09-29)
 
 Source: the ignored test `real_rust_analyzer_reports_a_type_error_under_the_sandbox`
-in `crates/cox/tests/lsp.rs`, run with `mise exec -- cargo nextest run -p cox
---test lsp --run-ignored only --no-capture`, plus two manual `cox run -p`
+in `crates/cox/tests/it/lsp.rs`, run with `mise exec -- cargo nextest run -p cox
+-E 'test(/^lsp::/)' --run-ignored only --no-capture`, plus two manual `cox run -p`
 runs against `COX_HOME=/tmp/cox-t41-9` with the server's stdin and stdout
 tee'd to files. The host is macOS, so the sandbox backend is Seatbelt; bwrap
 was not run. Server: `rust-analyzer 1.98.1 (48a229ce 2026-09-01)`, from the

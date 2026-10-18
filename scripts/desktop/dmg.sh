@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Packs desktop/macos/build/Cox.app into a DMG someone can download and run (T37.32.3, DT§7):
 # signs the app with COX_SIGN_IDENTITY (a Developer ID Application identity; CI imports it with
-# .github/actions/macos-signing) or ad-hoc when that is unset, checks the signature, and writes
+# pyrlyn/ci's macos-keychain action) or ad-hoc when that is unset, checks the signature, and writes
 # desktop/macos/build/Cox-<version>-<build>-debug-arm64.dmg holding the app and an
 # /Applications link. Needs `just desktop-app` first; app.sh builds Debug only, hence the tag.
 #
