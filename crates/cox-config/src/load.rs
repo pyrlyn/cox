@@ -933,7 +933,9 @@ fn env_layer() -> Result<EnvLayer, CoreError> {
     // `COX_AX_STARTUP_QUIET_MS` are read by the plain surface (T29.1)
     // itself. `COX_KEYRING` switches the OS keyring off (A49).
     // `COX_CURSOR_CLOUD_URL` points the cloud-agent client at a loopback
-    // test server (T56.8) and is not a config key.
+    // test server (T56.8) and is not a config key. `COX_SWIFT_TEST_ALL` and
+    // `COX_SWIFT_TEST_MARKERS` steer `scripts/desktop/swift_test.sh`, and the
+    // Swift tests it runs inherit them into the Rust core they load.
     Ok(EnvLayer::new("COX_", &tree).map_err(core_error)?.ignore(&[
         "home",
         "provider",
@@ -944,6 +946,8 @@ fn env_layer() -> Result<EnvLayer, CoreError> {
         "ax_startup_quiet_ms",
         "keyring",
         "cursor_cloud_url",
+        "swift_test_all",
+        "swift_test_markers",
     ]))
 }
 
@@ -1643,6 +1647,8 @@ mod tests {
                 ("COX_AX_STARTUP_QUIET_MS", Some("300")),
                 ("COX_KEYRING", Some("off")),
                 ("COX_CURSOR_CLOUD_URL", Some("http://127.0.0.1:9")),
+                ("COX_SWIFT_TEST_ALL", Some("0")),
+                ("COX_SWIFT_TEST_MARKERS", Some("/tmp/markers")),
             ],
             || {
                 let loaded = load_plain(cwd.path()).expect("load succeeds");
