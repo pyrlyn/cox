@@ -5,3 +5,4 @@ self-hosted-runner:
   labels:
     - xcode-27
     - xcode-27-xlarge
+    - xcode-27-local

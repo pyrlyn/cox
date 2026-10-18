@@ -28,9 +28,6 @@ use tokio::net::TcpListener;
 /// How long a login waits for the browser to come back.
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Keyring service every cox credential is filed under.
-const SERVICE: &str = "cox";
-
 /// Where a server's credentials are kept. One implementation per surface:
 /// the keyring for the binary, memory for tests.
 pub trait Secrets: Send + Sync {
@@ -84,20 +81,18 @@ pub fn stored(server: &str) -> Result<Option<StoredCredentials>, AuthError> {
 /// `COX_KEYRING=off` (A49) makes every entry "not there": reads find nothing
 /// and writes fail with a message, instead of a keychain prompt.
 fn entry(account: &str) -> Result<keyring::Entry, AuthError> {
-    let switch = std::env::var(cox_protocol::config::KEYRING_ENV).ok();
-    if !cox_protocol::config::keyring_enabled(switch.as_deref()) {
+    if !cox_protocol::config::keyring_enabled_in_env() {
         return Err(AuthError::CredentialStoreError(format!(
             "keyring disabled by {}",
             cox_protocol::config::KEYRING_ENV
         )));
     }
-    keyring::Entry::new(SERVICE, account)
+    keyring::Entry::new(cox_protocol::config::KEYRING_SERVICE, account)
         .map_err(|e| AuthError::CredentialStoreError(e.to_string()))
 }
 
 fn read(account: &str) -> Result<Option<StoredCredentials>, AuthError> {
-    let switch = std::env::var(cox_protocol::config::KEYRING_ENV).ok();
-    if !cox_protocol::config::keyring_enabled(switch.as_deref()) {
+    if !cox_protocol::config::keyring_enabled_in_env() {
         return Ok(None);
     }
     match entry(account)?.get_password() {
@@ -208,8 +203,15 @@ pub async fn login(
     let session = AuthorizationSession::new(manager, request)
         .await
         .map_err(|(_, e)| e)?;
-    on_url(session.get_authorization_url());
-    let query = tokio::time::timeout(LOGIN_TIMEOUT, callback(&listener))
+    let auth_url = session.get_authorization_url();
+    // The state rmcp put in the URL is the only thing that ties a redirect to
+    // this login, so the listener needs it before any connection is read.
+    let state =
+        query_param(auth_url.split_once('?').map_or("", |(_, q)| q), "state").ok_or_else(|| {
+            AuthError::AuthorizationFailed("authorization URL carries no state".into())
+        })?;
+    on_url(auth_url);
+    let query = tokio::time::timeout(LOGIN_TIMEOUT, callback(&listener, &state))
         .await
         .map_err(|_| {
             AuthError::AuthorizationFailed(format!(
@@ -223,37 +225,84 @@ pub async fn login(
     Ok(())
 }
 
-/// Accepts one HTTP request on the listener and returns its query string.
-/// The reply is a plain page the person can close; nothing else is served.
-async fn callback(listener: &TcpListener) -> Result<String, AuthError> {
-    let (mut socket, _) = listener
-        .accept()
-        .await
-        .map_err(|e| AuthError::AuthorizationFailed(format!("loopback accept: {e}")))?;
-    let mut buf = vec![0u8; 8192];
-    let n = socket
-        .read(&mut buf)
-        .await
-        .map_err(|e| AuthError::AuthorizationFailed(format!("loopback read: {e}")))?;
-    let head = String::from_utf8_lossy(&buf[..n]);
-    // `GET /callback?code=..&state=.. HTTP/1.1`
-    let target = head
-        .split_whitespace()
-        .nth(1)
-        .ok_or_else(|| AuthError::AuthorizationFailed("malformed callback request".into()))?;
-    let query = target
-        .split_once('?')
-        .map(|(_, q)| q)
-        .unwrap_or("")
-        .to_string();
-    let body = "<!doctype html><title>cox</title><p>Signed in. You can close this tab.";
-    let reply = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+/// How long one connection may take to send its request line. Any local
+/// process can connect to the loopback port, so a silent one must not stall
+/// the listener while the browser's redirect waits in the backlog.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// What the listener makes of one request.
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    /// `GET /callback` carrying the login's `state`: its query string.
+    Accept(String),
+    /// Anything that is not `GET /callback`.
+    NotFound,
+    /// The callback path, but a missing or different `state`.
+    BadRequest,
+}
+
+/// The first value of `key` in a query string, percent-decoded.
+fn query_param(query: &str, key: &str) -> Option<String> {
+    url::form_urlencoded::parse(query.as_bytes())
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.into_owned())
+}
+
+/// Judges a request head (`GET /callback?code=..&state=.. HTTP/1.1 ...`).
+/// Checking `state` here, not after the fact, is what stops a stray local
+/// request from consuming the one chance at the real redirect (T64.13).
+fn judge(head: &str, state: &str) -> Verdict {
+    let mut parts = head.split_whitespace();
+    let (Some("GET"), Some(target)) = (parts.next(), parts.next()) else {
+        return Verdict::NotFound;
+    };
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    if path != "/callback" {
+        return Verdict::NotFound;
+    }
+    match query_param(query, "state") {
+        Some(got) if got == state => Verdict::Accept(query.to_string()),
+        _ => Verdict::BadRequest,
+    }
+}
+
+fn reply(status: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
-    );
-    let _ = socket.write_all(reply.as_bytes()).await;
-    let _ = socket.shutdown().await;
-    Ok(query)
+    )
+}
+
+/// Serves the listener until a request passes `judge` and returns its query
+/// string; everything else gets a short 404/400 and the wait goes on. The
+/// caller bounds the whole wait with `LOGIN_TIMEOUT`. The reply is a plain
+/// page the person can close; nothing else is served.
+async fn callback(listener: &TcpListener, state: &str) -> Result<String, AuthError> {
+    loop {
+        let (mut socket, _) = listener
+            .accept()
+            .await
+            .map_err(|e| AuthError::AuthorizationFailed(format!("loopback accept: {e}")))?;
+        let mut buf = vec![0u8; 8192];
+        let n = match tokio::time::timeout(REQUEST_TIMEOUT, socket.read(&mut buf)).await {
+            Ok(Ok(n)) => n,
+            _ => continue,
+        };
+        let verdict = judge(&String::from_utf8_lossy(&buf[..n]), state);
+        let page = match &verdict {
+            Verdict::Accept(_) => reply(
+                "200 OK",
+                "<!doctype html><title>cox</title><p>Signed in. You can close this tab.",
+            ),
+            Verdict::NotFound => reply("404 Not Found", "Not found."),
+            Verdict::BadRequest => reply("400 Bad Request", "Bad request."),
+        };
+        let _ = socket.write_all(page.as_bytes()).await;
+        let _ = socket.shutdown().await;
+        if let Verdict::Accept(query) = verdict {
+            return Ok(query);
+        }
+    }
 }
 
 /// Forgets the server's credentials.
@@ -400,6 +449,47 @@ mod tests {
         }
         let token = serde_json::from_value(token).expect("token response");
         StoredCredentials::new("cid".into(), Some(token), vec![], Some(received))
+    }
+
+    async fn request(addr: std::net::SocketAddr, raw: &str) -> String {
+        let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        stream.write_all(raw.as_bytes()).await.expect("write");
+        let mut out = String::new();
+        stream.read_to_string(&mut out).await.expect("read");
+        out
+    }
+
+    #[tokio::test]
+    async fn callback_ignores_junk_and_waits_for_the_matching_state() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move { callback(&listener, "good").await });
+
+        let wrong_path = request(addr, "GET /other?code=evil&state=good HTTP/1.1\r\n\r\n").await;
+        assert!(wrong_path.starts_with("HTTP/1.1 404"));
+        let wrong_method =
+            request(addr, "POST /callback?code=evil&state=good HTTP/1.1\r\n\r\n").await;
+        assert!(wrong_method.starts_with("HTTP/1.1 404"));
+        let wrong_state = request(addr, "GET /callback?code=evil&state=bad HTTP/1.1\r\n\r\n").await;
+        assert!(wrong_state.starts_with("HTTP/1.1 400"));
+        let no_state = request(addr, "GET /callback?code=evil HTTP/1.1\r\n\r\n").await;
+        assert!(no_state.starts_with("HTTP/1.1 400"));
+        assert!(!server.is_finished(), "junk must not end the wait");
+
+        let real = request(addr, "GET /callback?code=real&state=good HTTP/1.1\r\n\r\n").await;
+        assert!(real.starts_with("HTTP/1.1 200"));
+        let query = server.await.expect("join").expect("callback");
+        assert_eq!(query_param(&query, "code").as_deref(), Some("real"));
+    }
+
+    #[test]
+    fn judge_decodes_the_state_before_comparing() {
+        assert_eq!(
+            judge("GET /callback?state=a%20b&code=c HTTP/1.1", "a b"),
+            Verdict::Accept("state=a%20b&code=c".into())
+        );
+        assert_eq!(judge("GET /callback HTTP/1.1", "a"), Verdict::BadRequest);
+        assert_eq!(judge("", "a"), Verdict::NotFound);
     }
 
     #[test]

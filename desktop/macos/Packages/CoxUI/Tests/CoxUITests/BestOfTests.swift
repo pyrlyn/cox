@@ -50,7 +50,71 @@ import Testing
   }
 }
 
+@MainActor
+@Suite struct BestOfMergeSnapshotTests {
+  @Test(arguments: Variant.all) func compareOffersMergeOnlyWithMoreThanOneResult(
+    _ variant: Variant
+  ) throws {
+    try assertCoxSnapshot(
+      PreviewPane { BestOfCompare(state: PreviewState.bestOfOneResult) { _ in } }, variant,
+      named: "one-result.\(variant.name)")
+    try assertCoxSnapshot(
+      PreviewPane { BestOfCompare(state: PreviewState.bestOfThreeResults) { _ in } }, variant,
+      named: "three-results.\(variant.name)")
+  }
+
+  @Test(arguments: Variant.all) func mergeSheet(_ variant: Variant) throws {
+    for (name, state) in [
+      ("two", PreviewState.bestOfMergeTwo), ("one", PreviewState.bestOfMergeOne),
+      ("model-menu", PreviewState.bestOfMergeModelMenu),
+      ("agent-menu", PreviewState.bestOfMergeAgentMenu),
+    ] {
+      try assertCoxSnapshot(
+        PreviewPane { BestOfMergeSheet(state: state) { _ in } }, variant,
+        named: "\(name).\(variant.name)")
+    }
+  }
+
+  @Test(arguments: Variant.all) func mergeColumn(_ variant: Variant) throws {
+    try assertCoxSnapshot(
+      PreviewPane { BestOfCompare(state: PreviewState.bestOfMergeRunning) { _ in } }, variant,
+      named: "running.\(variant.name)")
+    try assertCoxSnapshot(
+      PreviewPane { BestOfCompare(state: PreviewState.bestOfMergeDone) { _ in } }, variant,
+      named: "done.\(variant.name)")
+  }
+}
+
 @Suite struct BestOfTests {
+  @Test func bestOfMergeShowsOnlyForMoreThanOneMergeableResult() {
+    #expect(!PreviewState.bestOfThree.offersMerge, "a state that lists none offers none")
+    #expect(!PreviewState.bestOfOneResult.offersMerge)
+    #expect(PreviewState.bestOfThreeResults.offersMerge)
+  }
+
+  @Test func bestOfMergeIsBlockedUntilTwoAreCheckedAndAMergerCanStart() {
+    #expect(PreviewState.bestOfMergeTwo.canMerge)
+    #expect(PreviewState.bestOfMergeTwo.checked == 2)
+    #expect(!PreviewState.bestOfMergeOne.canMerge, "one result is not a merge")
+    var none = PreviewState.bestOfMergeTwo
+    none.merger = ""
+    #expect(!none.canMerge, "no merger chosen")
+    none.merger = "agent:gemini"
+    #expect(!none.canMerge, "a merger that cannot start here cannot merge")
+  }
+
+  @Test func bestOfMergeSheetSplitsModelsFromAgents() {
+    let mergers = PreviewState.bestOfMergeModelMenu.mergers
+    #expect(mergers.filter(\.isAgent).map(\.label) == ["Codex", "Gemini CLI"])
+    #expect(mergers.filter { !$0.isAgent }.map(\.label) == ["cox · Sonnet 5", "cox · Opus 5"])
+  }
+
+  @Test func bestOfMergeColumnNamesWhatItMerged() {
+    let columns = PreviewState.bestOfMergeDone.columns
+    #expect(columns.last?.merges == ["Claude Agent", "cox · Sonnet 5"])
+    #expect(columns.dropLast().allSatisfy { $0.merges.isEmpty })
+  }
+
   @Test func bestOfCountsTheSessionsOwnAgent() {
     #expect(PreviewState.bestOfControl.count == 2)
     #expect(PreviewState.bestOfControl.canLaunch)

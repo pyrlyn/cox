@@ -43,10 +43,14 @@ public struct BestOfCompare: View {
     public var duration: String
     public var canReview: Bool
     public var canKeep: Bool
+    /// The labels of the candidates this one merged (T52.26); empty for one the launch started.
+    /// A merge's `label` is who merged them.
+    public var merges: [String]
 
     public init(
       id: UInt32, label: String, status: Status, branch: String? = nil, files: [File] = [],
-      cost: String = "—", duration: String = "", canReview: Bool = false, canKeep: Bool = false
+      cost: String = "—", duration: String = "", canReview: Bool = false, canKeep: Bool = false,
+      merges: [String] = []
     ) {
       (self.id, self.label, self.status, self.branch, self.files) =
         (id, label, status, branch, files)
@@ -55,6 +59,7 @@ public struct BestOfCompare: View {
       )
       (self.cost, self.duration, self.canReview, self.canKeep) =
         (cost, duration, canReview, canKeep)
+      self.merges = merges
     }
   }
 
@@ -79,14 +84,19 @@ public struct BestOfCompare: View {
     public var confirm: Confirm?
     /// Why the last read or pick failed, and why a pick left some worktrees.
     public var notes: [String]
+    /// How many candidates the core lets a merge take (T52.25); Merge shows for more than one.
+    public var mergeable: Int
 
     public init(
       prompt: String = "", total: String = "", columns: [Column] = [], confirm: Confirm? = nil,
-      notes: [String] = []
+      notes: [String] = [], mergeable: Int = 0
     ) {
       (self.prompt, self.total, self.columns, self.confirm, self.notes) =
         (prompt, total, columns, confirm, notes)
+      self.mergeable = mergeable
     }
+
+    public var offersMerge: Bool { mergeable > 1 }
   }
 
   public enum Intent: Equatable, Sendable {
@@ -97,6 +107,8 @@ public struct BestOfCompare: View {
     /// The second yes: discard the changes too.
     case discard
     case cancel
+    /// Opens the merge sheet.
+    case merge
     case close
   }
 
@@ -116,6 +128,10 @@ public struct BestOfCompare: View {
         Spacer(minLength: 0)
         Text(verbatim: state.total).textStyle(.caption, tabularDigits: true)
           .foregroundStyle(Color(.textSecondary))
+        if state.offersMerge {
+          Button("Merge") { send(.merge) }
+            .buttonStyle(CoxButtonStyle(.secondary, size: .small))
+        }
         Button("Done") { send(.close) }
           .buttonStyle(CoxButtonStyle(.secondary, size: .small))
           .keyboardShortcut(.cancelAction)
@@ -150,8 +166,15 @@ private struct CandidateColumn: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: Space.m) {
-      Text(column.label).textStyle(.body).fontWeight(.semibold)
-        .foregroundStyle(Color(.textPrimary))
+      if column.merges.isEmpty {
+        Text(column.label).textStyle(.body).fontWeight(.semibold)
+          .foregroundStyle(Color(.textPrimary))
+      } else {
+        Text("Merge by \(column.label)").textStyle(.body).fontWeight(.semibold)
+          .foregroundStyle(Color(.textPrimary))
+        Text("Merges \(column.merges.joined(separator: ", "))").textStyle(.caption)
+          .foregroundStyle(Color(.textSecondary)).fixedSize(horizontal: false, vertical: true)
+      }
       CandidateStatus(status: column.status)
       if let branch = column.branch {
         Text(verbatim: branch).textStyle(.monoInline).foregroundStyle(Color(.textSecondary))

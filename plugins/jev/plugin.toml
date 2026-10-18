@@ -7,9 +7,8 @@ wasm = "jev.wasm"
 
 # The System One wire (J1): the host injects the key from `api_key_env` and
 # `cox_http` may reach only this host from inside `cox_provider_stream`.
-# `capabilities.decide` is added once a decision point calls in (T33.40.6,
-# T33.40.9); `capabilities.model` is not requested here — this plugin only
-# ever answers through its own provider, never through a tier.
+# `capabilities.model` is not requested here — this plugin only ever answers
+# through its own provider, never through a tier.
 [[provider]]
 name = "typesafe"
 api = "plugin"
@@ -30,3 +29,8 @@ id = "jev-latest"
 provider = "typesafe"
 context_window = 64000
 price = { input = 0.042, output = 0.0 }
+
+# J§5.1 (T33.40.6): raise a call's risk, never lower it. `route` joins with
+# T33.40.9.
+[capabilities]
+decide = ["risk"]

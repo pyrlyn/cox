@@ -86,4 +86,91 @@ extension PreviewState {
       keep: 0, label: "Claude Agent", prunes: ["cox · Sonnet 5 · best-01k6x-2"],
       dirty: ["/work/_worktrees/shop-best-01k6x-2"]),
     notes: ["cox · Sonnet 5 is still running; stop it first"])
+
+  private static let doneCox = BestOfCompare.Column(
+    id: 1, label: "cox · Sonnet 5", status: .done, branch: "best-01k6x-2",
+    files: [
+      .init(path: "src/checkout/AddressFields.tsx", added: 71, removed: 0),
+      .init(path: "src/checkout/CheckoutForm.tsx", added: 9, removed: 88),
+    ],
+    cost: "$0.52", duration: "5m 20s", canReview: true, canKeep: true)
+
+  private static let doneCodex = BestOfCompare.Column(
+    id: 2, label: "Codex", status: .done, branch: "best-01k6x-3",
+    files: [.init(path: "src/checkout/SummaryPanel.tsx", added: 47, removed: 0)],
+    duration: "3m 48s", canReview: true, canKeep: true)
+
+  /// One result and one that did not start: nothing to merge, so no Merge button (T52.26).
+  static let bestOfOneResult = BestOfCompare.State(
+    prompt: prompt, total: "$0.00", columns: [claudeColumn, codexColumn], mergeable: 1)
+
+  /// Three results: the core lists all of them, and Merge shows.
+  static let bestOfThreeResults = BestOfCompare.State(
+    prompt: prompt, total: "$0.52", columns: [claudeColumn, doneCox, doneCodex], mergeable: 3)
+
+  private static func merged(
+    _ status: BestOfCompare.Status, cost: String, duration: String
+  ) -> BestOfCompare.Column {
+    BestOfCompare.Column(
+      id: 3, label: "cox · Opus 5", status: status, branch: "best-01k6x-4",
+      files: [
+        .init(path: "src/checkout/AddressFields.tsx", added: 71, removed: 0),
+        .init(path: "src/checkout/CheckoutForm.tsx", added: 12, removed: 131),
+      ],
+      cost: cost, duration: duration, canReview: true, canKeep: status == .done,
+      merges: ["Claude Agent", "cox · Sonnet 5"])
+  }
+
+  /// The merge as one more column while its merger works.
+  static let bestOfMergeRunning = BestOfCompare.State(
+    prompt: prompt, total: "$0.61",
+    columns: [claudeColumn, doneCox, doneCodex, merged(.running, cost: "$0.09", duration: "40s")],
+    mergeable: 3)
+
+  /// The merge finished: it can be opened in Review or kept like any other candidate.
+  static let bestOfMergeDone = BestOfCompare.State(
+    prompt: prompt, total: "$0.94",
+    columns: [claudeColumn, doneCox, doneCodex, merged(.done, cost: "$0.42", duration: "2m 10s")],
+    mergeable: 4)
+
+  private static let mergeRows = [
+    BestOfMergeSheet.Row(
+      id: 0, label: "Claude Agent", added: 134, removed: 131, files: 3, cost: "—"),
+    BestOfMergeSheet.Row(
+      id: 1, label: "cox · Sonnet 5", added: 80, removed: 88, files: 2, cost: "$0.52"),
+    BestOfMergeSheet.Row(id: 2, label: "Codex", added: 47, removed: 0, files: 1, cost: "—"),
+  ]
+
+  private static func checked(_ ids: Set<UInt32>) -> [BestOfMergeSheet.Row] {
+    mergeRows.map { row in
+      var row = row
+      row.isChecked = ids.contains(row.id)
+      return row
+    }
+  }
+
+  /// The composer's models and the agents the best-of control offers; Gemini is missing its
+  /// program and cannot merge.
+  private static let mergers = [
+    BestOfControl.Option(id: "cox:claude-sonnet-5", label: "cox · Sonnet 5"),
+    BestOfControl.Option(id: "cox:claude-opus-5", label: "cox · Opus 5"),
+    BestOfControl.Option(id: "agent:codex", label: "Codex"),
+    BestOfControl.Option(id: "agent:gemini", label: "Gemini CLI", unavailable: "not on PATH"),
+  ]
+
+  /// Two results checked and a model chosen: Merge is ready.
+  static let bestOfMergeTwo = BestOfMergeSheet.State(
+    rows: checked([0, 1]), mergers: mergers, merger: "cox:claude-opus-5")
+
+  /// One result checked: Merge is blocked and the sheet says why.
+  static let bestOfMergeOne = BestOfMergeSheet.State(
+    rows: checked([2]), mergers: mergers, merger: "cox:claude-opus-5")
+
+  /// The picker open with a model chosen.
+  static let bestOfMergeModelMenu = BestOfMergeSheet.State(
+    rows: checked([0, 1]), mergers: mergers, merger: "cox:claude-opus-5", isMenuOpen: true)
+
+  /// The picker open with an external agent chosen.
+  static let bestOfMergeAgentMenu = BestOfMergeSheet.State(
+    rows: checked([0, 1]), mergers: mergers, merger: "agent:codex", isMenuOpen: true)
 }

@@ -74,6 +74,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "/loop <interval> <prompt> [--budget usd] | /loop stop",
         "repeat a prompt on a timer with its own budget cap",
     ),
+    (
+        "refine",
+        "/refine <text|list|undo> [--global]",
+        "review, apply or undo a change to notes, memory, skills",
+    ),
     ("skills", "/skills", "list skills"),
     ("hooks", "/hooks", "list hooks"),
     ("mcp", "/mcp", "MCP servers and their tools"),

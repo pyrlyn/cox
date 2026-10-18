@@ -3,17 +3,20 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 //! `cox config show|get|set|path` (plan.md §1.6/§1.12): renders the layered
-//! config `config_load::load` produces, and edits the user config file with
-//! `toml_edit` so hand-written comments survive a `set`.
+//! config `config_load::load` produces, and edits the user config file
+//! through `config_schema`'s `toml_edit` edits so hand-written comments
+//! survive a `set`.
 //!
 //! T32.16: moved here from `crates/cox`, which keeps only the printing
-//! (`config_cmd::show` prints the lines [`show_lines`] builds).
+//! (`config_cmd::show` prints the lines [`show_lines`] builds). T32.17: the
+//! edit itself is the shared `config_schema::plan_edit_foreign`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use config_schema::{TomlValue, parse_value, plan_edit_foreign, value_from_json};
 use serde_json::Value as JsonValue;
-use toml_edit::{DocumentMut, Item, Table, Value as TomlValue};
+use toml_edit::{DocumentMut, Item, Table};
 
 use crate::ConfigError;
 use crate::load::{self as config_load, LoadedConfig};
@@ -101,19 +104,12 @@ pub fn path() -> PathBuf {
     config_load::user_config_path()
 }
 
-/// Parses a `cox config set` value as TOML (`5`, `true`, `"text"`,
-/// `[1, 2]`, ...), falling back to a bare string for input that isn't
-/// valid TOML on its own (e.g. `cox config set tiers.code.model sonnet`
-/// without quotes).
-fn parse_value(raw: &str) -> TomlValue {
-    raw.parse::<TomlValue>()
-        .unwrap_or_else(|_| TomlValue::from(raw.to_string()))
-}
-
-/// `cox config set <key> <value>`: edits the user config file in place with
-/// `toml_edit`, which preserves comments and formatting for everything it
-/// doesn't touch; creates the file (and `~/.cox`) if absent. Returns the
-/// path written.
+/// `cox config set <key> <value>`: edits the user config file in place,
+/// keeping comments and formatting for everything it doesn't touch; creates
+/// the file (and `~/.cox`) if absent. The value is TOML (`5`, `true`,
+/// `"text"`, `[1, 2]`), or a bare string for input that isn't valid TOML on
+/// its own (`cox config set tiers.code.model sonnet`). Returns the path
+/// written.
 pub fn set(key: &str, raw_value: &str) -> Result<PathBuf, ConfigError> {
     let path = config_load::user_config_path();
     set_value_in(&path, key, parse_value(raw_value))?;
@@ -124,33 +120,11 @@ pub fn set(key: &str, raw_value: &str) -> Result<PathBuf, ConfigError> {
 /// already, so nothing falls back to a bare string, and the file is the
 /// app's own `config.toml`.
 pub fn set_json_in(path: &Path, key: &str, value: &JsonValue) -> Result<(), ConfigError> {
-    let unsupported = || ConfigError::UnsupportedValue {
-        key: key.to_string(),
-        value: value.to_string(),
-    };
-    set_value_in(path, key, toml_from_json(value).ok_or_else(unsupported)?)
+    set_value_in(path, key, value_from_json(key, value)?)
 }
 
-/// A JSON scalar or array as TOML; `None` for `null` and objects, which no
-/// leaf key takes.
-fn toml_from_json(value: &JsonValue) -> Option<TomlValue> {
-    Some(match value {
-        JsonValue::Bool(b) => TomlValue::from(*b),
-        JsonValue::Number(n) => match n.as_i64() {
-            Some(i) => TomlValue::from(i),
-            None => TomlValue::from(n.as_f64()?),
-        },
-        JsonValue::String(s) => TomlValue::from(s.as_str()),
-        JsonValue::Array(items) => {
-            let items: Option<Vec<TomlValue>> = items.iter().map(toml_from_json).collect();
-            TomlValue::Array(items?.into_iter().collect())
-        }
-        JsonValue::Null | JsonValue::Object(_) => return None,
-    })
-}
-
-/// Writes `contents` to `path`, creating its directory first: the one
-/// writer `set` and the TUI theme editor's save (T46.7) share.
+/// Writes `contents` to `path`, creating its directory first: the TUI theme
+/// editor's save (T46.7).
 pub fn write_file(path: &Path, contents: &str) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -159,36 +133,98 @@ pub fn write_file(path: &Path, contents: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// The edit is checked the way the loader reads the user file, through
+/// [`config_load::check_user_toml`] rather than `config_schema::plan_edit`'s
+/// own type check, so a refusal is the loader's `CoreError` (T22.12).
 fn set_value_in(path: &Path, key: &str, value: TomlValue) -> Result<(), ConfigError> {
-    let existing = fs::read_to_string(path).unwrap_or_default();
-    let mut doc: DocumentMut = existing.parse().map_err(|error| ConfigError::InvalidToml {
-        path: path.to_path_buf(),
-        error,
-    })?;
+    let edit = plan_edit_foreign(path, &[(key, value)])?;
+    config_load::check_user_toml(&edit.after)?;
+    Ok(edit.apply()?)
+}
 
-    let parts: Vec<&str> = key.split('.').collect();
-    let (last, ancestors) = parts.split_last().ok_or(ConfigError::EmptyKey)?;
-
-    let mut table: &mut Table = doc.as_table_mut();
-    for part in ancestors {
-        table = table
-            .entry(part)
-            .or_insert(Item::Table(Table::new()))
-            .as_table_mut()
-            .ok_or_else(|| ConfigError::NotATable {
-                part: (*part).to_string(),
-                key: key.to_string(),
-            })?;
+/// Appends one rule string to `permissions.allow` in the config file at
+/// `path` (T69.2): `Ok(true)` when the file changed, `Ok(false)` when the
+/// rule was already there. Unlike [`set`], which a person runs once at a
+/// terminal, this runs at an approval prompt while other cox sessions may be
+/// doing the same, so the read-edit-write holds an advisory lock on a
+/// sibling file and the new contents land through a temp file and a rename:
+/// two sessions cannot interleave into a lost rule or a half-written file.
+pub fn append_allow_rule_in(path: &Path, rule: &str) -> Result<bool, ConfigError> {
+    const KEY: &str = "permissions.allow";
+    // A dotfiles setup symlinks `config.toml`; renaming over the link would
+    // replace it with a regular file, so the edit lands on the target.
+    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
     }
-    // `Table::insert` resets the key's own formatting on overwrite, which
-    // strips a comment sitting directly above an existing key. `entry(..)`
-    // (via `IndexMut`) leaves the key's decor alone and only replaces the
-    // value, so a leading `# comment` above `key = old` survives a `set`.
-    *table.entry(last).or_insert(Item::None) = Item::Value(value);
+    let name = target.file_name().map_or_else(
+        || "config.toml".into(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    // The lock is a separate file: the rename swaps the config's inode, and a
+    // lock on the old inode would guard nothing.
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(target.with_file_name(format!(".{name}.lock")))?;
+    lock.lock()?;
+
+    let existing = match fs::read_to_string(&target) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let mut doc: DocumentMut =
+        existing
+            .parse()
+            .map_err(|error: toml_edit::TomlError| ConfigError::InvalidToml {
+                path: target.clone(),
+                message: error.to_string(),
+            })?;
+    let permissions = doc
+        .as_table_mut()
+        .entry("permissions")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| ConfigError::NotATable {
+            part: "permissions".into(),
+            key: KEY.into(),
+        })?;
+    let allow = permissions
+        .entry("allow")
+        .or_insert(Item::Value(TomlValue::Array(Default::default())))
+        .as_array_mut()
+        .ok_or_else(|| ConfigError::NotAnArray { key: KEY.into() })?;
+    if allow.iter().any(|v| v.as_str() == Some(rule)) {
+        return Ok(false);
+    }
+    // One rule per line, like the list a person would write by hand; an
+    // array the user kept inline stays inline.
+    let multiline = allow.is_empty()
+        || allow.iter().any(|v| {
+            v.decor()
+                .prefix()
+                .and_then(|p| p.as_str())
+                .is_some_and(|p| p.contains('\n'))
+        });
+    let mut value = TomlValue::from(rule);
+    if multiline {
+        value.decor_mut().set_prefix("\n    ");
+        allow.set_trailing_comma(true);
+        allow.set_trailing("\n");
+    }
+    allow.push_formatted(value);
 
     let contents = doc.to_string();
     config_load::check_user_toml(&contents)?;
-    write_file(path, &contents)
+    let temp = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let written = fs::write(&temp, &contents).and_then(|()| fs::rename(&temp, &target));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&temp);
+        return Err(e.into());
+    }
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -279,6 +315,27 @@ mod tests {
             other => panic!("expected Rejected, got {other:?}"),
         }
         assert_eq!(fs::read(&path).expect("read"), before);
+    }
+
+    /// T32.17: the shared edit keeps a key's trailing comment, edits an
+    /// inline table in place and refuses an empty key part, where the old
+    /// table walk dropped the comment and refused the inline table.
+    #[test]
+    fn set_keeps_a_trailing_comment_and_edits_an_inline_table() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            "[budget]\nsession_usd = 1 # mine\n[tiers]\ncode = { model = \"a\" }\n",
+        )
+        .expect("seed");
+        set_value_in(&path, "budget.session_usd", parse_value("2")).expect("set budget");
+        set_value_in(&path, "tiers.code.model", parse_value("b")).expect("set inline");
+        let written = fs::read_to_string(&path).expect("read back");
+        assert!(written.contains("session_usd = 2 # mine"), "{written}");
+        assert!(written.contains("code = { model = \"b\" }"), "{written}");
+        let empty = set_value_in(&path, "budget..x", parse_value("1"));
+        assert!(matches!(empty, Err(ConfigError::EmptyKey)), "{empty:?}");
     }
 
     #[test]
@@ -422,5 +479,76 @@ mod tests {
         assert_eq!(loaded.config.desktop.appearance.blur, 60.0);
         let loaded = set_then_load("desktop.transcript.text_size", "24").expect("the bound loads");
         assert_eq!(loaded.config.desktop.transcript.text_size, 24.0);
+    }
+
+    #[test]
+    fn allow_rule_append_creates_the_file_and_adds_one_line() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("nested").join("config.toml");
+        assert!(append_allow_rule_in(&path, "Bash(git status:*)").expect("append"));
+        let written = fs::read_to_string(&path).expect("read back");
+        assert_eq!(
+            written,
+            "[permissions]\nallow = [\n    \"Bash(git status:*)\",\n]\n"
+        );
+        config_load::check_user_toml(&written).expect("the file still loads");
+    }
+
+    #[test]
+    fn allow_rule_append_skips_a_duplicate_and_keeps_comments() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            "# mine\n[permissions]\n# keep\nallow = [\"Read(src/**)\"]\n",
+        )
+        .expect("seed");
+        assert!(append_allow_rule_in(&path, "Bash(cargo test:*)").expect("first"));
+        let once = fs::read_to_string(&path).expect("read");
+        assert!(!append_allow_rule_in(&path, "Bash(cargo test:*)").expect("second"));
+        assert_eq!(fs::read_to_string(&path).expect("read"), once);
+        assert!(once.contains("# mine") && once.contains("# keep"), "{once}");
+        assert_eq!(once.matches("Bash(cargo test:*)").count(), 1);
+        // An inline array stays inline.
+        assert!(
+            once.contains("allow = [\"Read(src/**)\", \"Bash(cargo test:*)\"]"),
+            "{once}"
+        );
+    }
+
+    #[test]
+    fn allow_rule_append_refuses_a_non_array_and_leaves_the_file() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "[permissions]\nallow = \"Bash\"\n").expect("seed");
+        let before = fs::read(&path).expect("read");
+        let err = append_allow_rule_in(&path, "Bash(ls:*)");
+        assert!(
+            matches!(err, Err(ConfigError::NotAnArray { .. })),
+            "{err:?}"
+        );
+        assert_eq!(fs::read(&path).expect("read"), before);
+    }
+
+    #[test]
+    fn allow_rule_append_from_many_threads_loses_nothing() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::thread::scope(|s| {
+            for n in 0..8 {
+                let path = &path;
+                s.spawn(move || {
+                    append_allow_rule_in(path, &format!("Bash(tool{n}:*)")).expect("append");
+                });
+            }
+        });
+        let written = fs::read_to_string(&path).expect("read back");
+        for n in 0..8 {
+            assert_eq!(
+                written.matches(&format!("Bash(tool{n}:*)")).count(),
+                1,
+                "{written}"
+            );
+        }
     }
 }

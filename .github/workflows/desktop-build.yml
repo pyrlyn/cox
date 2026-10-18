@@ -3,7 +3,7 @@ name: desktop build
 # The macOS app half of a release; the CLI is build-cli.yml. No trigger of its own: release.yml
 # (the one release workflow) calls both on the tagged commit and publishes the DMG with the CLI
 # archives. A Debug Cox.app with every macOS feature the app has (T37.32.3, DT§7),
-# Developer ID-signed with the pyrlyn org certificate through .github/actions/macos-signing
+# Developer ID-signed with the pyrlyn org certificate through pyrlyn/ci's macos-keychain action
 # (ad-hoc only when a caller passes require-signing: false and no certificate), packed by
 # scripts/desktop/dmg.sh into Cox-<version>-<run>-debug-arm64.dmg, checked (mounts, holds a
 # Cox.app with its Info.plist and executable, signature valid) and uploaded as the
@@ -51,11 +51,12 @@ jobs:
       - uses: ./.github/actions/desktop-macos
 
       - name: Import signing certificate
-        uses: ./.github/actions/macos-signing
+        uses: pyrlyn/ci/.github/actions/macos-keychain@main
         with:
           certificate: ${{ secrets.MACOS_CERTIFICATE }}
           password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           required: ${{ inputs.require-signing && 'true' || 'false' }}
+          identity-env: COX_SIGN_IDENTITY
 
       # The run number is the build number, so two DMGs of one version are told apart in Finder
       # and in About.

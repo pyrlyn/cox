@@ -636,6 +636,8 @@ async fn best_of_merge_is_a_candidate_compare_and_pick_see() {
     assert_eq!(views.len(), 3);
     assert_eq!(views[2].state, CandidateState::Done);
     assert_eq!(views[2].session, Some(merged.sessions[0].id()));
+    assert_eq!(views[2].merged_from, Some(vec![0, 1]));
+    assert_eq!(views[0].merged_from, None);
     // Its sidebar row sits in the group.
     let tree = worktree(&merged, 2);
     let listed = app.workspace().sessions(&tree, 50).expect("sessions");

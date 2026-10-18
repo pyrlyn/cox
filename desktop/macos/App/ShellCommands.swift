@@ -10,8 +10,8 @@
 // terminal pane under the column (DT§5.5, T51.6); Show/Hide Browser on ⌘⇧B puts the browser pane
 // beside it (DT§5.5, T51.10), and Show/Hide Canvas on ⌘⇧D a plugin's canvas in its place
 // (plugin-canvas §3, T33.47.8.6). The Window menu's Open in New Window and Open in New Tab pop the
-// shown session out (T51.11). File › Connect to Host… opens the focused window's sheet for an ssh
-// host alias (T52.21). File › New Session (⌘N) opens a session in the focused window, New Window
+// shown session out (T51.11). File › Connect to Target… opens the focused window's sheet (T52.21,
+// T68.5). File › New Session (⌘N) opens a session in the focused window, New Window
 // a main window of its own, Command Palette… (⌘K) the palette over it and Review Changes (⌘⇧R)
 // shows or hides Review (DT§5.5, T37.44.13); they replace the system's New Window item.
 
@@ -33,8 +33,8 @@ struct ShellActions {
   var toggleCanvas: (() -> Void)?
   /// Opens the shown session in a new window, or a tab when `true`; `nil` with none shown.
   var popOut: ((Bool) -> Void)?
-  /// Shows the Connect to Host sheet; `nil` for a launch that cannot connect (a fixture).
-  var connectHost: (() -> Void)?
+  /// Shows the Connect to Target sheet; `nil` for a launch that cannot connect (a fixture).
+  var connectTarget: (() -> Void)?
   /// Opens a new session in this window, asking for its agent first when one is configured.
   var newSession: () -> Void
   /// Shows or hides Review; `nil` with no session shown.
@@ -67,8 +67,8 @@ struct ShellCommands: Commands {
         .disabled(shell?.review == nil)
     }
     CommandGroup(after: .newItem) {
-      Button("Connect to Host…") { shell?.connectHost?() }
-        .disabled(shell?.connectHost == nil)
+      Button("Connect to Target…") { shell?.connectTarget?() }
+        .disabled(shell?.connectTarget == nil)
     }
     CommandGroup(replacing: .sidebar) {
       Button(shell?.isSidebarVisible == false ? "Show Sidebar" : "Hide Sidebar") {

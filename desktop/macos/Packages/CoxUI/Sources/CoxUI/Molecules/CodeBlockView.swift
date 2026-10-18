@@ -47,6 +47,7 @@ struct CodeBlockView: View {
           .textStyle(.monoCode)
           .foregroundStyle(Color(.textPrimary))
           .textSelection(.enabled)
+          .coxPointer(.selectableText)
           .fixedSize()
           .padding(.horizontal, Space.l)
           .padding(.vertical, Space.ml)

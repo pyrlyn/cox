@@ -53,7 +53,7 @@ pub enum Kind {
 /// with `crates/cox`'s `plugin_new::Lang` variants that actually scaffold
 /// something today — a language's template landing there (T33.34, ...)
 /// adds its name here too.
-pub const PLUGIN_LANGS: &[&str] = &["rust", "dart"];
+pub const PLUGIN_LANGS: &[&str] = &["rust", "go", "kotlin", "dart"];
 
 /// The `RewindWhat` rows; the first word is what `Submission::Rewind` gets.
 pub const REWIND_WHAT: [&str; 3] = [

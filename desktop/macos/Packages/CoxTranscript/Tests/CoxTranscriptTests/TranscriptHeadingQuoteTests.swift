@@ -63,7 +63,7 @@ struct TranscriptHeadingQuoteTests {
     defer { host.close() }
     host.fitToText()
     // Anti-aliasing differs slightly between machines; a real change moves far more pixels.
-    assertSnapshot(
+    try assertVersionedSnapshot(
       of: try host.image(), as: .image(precision: 0.995, perceptualPrecision: 0.98),
       named: dark ? "dark-solid" : "light-solid", testName: "everyHeadingLevel")
   }
@@ -73,7 +73,7 @@ struct TranscriptHeadingQuoteTests {
     let host = Host(quote, size: quoteSize, dark: dark)
     defer { host.close() }
     host.fitToText()
-    assertSnapshot(
+    try assertVersionedSnapshot(
       of: try host.image(), as: .image(precision: 0.995, perceptualPrecision: 0.98),
       named: dark ? "dark-solid" : "light-solid", testName: "nestedQuote")
   }

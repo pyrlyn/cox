@@ -82,14 +82,6 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `load` = `false` — true = load the model at session start if it is not loaded (with context_window)
 - `timeout_s` = `600` — local prefill is slow, same rationale as `local`
 - `max_retries` = `4`
-## `[providers.typesafe]`
-
-- `base_url` = `"https://api.typesafe.ai"` — client appends /v1/systemone
-- `api_key_env` = `"TYPESAFE_API_KEY"` — else keyring entry "cox/typesafe"
-- `model` = `"jev-latest"`
-- `timeout_s` = `30`
-- `max_retries` = `2`
-- `models` = `[{id="jev-latest", context_window=128000, efforts=["low"]}]` — decisions are cheap-tier only
 ## `[providers.deepseek]`
 
 - `base_url` = `"https://api.deepseek.com"` — client appends /chat/completions
@@ -164,13 +156,13 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `ask` = `[]` — a project config adds rules to this list, never replaces it
 - `deny` = `["Read(~/.ssh/**)", "Read(~/.aws/**)", "Bash(rm -rf /*)"]` — a project config adds rules to this list, never replaces it
 - `import_claude_settings` = `true`
-- `allow_for_session_persists` = `false`
+- `allow_for_session_persists` = `false` — T69.2: true also appends a Bash(<command>:*) prefix rule per approved shell command to allow in the user config, once; never for an opaque line, a denied line or another tool
 ## `[sandbox]`
 
 - `mode` = `"workspace-write"` — read-only | workspace-write | danger-full-access
 - `network` = `false`
 - `writable` = `[]` — extra writable roots
-- `readonly_in_workspace` = `[".git", ".cox", ".claude"]`
+- `readonly_in_workspace` = `[".git", ".cox", ".claude", ".agents", ".codex", ".aws"]`
 - `linux_backend` = `"auto"` — auto | bwrap | landlock | none
 ## `[budget]`
 
@@ -208,7 +200,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 
 - `timeout_s` = `30`
 - `deferred` = `true`
-- `servers` = `{}` — [mcp.servers.<name>] command/args/url/env/sandbox — same shape as .mcp.json, plus sandbox=false to opt a named stdio server out of the sandbox wrap (default true, T33.42)
+- `servers` = `{}` — [mcp.servers.<name>] command/args/url/env/sandbox — same shape as .mcp.json, plus sandbox=false to opt a named stdio server out of the sandbox wrap (default true, T33.42); [mcp.servers.<name>] is user config only — a project config cannot set mcp.servers (a repository must not choose a program cox runs or a URL it contacts)
 ## `[lsp]`
 
 - `enabled` = `true` — the deferred ReadOnly `diagnostics` tool (P41): one sandboxed stdio LSP server per language per session, killed when the session ends
@@ -307,6 +299,15 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 ## `[desktop.review]`
 
 - `send` = `"queue"` — queue | now — the Review pane's "Send to agent" while a turn runs: queue it behind the turn like a prompt, or send it at once (A108)
+## `[autonomous]`
+
+- `gates` = `[]` — shell commands `cox run -p --autonomous` runs after each turn, in order; the first failure wins and its output tail is fed back. User config only: a project config cannot set any autonomous.* key (a gate is a shell command, so a repository must not choose one). Empty means the flag is refused
+- `max_continuations` = `3` — turns the driver may start after your own
+- `max_turns` = `12` — turns in the whole run, yours included
+- `max_tokens` = `80000` — tokens the run's turns may use in total
+- `timeout_secs` = `1800` — wall-clock seconds the run may take
+- `gate_retries` = `3` — failed checks of one gate the run may retry before it gives up
+- `gate_timeout_secs` = `300` — seconds one gate command may run before it counts as failed
 ## `[external_agents.<name>]`
 
 An ACP agent a new session can be driven by instead of cox's own loop (T52.2, DT§3.3.1). None by default. **User config only**: a project `.cox/config.toml` cannot add, change or widen an entry, because an entry runs a program; the loader reverts it with a warning. cox never installs the agent: you install it, and cox runs the installed program.
@@ -315,8 +316,11 @@ An ACP agent a new session can be driven by instead of cox's own loop (T52.2, DT
 - `args` — arguments to `command`
 - `key_env` — the agent's own API-key variable. Only this one variable is passed through, by name, next to the child allowlist (`PATH`, `HOME`, `LANG`, `LC_*`, `TERM`, `TMPDIR`, `USER`, `SHELL`); cox's own provider keys stay behind. A key that does not resolve (env var, then keychain) leaves the agent out with one warning
 - `writable` — extra directories under your home the agent may write, for its own state (for example `~/.claude`). Each must resolve inside your home, never to your home itself; one that does not refuses the entry with a warning. A project config cannot set it
+- `target` — run the preset on a target (a `[targets.<name>]` name or a literal `kind:name`) instead of a local program (T68.7). The remote `cox run --output-format stream-json` does the work; `command`, `args`, `key_env` and `writable` then do nothing
 
 An external agent always runs under the sandbox wrap. Its file limits are the session's `[sandbox]` ones plus `writable`, but it always has network access, whatever `sandbox.network` says: it has to reach its vendor's API. The agent's model, cost and context are its own: cox writes no usage row for it and shows its cost as "—".
+
+A preset with a `target` is not wrapped in the local sandbox: the remote `cox` applies its own, keeps its own keys, and nothing but the launcher's scrubbed environment leaves this machine. The prompt goes over stdin, never onto the remote command line. Every call needs an allow rule `TargetAgent(<kind:name>)` in your own config's `permissions.allow` (`bypass` and `auto` do not waive it, like `CloudAgent`); without one the call is refused with the rule to add. The remote run's token counts become a `$0` usage row named after the preset.
 
 Examples (install the program first; these are not defaults):
 
@@ -340,6 +344,52 @@ writable = ["~/.gemini"]
 ```
 
 Cursor (`agent acp`, `CURSOR_API_KEY`) comes from the granted Cursor plugin's `[[external_agents]]` entry (`plugins/cursor`), not from this table.
+
+## `[targets.<name>]` and `[launchers]`
+
+Run targets (T68.2, P68): a machine or container a whole cox session can run on, reached with `--on <name>` and in the desktop app. None by default. **User config only**: a project `.cox/config.toml` cannot add, change or remove an entry or a launcher path, because a target decides which machine receives the session and a launcher path decides which program runs; the loader reverts both with a warning. `cox` must already be installed on the target. Setup and a worked example per kind are in [docs/targets.md](targets.md).
+
+- `target` — where it runs, as `kind:name`: `ssh:<host or alias>`, `docker:<container>`, `lima:<instance>` or `colima:<profile>`
+- `cwd` — the directory on the target the session starts in. Letters, digits and `- _ . , / : = @ + \` only, because it goes on the remote command line
+- `context` — `docker --context` to reach the container through; `docker:` targets only
+- `program` — absolute path of the launcher for this target; beats `[launchers]` and the built-in lookup
+- `[launchers]` `ssh`, `docker`, `limactl`, `colima` — absolute path of that program, for a machine where it is not at the usual place. `PATH` is never searched. A path that is relative or does not exist is refused
+
+A name in `[targets.*]` wins over a literal `kind:name`. Every `desktop.remote_hosts` alias also reads as an `ssh:<alias>` target.
+
+Examples (not defaults):
+
+```toml
+[targets.devbox]                    # ssh
+target = "ssh:devbox"
+cwd = "/srv/app"
+
+[targets.web]                       # a running container on a remote Docker engine
+target = "docker:web"
+context = "staging"
+
+[targets.vm]                        # a Lima instance
+target = "lima:default"
+
+[targets.dev]                       # a Colima profile
+target = "colima:dev"
+
+[launchers]
+docker = "/opt/orbstack/bin/docker"
+```
+
+### Running on a target
+
+`cox --on <target>` opens the TUI on the target through its launcher, with a terminal (`ssh -t`, `docker exec -it`, `limactl shell`, `colima ssh`). `cox run --on <target> -p "…"` runs without one: the prompt goes to the remote `cox run --prompt-stdin` as the first stdin line, a JSON string, never on the command line; the rest of your stdin stays the approvals channel, the remote stdout and stderr are copied through, and the exit code is the remote's. `<target>` is a name from `[targets.*]` or a literal `kind:name`. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link.
+
+Only `--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume` and `--continue` are forwarded, each value limited to letters, digits and `- _ . , / : = @ + \`; the directory is the target's `cwd`. Any other flag, a first-turn prompt for the TUI and every subcommand other than `run` are refused with a message naming them, so nothing is dropped silently.
+
+```bash
+cox --on lima:dev
+cox run --on docker:ci -p "fix the failing test" --output-format stream-json
+```
+
+`cox run --prompt-stdin` also works on its own: `printf '"summarise the diff"\n' | cox run --prompt-stdin`. It excludes `-p`.
 
 ## `~/.cox/keybindings.toml`
 

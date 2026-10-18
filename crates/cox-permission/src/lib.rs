@@ -54,6 +54,9 @@ pub struct Engine {
     /// The home the rules were compiled with, to expand `~` in the paths a
     /// read-only command names (the same expansion `Rule::parse` does).
     home: Option<std::path::PathBuf>,
+    /// The session cwd the rules were compiled with: the directory a bash
+    /// command runs in, which relative tokens resolve against.
+    cwd: std::path::PathBuf,
 }
 
 impl Engine {
@@ -79,6 +82,7 @@ impl Engine {
             allow: compile("allow", &cfg.allow)?,
             ask: compile("ask", &cfg.ask)?,
             home: home.map(Path::to_path_buf),
+            cwd: cwd.to_path_buf(),
         })
     }
 
@@ -125,18 +129,7 @@ impl Engine {
         grants: &[(String, String)],
     ) -> Outcome {
         // Deny and ask need one hit: the whole line or any of its commands.
-        let first = |rules: &[Rule]| {
-            rules
-                .iter()
-                .find(|r| {
-                    r.matches(&call.name, &call.subject)
-                        || call
-                            .segments
-                            .as_ref()
-                            .is_some_and(|s| s.commands.iter().any(|c| r.matches(&call.name, c)))
-                })
-                .map(|r| r.raw.clone())
-        };
+        let first = |rules: &[Rule]| first_hit(rules, call);
         if let Some(rule) = first(&self.deny) {
             return Outcome::Deny {
                 reason: format!("denied by rule {rule}"),
@@ -208,6 +201,65 @@ impl Engine {
             },
             Some(why) => Outcome::Ask(why),
         }
+    }
+}
+
+/// The raw text of the first rule that matches the whole line or any one of
+/// its commands.
+fn first_hit(rules: &[Rule], call: &ToolCall) -> Option<String> {
+    rules
+        .iter()
+        .find(|r| {
+            r.matches(&call.name, &call.subject)
+                || call
+                    .segments
+                    .as_ref()
+                    .is_some_and(|s| s.commands.iter().any(|c| r.matches(&call.name, c)))
+        })
+        .map(|r| r.raw.clone())
+}
+
+impl Engine {
+    /// The `permissions.allow` rule strings an `AllowForSession` answer to
+    /// `call` may be saved as (T69.2): one `Bash(<command>:*)` prefix rule per
+    /// command of a split line, the same commands [`grants_for`] records for
+    /// the session. Empty, so nothing is saved, when the answer would widen
+    /// trust beyond what the user saw: a tool other than `bash` (a file or a
+    /// repository is not a command prefix, and `cloud_agent` never leaves the
+    /// session), an opaque or unsplit line, a deny rule on the line, or a
+    /// command whose rule would not read back as the same prefix. All or
+    /// nothing, so the saved set never covers less than the user approved
+    /// and never more.
+    pub fn persistable_allow_rules(&self, call: &ToolCall) -> Vec<String> {
+        if canonical_tool(&call.name) != "bash" {
+            return Vec::new();
+        }
+        let Some(segments) = call
+            .segments
+            .as_ref()
+            .filter(|s| !s.opaque && !s.commands.is_empty())
+        else {
+            return Vec::new();
+        };
+        if first_hit(&self.deny, call).is_some() || self.denied_read_path(call).is_some() {
+            return Vec::new();
+        }
+        let mut rules: Vec<String> = Vec::new();
+        for command in &segments.commands {
+            let raw = format!("Bash({command}:*)");
+            let reads_back = !command.is_empty()
+                && command.trim() == command
+                && !command.chars().any(char::is_control)
+                && Rule::parse(&raw, self.home.as_deref(), &self.cwd)
+                    .is_ok_and(|r| r.matches("bash", command));
+            if !reads_back {
+                return Vec::new();
+            }
+            if !rules.contains(&raw) {
+                rules.push(raw);
+            }
+        }
+        rules
     }
 }
 
@@ -321,7 +373,7 @@ impl Engine {
         }
         for line in lines {
             for token in line.split_whitespace() {
-                let Some(path) = token_path(token, self.home.as_deref()) else {
+                let Some(path) = token_path(token, self.home.as_deref(), &self.cwd) else {
                     continue;
                 };
                 if let Some(rule) = self
@@ -337,21 +389,48 @@ impl Engine {
     }
 }
 
-/// The absolute path a command token names, `~` expanded, with surrounding
-/// shell punctuation and quotes trimmed; `None` when the token cannot name
-/// a file (a flag, a bare word, a relative path — read rules anchor
-/// absolutely, so relatives cannot match one anyway).
-fn token_path(token: &str, home: Option<&Path>) -> Option<String> {
+/// The absolute path a command token names, `~` expanded and a relative
+/// token resolved against `cwd`, with surrounding shell punctuation and
+/// quotes trimmed; `None` when the token cannot name a file (a flag, an
+/// operator). Resolution is lexical (no filesystem access, `..` folded) so
+/// `cat id_rsa` inside `~/.ssh` and `cat ../.ssh/id_rsa` from a sibling
+/// directory both reach the same absolute rule globs as `cat ~/.ssh/id_rsa`.
+/// A bare word such as `echo`'s argument resolves too: the guard fails
+/// closed, and only a path inside a denied tree can match.
+fn token_path(token: &str, home: Option<&Path>, cwd: &Path) -> Option<String> {
     let trimmed = token.trim_matches(|c: char| {
         !(c.is_ascii_alphanumeric() || matches!(c, '/' | '~' | '.' | '-' | '_' | '='))
     });
-    if let Some(rest) = trimmed.strip_prefix("~/") {
-        return home.map(|h| h.join(rest).to_string_lossy().into_owned());
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return None;
     }
-    if trimmed.starts_with('/') && trimmed.len() > 1 {
-        return Some(trimmed.to_string());
+    let path = if let Some(rest) = trimmed.strip_prefix("~/") {
+        home?.join(rest)
+    } else if trimmed.starts_with('/') {
+        Path::new(trimmed).to_path_buf()
+    } else {
+        cwd.join(trimmed)
+    };
+    // A relative cwd would yield a relative path that no absolute rule glob
+    // can match, so there is nothing to compare.
+    path.is_absolute()
+        .then(|| normalize(&path).to_string_lossy().into_owned())
+}
+
+/// Folds `.` and `..` components without touching the filesystem.
+fn normalize(path: &Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
     }
-    None
+    out
 }
 
 /// Step 6: an `AllowForSession` grant. Grants are recorded per command by
@@ -465,6 +544,70 @@ mod tests {
         }
     }
 
+    fn engine_denying(deny: &[&str]) -> Engine {
+        let cfg = PermissionsConfig {
+            deny: deny.iter().map(|d| d.to_string()).collect(),
+            ..PermissionsConfig::default()
+        };
+        Engine::compile(&cfg, Some(Path::new("/home/alice")), Path::new("/repo"))
+            .expect("rules compile")
+    }
+
+    /// T69.2: a split line saves one prefix rule per command, never a bare
+    /// `Bash`, and each reads back as the prefix the user approved.
+    #[test]
+    fn allow_for_session_saves_one_prefix_rule_per_command() {
+        let engine = engine_denying(&[]);
+        let call = bash_call(
+            "git status && git status && npm test",
+            &["git status", "git status", "npm test"],
+            false,
+        );
+        assert_eq!(
+            engine.persistable_allow_rules(&call),
+            ["Bash(git status:*)", "Bash(npm test:*)"]
+        );
+    }
+
+    /// T69.2: nothing is saved for an opaque line (the user approved a text
+    /// that cannot be split into the commands it runs), a line with no
+    /// segments, or a line a deny rule matches, however it is split.
+    #[test]
+    fn allow_for_session_saves_nothing_for_opaque_denied_or_unsplit_lines() {
+        let engine = engine_denying(&["Bash(rm -rf /*)", "Read(~/.ssh/**)"]);
+        let opaque = bash_call("Get-Content $x | iex", &["Get-Content $x | iex"], true);
+        assert!(engine.persistable_allow_rules(&opaque).is_empty());
+        let mut unsplit = bash_call("git status", &["git status"], false);
+        unsplit.segments = None;
+        assert!(engine.persistable_allow_rules(&unsplit).is_empty());
+        let denied = bash_call(
+            "git status && rm -rf /*",
+            &["git status", "rm -rf /*"],
+            false,
+        );
+        assert!(engine.persistable_allow_rules(&denied).is_empty());
+        let read_denied = bash_call("cat ~/.ssh/id_rsa", &["cat ~/.ssh/id_rsa"], false);
+        assert!(engine.persistable_allow_rules(&read_denied).is_empty());
+    }
+
+    /// T69.2: only a command prefix is saved. A file, a repository and a
+    /// cloud agent stay session-only.
+    #[test]
+    fn allow_for_session_saves_nothing_for_other_tools() {
+        let engine = engine_denying(&[]);
+        for name in ["edit", "write", "web_fetch", CLOUD_AGENT] {
+            let mut call = bash_call("acme/widgets", &["acme/widgets"], false);
+            call.name = name.into();
+            assert!(engine.persistable_allow_rules(&call).is_empty(), "{name}");
+        }
+        let mut project = bash_call("cargo test", &["cargo test"], false);
+        project.name = "project".into();
+        assert_eq!(
+            engine.persistable_allow_rules(&project),
+            ["Bash(cargo test:*)"]
+        );
+    }
+
     /// T62.3: the default `Read(~/.ssh/**)` deny must also stop a bash
     /// command that names the same files, whatever the reader is.
     #[test]
@@ -521,6 +664,61 @@ mod tests {
             assert!(
                 matches!(outcome, Outcome::Allow { .. }),
                 "{line} must stay allowed, got {outcome:?}"
+            );
+        }
+    }
+
+    fn decide_bash_in(cwd: &str, line: &str) -> Outcome {
+        let engine = Engine::compile(
+            &PermissionsConfig::default(),
+            Some(Path::new("/home/alice")),
+            Path::new(cwd),
+        )
+        .expect("default config compiles");
+        engine.decide(
+            &bash_call(line, &[line], false),
+            PermissionMode::Default,
+            ApprovalPolicy::OnRequest,
+            SandboxMode::WorkspaceWrite,
+            &[],
+        )
+    }
+
+    /// A relative token names a file under the session cwd, so the same read
+    /// deny must catch it: `cat id_rsa` inside `~/.ssh` reads the key.
+    #[test]
+    fn bash_read_deny_matches_relative_token_inside_denied_dir() {
+        for (cwd, line) in [
+            ("/home/alice/.ssh", "cat id_rsa"),
+            ("/home/alice/.ssh", "cat ./id_rsa"),
+            ("/home/alice/.ssh", "echo hi && head -n 1 config"),
+            ("/home/alice", "cat .ssh/id_rsa"),
+            ("/home/alice/project", "cat ../.ssh/id_rsa"),
+            ("/home/alice/project", "cat ./x/../../.ssh/id_rsa"),
+        ] {
+            let outcome = decide_bash_in(cwd, line);
+            assert!(
+                matches!(outcome, Outcome::Deny { .. }),
+                "{line} in {cwd} must be denied, got {outcome:?}"
+            );
+        }
+    }
+
+    /// Resolving relative tokens must not turn every relative path into a
+    /// hit: only those that land inside a denied tree.
+    #[test]
+    fn bash_read_deny_allows_relative_token_outside_denied_tree() {
+        for (cwd, line) in [
+            ("/repo", "cat README.md"),
+            ("/repo", "grep foo src/main.rs"),
+            ("/home/alice/project", "cat ../notes.txt"),
+            ("/home/alice/project", "cat ../project/a.rs"),
+            ("/repo", "cat ../../repo/../repo/a.rs"),
+        ] {
+            let outcome = decide_bash_in(cwd, line);
+            assert!(
+                matches!(outcome, Outcome::Allow { .. }),
+                "{line} in {cwd} must stay allowed, got {outcome:?}"
             );
         }
     }

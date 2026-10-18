@@ -17,11 +17,12 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use cox_plugin_api::{
-    Advice, CallTarget, DecideOut, DecideResume, ModelCall, OwnProvider, Question,
+    Advice, CallTarget, DecideOut, DecideResume, ModelCall, NoticeLevel, OwnProvider, Question,
 };
 use cox_protocol::traits::{Advisor, ModelCaller};
 use cox_protocol::types::Request;
@@ -35,6 +36,8 @@ const EXPORT: &str = "cox_decide";
 const RESUME: &str = "cox_decide_resume";
 /// The granted-capability line prefix `grant::capability_list` writes.
 const GRANT_PREFIX: &str = "decide:";
+/// Failures in a row that disable `cox_decide` for the session (PL§10).
+const STRIKES: u32 = 3;
 
 /// A loaded plugin's granted decision points. The deadline is the point's
 /// latency budget, clamped by `PluginHost::call` to the plugin's
@@ -45,6 +48,9 @@ pub struct PluginAdvisor {
     host: Arc<PluginHost>,
     points: BTreeSet<String>,
     call_out: Option<CallOut>,
+    /// Failures since the last answer or silence; at [`STRIKES`] the export
+    /// is never called again in this session.
+    failures: AtomicU32,
 }
 
 /// What a `DecideOut::Call` runs through: the plugin's own environment,
@@ -68,6 +74,7 @@ impl PluginAdvisor {
             host,
             points,
             call_out: None,
+            failures: AtomicU32::new(0),
         }
     }
 
@@ -155,7 +162,9 @@ impl Advisor for PluginAdvisor {
     /// pick.
     async fn advise(&self, question: Question, budget: Duration) -> Option<Advice> {
         let point = serde_json::to_value(question.point).ok()?;
-        if !point.as_str().is_some_and(|p| self.points.contains(p)) {
+        if !point.as_str().is_some_and(|p| self.points.contains(p))
+            || self.failures.load(Ordering::Relaxed) >= STRIKES
+        {
             return None;
         }
         let deadline = Instant::now() + budget;
@@ -171,13 +180,41 @@ impl Advisor for PluginAdvisor {
             Err(why) => Err(why),
         };
         let why = match answer {
-            Ok(None) => return None,
-            Ok(Some(advice)) if question.fits(&advice.answer) => return Some(advice),
+            Ok(None) => {
+                self.failures.store(0, Ordering::Relaxed);
+                return None;
+            }
+            Ok(Some(advice)) if question.fits(&advice.answer) => {
+                self.failures.store(0, Ordering::Relaxed);
+                return Some(advice);
+            }
             Ok(Some(_)) => "the answer does not fit the question".to_string(),
             Err(why) => why,
         };
         tracing::warn!(plugin = %self.id, %point, "decision skipped: {why}");
+        self.strike(&why);
         None
+    }
+}
+
+impl PluginAdvisor {
+    /// Counts one failure. The first of a run and the one that disables the
+    /// export each leave one notice, so a dead key or endpoint is visible
+    /// without a notice per question (D14).
+    fn strike(&self, why: &str) {
+        let n = self.failures.fetch_add(1, Ordering::Relaxed) + 1;
+        let text = match n {
+            1 => format!("decision skipped: {why}"),
+            STRIKES => {
+                format!("{EXPORT} disabled for this session after {STRIKES} failures in a row")
+            }
+            _ => return,
+        };
+        if let Some(out) = &self.call_out {
+            // A full notice queue only loses the notice; the decision is
+            // already skipped.
+            let _ = out.env.notify(NoticeLevel::Warn, &text);
+        }
     }
 }
 
@@ -309,6 +346,7 @@ mod tests {
         provider: Mutex<Option<PluginProvider>>,
         over_budget: bool,
         rows: Mutex<Vec<(String, String, String, Job)>>,
+        attempts: AtomicU32,
     }
 
     #[async_trait]
@@ -329,6 +367,7 @@ mod tests {
             model: &str,
             request: Request,
         ) -> Result<Vec<ProviderEvent>, CoreError> {
+            self.attempts.fetch_add(1, Ordering::Relaxed);
             if self.over_budget {
                 return Err(CoreError::Budget {
                     spent: 1.0,
@@ -402,13 +441,14 @@ mod tests {
             answering_at(RESUME, RESUMED, 8192),
         );
         let env = Arc::new(HostEnv::new("p"));
-        assert!(env.bind_provider("own", "https://own.example", None));
+        assert!(env.bind_provider("own", "https://own.example", None, None));
         let host = Arc::new(
             PluginHost::load_with(&module(&body), &Limits::default(), env.clone())
                 .expect("module loads"),
         );
         *ledger.provider.lock().expect("ledger lock") = Some(PluginProvider::new(
             "own",
+            "https://own.example",
             host.clone(),
             env.clone(),
             Arc::new(|_: &Request| 10),
@@ -488,5 +528,28 @@ mod tests {
             tier.advise(risk_question(), Duration::from_secs(5)).await,
             None
         );
+    }
+
+    /// PL§10: three failures in a row disable `cox_decide` for the
+    /// session; the first failure and the disabling each leave one notice.
+    #[tokio::test]
+    async fn three_failures_disable_decide_export() {
+        let ledger = Ledger {
+            over_budget: true,
+            ..Ledger::default()
+        };
+        let (advisor, ledger) = calling_out("own", ledger);
+        for _ in 0..4 {
+            let advice = advisor
+                .advise(risk_question(), Duration::from_secs(10))
+                .await;
+            assert_eq!(advice, None);
+        }
+        assert_eq!(ledger.attempts.load(Ordering::Relaxed), STRIKES);
+        let notices = advisor.call_out.as_ref().expect("wired").env.take_notices();
+        let texts: Vec<&str> = notices.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(texts[0].starts_with("decision skipped: "), "{texts:?}");
+        assert!(texts[1].contains("cox_decide disabled"), "{texts:?}");
     }
 }

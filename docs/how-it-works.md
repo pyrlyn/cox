@@ -353,7 +353,7 @@ A worktree is one session's place. Starting a second session in a worktree anoth
 | Editor | `cox acp` | maps `Event` → ACP `session/update` (see `docs/ide.md`) |
 | Other agents | `cox mcp [--allow-write] [--tools a,b]` | serves built-in tools, not the loop (see `docs/compat.md`) |
 | macOS app | `Cox.app` (links `cox-ffi` as a static library) | `cox-app` folds them into keyed blocks; Swift pulls `TimelinePatch` batches through UniFFI (see `docs/design/desktop.md`) |
-| Remote host | `cox app-server --stdio` (run by the app over your own `ssh`) | serves the same calls and `TimelinePatch` batches as JSON lines, so a host's sessions show in the app; keys and the ssh agent never cross (see `docs/app-server.md`) |
+| Remote host | `cox app-server --stdio` (run by the app through a target's launcher, such as your own `ssh`) | serves the same calls and `TimelinePatch` batches as JSON lines, so a target's sessions show in the app; keys and the ssh agent never cross (see `docs/targets.md` and `docs/app-server.md`) |
 
 Useful companions: `cox sessions --grep <q>` (find a rollout),
 `cox doctor` (keys, sandbox, stale price rows, a configured model with no
@@ -397,7 +397,7 @@ repository instruction files are all untrusted. Four guards from
 confinement** (`cox_tools::path::confine`) rejects workspace escapes
 before a file tool runs; the **sandbox** confines shell commands and every
 stdio MCP server's process unless the session chose `danger-full-access`
-or, per server, `sandbox = false` (T33.42); terminal **sanitisation**
+or, per server, `sandbox = false` (T33.42); a server the host cannot wrap is skipped with a warning, never run bare (T64.10); terminal **sanitisation**
 strips escape sequences and bidi overrides before anything the model or
 a tool wrote is displayed. A broken hook, skill, or MCP server is a
 warning and an absence, never a fatal error.

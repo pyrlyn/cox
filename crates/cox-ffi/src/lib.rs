@@ -22,14 +22,14 @@ use cox_app::ModelSection;
 use cox_app::Readiness;
 use cox_app::WorkspaceError;
 use cox_app::app::{App as Owner, AppError as OwnerError};
-use cox_app::best_of::{BestOfId, BestOfRequest, CandidateView, Picked};
+use cox_app::best_of::{BestOfId, BestOfMerge, BestOfRequest, CandidateView, Picked};
 use cox_app::onboarding::CheckRow;
 use cox_app::remote::RemoteError;
 use cox_app::terminal::TerminalError;
 use cox_app::workspace::SidebarSection;
 use cox_app::{
     Activity, AgentChoice, DaySummary, Holder, InboxItem, ModelChoice, PaletteHit, PaletteItem,
-    Project, SearchHit, SessionEntry,
+    Project, SearchHit, SessionEntry, TargetChoice,
 };
 use cox_app::{RuleKind, SessionGrant, SettingsView};
 use cox_protocol::ids::SessionId;
@@ -468,6 +468,22 @@ impl App {
         ))
     }
 
+    /// A workspace on a configured name or a `kind:name` target (T68.4).
+    pub async fn connect_target(
+        self: Arc<Self>,
+        text: String,
+    ) -> Result<Arc<RemoteHandle>, AppError> {
+        Ok(RemoteHandle::new(
+            on_runtime(async move { self.owner.connect_target(&text).await }).await??,
+        ))
+    }
+
+    /// The configured targets and the containers and VMs running now
+    /// (T68.4); it runs the launchers, so it runs off the caller's thread.
+    pub async fn targets(self: Arc<Self>) -> Result<Vec<TargetChoice>, AppError> {
+        on_runtime(async move { self.owner.targets().await }).await
+    }
+
     /// Best of n (T52.9): one worktree and one session per candidate, each
     /// sent the same prompt; a candidate that cannot start is listed with
     /// why and the others run.
@@ -496,6 +512,26 @@ impl App {
         discard: bool,
     ) -> Result<Picked, AppError> {
         Ok(on_runtime(async move { self.owner.pick(&id, keep, discard).await }).await??)
+    }
+
+    /// Merges the finished candidates `merge.from` of group `id` with
+    /// `merge.by` (T52.25): a new worktree and a session that joins the group
+    /// as one more candidate. Refused before anything starts for fewer than
+    /// two, one not finished, or a picked group.
+    pub async fn best_of_merge(
+        self: Arc<Self>,
+        merge: BestOfMerge,
+        theme: String,
+    ) -> Result<BestOfLaunch, AppError> {
+        Ok(BestOfLaunch::from(
+            on_runtime(async move { self.owner.best_of_merge(merge, theme).await }).await??,
+        ))
+    }
+
+    /// The candidates of group `id` a merge may take (T52.25): decided in
+    /// `cox-app` so every client offers the same choice.
+    pub fn mergeable(&self, id: BestOfId) -> Result<Vec<u32>, AppError> {
+        Ok(self.owner.mergeable(&id)?)
     }
 
     pub async fn open(

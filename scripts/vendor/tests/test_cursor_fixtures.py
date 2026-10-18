@@ -98,7 +98,7 @@ def test_rerun_is_a_no_op_and_check_writes_nothing(isolated_dir):
 def test_default_target_is_what_the_e2e_reads():
     crate = cf.REPO_ROOT / "crates" / "cox"
     assert REAL_FIXTURE_DIR == crate / "tests" / "fixtures" / "cursor"
-    e2e = (crate / "tests" / "external_agents_cursor.rs").read_text()
+    e2e = (crate / "tests" / "it" / "external_agents_cursor.rs").read_text()
     for name in ("stream_json.json", "acp.json"):
         assert (REAL_FIXTURE_DIR / name).is_file()
         assert f'"{name}"' in e2e

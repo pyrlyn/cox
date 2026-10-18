@@ -14,8 +14,8 @@ use cox_protocol::agent::AgentDef;
 use cox_protocol::errors::{CoreError, ProviderError, StoreError, ToolError};
 use cox_protocol::ids::{ArchiveId, CallId, ItemId, SessionId, TaskId, TurnId};
 use cox_protocol::traits::{
-    Advisor, Archive, ArchivePut, Checkpointer, EventTap, ExternalAgent, Hook, HunkReverter,
-    Provider, RepoMapper, Store, Tool, Worktrees,
+    Advisor, AllowRuleStore, Archive, ArchivePut, Checkpointer, EventTap, ExternalAgent, Hook,
+    HunkReverter, Provider, RepoMapper, Store, Tool, Worktrees,
 };
 use cox_protocol::types::{
     ArchiveRef, Attachment, Content, ContextBreakdown, Decision, Event, HookEvent, HookOutcome,
@@ -42,7 +42,7 @@ use crate::turn::{consume_provider, results_message, run_signed_tools, run_tools
 pub enum State {
     /// No turn in flight.
     Idle,
-    /// Building the next provider request.
+    /// Building the next provider request, or compacting the history it carries.
     Assembling,
     /// A provider stream is open.
     Streaming,
@@ -50,9 +50,6 @@ pub enum State {
     RunningTools,
     /// Waiting on `Submission::Approve`.
     AwaitingApproval,
-    /// Compaction is running (wired in T8.1).
-    #[allow(dead_code)]
-    Compacting,
     /// Emitting `TurnDone` and flushing.
     Finishing,
     /// `Submission::Interrupt` is draining work.
@@ -111,6 +108,8 @@ pub(crate) struct Inner {
     pub(crate) tasks: HashMap<TaskId, (String, Tier, crate::tasks::TaskKind)>,
     /// Subagents a follow-up can reach, running or finished (T34.5, SM§2).
     pub(crate) children: HashMap<TaskId, crate::tasks::Child>,
+    /// Where each background subagent stands, for `agent(collect)` (T66.3).
+    pub(crate) collects: HashMap<TaskId, crate::tasks::Collect>,
     /// Received-message counter per task (T34.6, SM§5):
     /// `MAX_MESSAGES_PER_TASK` denies the 17th delivery instead of letting
     /// a flood spin the addressee.
@@ -129,6 +128,9 @@ pub(crate) struct Inner {
     pub(crate) renamed: bool,
     /// Context size of the last main call, for the §1.10 auto trigger.
     pub(crate) last_context_tokens: u32,
+    /// The context size at which the last compaction failed on the summary,
+    /// so the auto triggers stay quiet until `/compact` or a smaller context.
+    pub(crate) compact_suppressed_at: Option<u32>,
     /// The last main call's usage: `ContextBreakdown.cached` (A98).
     last_usage: Option<cox_protocol::types::Usage>,
     /// The model catalog `ContextBreakdown.window` is read from (A98),
@@ -215,6 +217,10 @@ pub struct Session {
     /// What puts one of Review's hunks back (T51.19); installed by the
     /// surface like the checkpointer, since it is cox-render's.
     hunks: Arc<OnceLock<Arc<dyn HunkReverter>>>,
+    /// Where a persisted `AllowForSession` rule is written (T69.2); installed
+    /// by the surface and shared with children, whose approvals reach the
+    /// same user. Absent in tests and in `cox mcp`, which then persist nothing.
+    allow_rules: Arc<OnceLock<Arc<dyn AllowRuleStore>>>,
     /// Roots mutation may target. Empty until a worktree-isolated surface
     /// narrows it; ordinary sessions write anywhere they can read.
     writable_roots: Arc<OnceLock<Vec<PathBuf>>>,
@@ -242,6 +248,11 @@ pub struct Session {
     /// the memory directory (D2). Shared with children: the index is project
     /// facts, not a tool catalog the child may lack.
     memory_index: Arc<OnceLock<String>>,
+    /// The refined prompt notes appended to volatile `system[3]` (T66.7).
+    /// Unlike the memory index it can change mid-session (a `/refine` or an
+    /// undo), which is safe only because `system[3]` sits after the last
+    /// cache breakpoint. Shared with children, like the memory index.
+    harness_notes: Arc<std::sync::Mutex<String>>,
     /// The task id `send_message`'s `Relay` impl stamps a child's own
     /// message with (T34.6, SM§4), set once by `subagent::spawn` right
     /// after the child session exists; unset for the session the user is
@@ -425,9 +436,11 @@ impl Session {
         child.hook = self.hook.clone();
         child.checkpointer = self.checkpointer.clone();
         child.hunks = self.hunks.clone();
+        child.allow_rules = self.allow_rules.clone();
         child.worktrees = self.worktrees.clone();
         child.instructions = self.instructions.clone();
         child.memory_index = self.memory_index.clone();
+        child.harness_notes = self.harness_notes.clone();
         child.checkpoint_warned = self.checkpoint_warned.clone();
         // T34.9: share this session's name→TaskId registry so the child can
         // resolve a sibling by name itself (`resolve_name_or_id`).
@@ -558,6 +571,7 @@ impl Session {
             hook: Arc::new(OnceLock::new()),
             checkpointer: Arc::new(OnceLock::new()),
             hunks: Arc::new(OnceLock::new()),
+            allow_rules: Arc::new(OnceLock::new()),
             writable_roots: Arc::new(OnceLock::new()),
             worktrees: Arc::new(OnceLock::new()),
             repo_mapper: Arc::new(OnceLock::new()),
@@ -565,6 +579,7 @@ impl Session {
             instructions: Arc::new(OnceLock::new()),
             skills_index: Arc::new(OnceLock::new()),
             memory_index: Arc::new(OnceLock::new()),
+            harness_notes: Arc::new(std::sync::Mutex::new(String::new())),
             self_task: Arc::new(OnceLock::new()),
             external_agents: Arc::new(OnceLock::new()),
             event_tap: Arc::new(OnceLock::new()),
@@ -606,10 +621,12 @@ impl Session {
                 routed: None,
                 tasks: HashMap::new(),
                 children: HashMap::new(),
+                collects: HashMap::new(),
                 message_counts: HashMap::new(),
                 detach: HashMap::new(),
                 extracted: Vec::new(),
                 last_context_tokens: 0,
+                compact_suppressed_at: None,
                 last_usage: None,
                 catalog: None,
                 retried_after_too_long: false,
@@ -776,6 +793,13 @@ impl Session {
         Ok(())
     }
 
+    /// Where this session archives full tool output, for a surface that runs
+    /// a command of its own (an autonomous run's gates, T66.11) and must keep
+    /// the same lossless rule as `bash`.
+    pub fn archive(&self) -> Arc<dyn Archive> {
+        self.archive.clone()
+    }
+
     /// Cancels the provider stream and running tools.
     pub fn interrupt(&self) {
         self.cancel
@@ -853,6 +877,12 @@ impl Session {
         let _ = self.hunks.set(hunks);
     }
 
+    /// Installs where `permissions.allow_for_session_persists` writes; a
+    /// second call is ignored, as for the checkpointer.
+    pub fn set_allow_rule_store(&self, store: Arc<dyn AllowRuleStore>) {
+        let _ = self.allow_rules.set(store);
+    }
+
     pub(crate) fn hunk_reverter(&self) -> Option<Arc<dyn HunkReverter>> {
         self.hunks.get().cloned()
     }
@@ -911,6 +941,17 @@ impl Session {
     /// surface passes nothing when the directory yields only the header.
     pub fn set_memory_index(&self, index: String) {
         let _ = self.memory_index.set(index);
+    }
+
+    /// Replaces the refined prompt notes `system[3]` carries (T66.7). The
+    /// session layer renders them from the harness entries on disk, since
+    /// this crate reads no files (D2); empty appends nothing. Only the next
+    /// request changes: `system[0..=2]` and the breakpoints never move.
+    pub fn set_harness_notes(&self, notes: String) {
+        *self
+            .harness_notes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = notes;
     }
 
     /// Installs the granted external-agent drivers (T35.5); the surface
@@ -1235,6 +1276,43 @@ impl Session {
     /// Records an `AllowForSession` grant.
     pub(crate) async fn grant(&self, tool: String, subject: String) {
         self.inner.lock().await.grants.push((tool, subject));
+    }
+
+    /// Saves what an `AllowForSession` answer to `call` may keep past the
+    /// session (T69.2), when `permissions.allow_for_session_persists` is on:
+    /// the engine's `persistable_allow_rules`, appended to the user config.
+    /// A failed write is a warning, never an error: the session grant already
+    /// covers this run, and the approval must not fail because a file is
+    /// read-only.
+    pub(crate) async fn persist_grant(&self, call: &ToolCall) {
+        if !self.config.permissions.allow_for_session_persists {
+            return;
+        }
+        let Some(store) = self.allow_rules.get().cloned() else {
+            return;
+        };
+        let rules = self.engine.persistable_allow_rules(call);
+        if rules.is_empty() {
+            return;
+        }
+        let saved = tokio::task::spawn_blocking(move || {
+            rules
+                .iter()
+                .map(|rule| store.append_allow(rule))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .await;
+        let failure = match saved {
+            Ok(Ok(_)) => return,
+            Ok(Err(e)) => e.to_string(),
+            Err(e) => e.to_string(),
+        };
+        let _ = self
+            .emit(Event::Notice {
+                level: Level::Warn,
+                text: format!("could not save the approval to permissions.allow: {failure}"),
+            })
+            .await;
     }
 
     /// The `AllowForSession` grants in force, as `(tool, subject prefix)`,
@@ -1614,35 +1692,41 @@ impl Session {
                 }
             }
         }
-        let reported = match run.await {
-            Ok(Ok(reported)) => reported,
+        // A row means a request was made (§0 ledger rule): only a driver that
+        // refused before making one (T56.11) leaves none. Any other failure
+        // keeps its row with whatever usage and latency is known.
+        let (ran, reported) = match run.await {
+            Ok(Ok(reported)) => (true, reported),
             Ok(Err(error)) => {
+                let refused = matches!(error, CoreError::ExternalAgentRefused { .. });
                 self.emit(Event::Error {
                     error,
                     fatal: false,
                 })
                 .await?;
                 stop = Some(StopReason::Error);
-                None
+                (!refused, None)
             }
             Err(_) => {
                 stop = Some(StopReason::Interrupted);
-                None
+                (true, None)
             }
         };
-        let mut usage = reported.unwrap_or(cox_protocol::types::Usage {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            estimated: false,
-            cost_usd: 0.0,
-            latency_ms: 0,
-        });
-        usage.latency_ms = started.elapsed().as_millis() as u64;
-        let usage =
-            self.insert_external_usage(self.job.clone(), tier, &agent.ledger_model(), usage)?;
-        self.emit(Event::Usage { turn, usage }).await?;
+        if ran {
+            let mut usage = reported.unwrap_or(cox_protocol::types::Usage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                estimated: false,
+                cost_usd: 0.0,
+                latency_ms: 0,
+            });
+            usage.latency_ms = started.elapsed().as_millis() as u64;
+            let usage =
+                self.insert_external_usage(self.job.clone(), tier, &agent.ledger_model(), usage)?;
+            self.emit(Event::Usage { turn, usage }).await?;
+        }
         let stop = stop.unwrap_or(if self.cancel_token().is_cancelled() {
             StopReason::Interrupted
         } else {
@@ -1764,6 +1848,15 @@ impl Session {
             if !memory_index.is_empty() {
                 req.system[3].text.push('\n');
                 req.system[3].text.push_str(memory_index);
+            }
+            // T66.7: refined prompt notes ride in the same volatile block.
+            let notes = self
+                .harness_notes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !notes.is_empty() {
+                req.system[3].text.push('\n');
+                req.system[3].text.push_str(&notes);
             }
             req
         };
@@ -2370,7 +2463,6 @@ fn provider_name(provider: &ProviderId) -> String {
         ProviderId::Anthropic => "anthropic".to_string(),
         ProviderId::OpenAi => "openai".to_string(),
         ProviderId::Local => "local".to_string(),
-        ProviderId::Jev => "typesafe".to_string(),
         ProviderId::External => "external".to_string(),
         // The section name, not the `plugin:` ledger tag (T33.18).
         ProviderId::Plugin(name) => name.clone(),
@@ -2581,7 +2673,6 @@ mod tests {
             super::provider_name(&ProviderId::Plugin("acme".into())),
             "acme"
         );
-        assert_eq!(super::provider_name(&ProviderId::Jev), "typesafe");
     }
 
     /// Records every hook call and always continues (T22.3's claims).
@@ -3097,5 +3188,26 @@ mod tests {
             "{}",
             b.system[3].text
         );
+    }
+
+    /// Refined prompt notes are volatile like the memory index: they reach
+    /// `system[3]` after the last cache breakpoint and leave the cached
+    /// prefix bytes alone.
+    #[tokio::test]
+    async fn harness_notes_reach_system_3_and_leave_the_prefix_byte_identical() {
+        let (plain, _, plain_provider) = recorded(cox_protocol::Config::default(), 1);
+        let (noted, _, noted_provider) = recorded(cox_protocol::Config::default(), 1);
+        noted.set_harness_notes("<harness_notes>\nWrite the test first.\n</harness_notes>".into());
+        turn(&plain, false).await;
+        turn(&noted, false).await;
+        let (plain_seen, noted_seen) = (plain_provider.seen(), noted_provider.seen());
+        let (a, b) = (&plain_seen[0], &noted_seen[0]);
+        for slot in 0..=2 {
+            assert_eq!(a.system[slot].text, b.system[slot].text, "system[{slot}]");
+        }
+        assert_eq!(a.cache_breakpoints, b.cache_breakpoints);
+        assert!(!b.system[3].cache);
+        assert!(!a.system[3].text.contains("Write the test first."));
+        assert!(b.system[3].text.contains("Write the test first."));
     }
 }

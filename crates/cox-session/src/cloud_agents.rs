@@ -34,7 +34,7 @@ use cox_cursor_cloud::wire::{CreateAgentRequest, Repo, RunStatus, StreamEvent, U
 use cox_plugin_api::CloudAgentDecl;
 use cox_protocol::Config;
 use cox_protocol::errors::{CoreError, ProviderError};
-use cox_protocol::ids::{CallId, ItemId, SessionId, TurnId};
+use cox_protocol::ids::{CallId, ItemId, SessionId, TaskId, TurnId};
 use cox_protocol::traits::{ExternalAgent, TaskTurn};
 use cox_protocol::types::{
     ApprovalPolicy, Event, ItemKind, Level, PermissionMode, Risk, SandboxMode, StopReason,
@@ -47,6 +47,20 @@ use futures::StreamExt as _;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+/// Names a loopback address that replaces `api.cursor.com`, for the offline
+/// end-to-end test (T56.8) only. It lives in the environment, never in a
+/// manifest or the config, so a plugin or a repository cannot set it, and the
+/// client takes loopback alone, so even a stray value cannot move the key.
+const TEST_URL_ENV: &str = "COX_CURSOR_CLOUD_URL";
+
+fn client_for(secret: String) -> Result<Client, cox_cursor_cloud::client::CloudError> {
+    let client = Client::new(secret)?;
+    match std::env::var(TEST_URL_ENV) {
+        Ok(base) if !base.is_empty() => client.with_loopback_base_url(&base),
+        _ => Ok(client),
+    }
+}
 
 /// One driver per entry whose key resolves, plus one warning per entry left
 /// out. `key` is `cox_provider::http::resolve_key` (a test passes its own,
@@ -75,7 +89,7 @@ pub(crate) fn drivers(
     for decl in decls {
         let client = key(&decl.key_env, decl.backend.name())
             .map_err(|_| format!("{} is not set", decl.key_env))
-            .and_then(|secret| Client::new(secret).map_err(|e| e.to_string()));
+            .and_then(|secret| client_for(secret).map_err(|e| e.to_string()));
         match client {
             Ok(client) => out.push(Arc::new(CloudDriver {
                 name: decl.name,
@@ -290,13 +304,28 @@ impl ExternalAgent for CloudDriver {
         events: mpsc::Sender<Event>,
         cancel: CancellationToken,
     ) -> Result<Option<Usage>, CoreError> {
-        self.run(cx, turn, prompt, &events, &cancel)
-            .await
-            .map_err(|message| CoreError::ExternalAgent {
-                agent: self.name.clone(),
+        let (agent, ran) = (
+            self.name.clone(),
+            self.run(cx, turn, prompt, &events, &cancel),
+        );
+        ran.await.map_err(|failure| match failure {
+            Failure::Refused(message) => CoreError::ExternalAgentRefused {
+                agent,
                 message: cox_sanitize::sanitize(&message),
-            })
+            },
+            Failure::Ran(message) => CoreError::ExternalAgent {
+                agent,
+                message: cox_sanitize::sanitize(&message),
+            },
+        })
     }
+}
+
+/// Why a run ended in an error: refused before any request was made, which
+/// the ledger does not see (T56.11), or failed after one went out.
+enum Failure {
+    Refused(String),
+    Ran(String),
 }
 
 impl CloudDriver {
@@ -307,7 +336,16 @@ impl CloudDriver {
         prompt: String,
         events: &mpsc::Sender<Event>,
         cancel: &CancellationToken,
-    ) -> Result<Option<Usage>, String> {
+    ) -> Result<Option<Usage>, Failure> {
+        let (task, remote, head) = self.admit(cx).await.map_err(Failure::Refused)?;
+        self.start_and_follow(task, remote, head, turn, prompt, events, cancel)
+            .await
+            .map_err(Failure::Ran)
+    }
+
+    /// Every check that runs before a request is made; an `Err` here costs
+    /// nothing, so it leaves no ledger row (T56.11).
+    async fn admit(&self, cx: TaskTurn) -> Result<(TaskId, Remote, Head), String> {
         let task = cx
             .task
             .ok_or("a cloud agent runs only as a background task")?;
@@ -318,6 +356,20 @@ impl CloudDriver {
             .ok_or("a cloud agent needs a GitHub `origin` remote; other hosts are refused")?;
         let head = Head::read(&self.cwd).await?;
         self.approve(&remote, &head, cx.mode)?;
+        Ok((task, remote, head))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn start_and_follow(
+        &self,
+        task: TaskId,
+        remote: Remote,
+        head: Head,
+        turn: TurnId,
+        prompt: String,
+        events: &mpsc::Sender<Event>,
+        cancel: &CancellationToken,
+    ) -> Result<Option<Usage>, String> {
         let repo = Repo {
             url: remote.url.clone(),
             starting_ref: Some(head.git_ref.clone()),

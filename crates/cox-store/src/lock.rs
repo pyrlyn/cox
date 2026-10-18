@@ -21,9 +21,12 @@ use std::sync::{Arc, Mutex, Weak};
 use cox_protocol::{SessionId, StoreError};
 use serde::{Deserialize, Serialize};
 
-/// Who drives a session, as its lock file says. `Default` stands for a
-/// holder that has the lock but has not written itself yet, or a file this
-/// platform will not let a second process read (Windows locks the bytes).
+/// Who drives a session, as its lock file says. Pid 0 is never a real
+/// holder, so `Default` is the one "unknown holder": a process that has the
+/// lock but has not written itself yet, or a file that is corrupt, truncated
+/// or that this platform will not let a second process read (Windows locks
+/// the bytes). A caller that gets one still has a busy session: the kernel
+/// lock decided that, the text only names who.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Holder {
     pub pid: u32,
@@ -33,9 +36,27 @@ pub struct Holder {
     pub since: String,
 }
 
+impl Holder {
+    /// Whether the lock file could not say who holds the lock.
+    pub fn is_unknown(&self) -> bool {
+        self.pid == 0
+    }
+
+    /// The holder a locked file names, or the unknown holder when its text
+    /// cannot be read or parsed. Never an error: a held lock is busy
+    /// whatever the file says, so no corrupt text may turn into "free".
+    fn read_from(file: &mut File) -> Self {
+        let mut text = String::new();
+        match file.read_to_string(&mut text) {
+            Ok(_) => serde_json::from_str(&text).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+}
+
 impl std::fmt::Display for Holder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.pid == 0 {
+        if self.is_unknown() {
             return f.write_str("another cox process");
         }
         write!(
@@ -65,23 +86,31 @@ pub fn claim(
     id: &SessionId,
     surface: &str,
 ) -> Result<Result<SessionLock, Holder>, StoreError> {
-    let path = sessions.join(format!("{id}.lock"));
+    claim_path(&sessions.join(format!("{id}.lock")), surface)
+}
+
+/// The same claim for any lock file, so a second kind of singleton (the
+/// `cox serve` supervisor's `run/serve.lock`, T66.20) shares one
+/// implementation with the session locks instead of copying it.
+pub fn claim_path(path: &Path, surface: &str) -> Result<Result<SessionLock, Holder>, StoreError> {
     let mut held = HELD.lock().unwrap_or_else(|poison| poison.into_inner());
     held.retain(|(_, weak)| weak.strong_count() > 0);
     if let Some(file) = held
         .iter()
-        .find(|(p, _)| *p == path)
+        .find(|(p, _)| p == path)
         .and_then(|(_, weak)| weak.upgrade())
     {
         return Ok(Ok(SessionLock { _file: file }));
     }
-    std::fs::create_dir_all(sessions).map_err(|_| StoreError::Io)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|_| StoreError::Io)?;
+    }
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&path)
+        .open(path)
         .map_err(|_| StoreError::Io)?;
     match file.try_lock() {
         Ok(()) => {
@@ -94,17 +123,10 @@ pub fn claim(
             file.set_len(0).map_err(|_| StoreError::Io)?;
             file.write_all(&text).map_err(|_| StoreError::Io)?;
             let file = Arc::new(file);
-            held.push((path, Arc::downgrade(&file)));
+            held.push((path.to_path_buf(), Arc::downgrade(&file)));
             Ok(Ok(SessionLock { _file: file }))
         }
-        Err(TryLockError::WouldBlock) => {
-            let mut text = String::new();
-            let holder = match file.read_to_string(&mut text) {
-                Ok(_) => serde_json::from_str(&text).unwrap_or_default(),
-                Err(_) => Holder::default(),
-            };
-            Ok(Err(holder))
-        }
+        Err(TryLockError::WouldBlock) => Ok(Err(Holder::read_from(&mut file))),
         Err(TryLockError::Error(_)) => Err(StoreError::Io),
     }
 }
@@ -127,11 +149,7 @@ pub fn holder(sessions: &Path, id: &SessionId) -> Result<Option<Holder>, StoreEr
     };
     match file.try_lock_shared() {
         Ok(()) => Ok(None),
-        Err(TryLockError::WouldBlock) => {
-            let mut text = String::new();
-            let _ = file.read_to_string(&mut text);
-            Ok(Some(serde_json::from_str(&text).unwrap_or_default()))
-        }
+        Err(TryLockError::WouldBlock) => Ok(Some(Holder::read_from(&mut file))),
         Err(TryLockError::Error(_)) => Err(StoreError::Io),
     }
 }
@@ -243,5 +261,71 @@ mod tests {
         let first = claim(dir.path(), &id, "tui").expect("claim");
         let second = claim(dir.path(), &id, "tui").expect("claim");
         assert!(first.is_ok() && second.is_ok());
+    }
+
+    /// What another process holding the lock looks like when its text is
+    /// unreadable: a second open file description, which flock treats as a
+    /// separate owner even inside this process.
+    fn hold_with_text(dir: &Path, id: &SessionId, text: &[u8]) -> File {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(dir.join(format!("{id}.lock")))
+            .expect("open");
+        (&file).write_all(text).expect("write");
+        file.lock().expect("lock");
+        file
+    }
+
+    #[test]
+    fn corrupt_holder_text_is_busy_with_unknown_holder() {
+        for text in [&b"not json"[..], b"", b"{\"pid\":7,\"surf", b"\xff\xfe"] {
+            let dir = tempfile::tempdir().expect("dir");
+            let id = SessionId::new();
+            let _other = hold_with_text(dir.path(), &id, text);
+            let busy = claim(dir.path(), &id, "tui")
+                .expect("claim")
+                .expect_err("the lock is held, whatever the file says");
+            assert!(busy.is_unknown(), "{text:?}: {busy:?}");
+            assert_eq!(busy.to_string(), "another cox process");
+            let probed = holder(dir.path(), &id).expect("probe").expect("busy");
+            assert!(probed.is_unknown(), "{text:?}: {probed:?}");
+        }
+    }
+
+    #[test]
+    fn readable_holder_text_is_not_unknown() {
+        let dir = tempfile::tempdir().expect("dir");
+        let id = SessionId::new();
+        let me = Holder {
+            pid: 4242,
+            surface: "app".into(),
+            since: "2026-10-16T00:00:00Z".into(),
+        };
+        let text = serde_json::to_vec(&me).expect("json");
+        let _other = hold_with_text(dir.path(), &id, &text);
+        let busy = claim(dir.path(), &id, "tui")
+            .expect("claim")
+            .expect_err("busy");
+        assert_eq!(busy, me);
+        assert!(!busy.is_unknown());
+    }
+
+    #[test]
+    fn corrupt_text_without_a_lock_does_not_block_the_session() {
+        // The kernel lock, not the text, is the truth: a leftover corrupt
+        // file from a crashed writer must not keep the session busy forever,
+        // and no pid in it is ever trusted enough to refuse or steal.
+        let dir = tempfile::tempdir().expect("dir");
+        let id = SessionId::new();
+        std::fs::write(dir.path().join(format!("{id}.lock")), "garbage").expect("write");
+        assert_eq!(holder(dir.path(), &id).expect("probe"), None);
+        let lock = claim(dir.path(), &id, "tui").expect("claim");
+        assert!(lock.is_ok());
+        let text = std::fs::read_to_string(dir.path().join(format!("{id}.lock"))).expect("read");
+        let written: Holder = serde_json::from_str(&text).expect("holder rewritten");
+        assert_eq!(written.pid, std::process::id());
     }
 }

@@ -176,6 +176,9 @@ pub struct CandidateView {
     pub cost_usd: f64,
     /// From its launch to its session's last write, or to now while it runs.
     pub duration_ms: u64,
+    /// The candidates this one merged (T52.26); `None` for one the launch
+    /// started. Lets every client head a merge's column with what it took.
+    pub merged_from: Option<Vec<u32>>,
 }
 
 /// What a pick did (T52.10).
@@ -388,6 +391,7 @@ pub(crate) async fn compare(app: &App, id: &BestOfId) -> Result<Vec<CandidateVie
             label: launched.candidate.label(),
             candidate: launched.candidate.clone(),
             session: launched.session,
+            merged_from: launched.merged_from.clone(),
             worktree: launched.worktree.as_ref().map(|t| t.path.clone()),
             branch: launched.worktree.as_ref().map(|t| t.branch.clone()),
             added: files.iter().map(|f| f.added).sum(),

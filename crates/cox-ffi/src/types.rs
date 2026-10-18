@@ -18,8 +18,8 @@ use cox_app::AgentChoice;
 use cox_app::Holder;
 use cox_app::SessionInfo;
 use cox_app::best_of::{
-    BestOf, BestOfId, BestOfRequest, Candidate, CandidateState, CandidateView, Launch, Launched,
-    Picked,
+    BestOf, BestOfId, BestOfMerge, BestOfRequest, Candidate, CandidateState, CandidateView, Launch,
+    Launched, Picked,
 };
 use cox_app::complete::{Splice, TypedToken};
 use cox_app::diffmodel::{DiffHunk, DiffLine, DiffLineKind, DiffModel, WordRange};
@@ -31,6 +31,7 @@ use cox_app::patch::{Block, BlockId, BlockKind, Status, TimelinePatch, ToolState
 use cox_app::plugin_ui::{CanvasUpdate, PluginCanvas};
 use cox_app::pointer::{Edge, Interaction, Pointer};
 use cox_app::review::LineComment;
+use cox_app::wire::HostInfo;
 use cox_app::workspace::{SidebarKind, SidebarRow, SidebarSection, SidebarStatus, SubtitlePart};
 use cox_app::{
     Activity, BrowserError, BudgetRow, ChangedFile, Changes, Checkpoint, Completion, ConfigSource,
@@ -42,7 +43,7 @@ use cox_app::{
 };
 use cox_app::{AlertAction, LinkClick, PluginAction, PluginAlert, PluginTab};
 use cox_app::{Fact, TurnFiles};
-use cox_app::{KeyError, PermissionRule, RuleKind, SessionGrant, SettingsGroup};
+use cox_app::{KeyError, PermissionRule, RuleKind, SessionGrant, SettingsGroup, TargetChoice};
 use cox_app::{KeyValueRow, PluginSlot, SpanView, WidgetView};
 use cox_app::{MenuModel, ModelSection, Readiness};
 use cox_app::{SettingControl, SettingInput, SettingOption};
@@ -123,6 +124,22 @@ uniffi::custom_type!(StyledSpan, Span, {
         link: s.link,
     }),
 });
+
+#[uniffi::remote(Record)]
+pub struct TargetChoice {
+    pub name: String,
+    pub target: String,
+    pub configured: bool,
+}
+
+#[uniffi::remote(Record)]
+pub struct HostInfo {
+    pub wire: u32,
+    pub cox: String,
+    pub os: String,
+    pub arch: String,
+    pub sandbox: Option<String>,
+}
 
 #[uniffi::remote(Record)]
 pub struct ModelChoice {
@@ -1502,7 +1519,7 @@ impl From<BrowserFailure> for BrowserError {
     }
 }
 
-// Best of n (T52.9, T52.10, T52.11): the launch, the compare view's columns
+// Best of n (T52.9, T52.10, T52.11, T52.25): the launch, the compare view's columns
 // and what a pick did.
 uniffi::custom_type!(BestOfId, String, {
     remote,
@@ -1521,6 +1538,15 @@ pub struct BestOfRequest {
     pub project: PathBuf,
     pub prompt: String,
     pub candidates: Vec<Candidate>,
+}
+
+/// What `App.best_of_merge` merges (T52.24, T52.25): the chosen candidates of
+/// group `id`, and who merges them.
+#[uniffi::remote(Record)]
+pub struct BestOfMerge {
+    pub id: BestOfId,
+    pub from: Vec<u32>,
+    pub by: Candidate,
 }
 
 #[uniffi::remote(Record)]
@@ -1580,6 +1606,7 @@ pub struct CandidateView {
     pub removed: u32,
     pub cost_usd: f64,
     pub duration_ms: u64,
+    pub merged_from: Option<Vec<u32>>,
 }
 
 #[uniffi::remote(Record)]

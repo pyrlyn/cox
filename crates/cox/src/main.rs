@@ -16,6 +16,7 @@ mod doctor;
 mod expand_cmd;
 mod ext_cmd;
 mod mcp_cmd;
+mod on_target;
 mod plain;
 #[cfg(feature = "plugins")]
 mod plugin_cmd;
@@ -25,9 +26,12 @@ mod plugin_new;
 #[cfg(feature = "plugins")]
 mod plugin_ui;
 mod record;
+mod refine_cmd;
 mod resume;
 mod run;
 mod self_update;
+#[cfg(feature = "app-server")]
+mod serve_cmd;
 mod session;
 mod sessions;
 mod stats;
@@ -36,7 +40,7 @@ mod telemetry;
 #[cfg(feature = "voice")]
 mod voice_cmd;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Command, ConfigAction};
 
 /// `[y/N]` on stdin, same idiom as `session::offer_worktree_removal`; the
@@ -49,19 +53,35 @@ pub(crate) fn confirm(question: &str) -> bool {
     matches!(answer.trim(), "y" | "Y" | "yes")
 }
 
+fn completions(shell: shell_completions::Shell) -> anyhow::Result<()> {
+    let mut script = Vec::new();
+    shell_completions::generate(shell, Cli::command(), &mut script);
+    std::io::Write::write_all(&mut std::io::stdout().lock(), &script)?;
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
-    load_dotenv()?;
     let mut cli = Cli::parse();
+    // Completion generation must work even when local configuration is broken.
+    if let Some(Command::Completions { shell }) = &cli.command {
+        return completions(*shell);
+    }
+    load_dotenv()?;
     let mut cwd = match &cli.cwd {
         Some(dir) => dir.clone(),
         None => std::env::current_dir().unwrap_or_default(),
     };
-    if cli.worktree.is_some() {
-        cwd = session::enter_worktree(&mut cli, &cwd)?;
-    } else if cli.resume.is_some() {
-        // T44.4: a worktree session resumes in its worktree, before config
-        // loads, for the same reason `--worktree` runs first.
-        cwd = session::resume_worktree(&mut cli, &cwd)?;
+    // A target has its own worktrees and sessions; `--on` rejects `--worktree`
+    // later, with the other flags it does not forward, and a `--resume` id is
+    // the target's, not one to look up here.
+    if cli.on.is_none() {
+        if cli.worktree.is_some() {
+            cwd = session::enter_worktree(&mut cli, &cwd)?;
+        } else if cli.resume.is_some() {
+            // T44.4: a worktree session resumes in its worktree, before config
+            // loads, for the same reason `--worktree` runs first.
+            cwd = session::resume_worktree(&mut cli, &cwd)?;
+        }
     }
     let loaded = config_load::load(&cwd, &cli)?;
     let telemetry_home = cli.home.clone().unwrap_or_else(config_load::cox_home);
@@ -72,7 +92,14 @@ fn main() -> anyhow::Result<()> {
         &telemetry_home,
     )?;
 
+    if let Some(on) = &cli.on {
+        let code = on_target::run(&cli, &loaded.config, on)?;
+        drop(telemetry);
+        std::process::exit(code);
+    }
+
     match &cli.command {
+        Some(Command::Completions { shell }) => completions(*shell),
         Some(Command::Config(args)) => run_config(&cwd, &cli, &args.action),
         Some(Command::Doctor) => {
             let servers = session::mcp_servers(&loaded.config, &cwd).servers;
@@ -171,8 +198,21 @@ fn main() -> anyhow::Result<()> {
         #[cfg(feature = "app-server")]
         Some(Command::AppServer(_)) => {
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(cox_app::server::serve_stdio(cli.home.clone()))?;
+            rt.block_on(cox_app::server::serve_stdio(
+                cli.home.clone(),
+                cox_app::server::ServeMode::Client,
+            ))?;
             Ok(())
+        }
+        #[cfg(feature = "app-server")]
+        Some(Command::Serve(args)) => {
+            let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
+            serve_cmd::serve(&home, args.worker)
+        }
+        #[cfg(feature = "app-server")]
+        Some(Command::Attach(_)) => {
+            let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
+            serve_cmd::attach(&home)
         }
         Some(Command::Init(args)) => {
             let code = session::run_init(&cli, &cwd, args.force)?;
@@ -187,6 +227,17 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Expand(args)) => {
             let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
             expand_cmd::run(&home, &args.id, args.lines.as_deref())
+        }
+        Some(Command::Refine(args)) => {
+            let home = cli.home.clone().unwrap_or_else(config_load::cox_home);
+            match &args.action {
+                cli::RefineAction::List { session } => {
+                    refine_cmd::list(&home, &cwd, session.as_deref())
+                }
+                cli::RefineAction::Undo { id, global } => {
+                    refine_cmd::undo(&home, &loaded.config, &cwd, id, *global)
+                }
+            }
         }
         #[cfg(feature = "voice")]
         Some(Command::Voice(args)) => {

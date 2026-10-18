@@ -7,8 +7,10 @@
 //! `docs/config.jsonschema` and the desktop Settings screen reads.
 //!
 //! Separate from `crates/cox` (size (c): a ~1k-line leaf, and reuse (d):
-//! any surface can load config without the clap binary). `figment` and
-//! `toml_edit` live here only. Errors are [`ConfigError`], because AGENTS.md
+//! any surface can load config without the clap binary). The layering and
+//! the edits are the shared `config-schema` crate's (T32.17); this crate
+//! keeps cox's layer order, guard list and messages. Errors are
+//! [`ConfigError`], because AGENTS.md
 //! keeps `anyhow` in `crates/cox`; the binary maps them at its call sites.
 //! `crates/cox` keeps the clap-facing glue (the flag layer built from `Cli`,
 //! the Claude-settings reader from `cox-ext`, the keymap for `cox-tui`, and
@@ -35,19 +37,20 @@ pub enum ConfigError {
     /// Serializing the effective `Config` for `cox config show` failed.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-    /// The user config file on disk is not valid TOML. `error` is not a
-    /// `#[source]`: the message already embeds it, as before.
-    #[error("{} is not valid TOML: {error}", path.display())]
-    InvalidToml {
-        path: PathBuf,
-        error: toml_edit::TomlError,
-    },
+    /// The user config file on disk is not valid TOML; `message` is the
+    /// parser's.
+    #[error("{} is not valid TOML: {message}", path.display())]
+    InvalidToml { path: PathBuf, message: String },
     /// `cox config set` got an empty key.
     #[error("empty key")]
     EmptyKey,
     /// A dotted key walks through a value that is not a table.
     #[error("`{part}` in `{key}` is not a table")]
     NotATable { part: String, key: String },
+    /// `permissions.allow` exists in the file but is not an array, so there
+    /// is nothing to append to without discarding what the user wrote.
+    #[error("`{key}` is not an array")]
+    NotAnArray { key: String },
     /// A value that has no TOML form a config key takes (`null`, an object).
     #[error("`{key}` cannot be set to {value}")]
     UnsupportedValue { key: String, value: String },
@@ -55,6 +58,24 @@ pub enum ConfigError {
     /// type), so `cox config set` left it as it was (T22.12).
     #[error(transparent)]
     Rejected(#[from] cox_protocol::CoreError),
+}
+
+/// config-schema's edit errors onto the variants `cox config set` always
+/// returned. An I/O error keeps only its source, as before; the variants no
+/// edit produces (a layered load, a stale schema) keep their own message.
+impl From<config_schema::Error> for ConfigError {
+    fn from(err: config_schema::Error) -> Self {
+        use config_schema::Error as E;
+        match err {
+            E::Io { source, .. } => Self::Io(source),
+            E::Parse { path, message } => Self::InvalidToml { path, message },
+            E::EmptyKey => Self::EmptyKey,
+            E::NotATable { part, key } => Self::NotATable { part, key },
+            E::UnsupportedValue { key, value } => Self::UnsupportedValue { key, value },
+            E::Json(err) => Self::Json(err),
+            other => Self::Io(std::io::Error::other(other.to_string())),
+        }
+    }
 }
 
 /// `Config`'s JSON Schema, the one `docs/config.jsonschema` commits.
@@ -94,8 +115,8 @@ mod tests {
     }
 
     /// T52.2: the `[external_agents.<name>]` part of the committed schema
-    /// matches the types, and an entry has exactly the four keys the docs
-    /// name. Narrower than the whole-file test above, so a drift here names
+    /// matches the types, and an entry has exactly the five keys the docs
+    /// name (`target` since T68.7). Narrower than the whole-file test above, so a drift here names
     /// the table that moved.
     #[test]
     fn external_agents_schema_drift() {
@@ -118,6 +139,6 @@ mod tests {
             .keys()
             .map(String::as_str)
             .collect();
-        assert_eq!(keys, ["command", "args", "key_env", "writable"]);
+        assert_eq!(keys, ["command", "args", "key_env", "writable", "target"]);
     }
 }

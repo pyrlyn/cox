@@ -1,0 +1,8 @@
+---
+source: crates/cox/src/doctor.rs
+expression: "human.join(\"\\n\")"
+---
+provider typesafe: ✓ served by the jev plugin; key TYPESAFE_API_KEY found
+
+provider typesafe: ⚠ served by the jev plugin; TYPESAFE_API_KEY is not set and keyring entry 'cox/typesafe' not found
+  fix: set TYPESAFE_API_KEY

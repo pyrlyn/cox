@@ -561,6 +561,11 @@ pub struct ProviderCall {
     pub request: Value,
     /// The model id to send.
     pub model: String,
+    /// The section's base URL as the host bound it, which a user config may
+    /// override (T33.40.4); `cox_http` allows only this host. Absent from an
+    /// older host, so a guest falls back to its manifest's `base_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 }
 
 /// `cox_model_call` input (PL§7d), and what `DecideOut::Call` asks the host
@@ -733,7 +738,9 @@ pub struct Advice {
     /// In `[0, 1]`; absent when the model gives none (a yes/no, J11).
     #[serde(default)]
     pub confidence: Option<f64>,
-    /// A caution note, for `approve_hint`.
+    /// A caution note for `approve_hint`, or for `risk` the reasons behind
+    /// a raise (such as a model's probabilities). The core keeps it, cleaned
+    /// and clipped, only when it applies the advice of one of those points.
     #[serde(default)]
     pub note: Option<String>,
 }

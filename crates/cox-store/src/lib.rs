@@ -20,6 +20,7 @@ mod mcp_trust;
 mod memory;
 mod models;
 pub mod queries;
+pub mod refine;
 mod rollout;
 pub mod schema;
 mod watch;
@@ -28,14 +29,18 @@ pub use watch::ChangeToken;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::ptr;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
+use libsqlite3_sys as ffi;
 use sha2::{Digest, Sha256};
 
 use cox_protocol::{
@@ -284,6 +289,160 @@ fn enable_wal(conn: &mut SqliteConnection) -> Result<(), StoreError> {
     }
 }
 
+/// How long the open-time `quick_check` may run (T69.4). A large healthy file
+/// runs past it and opens unchecked, the price of not holding the session up
+/// on open.
+const QUICK_CHECK_BUDGET: Duration = Duration::from_millis(200);
+
+/// VM instructions between progress callbacks: small enough to honour the
+/// budget to a few milliseconds, large enough that the callback itself is
+/// negligible next to the check.
+const PROGRESS_OPS: c_int = 1000;
+
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    /// `quick_check` reported `ok`.
+    Ok,
+    /// `quick_check` reported damage; the text is SQLite's own description.
+    Finding(String),
+    /// The check did not finish. Not evidence of damage.
+    Skipped(String),
+}
+
+/// Refuses a store whose file has a finding. A check that runs out of budget
+/// or cannot run at all is logged and the store opens anyway: a slow check on
+/// a large healthy file, or a file another process is writing right now, must
+/// not turn into a refusal.
+fn check_on_open(path: &Path, budget: Duration) -> Result<(), StoreError> {
+    match quick_check(path, budget) {
+        Verdict::Ok => Ok(()),
+        Verdict::Finding(text) => {
+            tracing::error!(path = %path.display(), finding = %text, "cox.db failed quick_check");
+            Err(StoreError::Corrupt {
+                path: path.to_path_buf(),
+            })
+        }
+        Verdict::Skipped(reason) => {
+            tracing::warn!(path = %path.display(), %reason, "quick_check did not finish; opening cox.db unchecked");
+            Ok(())
+        }
+    }
+}
+
+// why: the progress handler and the statement calls are FFI into the bundled
+// SQLite (`libsqlite3-sys`, already a direct dependency). Diesel exposes
+// neither a progress handler nor its SQLite handle, so the time budget cannot
+// be enforced through Diesel; each unsafe item below carries its own allow.
+#[allow(unsafe_code)]
+fn quick_check(path: &Path, budget: Duration) -> Verdict {
+    let deadline = Instant::now() + budget;
+    let Ok(c_path) = CString::new(path.to_string_lossy().into_owned()) else {
+        return Verdict::Skipped("the path holds a NUL byte".into());
+    };
+    let mut db = ptr::null_mut();
+    // Read-write without CREATE: the file already exists, and quick_check
+    // writes nothing, so this only avoids the WAL read-only corner cases.
+    let rc = unsafe {
+        ffi::sqlite3_open_v2(
+            c_path.as_ptr(),
+            &mut db,
+            ffi::SQLITE_OPEN_READWRITE,
+            ptr::null(),
+        )
+    };
+    // Declared after `deadline`, so the connection closes before the handler's
+    // `Instant` goes away.
+    let handle = Handle(db);
+    if rc != ffi::SQLITE_OK {
+        return failure(rc, handle.0);
+    }
+    unsafe {
+        ffi::sqlite3_progress_handler(
+            handle.0,
+            PROGRESS_OPS,
+            Some(past_deadline),
+            ptr::from_ref(&deadline).cast_mut().cast(),
+        );
+    }
+    run_check(handle.0)
+}
+
+#[allow(unsafe_code)]
+fn run_check(db: *mut ffi::sqlite3) -> Verdict {
+    // Diesel's `sql_query` cannot carry the progress handler set up above, so
+    // the PRAGMA is prepared here; Diesel has no typed form for it.
+    let sql = c"PRAGMA quick_check(1)";
+    let mut stmt = ptr::null_mut();
+    let rc = unsafe { ffi::sqlite3_prepare_v2(db, sql.as_ptr(), -1, &mut stmt, ptr::null_mut()) };
+    if rc != ffi::SQLITE_OK {
+        return failure(rc, db);
+    }
+    let mut rows = Vec::new();
+    let verdict = loop {
+        match unsafe { ffi::sqlite3_step(stmt) } {
+            ffi::SQLITE_ROW => {
+                rows.push(unsafe { copy_text(ffi::sqlite3_column_text(stmt, 0).cast()) })
+            }
+            ffi::SQLITE_DONE => break judge(rows),
+            rc => break failure(rc, db),
+        }
+    };
+    unsafe { ffi::sqlite3_finalize(stmt) };
+    verdict
+}
+
+fn judge(rows: Vec<String>) -> Verdict {
+    match rows.as_slice() {
+        [] => Verdict::Skipped("quick_check returned no rows".into()),
+        [only] if only.as_str() == "ok" => Verdict::Ok,
+        _ => Verdict::Finding(rows.join("; ")),
+    }
+}
+
+/// Maps a failed SQLite call to a verdict. Only the progress handler interrupts
+/// this statement, so `SQLITE_INTERRUPT` means the budget ran out; damage
+/// reported as an error code is a finding, not a failed check.
+#[allow(unsafe_code)]
+fn failure(rc: c_int, db: *mut ffi::sqlite3) -> Verdict {
+    let text = unsafe { copy_text(ffi::sqlite3_errmsg(db)) };
+    match rc & 0xff {
+        ffi::SQLITE_INTERRUPT => Verdict::Skipped("the budget ran out".into()),
+        ffi::SQLITE_CORRUPT | ffi::SQLITE_NOTADB => Verdict::Finding(text),
+        _ => Verdict::Skipped(text),
+    }
+}
+
+/// Copies a string SQLite owns now: its pointer is only valid until the next
+/// call on the same handle.
+#[allow(unsafe_code)]
+unsafe fn copy_text(p: *const c_char) -> String {
+    if p.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+    }
+}
+
+/// Called by SQLite every `PROGRESS_OPS` instructions; a non-zero return stops
+/// the statement with `SQLITE_INTERRUPT`.
+#[allow(unsafe_code)]
+unsafe extern "C" fn past_deadline(arg: *mut c_void) -> c_int {
+    // SAFETY: `arg` is the `&Instant` that `quick_check` registered, and it
+    // outlives the connection that calls back.
+    let deadline = unsafe { &*arg.cast::<Instant>() };
+    c_int::from(Instant::now() >= *deadline)
+}
+
+/// Closes the connection on every return path. A null handle is fine to close.
+struct Handle(*mut ffi::sqlite3);
+
+#[allow(unsafe_code)]
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe { ffi::sqlite3_close(self.0) };
+    }
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -317,6 +476,9 @@ impl StoreTrait for Store {
         conn.batch_execute("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;")
             .map_err(|_| StoreError::Open)?;
         enable_wal(&mut conn)?;
+        // Before migrations, so a damaged file is refused before anything is
+        // written to it (T69.4).
+        check_on_open(&db_path, QUICK_CHECK_BUDGET)?;
 
         // Reading the applied versions and then migrating is a read-then-write:
         // two processes opening an older `cox.db` at once would both find the
@@ -1177,9 +1339,62 @@ mod tests {
             err,
             StoreError::SchemaNewer {
                 db: "99991231000000".into(),
-                binary: "00000000000009".into(),
+                binary: "00000000000010".into(),
             }
         );
+    }
+
+    /// T69.4: a damaged page passes `PRAGMA journal_mode = WAL` (it reads only
+    /// the header) and must be refused by the open-time `quick_check` before
+    /// any migration writes to the file.
+    #[test]
+    fn damaged_store_file_is_refused_on_open() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        drop(Store::open(dir.path()).expect("first open"));
+        let db = dir.path().join("cox.db");
+        let mut bytes = std::fs::read(&db).expect("read db");
+        for b in &mut bytes[4096..8192] {
+            *b = 0xFF;
+        }
+        std::fs::write(&db, bytes).expect("damage db");
+        let err = Store::open(dir.path())
+            .err()
+            .expect("damaged store refused");
+        assert_eq!(err, StoreError::Corrupt { path: db });
+    }
+
+    #[test]
+    fn healthy_store_passes_quick_check() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        drop(Store::open(dir.path()).expect("open store"));
+        assert_eq!(
+            quick_check(&dir.path().join("cox.db"), QUICK_CHECK_BUDGET),
+            Verdict::Ok
+        );
+    }
+
+    /// A check that cannot finish in its budget is skipped, and the store still
+    /// opens: the budget is a limit on waiting, not a verdict on the file.
+    #[test]
+    fn check_past_its_budget_is_skipped_and_open_goes_on() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        drop(Store::open(dir.path()).expect("open store"));
+        let db = dir.path().join("cox.db");
+        // Enough rows that the check runs well past the first progress callback.
+        let mut conn = SqliteConnection::establish(&db.to_string_lossy()).expect("connect");
+        conn.batch_execute(
+            "CREATE TABLE filler (x INTEGER); \
+             WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 20000) \
+             INSERT INTO filler SELECT i FROM c;",
+        )
+        .expect("fill");
+        drop(conn);
+
+        assert_eq!(
+            quick_check(&db, Duration::ZERO),
+            Verdict::Skipped("the budget ran out".into())
+        );
+        assert_eq!(check_on_open(&db, Duration::ZERO), Ok(()));
     }
 
     #[test]

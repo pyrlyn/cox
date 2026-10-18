@@ -1,0 +1,34 @@
+# {{id}}
+
+A cox plugin scaffolded by `cox plugin new {{id}} --lang go`. `docs/design/plugins.md`
+(PL) and `docs/plugins.md` in the [cox repository](https://github.com/pyrlyn/cox)
+have the full contract; this file only covers this package.
+
+Capabilities asked for at scaffold time: {{with_summary}}. Edit `plugin.toml`'s
+`[capabilities]` to change them, and `main.go` for the exports that back them.
+
+## Build
+
+```
+mise use go tinygo   # once, or install Go and TinyGo yourself
+just build
+```
+
+builds `{{crate_name}}.wasm` with TinyGo (`-target wasip1 -buildmode=c-shared`).
+`plugin.toml` has `wasi = true` because TinyGo's runtime imports WASI.
+
+## Try it
+
+```
+just smoke
+```
+
+builds the module and runs `smoke_test.go`, which installs the package into a
+scratch `COX_HOME` with `cox plugin install --yes` and checks that
+`cox plugin list --json` reports it `loaded`. `cox` must be on `PATH`.
+
+## Install for real
+
+```
+cox plugin install . --yes
+```

@@ -282,6 +282,29 @@ fn no_crate_below_cox_depends_on_core() {
         deps["cox-target"]
     );
 
+    // cox-serve (T66.19) owns process supervision and the socket's trust
+    // boundary, kept out of cox-app and crates/cox. T66.20 lets it depend on
+    // cox-store alone, for the singleton lock (`lock::claim_path`).
+    assert_eq!(
+        deps["cox-serve"]
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["cox-store"],
+        "cox-serve may depend on cox-store and no other workspace crate, found {:?}",
+        deps["cox-serve"]
+    );
+
+    // The supervisor's socket and process plumbing is linked by the CLI alone,
+    // behind `app-server` (T66.23): the macOS app's FFI and the app core must
+    // not reach it.
+    for (crate_name, crate_deps) in &all_deps() {
+        assert!(
+            crate_name == "cox" || !crate_deps.contains("cox-serve"),
+            "{crate_name} must not depend on cox-serve; only crates/cox does"
+        );
+    }
+
     // cox-sandbox (T32.3) is a trust guard that depends only on
     // cox-protocol among workspace crates (SandboxPolicy, SandboxMode,
     // LinuxBackend, ToolError).
@@ -645,4 +668,16 @@ fn only_ffi_depends_on_uniffi() {
             "the cox binary must not pull {banned}"
         );
     }
+}
+
+/// T64.19: `crates/cox` never touches the OS keyring itself — key lookup
+/// lives in `cox-provider-http` and MCP tokens in `cox-mcp` — so a direct
+/// `keyring` dependency here is dead weight (unused since T37.31). Checked on
+/// the manifest because the crate still reaches `keyring` transitively.
+#[test]
+fn cox_does_not_depend_on_keyring() {
+    assert!(
+        !all_deps()["cox"].contains("keyring"),
+        "crates/cox must not depend on keyring directly"
+    );
 }

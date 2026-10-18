@@ -20,12 +20,14 @@
 // drop this allow once its public items are documented.
 #![allow(missing_docs)]
 
+pub mod anchor;
 pub mod ask_user;
 pub mod bash;
 pub mod checkpoint;
 pub mod docs;
 pub mod edit;
 pub mod expand;
+pub mod gate;
 pub mod git;
 pub mod glob;
 pub mod grep;
@@ -42,6 +44,9 @@ pub mod v4a;
 pub mod web_fetch;
 pub mod write;
 
+#[cfg(all(test, unix))]
+mod swap_fixture;
+
 /// T32.3: `path::confine` and `sandbox` moved to their own crate (dependency
 /// (a): `landlock`/`seccompiler` are Linux-only, and guard (b) —
 /// `docs/design/crates.md`); re-exported here at the old paths so
@@ -49,6 +54,9 @@ pub mod write;
 /// for existing callers.
 pub use cox_sandbox::path;
 pub use cox_sandbox::sandbox;
+
+/// T64.15.1: the open that pairs with `path::confine`, next to it.
+pub use cox_sandbox::open;
 
 /// T32.4: `outline` (AST signature extraction) moved to `cox-syntax`
 /// (dependency (a): tree-sitter and its five grammars are each a C build);

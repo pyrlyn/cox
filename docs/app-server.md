@@ -1,27 +1,22 @@
-# `cox app-server` and remote sessions
+# `cox app-server` wire protocol
 
-`cox app-server --stdio` serves the macOS app's session calls over stdin and
-stdout, one JSON object per line. The app runs it on another machine over your
-own `ssh`. That machine's sessions then show in the app's sidebar as a group of
-their own, and they open, stream and take prompts like local ones. The session,
-its tools, its sandbox and its keys stay on that machine. Only the protocol
-lines cross the connection.
+`cox app-server --stdio` serves the desktop app's session calls over stdin and
+stdout, one JSON object per line. The app starts it on another machine through
+a target's launcher (ssh, docker, limactl or colima); `docs/targets.md` covers
+the targets, how to put cox on them and what they may and may not receive. This
+file is the wire between the app and that server.
 
-## Running it on a host
+The session, its tools, its sandbox and its keys stay on the machine that runs
+the server. Only the protocol lines cross the connection.
 
-Install cox on the host as you would locally (see `docs/getting-started.md`),
-so that `cox` is on the `PATH` of a non-interactive ssh login. Then check it by
-hand:
+## Serving
 
-```sh
-ssh devbox cox app-server --stdio
-```
-
-The server reads requests until stdin closes, then closes every session stream
-it opened. A running turn keeps running on the host. It writes nothing to
-stdout except protocol lines; logs go to cox's log file under `COX_HOME` on the
-host. At start it reads the login shell's environment, as the app does locally,
-so tools such as `cargo` or `mise` and env-var keys resolve as they would in a
+The server reads requests until stdin closes, then ends every session it
+opened. A running turn stops, a shell it detached is killed, and the session
+can be resumed later with `open` and `resume`. It writes nothing to stdout
+except protocol lines; logs go to cox's log file under `COX_HOME` on the host.
+At start it reads the login shell's environment, as the app does locally, so
+tools such as `cargo` or `mise` and env-var keys resolve as they would in a
 terminal there.
 
 A one-line request to try it by hand is in
@@ -56,7 +51,14 @@ module, and a drift test keeps it current.
   - `snapshot`, `expand`, `complete`, `changes` and `plan` read one session.
   - `plugin_action` runs the command a plugin button or action (`plugin:<id>:<command>`)
     names, and answers whether the session's plugins granted it.
-  - `close` stops a session's stream.
+  - `close` stops a session's stream and sends `ended`. The server still holds
+    the session, and its timeline keeps folding.
+  - `attach` streams a session the server still holds again, from its snapshot,
+    and answers like `open`. An `open` that resumes a session this server
+    already holds attaches to it instead of building a second core.
+  - `end` ends a session: its turns stop and what they detached is killed.
+  - `inbox` returns the approvals and questions that wait, so a client that
+    attaches sees those that arrived while it was away.
 
   The server answers each with a `response` that carries the same `id`. The
   response is either `ok` with a reply, or `err` with a message. A line that is
@@ -76,6 +78,33 @@ module, and a drift test keeps it current.
     plugin's widget is checked again on the app and goes through the same
     confirmation as `open_url`.
 
+## Handshake
+
+The first request on a link is `hello`. It takes no parameters and answers the
+host's protocol version (`wire`), cox version, OS, architecture and sandbox
+backend, or no backend when the host has none. The app refuses a host that
+speaks another protocol version and says which side to update, for example:
+
+> devbox speaks app-server protocol 2 but this app speaks 1; update this app
+> so the two match
+
+A cox that is too old to know `hello` gives a plain error instead:
+
+> the cox on devbox is too old for this app (protocol 1); update cox on that
+> machine (see docs/targets.md)
+
+The app also reads the launcher's stderr, keeping the last 8 KiB and stripping
+escape sequences and bidi controls from it, so a link that closes before
+`hello` says why. When the shell reports exit status 127 or `cox: command not
+found`, the message is:
+
+> cox is not on the PATH of devbox; install cox there so that a
+> non-interactive login can run `cox` (see docs/targets.md)
+
+Any other early close shows the last lines the launcher wrote, for example
+`could not reach devbox: ssh: Could not resolve hostname devbox`. A drop after
+a successful `hello` is the usual disconnected state.
+
 A stalled client never delays a turn. The server keeps at most 64 lines queued
 for the writer. Past that, each session's patches fold into the latest state
 per block until the client reads again.
@@ -85,47 +114,46 @@ per block until the client reads again.
 - **Keys.** The server's host answers no secret request. A session on the host
   reads the host's own env vars and keyring, and the protocol has no message
   that carries a key. A test checks that no schema tag names a secret.
-- **Your ssh agent.** The app runs `ssh` with `ForwardAgent=no` and
-  `ClearAllForwardings=yes`, so neither the agent nor a port reaches the host.
-- **Your environment.** `ssh` starts with an empty environment apart from
-  `HOME`, `USER`, `LOGNAME`, `PATH` and `SSH_AUTH_SOCK`. The last lets the
-  local `ssh` itself authenticate; it is not forwarded.
+- **The launch environment and the ssh agent.** How a link is started, what
+  the launcher is given and what it may forward are the target's rules and are
+  in `docs/targets.md`.
 
-## How the app connects
+## Resident sessions
 
-**File › Connect to Host…** takes an ssh host alias, such as a `Host` entry in
-`~/.ssh/config`. The app then runs:
+`cox app-server --stdio` ends its sessions when the connection closes. To keep
+a session running with no client attached, run a supervisor on the host:
 
 ```sh
-/usr/bin/ssh -T -o BatchMode=yes -o ForwardAgent=no -o ClearAllForwardings=yes -- <alias> cox app-server --stdio
+cox serve
 ```
 
-The alias is refused before anything runs if it is empty, starts with `-`, or
-contains whitespace or control characters. `BatchMode=yes` means ssh never
-prompts, so the host must accept a key from your agent or your ssh config. A
-host that cannot connect shows in the sidebar as disconnected, and the core's
-reason shows in the sheet.
+It runs in the foreground and does not daemonize; keep it alive with your
+terminal, `nohup`, launchd or systemd. It listens on `COX_HOME/run/serve.sock`,
+a socket only your user can open, and refuses a second `cox serve` on the same
+`COX_HOME`. Each session it opens runs in a worker process of its own (the
+hidden `cox serve --worker`, which the supervisor starts and nobody runs by
+hand), so a crash takes down one session, which the supervisor restarts idle.
+At most 16 sessions are resident at once.
 
-A host that connects is saved to `desktop.remote_hosts` in your user config
-(see `docs/config.md`), and the app reconnects to it at the next launch. A
-project's `.cox/config.toml` cannot set this key: the project-config guard
-reverts it and reports the change, because a repository must not choose where
-the app opens a shell.
+A session is resident until a client sends `end`: closing the connection only
+stops its stream, and a client that connects later with `open` and `resume`
+(or `attach`) gets the session as it is, mid-turn included. One client is
+attached to a session at a time. Stopping `cox serve` ends every session.
 
-Each host is a sidebar group under a host badge. The app re-reads the group
-every few seconds. When the connection drops, the group shows **Disconnected**
-with a **Reconnect** button, and its rows are read-only until it reconnects.
-A session opened from a host streams through that host's connection. When the
-connection drops, the session's stream ends; the session itself keeps running
-on the host.
+A session you start in the TUI (`cox`) is never resident: it belongs to that
+terminal and ends with it.
 
-A remote session in the app does not yet have:
+To reach resident sessions from another machine, run the bridge over ssh:
 
-- completions or prompt history;
-- the Plan and Info tabs;
-- Review, or turn costs;
-- expanding a truncated output;
-- a terminal pane.
+```sh
+ssh devbox cox attach --stdio
+```
 
-The protocol has no message for these yet, or the app asks for them
-synchronously.
+`cox attach --stdio` copies stdin and stdout to the supervisor's socket, so
+ssh decides who gets in and cox opens no port. It never starts a supervisor:
+with no `cox serve` running it exits with an error that names the socket.
+Both commands are behind the `app-server` cargo feature and are not supported
+on Windows yet.
+
+The desktop app's ssh command stays `cox app-server --stdio`; choosing
+`cox attach --stdio` for a host that runs `cox serve` is a later app change.

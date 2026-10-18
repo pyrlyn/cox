@@ -58,6 +58,13 @@ pub struct Cli {
     /// system prompt and no skills/memory index (T30.1).
     #[arg(long, global = true, value_name = "NAME")]
     pub profile: Option<String>,
+    /// Run the session on a target (`ssh:<host>`, `docker:<container>`,
+    /// `lima:<instance>`, `colima:<profile>` or a configured name) instead of
+    /// here (T68.6). Only `--model`, `--mode`, `--permission-mode`,
+    /// `--sandbox`, `--max-turns`, `--output-format`, `--resume` and
+    /// `--continue` are forwarded; the directory is the target's `cwd`.
+    #[arg(long, global = true, value_name = "TARGET")]
+    pub on: Option<String>,
     /// Run as if started from this directory.
     #[arg(long, global = true, value_name = "DIR")]
     pub cwd: Option<PathBuf>,
@@ -95,12 +102,19 @@ pub struct Cli {
 /// Top-level subcommands (plan.md §1.12); `main.rs` dispatches each one.
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
+    /// Print a shell completion script without starting a session.
+    Completions {
+        #[arg(value_enum)]
+        shell: shell_completions::Shell,
+    },
     /// Headless run: `cox run -p <prompt>`.
     Run(RunArgs),
     /// List / search rollouts.
     Sessions(SessionsArgs),
     /// Print archived tool output by id.
     Expand(ExpandArgs),
+    /// List or undo a session's refines (the TUI's `/refine` proposes them).
+    Refine(RefineArgs),
     /// Usage and cost stats.
     Stats(StatsArgs),
     /// Read or write config.
@@ -116,6 +130,12 @@ pub enum Command {
     /// Serve this machine's sessions to a remote desktop app (T52.19).
     #[cfg(feature = "app-server")]
     AppServer(AppServerArgs),
+    /// Keep sessions alive on this machine with no client attached (T66.23).
+    #[cfg(feature = "app-server")]
+    Serve(ServeArgs),
+    /// Reach `cox serve`'s sessions over stdio (what `ssh <host> cox attach --stdio` runs).
+    #[cfg(feature = "app-server")]
+    Attach(AttachArgs),
     /// Scaffold an AGENTS.md for the repo.
     Init(InitArgs),
     /// Instruction files, skills, commands, agents, hooks, MCP servers in effect.
@@ -175,6 +195,29 @@ pub struct AppServerArgs {
     pub stdio: bool,
 }
 
+/// `cox serve` (T66.23, `docs/design/serve.md` D3): the supervisor, in the
+/// foreground. Resident sessions live in worker processes it starts and
+/// restarts.
+#[cfg(feature = "app-server")]
+#[derive(Args, Debug, Clone)]
+pub struct ServeArgs {
+    /// What the supervisor starts for each session: one session over stdin
+    /// and stdout. Hidden because a person never runs it by hand.
+    #[arg(long, hide = true)]
+    pub worker: bool,
+}
+
+/// `cox attach --stdio` (T66.23, D4.6): bridges stdin and stdout to a running
+/// `cox serve`. It never starts one; stdio is the only transport, as for
+/// `app-server`.
+#[cfg(feature = "app-server")]
+#[derive(Args, Debug, Clone)]
+pub struct AttachArgs {
+    /// Bridge stdin and stdout to the supervisor's socket.
+    #[arg(long, required = true)]
+    pub stdio: bool,
+}
+
 /// `cox self update [--version v]` (plan.md §1.12/T12.2).
 #[derive(Args, Debug, Clone)]
 pub struct SelfUpdateArgs {
@@ -203,6 +246,31 @@ pub struct ExpandArgs {
     pub lines: Option<String>,
 }
 
+/// `cox refine` (T66.8, P66).
+#[derive(Args, Debug, Clone)]
+pub struct RefineArgs {
+    #[command(subcommand)]
+    pub action: RefineAction,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum RefineAction {
+    /// Show a session's refines, newest first.
+    List {
+        /// Session id; default is the newest session in this directory.
+        #[arg(long, value_name = "ID")]
+        session: Option<String>,
+    },
+    /// Reverse one applied refine by its event id.
+    Undo {
+        /// Event id as printed by `list`.
+        id: String,
+        /// Required when the refine changed the global entries.
+        #[arg(long)]
+        global: bool,
+    },
+}
+
 /// `cox run` (plan.md §1.12). Only the clap shape and the flag→config-key
 /// mapping land in T0.3; execution is T2.x.
 #[derive(Args, Debug, Clone)]
@@ -210,6 +278,11 @@ pub struct RunArgs {
     /// The prompt to run headlessly.
     #[arg(short = 'p', long = "prompt", value_name = "TEXT")]
     pub prompt: Option<String>,
+    /// Read the prompt from the first stdin line, a JSON string; the rest of
+    /// stdin stays the approvals channel. What `--on` sends, so the prompt
+    /// never reaches a remote command line (T68.6).
+    #[arg(long = "prompt-stdin", conflicts_with = "prompt")]
+    pub prompt_stdin: bool,
     /// Output shape: `text` | `json` | `stream-json`.
     #[arg(long = "output-format", value_name = "FORMAT")]
     pub output_format: Option<String>,
@@ -242,6 +315,11 @@ pub struct RunArgs {
     /// first turn; repeat for more. Checked before any request (T40.7).
     #[arg(long = "image", value_name = "PATH")]
     pub images: Vec<PathBuf>,
+    /// After each turn run the `[autonomous]` gate commands in the sandbox
+    /// and, while one fails, start another turn with its output (T66.11).
+    /// Needs `autonomous.gates` in your own config.
+    #[arg(long, requires = "prompt", conflicts_with = "loop")]
+    pub autonomous: bool,
 }
 
 /// `cox stats` (plan.md §1.12/T1.7). Print usage and cost statistics.
@@ -514,7 +592,7 @@ pub enum PluginAction {
     New {
         /// The plugin id; also the scaffolded directory's default name.
         name: String,
-        /// Only `rust` has a template today (PL§13); headless defaults to it.
+        /// `rust`, `go`, `kotlin` and `dart` have templates (PL§13); headless defaults to `rust`.
         #[arg(long, default_value = "rust")]
         lang: crate::plugin_new::Lang,
         /// Where to write the package; defaults to `./<name>`.

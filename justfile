@@ -31,9 +31,10 @@ docs-check:
     {{docs_cargo}} test --locked -p cox-tui --lib keymap_table_matches_docs
 
 docs_cargo := env("CARGO", "mise exec -- cargo")
-# The whole workspace, then the swarfr cleanup; CI runs the same suite.
+# The whole workspace, then the swarfr cleanup; CI runs the same suite with the same
+# features (--all-features), so local and CI runs share build artifacts.
 check-all: && swarfr
-    mise exec -- cargo nextest run --workspace
+    mise exec -- cargo nextest run --workspace --all-features
 
 # The crates that build for Windows (P57, T57.1): the one list `just
 # windows-check` and CI's `windows` job use. Each P57 card adds the crates it
@@ -89,6 +90,28 @@ plugin-examples lang:
         mise exec -- dart pub get
         mkdir -p build
         mise exec -- dart compile exe bin/server.dart -o build/example_dart
+        ;;
+      go)
+        cd plugins && mise install go tinygo
+        # The template test runs `go` and `tinygo` from a scratch dir, where
+        # mise's shims find no config: put the real binaries on PATH.
+        eval "$(mise env -s bash)"
+        export PLUGIN_TOOLS_PATH="$PATH"
+        # Also under TinyGo: the guest compiler differs from gc (T33.34).
+        (cd sdk-go && go test ./... && tinygo test .)
+        cd examples/go
+        go test ./...
+        tinygo build -o example_go.wasm -target wasip1 -buildmode=c-shared .
+        ;;
+      kotlin)
+        cd plugins && mise install java gradle
+        # The template test runs `gradle` from a scratch dir, where mise's
+        # shims find no config: put the real binaries on PATH.
+        eval "$(mise env -s bash)"
+        export PLUGIN_TOOLS_PATH="$PATH"
+        # No daemon: the recipe leaves no Gradle process behind.
+        cd examples/kotlin
+        gradle --no-daemon -q pluginPackage
         ;;
       *)
         echo "plugin-examples: no {{lang}} example yet" >&2
@@ -146,6 +169,11 @@ release:
 # (aarch64-apple-darwin only, macOS 26.0) plus the generated Swift bindings.
 desktop-xcframework:
     mise exec -- bash scripts/desktop/xcframework.sh
+
+# Every Swift package's tests (T63.2): the XCFramework, then swift_test.sh with no pass markers
+# skipped, as on main. CI skips unchanged packages on pull requests only.
+desktop-test: desktop-xcframework
+    COX_SWIFT_TEST_ALL=1 mise exec -- bash scripts/desktop/swift_test.sh
 
 # The macOS app, Debug and ad-hoc signed (T37.32.1, DT§7): the XCFramework, then XcodeGen's
 # thin Cox.xcodeproj from desktop/macos/project.yml, then desktop/macos/build/Cox.app. No

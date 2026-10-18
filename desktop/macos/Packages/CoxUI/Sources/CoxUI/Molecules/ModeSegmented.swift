@@ -86,6 +86,7 @@ struct ModeMenu: View {
     .menuStyle(.button)
     .menuIndicator(.hidden)
     .buttonStyle(.plain)
+    .coxControlPointer()
     .fixedSize()
     .help("Permission mode (⇧⇥ for the next)")
     .accessibilityLabel("Permission mode")

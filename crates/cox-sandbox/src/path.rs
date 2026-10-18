@@ -44,10 +44,7 @@ pub fn confine(roots: &[PathBuf], cwd: &Path, input: &str) -> Result<PathBuf, To
 
     let joined = cwd.join(expand_tilde(input)?);
 
-    let canon_roots: Vec<PathBuf> = roots
-        .iter()
-        .map(|r| std::fs::canonicalize(r).unwrap_or_else(|_| lexically_normalize(r)))
-        .collect();
+    let canon_roots = canonical_roots(roots);
 
     // Step 3: fast, symlink-free rejection. A root is matched as given and
     // canonical, so an already-canonical path under a symlinked root (a
@@ -78,6 +75,15 @@ pub fn confine(roots: &[PathBuf], cwd: &Path, input: &str) -> Result<PathBuf, To
     } else {
         Err(confined(&resolved, roots))
     }
+}
+
+/// The roots as the containment checks compare them. Shared with
+/// `open::open_confined` so the post-open check cannot drift from this one.
+pub(crate) fn canonical_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+    roots
+        .iter()
+        .map(|r| std::fs::canonicalize(r).unwrap_or_else(|_| lexically_normalize(r)))
+        .collect()
 }
 
 /// Rejects NUL, which terminates a C string and would truncate the path the
@@ -135,7 +141,7 @@ fn has_windows_reserved_name(input: &str) -> bool {
 
 /// Path component comparison is case-insensitive on Windows, including the
 /// drive letter. Components still delimit the prefix: `root2` is not `root`.
-fn path_starts_with(path: &Path, root: &Path) -> bool {
+pub(crate) fn path_starts_with(path: &Path, root: &Path) -> bool {
     #[cfg(windows)]
     {
         let mut path_parts = path.components();
@@ -239,7 +245,7 @@ fn deepest_existing_ancestor(path: &Path) -> (PathBuf, Vec<OsString>) {
 /// Builds a `ToolError::Confined`, reporting whichever root shares the
 /// longest path prefix with `path` (the most useful one to show the model
 /// when several roots are configured).
-fn confined(path: &Path, roots: &[PathBuf]) -> ToolError {
+pub(crate) fn confined(path: &Path, roots: &[PathBuf]) -> ToolError {
     let root = roots
         .iter()
         .max_by_key(|r| common_prefix_len(r, path))
@@ -276,7 +282,7 @@ mod tests {
     }
 
     /// Smoke test kept alongside the exhaustive table in
-    /// `tests/confine.rs`: a plain in-root relative path resolves to an
+    /// `tests/it/confine.rs`: a plain in-root relative path resolves to an
     /// absolute path under the root.
     #[test]
     fn confine_plain_relative_path_stays_in_root() {

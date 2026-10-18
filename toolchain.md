@@ -25,6 +25,11 @@ Programs the project uses and the direct packages from its manifests.
 | colima | global (mise) | Docker runtime for Terminal-Bench (the creator's choice) | https://github.com/abiosoft/colima |
 | LM Studio (`lms`) | desktop app | Local model server for the eval matrix (`cox-bench`, provider `lmstudio`): OpenAI Chat and Anthropic Messages endpoints on :1234 | https://lmstudio.ai/docs/developer |
 | docker-cli, docker-compose, docker-buildx | global (mise) | Harbor drives task containers through `docker compose` and `docker buildx build` | https://github.com/docker/cli , https://github.com/docker/compose , https://github.com/docker/buildx |
+| go | mise (`plugins/mise.toml`) | T33.34: the Go plugin SDK (`plugins/sdk-go`), `plugins/examples/go` and `plugins/templates/go`; TinyGo's GOROOT, and `go test` for the pure parts | https://github.com/golang/go |
+| tinygo | mise (`plugins/mise.toml`) | T33.34: builds a Go plugin as a `wasip1` module extism loads (`-target wasip1 -buildmode=c-shared`); 0.43.0 takes Go 1.25–1.27 | https://github.com/tinygo-org/tinygo |
+| java | mise (`plugins/mise.toml`) | T33.36: the JDK Gradle runs on to build the Kotlin plugin PDK (`plugins/sdk-kotlin`), `plugins/examples/kotlin` and `plugins/templates/kotlin` | https://openjdk.org |
+| gradle | mise (`plugins/mise.toml`) | T33.36: builds a Kotlin plugin (`gradle pluginPackage` stages `plugin.toml` and the `wasmWasi` module in `build/plugin`) | https://github.com/gradle/gradle |
+| kotlin | mise (`plugins/mise.toml`) | T33.36: the compiler version the Kotlin Gradle plugin pins for a Kotlin/Wasm `wasmWasi` plugin; kept on the same version as that plugin | https://github.com/JetBrains/kotlin |
 | dart | mise (`plugins/mise.toml`) | Builds `plugins/templates/dart` and `plugins/examples/dart` (T33.38): Dart cannot emit a wasm module extism can load (research.md §4.3.5 P44), so its only plugin capability is an `[[mcp]]` stdio server, `dart compile exe` | https://github.com/dart-lang/sdk |
 | node | mise (`mise.toml`) | Runs Style Dictionary, the desktop token build (`just desktop-tokens`, T37.17, DS§2) | https://github.com/nodejs/node |
 | SwiftLint | mise (`mise.toml`, aqua) | Lints the macOS app (T37.18): default rules plus DS§9's no-literal custom rules in `desktop/macos/.swiftlint.yml`; CI's `desktop-macos-lint` job; packages run the same version through the SwiftLintPlugins build-tool plugin | https://github.com/realm/SwiftLint |
@@ -59,6 +64,8 @@ Programs the project uses and the direct packages from its manifests.
 | bytes | local | https://crates.io/crates/bytes | T1.2: turns a reqwest byte stream into SSE frames (`sse.rs`) and drives the in-memory fixture parser (`parse_sse_str`) through the same code path. |
 | chrono | local (`clock`) | https://crates.io/crates/chrono | cox-app: local midnight and week start for the desktop's project spend (T37.29.3.3) |
 | clap | local | https://crates.io/crates/clap | cox (CLI) |
+| config-schema | local | https://github.com/pyrlyn/crates-packages | cox-config: figment layering with named layers and per-key provenance, the `COX_*` layer and comment-preserving `cox config set` edits (T32.17); the shared crate extracted from cox-config, rtok and ketch |
+| shell-completions | local | https://crates.io/crates/shell-completions | Shared clap shell scripts and Clink generator; published dependency |
 | cpal | local | https://github.com/RustAudio/cpal | cox-voice: the default microphone (CoreAudio, ALSA, WASAPI) for push-to-talk, in memory only (T54.3, A123); Linux builds need the ALSA headers (libasound2-dev) |
 | crossterm | local | https://crates.io/crates/crossterm | Terminal I/O |
 | diesel | local | https://crates.io/crates/diesel | cox-store diesel/diesel_migrations pinned "2.2" per plan.md D9 resolve to the latest 2.x compatible release (2.3.x) on crates.io as of 2026-09-02; verified no semver-breaking API change vs. 2.2 for the sqlite backend used here. |
@@ -95,7 +102,7 @@ Programs the project uses and the direct packages from its manifests.
 | pulldown-cmark | local | https://crates.io/crates/pulldown-cmark | T5.3: plan.md says pulldown-cmark 0.10; 0.13 is the current line with the same Tag/TagEnd API. syntect without onig (pure-Rust fancy-regex engine). Lives in `cox-render` (T32.2). |
 | ratatui | local | https://crates.io/crates/ratatui | cox-tui |
 | reqwest | local | https://crates.io/crates/reqwest | cox-provider; cox-plugin: the host side of `cox_http` (T33.14.1) |
-| url | local | https://crates.io/crates/url | cox-tools: LSP `file://` URI ↔ path (T41.3); `cox-app`'s browser tools parse a URL and pass only http/https (T51.7). 2.5.8, the latest release, 2026-01-05 |
+| url | local | https://crates.io/crates/url | cox-mcp: reads `state` from the OAuth callback query (T64.13); cox-tools: LSP `file://` URI ↔ path (T41.3); `cox-app`'s browser tools parse a URL and pass only http/https (T51.7). 2.5.8, the latest release, 2026-01-05 |
 | rmcp | local | https://crates.io/crates/rmcp | cox-mcp |
 | rubato | local | https://github.com/HEnquist/rubato | cox-voice: the microphone's rate (often 44.1 or 48 kHz) to whisper's 16 kHz (T54.3, A123) |
 | rstest | local | https://crates.io/crates/rstest | Rust dependency |
@@ -105,7 +112,7 @@ Programs the project uses and the direct packages from its manifests.
 | serde | local | https://crates.io/crates/serde | cox-protocol |
 | serde-saphyr | local | https://crates.io/crates/serde-saphyr | cox-ext: SKILL.md, command and subagent frontmatter (T7.9); maintained, serde_yaml is deprecated and pulled the unmaintained unsafe-libyaml |
 | serde_json | local | https://crates.io/crates/serde_json | preserve_order: agent-client-protocol-schema requires it, which unifies the feature into every workspace build anyway; pinning it here makes JSON key order (snapshots, rollout lines, ledger JSON) identical for per-crate and full-workspace runs instead of depending on the invocation. |
-| sha2 | local | https://crates.io/crates/sha2 | Rust dependency |
+| sha2 | local | https://crates.io/crates/sha2 | Content hashes (cox-ext harness fingerprint, T66.5; cox-store, cox-plugin, cox-mcp, cox-tools) |
 | shlex | local | https://crates.io/crates/shlex | Rust dependency |
 | similar | local | https://crates.io/crates/similar | Rust dependency |
 | syntect | local | https://crates.io/crates/syntect | Rust dependency Lives in `cox-render` (T32.2). |
@@ -144,6 +151,19 @@ Programs the project uses and the direct packages from its manifests.
 | Package | Where | Source | Why here |
 | --- | --- | --- | --- |
 | dart_mcp | local | https://pub.dev/packages/dart_mcp | T33.38: the official Dart MCP server/client SDK (`ToolsSupport`, `stdioChannel`) a Dart plugin's `[[mcp]]` server is built on, since Dart cannot emit a wasm module extism can load |
+
+## go (`plugins/sdk-go`, `plugins/examples/go`, `plugins/templates/go`)
+
+| Package | Where | Source | Why here |
+| --- | --- | --- | --- |
+| github.com/extism/go-pdk | local | https://github.com/extism/go-pdk | T33.34: extism's official Go PDK (v1.1.3), the memory and I/O under the Go SDK's `cox:host/v1` wrappers |
+
+## gradle (`plugins/sdk-kotlin`, `plugins/examples/kotlin`, `plugins/templates/kotlin`)
+
+| Package | Where | Source | Why here |
+| --- | --- | --- | --- |
+| org.jetbrains.kotlin.multiplatform | local | https://github.com/JetBrains/kotlin | T33.36: the Kotlin Gradle plugin (2.4.20) that compiles the `wasmWasi` target |
+| org.jetbrains.kotlinx:kotlinx-serialization-json | local | https://github.com/Kotlin/kotlinx.serialization | T33.36: the `JsonElement` tree the Kotlin PDK passes payloads as (1.11.0), with no compiler plugin in every plugin build |
 
 ## uv (`evals/`)
 
@@ -188,3 +208,10 @@ Programs the project uses and the direct packages from its manifests.
 | Microsoft.WindowsAppSDK | local (`App`, `Cox.UI`, `Cox.Transcript`) | https://github.com/microsoft/WindowsAppSDK | T58.3: WinUI 3 (2.5.1, the stable line in R10.2.5) |
 | Microsoft.Windows.SDK.BuildTools | local (the same projects) | https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools | T58.3: Windows SDK targeting pack the WinUI targets require; 10.0.26100.7705, the latest 26100 build, with `TargetPlatformMinVersion` 10.0.17763.0 (A128) |
 | MSTest.Sdk | local (`Cox.Tests`, pinned in `global.json`) | https://github.com/microsoft/testfx | T58.3, A141: MSTest 4.4.1, the creator's C# test runner |
+
+## Linkers
+
+- **Windows (MSVC):** `rust-lld` through `.cargo/config.toml` (`[target.*-pc-windows-msvc] linker`). It ships with rustup, nothing to install.
+- **Linux:** `mold`, pinned in `mise.toml` for Linux only and driven by `clang`. mise `[env]` sets `CARGO_TARGET_{X86_64,AARCH64}_UNKNOWN_LINUX_GNU_RUSTFLAGS` to `-C linker=clang -C link-arg=-fuse-ld=mold` only when mise has mold installed (`mise install`); otherwise the variable is empty and the default linker stays. A Linux machine without mold (or without mise) builds as before; to use mold, run `mise install` and make sure `clang` is on PATH (`apt install clang`). `RUSTFLAGS`, when set, overrides these flags. CI installs mold on Linux runners.
+- **macOS:** Apple's native linker (mold has no macOS support).
+- **Cranelift:** not used. It needs a nightly toolchain and this repository is on stable.

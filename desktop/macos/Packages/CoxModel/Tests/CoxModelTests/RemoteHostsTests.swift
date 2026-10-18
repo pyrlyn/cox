@@ -17,6 +17,7 @@ private struct Unreachable: Error {}
 private struct FakeRemote: RemoteWorkspace {
   let host: String
   let isConnected = true
+  let info = HostInfo(wire: 1, cox: "0.9.1", platform: "linux", arch: "x86_64", sandbox: "bwrap")
 
   func reconnect() async throws {}
 
@@ -32,9 +33,13 @@ private struct FakeRemote: RemoteWorkspace {
 }
 
 private struct FakeConnector: RemoteConnector {
-  func connect(host: String) async throws -> any RemoteWorkspace {
-    guard host == "devbox" else { throw Unreachable() }
-    return FakeRemote(host: host)
+  func connect(target: String) async throws -> any RemoteWorkspace {
+    guard ["ssh:devbox", "docker:web"].contains(target) else { throw Unreachable() }
+    return FakeRemote(host: TargetList.hostID(target))
+  }
+
+  func targets() async -> [TargetChoice] {
+    [TargetChoice(name: "web", target: "docker:web", configured: false)]
   }
 }
 
@@ -42,7 +47,7 @@ private struct FakeConnector: RemoteConnector {
 @Suite struct RemoteHostsTests {
   @Test func aConnectedHostIsOneGroupThatOpensItsOwnSessions() async {
     let remotes = RemoteHosts(connector: FakeConnector(), settings: nil)
-    #expect(await remotes.connect("devbox") == nil)
+    #expect(await remotes.connect("ssh:devbox") == nil)
     let sections = remotes.sections
     #expect(sections.map(\.id) == ["host:devbox"])
     #expect(sections[0].kind == .host(isConnected: true))
@@ -56,8 +61,24 @@ private struct FakeConnector: RemoteConnector {
 
   @Test func aHostThatCannotConnectShowsDisconnected() async {
     let remotes = RemoteHosts(connector: FakeConnector(), settings: nil)
-    #expect(await remotes.connect("gone") != nil)
+    #expect(await remotes.connect("ssh:gone") != nil)
     #expect(remotes.sections.map(\.kind) == [.host(isConnected: false)])
     #expect(remotes.hosts.first?.failure != nil)
+  }
+
+  @Test func aTargetOfAnotherKindKeepsItsPrefixAndShowsItsHello() async {
+    let remotes = RemoteHosts(connector: FakeConnector(), settings: nil)
+    #expect(await remotes.connect("docker:web") == nil)
+    #expect(remotes.sections.map(\.id) == ["host:docker:web"])
+    #expect(RemoteHosts.host(section: "host:docker:web") == "docker:web")
+    #expect(remotes.hello(for: "docker:web")?.sandbox == "bwrap")
+    #expect(await remotes.targets().map(\.target) == ["docker:web"])
+  }
+
+  @Test func anSshTargetIsAGroupNamedByItsBareAlias() async {
+    let remotes = RemoteHosts(connector: FakeConnector(), settings: nil)
+    #expect(await remotes.connect("ssh:devbox", save: false) == nil)
+    #expect(remotes.hosts.map(\.id) == ["devbox"])
+    #expect(remotes.hello(for: "ssh:devbox")?.summary == "Linux · x86_64 · cox 0.9.1")
   }
 }

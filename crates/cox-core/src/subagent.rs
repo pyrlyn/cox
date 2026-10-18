@@ -32,6 +32,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use cox_permission::narrower;
@@ -53,7 +54,7 @@ use crate::budget;
 use crate::hooks;
 use crate::rollout::History;
 use crate::session::Session;
-use crate::tasks::{Queued, agent_detail, message_line};
+use crate::tasks::{Collect, Queued, TaskStatus, agent_detail, message_line};
 
 /// A subagent shape: which job it reports as, which tools it may use, how
 /// long it may run and how big its answer may be.
@@ -113,6 +114,10 @@ struct Resolved {
     /// `None` means every parent tool (an `AgentDef` with an empty
     /// `tools:`); built-in presets always name theirs explicitly.
     tools: Option<Vec<String>>,
+    /// The allowlist is a discovered def's own (T64.20): a call's `tools`
+    /// may only narrow it. A built-in preset's list is a default a call
+    /// replaces, which `agent`'s documented `tools` argument relies on.
+    allowlist_is_a_ceiling: bool,
     read_only: bool,
     max_turns: u32,
     result_cap_tokens: usize,
@@ -147,6 +152,13 @@ pub fn slice(parent_cap: f64, parent_spent: f64, requested: Option<f64>) -> f64 
     let remaining = (parent_cap - parent_spent).max(0.0);
     requested.map_or(remaining * DEFAULT_SLICE, |r| r.max(0.0).min(remaining))
 }
+
+/// Tasks one `collect` call may name: each settled one adds a capped
+/// preview to the result, so the call's own size stays bounded.
+const MAX_COLLECT_TASKS: usize = 8;
+
+/// The longest `timeout_ms` honoured; a longer wait is a snapshot later.
+const MAX_COLLECT_WAIT_MS: u64 = 120_000;
 
 /// `agent`: delegates a task to a child session and returns its answer.
 pub struct AgentTool {
@@ -225,6 +237,7 @@ impl AgentTool {
                 name: p.name.to_string(),
                 job: p.job.clone(),
                 tools: Some(p.tools.iter().map(|s| s.to_string()).collect()),
+                allowlist_is_a_ceiling: false,
                 read_only: p.read_only,
                 max_turns: p.max_turns,
                 result_cap_tokens: p.result_cap_tokens,
@@ -243,6 +256,7 @@ impl AgentTool {
                 name: def.name.clone(),
                 job: Job::Agent,
                 tools: (!def.tools.is_empty()).then(|| def.tools.clone()),
+                allowlist_is_a_ceiling: true,
                 read_only: false,
                 max_turns: CUSTOM_MAX_TURNS,
                 result_cap_tokens: CUSTOM_RESULT_CAP_TOKENS,
@@ -264,6 +278,7 @@ impl AgentTool {
                 name: name.to_string(),
                 job: Job::Agent,
                 tools: Some(Vec::new()),
+                allowlist_is_a_ceiling: false,
                 read_only: false,
                 max_turns: CUSTOM_MAX_TURNS,
                 result_cap_tokens: CUSTOM_RESULT_CAP_TOKENS,
@@ -299,23 +314,31 @@ impl AgentTool {
     }
 
     /// The parent's tools this call may hand to the child: the resolved
-    /// allowlist (or the call's `tools`, narrowed to it for a read-only
-    /// preset), never `agent` itself.
+    /// allowlist (or the call's `tools`, which for a def can only narrow it
+    /// and for a read-only preset is narrowed to read-only tools), never
+    /// `agent` itself.
     fn tools_for(&self, resolved: &Resolved, input: &Value) -> Vec<Arc<dyn Tool>> {
         if resolved.external.is_some() {
             return Vec::new();
         }
-        let wanted: Option<Vec<String>> = input
-            .get("tools")
-            .and_then(Value::as_array)
-            .map(|names| {
+        let requested: Option<Vec<String>> =
+            input.get("tools").and_then(Value::as_array).map(|names| {
                 names
                     .iter()
                     .filter_map(Value::as_str)
                     .map(str::to_string)
                     .collect()
-            })
-            .or_else(|| resolved.tools.clone());
+            });
+        // The model writes the call's `tools`, but a def's `tools:` is the
+        // user's boundary for that child ("narrow, never widen",
+        // docs/design/extensions.md): naming a tool outside it adds nothing.
+        let wanted = match (requested, &resolved.tools) {
+            (Some(asked), Some(allowed)) if resolved.allowlist_is_a_ceiling => {
+                Some(asked.into_iter().filter(|n| allowed.contains(n)).collect())
+            }
+            (Some(asked), _) => Some(asked),
+            (None, allowed) => allowed.clone(),
+        };
         self.parent
             .tools
             .iter()
@@ -363,7 +386,13 @@ impl Tool for AgentTool {
                 default — never a more expensive one, `budget_usd`, \
                 `isolation: \"worktree\"` to run the task in its own git worktree and \
                 branch (named after the task id) so its edits never touch this checkout; \
-                the answer then ends with the worktree path and branch."
+                the answer then ends with the worktree path and branch. \
+                `background: true` returns a task id at once; its answer is not in the \
+                result. To fetch it, call `agent` with `collect` (task ids or names) and \
+                no `task`, plus an optional `timeout_ms` to wait for them: each entry has a \
+                status (`queued`, `running`, `done`, `error`, `cancelled`) and, once \
+                settled, a short preview; waiting out the timeout returns the current \
+                statuses, not an error."
             .to_string();
         let custom = self.custom_names();
         if !custom.is_empty() {
@@ -391,9 +420,10 @@ impl Tool for AgentTool {
                     "tools": {"type": "array", "items": {"type": "string"}},
                     "budget_usd": {"type": "number", "minimum": 0},
                     "background": {"type": "boolean"},
-                    "isolation": {"type": "string", "enum": ["none", "worktree"]}
-                },
-                "required": ["task"]
+                    "isolation": {"type": "string", "enum": ["none", "worktree"]},
+                    "collect": {"type": "array", "items": {"type": "string"}},
+                    "timeout_ms": {"type": "integer", "minimum": 0}
+                }
             }),
             deferred: true,
             risk: Risk::ReadOnly,
@@ -402,12 +432,20 @@ impl Tool for AgentTool {
     }
 
     fn subject(&self, input: &Value) -> String {
+        if is_collect(input) {
+            return "collect".into();
+        }
         self.resolve(input).map_or_else(|_| "?".into(), |r| r.name)
     }
 
     /// The riskiest tool the child may use (plan.md §1.11: "inherits max
     /// of its tools").
     fn risk(&self, input: &Value) -> Risk {
+        // Reading back a result the parent already has a pointer to runs
+        // nothing, so it needs no more than the cheapest preset would.
+        if is_collect(input) {
+            return Risk::ReadOnly;
+        }
         let Ok(resolved) = self.resolve(input) else {
             return Risk::Exec;
         };
@@ -429,6 +467,9 @@ impl Tool for AgentTool {
     }
 
     async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+        if input.get("collect").is_some() {
+            return self.collect(&input, cx).await;
+        }
         let task_text = input
             .get("task")
             .and_then(Value::as_str)
@@ -586,6 +627,8 @@ impl Tool for AgentTool {
                 .unwrap_or(false)
         {
             let parent = self.parent.clone();
+            let name = io.spec.name.clone();
+            parent.begin_collect(task, name.clone()).await;
             tokio::spawn(async move {
                 // T34.2: the slot stays reserved for this child's whole run,
                 // not just until `call()` returns its "started" pointer.
@@ -599,10 +642,11 @@ impl Tool for AgentTool {
                 ),
                 is_error: false,
                 diff: None,
+                // The handle to collect by (T66.3), never the child's answer.
                 structured: Some(json!({
-                    "task": task,
-                    "preset": preset.name,
-                    "background": true,
+                    "task_id": task,
+                    "name": name,
+                    "status": TaskStatus::Queued.as_str(),
                 })),
             });
         }
@@ -662,7 +706,7 @@ impl Tool for AgentTool {
         let outcome = outcome?;
         Ok(ToolOutput {
             text: outcome.answer,
-            is_error: false,
+            is_error: outcome.is_error,
             diff: None,
             structured: Some(json!({
                 "task": task,
@@ -671,6 +715,99 @@ impl Tool for AgentTool {
                 "cost_usd": outcome.cost_usd,
                 "summarised": outcome.summarised,
             })),
+        })
+    }
+}
+
+/// A call that reads results back rather than starting a task.
+fn is_collect(input: &Value) -> bool {
+    input.get("collect").is_some() && input.get("task").is_none()
+}
+
+impl AgentTool {
+    /// `{"collect": [id or name, …], "timeout_ms": n}`: one entry per task
+    /// with its status and, once settled, the capped answer (T66.3). The
+    /// wait is bounded; a timeout reports the statuses as they stand.
+    async fn collect(&self, input: &Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+        let denied = |why: String| ToolError::Denied { why };
+        if input.get("task").is_some() {
+            return Err(denied(
+                "pass either \"task\" or \"collect\", not both".into(),
+            ));
+        }
+        let wanted = input
+            .get("collect")
+            .and_then(Value::as_array)
+            .filter(|a| !a.is_empty())
+            .ok_or_else(|| denied("\"collect\" must list at least one task id or name".into()))?;
+        if wanted.len() > MAX_COLLECT_TASKS {
+            return Err(denied(format!(
+                "collect at most {MAX_COLLECT_TASKS} tasks per call"
+            )));
+        }
+        let mut tasks = Vec::new();
+        for item in wanted {
+            let raw = item
+                .as_str()
+                .ok_or_else(|| denied("\"collect\" entries are task ids or names".into()))?;
+            let task = self
+                .parent
+                .resolve_name_or_id(raw)
+                .await
+                .ok_or_else(|| denied(format!("no background task {raw:?} to collect")))?;
+            if !tasks.contains(&task) {
+                tasks.push(task);
+            }
+        }
+        let wait_ms = input
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .min(MAX_COLLECT_WAIT_MS);
+        let found = self
+            .parent
+            .collect_snapshot(&tasks, Duration::from_millis(wait_ms), &cx.cancel)
+            .await;
+        if let Some(missing) = tasks.iter().find(|t| !found.iter().any(|(id, _)| id == *t)) {
+            return Err(denied(format!("no background task {missing} to collect")));
+        }
+        let mut text = Vec::new();
+        let mut entries = Vec::new();
+        for (
+            task_id,
+            Collect {
+                name,
+                status,
+                answer,
+                archive,
+            },
+        ) in found
+        {
+            let head = format!("task {task_id} ({name}): {}", status.as_str());
+            text.push(match &answer {
+                Some(preview) => format!("{head}\n{preview}"),
+                None => head,
+            });
+            // `preview` is present once settled, already inside the preset's
+            // `result_cap_tokens`; `archive` names the full answer (T66.2).
+            let mut entry = json!({
+                "task_id": task_id,
+                "name": name,
+                "status": status.as_str(),
+            });
+            if let Some(preview) = answer {
+                entry["preview"] = json!(preview);
+            }
+            if let Some(id) = archive {
+                entry["archive"] = json!(id);
+            }
+            entries.push(entry);
+        }
+        Ok(ToolOutput {
+            text: text.join("\n\n"),
+            is_error: false,
+            diff: None,
+            structured: Some(json!({"tasks": entries})),
         })
     }
 }
@@ -735,11 +872,15 @@ fn relay_question(
 /// What one child run produced, foreground or background.
 struct TaskOutcome {
     answer: String,
+    /// The driver refused the run: `answer` is its reason, not the run's result.
+    is_error: bool,
     cost_usd: f64,
     turns: u32,
     summarised: bool,
     /// The full answer's archive row, written only when the cap shortened it.
     archive: Option<ArchiveId>,
+    /// The run was interrupted rather than finished (T66.3).
+    cancelled: bool,
 }
 
 /// Everything a child needs to run again after it finished (SM§2): the
@@ -825,10 +966,24 @@ async fn drive(parent: Session, task: TaskId, mut child: Session, text: String, 
     let mut text = text;
     loop {
         let session = child.id();
-        let (answer, cost_usd, archive) = match run_task(&parent, child, text, &mut io).await {
-            Ok(o) => (o.answer, o.cost_usd, o.archive),
-            Err(e) => (format!("task failed: {e}"), 0.0, None),
-        };
+        parent.mark_running(task, &io.spec.name).await;
+        let (answer, cost_usd, archive, status) =
+            match run_task(&parent, child, text, &mut io).await {
+                Ok(o) => {
+                    let status = match (o.cancelled, o.is_error) {
+                        (true, _) => TaskStatus::Cancelled,
+                        (false, true) => TaskStatus::Error,
+                        (false, false) => TaskStatus::Done,
+                    };
+                    (o.answer, o.cost_usd, o.archive, status)
+                }
+                Err(e) => (format!("task failed: {e}"), 0.0, None, TaskStatus::Error),
+            };
+        // Settled before the notice goes out, so a `collect` the notice
+        // prompts never sees the task still running.
+        parent
+            .settle_collect(task, status, answer.clone(), archive)
+            .await;
         let label = io.spec.label.clone();
         let _ = parent
             .emit(Event::TaskCompleted {
@@ -840,7 +995,13 @@ async fn drive(parent: Session, task: TaskId, mut child: Session, text: String, 
             })
             .await;
         let _ = parent
-            .publish_task_result(task, &label, &answer, &agent_detail(cost_usd, archive))
+            .publish_task_result(
+                task,
+                &label,
+                &answer,
+                &agent_detail(cost_usd, archive),
+                true,
+            )
             .await;
         let stop = json!({"task": task.to_string(), "label": label});
         let _ = hooks::fire(&parent, HookEvent::SubagentStop, stop).await;
@@ -943,6 +1104,9 @@ async fn lost(parent: &Session, task: TaskId, e: CoreError) {
     parent.complete_task(task).await;
     parent.forget_child(task).await;
     let text = format!("subagent task {task} could not resume: {e}");
+    parent
+        .settle_collect(task, TaskStatus::Error, text.clone(), None)
+        .await;
     let _ = parent.notice(Level::Warn, text).await;
 }
 
@@ -1089,6 +1253,7 @@ async fn run_task(
     let mut cost_usd = 0.0;
     let mut turns = 0u32;
     let mut interrupted = false;
+    let mut refusal = None;
     // `TurnDone` is the child's last event (turn.rs: nothing follows it).
     let outcome = loop {
         tokio::select! {
@@ -1133,6 +1298,13 @@ async fn run_task(
                 Some(Event::TaskMessage { task: to, text, .. }) => {
                     let _ = relay(parent, io.task, to, text).await;
                 }
+                // The child's stream is the only place a refusal shows: its
+                // history holds no assistant message, so without this the
+                // task would close as "produced no answer" (T56.12).
+                Some(Event::Error {
+                    error: e @ CoreError::ExternalAgentRefused { .. },
+                    ..
+                }) => refusal = Some(e.to_string()),
                 Some(_) => {}
                 None => break Err(ToolError::Io),
             },
@@ -1142,6 +1314,20 @@ async fn run_task(
         return Err(core_error(e));
     }
     outcome?;
+    if let Some(reason) = refusal {
+        // The reason carries repository names from the remote, so it is
+        // cleaned like any other text from outside. No request was made, so
+        // there is no cost to charge and no answer to cap.
+        return Ok(TaskOutcome {
+            answer: format!("task failed: {}", cox_sanitize::sanitize(&reason)),
+            is_error: true,
+            cost_usd,
+            turns,
+            summarised: false,
+            archive: None,
+            cancelled: interrupted,
+        });
+    }
     if budget::counts(io.spec.tier, parent.config.budget.cheap_counts) {
         parent.add_spend(cost_usd).await;
     }
@@ -1199,10 +1385,12 @@ async fn run_task(
     }
     Ok(TaskOutcome {
         answer: result,
+        is_error: false,
         cost_usd,
         turns,
         summarised,
         archive,
+        cancelled: interrupted,
     })
 }
 
@@ -1314,6 +1502,99 @@ mod tests {
         .expect("session");
         session.set_agent_defs(defs);
         AgentTool::new(session)
+    }
+
+    /// A do-nothing tool with a given name, for `tools_for` claims.
+    struct Named(&'static str);
+
+    #[async_trait]
+    impl Tool for Named {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: self.0.into(),
+                description: String::new(),
+                input_schema: json!({"type": "object"}),
+                deferred: false,
+                risk: Risk::ReadOnly,
+                concurrency: Concurrency::Parallel,
+            }
+        }
+        fn subject(&self, _input: &Value) -> String {
+            self.0.into()
+        }
+        async fn call(&self, _input: Value, _cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+            Err(ToolError::Io)
+        }
+    }
+
+    /// The tool names `tools_for` hands a child for `input`, over a parent
+    /// that has `read`, `grep` and `bash`.
+    fn child_tool_names(defs: Vec<AgentDef>, input: Value) -> Vec<String> {
+        let store = Arc::new(crate::MemoryStore::new());
+        let provider =
+            Arc::new(cox_provider::scripted::Scripted::from_toml("", "").expect("scripted"));
+        let tools: Vec<Arc<dyn Tool>> = ["read", "grep", "bash"]
+            .into_iter()
+            .map(|n| Arc::new(Named(n)) as Arc<dyn Tool>)
+            .collect();
+        let session = Session::new(
+            cox_protocol::Config::default(),
+            provider,
+            tools,
+            store.clone(),
+            store,
+            PathBuf::from("/tmp/cox-subagent-unit"),
+        )
+        .expect("session");
+        session.set_agent_defs(defs);
+        let tool = AgentTool::new(session);
+        let resolved = tool.resolve(&input).expect("resolve");
+        let kept = tool.tools_for(&resolved, &input);
+        kept.iter().map(|t| t.spec().name).collect()
+    }
+
+    fn reviewer(tools: &[&str]) -> AgentDef {
+        AgentDef {
+            name: "reviewer".into(),
+            description: "d".into(),
+            tools: tools.iter().map(|t| t.to_string()).collect(),
+            model: None,
+            path: PathBuf::from("<test>/.cox/agents/reviewer.md"),
+            body: String::new(),
+            disabled: false,
+            permission_mode: None,
+        }
+    }
+
+    /// T64.20: the model writes the call's `tools`; a def's `tools:` is the
+    /// user's boundary, so naming `bash` hands the child nothing extra.
+    #[test]
+    fn agent_call_tools_cannot_widen_a_defs_allowlist() {
+        let call = json!({"task": "t", "preset": "reviewer", "tools": ["read", "bash"]});
+        assert_eq!(
+            child_tool_names(vec![reviewer(&["read", "grep"])], call),
+            ["read"]
+        );
+    }
+
+    #[test]
+    fn agent_call_tools_still_narrow_a_defs_allowlist() {
+        let narrower = json!({"task": "t", "preset": "reviewer", "tools": ["grep"]});
+        assert_eq!(
+            child_tool_names(vec![reviewer(&["read", "grep"])], narrower),
+            ["grep"]
+        );
+        let none = json!({"task": "t", "preset": "reviewer"});
+        assert_eq!(
+            child_tool_names(vec![reviewer(&["read", "grep"])], none),
+            ["read", "grep"]
+        );
+    }
+
+    #[test]
+    fn agent_def_without_tools_lets_a_call_pick_any_parent_tool() {
+        let call = json!({"task": "t", "preset": "reviewer", "tools": ["bash"]});
+        assert_eq!(child_tool_names(vec![reviewer(&[])], call), ["bash"]);
     }
 
     #[test]
@@ -2073,14 +2354,20 @@ text = "it was 42"
     /// an empty script; the child gets no tools of its own (`vec![]`,
     /// like `agent_tool_with_cap`), so it never needs one.
     fn agent_tool_with_cap_and_turns(cap: u32) -> AgentTool {
-        let mut config = cox_protocol::Config::default();
-        config.core.max_concurrent_subagents = cap;
         let toml: String = (0..cap)
             .map(|i| format!("[[turn]]\ntext = \"ok {i}\"\n\n"))
             .collect();
+        scripted_agent_tool(&toml, cap)
+    }
+
+    /// An `AgentTool` over `toml`'s scripted turns, with `cap` concurrent
+    /// subagents allowed and no tools for the child.
+    fn scripted_agent_tool(toml: &str, cap: u32) -> AgentTool {
+        let mut config = cox_protocol::Config::default();
+        config.core.max_concurrent_subagents = cap;
         let store = Arc::new(crate::MemoryStore::new());
         let provider =
-            Arc::new(cox_provider::scripted::Scripted::from_toml(&toml, "").expect("scripted"));
+            Arc::new(cox_provider::scripted::Scripted::from_toml(toml, "").expect("scripted"));
         let session = Session::new(
             config,
             provider,
@@ -2400,6 +2687,11 @@ text = "it was 42"
         parent: OnceLock<Session>,
         poke: bool,
         reported: Option<Usage>,
+        /// Refuses before doing any work, as a cloud driver does without an
+        /// allow rule (T56.11).
+        refuses: bool,
+        /// Fails after it started its work, as a CLI agent that crashes does.
+        fails_midway: bool,
     }
 
     #[async_trait]
@@ -2414,6 +2706,12 @@ text = "it was 42"
             events: mpsc::Sender<Event>,
             _cancel: CancellationToken,
         ) -> Result<Option<Usage>, CoreError> {
+            if self.refuses {
+                return Err(CoreError::ExternalAgentRefused {
+                    agent: "cursor".into(),
+                    message: "refused".into(),
+                });
+            }
             let first = {
                 let mut prompts = self.prompts.lock().expect("lock");
                 prompts.push(prompt.clone());
@@ -2442,6 +2740,12 @@ text = "it was 42"
             let kind = cox_protocol::types::ItemKind::AssistantMessage { text };
             let _ = events.send(Event::ItemStarted { item, kind }).await;
             let _ = events.send(Event::ItemDone { item }).await;
+            if self.fails_midway {
+                return Err(CoreError::ExternalAgent {
+                    agent: "cursor".into(),
+                    message: "crashed".into(),
+                });
+            }
             let stop = cox_protocol::types::StopReason::EndTurn;
             let _ = events.send(Event::TurnDone { turn, stop }).await;
             Ok(self.reported)
@@ -2476,7 +2780,30 @@ text = "it was 42"
             parent: OnceLock::new(),
             poke,
             reported,
+            refuses: false,
+            fails_midway: false,
         })
+    }
+
+    fn refusing() -> Arc<FakeAgent> {
+        Arc::new(FakeAgent {
+            refuses: true,
+            ..take(fake(false, None))
+        })
+    }
+
+    fn failing_midway() -> Arc<FakeAgent> {
+        Arc::new(FakeAgent {
+            fails_midway: true,
+            ..take(fake(false, None))
+        })
+    }
+
+    fn take(agent: Arc<FakeAgent>) -> FakeAgent {
+        match Arc::try_unwrap(agent) {
+            Ok(agent) => agent,
+            Err(_) => panic!("a fresh fake has one owner"),
+        }
     }
 
     fn tool_results(events: &[Event]) -> Vec<String> {
@@ -2560,6 +2887,309 @@ text = "done"
         assert_eq!(
             row.usage.cost_usd, 0.0,
             "never priced: billed on the user's plan"
+        );
+    }
+
+    #[tokio::test]
+    async fn external_agent_that_ran_without_usage_keeps_its_latency_row() {
+        let (parent, store, mut rx) = external_parent(DISPATCH, fake(false, None)).await;
+        parent_turn(&parent, &mut rx).await;
+
+        let rows = store.usage_rows();
+        let external = rows.iter().filter(|r| r.provider == ProviderId::External);
+        assert_eq!(
+            external.count(),
+            1,
+            "a run that happened is a row: {rows:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn external_agent_that_fails_after_starting_still_writes_its_row() {
+        let (parent, store, mut rx) = external_parent(DISPATCH, failing_midway()).await;
+        parent_turn(&parent, &mut rx).await;
+
+        let rows = store.usage_rows();
+        let external = rows.iter().filter(|r| r.provider == ProviderId::External);
+        assert_eq!(
+            external.count(),
+            1,
+            "work that ran is a row even when it failed: {rows:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn refused_external_agent_turn_writes_no_usage_row() {
+        let (parent, store, mut rx) = external_parent(DISPATCH, refusing()).await;
+        parent_turn(&parent, &mut rx).await;
+
+        let rows = store.usage_rows();
+        let external = rows.iter().filter(|r| r.provider == ProviderId::External);
+        assert_eq!(external.count(), 0, "no request, no row: {rows:?}");
+    }
+
+    /// The `tasks` array of an `agent(collect)` result.
+    fn collected(out: &ToolOutput) -> Vec<Value> {
+        let tasks = out.structured.as_ref().and_then(|s| s.get("tasks"));
+        tasks.and_then(Value::as_array).cloned().expect("tasks")
+    }
+
+    /// A background spawn's handle is `{task_id, name, status}` and nothing of
+    /// the child's answer, which only `collect` returns (T66.3).
+    #[tokio::test]
+    async fn background_spawn_returns_a_handle_and_no_answer() {
+        let tool = scripted_agent_tool("[[turn]]\ntext = \"SECRET-ANSWER\"\n", 4);
+        let out = tool
+            .call(
+                json!({"task": "find x", "background": true}),
+                &test_cx(&tool),
+            )
+            .await
+            .expect("spawn");
+        let handle = out.structured.expect("structured");
+        let keys: Vec<_> = handle.as_object().expect("object").keys().collect();
+        assert_eq!(keys, ["task_id", "name", "status"]);
+        assert_eq!(handle["status"], "queued");
+        assert_eq!(handle["name"], "explore-1");
+        assert!(!out.text.contains("SECRET-ANSWER"), "{}", out.text);
+        assert!(!handle.to_string().contains("SECRET-ANSWER"));
+    }
+
+    /// The pointer a settled subagent leaves in history ends with the call
+    /// that fetches the answer; a detached shell call has nothing to collect.
+    #[tokio::test]
+    async fn pointer_line_for_a_subagent_ends_with_collect_and_its_id() {
+        let tool = scripted_agent_tool("[[turn]]\ntext = \"found it\"\n", 4);
+        let out = tool
+            .call(
+                json!({"task": "find x", "background": true}),
+                &test_cx(&tool),
+            )
+            .await
+            .expect("spawn");
+        let id = out.structured.expect("handle")["task_id"].clone();
+        let id = id.as_str().expect("id").to_string();
+        let done = json!({"collect": [id], "timeout_ms": 5000});
+        tool.call(done, &test_cx(&tool)).await.expect("collect");
+        // `settle_collect` runs before the pointer is written.
+        let pointer = loop {
+            let history = tool.parent.history().await;
+            let found = history
+                .iter()
+                .flat_map(|m| &m.content)
+                .find_map(|c| match c {
+                    Content::Text { text } if text.contains("finished") => Some(text.clone()),
+                    _ => None,
+                });
+            if let Some(found) = found {
+                break found;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert!(pointer.ends_with(&format!("collect {id}")), "{pointer}");
+    }
+
+    /// A finished background task is collected by id or by name with the
+    /// answer as its preview.
+    #[tokio::test]
+    async fn collect_returns_a_done_tasks_preview_by_id_and_by_name() {
+        let tool = scripted_agent_tool("[[turn]]\ntext = \"found it\"\n", 4);
+        let spawn = tool
+            .call(
+                json!({"task": "find x", "background": true}),
+                &test_cx(&tool),
+            )
+            .await
+            .expect("spawn");
+        let id = spawn.structured.expect("handle")["task_id"].clone();
+
+        let input = json!({"collect": [id], "timeout_ms": 5000});
+        let out = tool.call(input, &test_cx(&tool)).await.expect("collect");
+        let entries = collected(&out);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["status"], "done");
+        assert_eq!(entries[0]["preview"], "found it");
+        assert_eq!(entries[0]["name"], "explore-1");
+        assert!(
+            out.text.contains("(explore-1): done\nfound it"),
+            "{}",
+            out.text
+        );
+        assert!(!out.is_error);
+
+        let by_name = json!({"collect": ["explore-1"]});
+        let out = tool.call(by_name, &test_cx(&tool)).await.expect("by name");
+        assert_eq!(collected(&out)[0]["preview"], "found it");
+    }
+
+    /// Each status the card names comes back as itself, and waiting out a
+    /// `timeout_ms` on an unsettled task is a snapshot, not an error.
+    #[tokio::test]
+    async fn collect_reports_queued_running_and_a_timeout_snapshot() {
+        let tool = agent_tool_with_cap(4);
+        let (queued, running) = (TaskId::new(), TaskId::new());
+        tool.parent.begin_collect(queued, "explore-1".into()).await;
+        tool.parent.begin_collect(running, "explore-2".into()).await;
+        tool.parent.mark_running(running, "explore-2").await;
+
+        let input = json!({"collect": [queued.to_string(), running.to_string()]});
+        let out = tool.call(input, &test_cx(&tool)).await.expect("snapshot");
+        let statuses: Vec<_> = collected(&out)
+            .iter()
+            .map(|e| e["status"].clone())
+            .collect();
+        assert_eq!(statuses, ["queued", "running"]);
+        assert!(collected(&out).iter().all(|e| e.get("preview").is_none()));
+
+        let waiting = json!({"collect": [running.to_string()], "timeout_ms": 60});
+        let started = std::time::Instant::now();
+        let out = tool.call(waiting, &test_cx(&tool)).await.expect("timeout");
+        assert!(started.elapsed() >= Duration::from_millis(50), "it waited");
+        assert!(!out.is_error);
+        assert_eq!(collected(&out)[0]["status"], "running");
+    }
+
+    #[tokio::test]
+    async fn collect_wakes_when_the_task_settles_before_the_timeout() {
+        let tool = Arc::new(agent_tool_with_cap(4));
+        let task = TaskId::new();
+        tool.parent.begin_collect(task, "explore-1".into()).await;
+        let waiting = {
+            let tool = tool.clone();
+            tokio::spawn(async move {
+                let input = json!({"collect": [task.to_string()], "timeout_ms": 30_000});
+                tool.call(input, &test_cx(&tool)).await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let settle =
+            tool.parent
+                .settle_collect(task, TaskStatus::Error, "task failed: x".into(), None);
+        settle.await;
+        let out = tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("woken, not timed out")
+            .expect("join")
+            .expect("collect");
+        assert_eq!(collected(&out)[0]["status"], "error");
+        assert_eq!(collected(&out)[0]["preview"], "task failed: x");
+    }
+
+    /// The driver's refusal is the `error` status; an interrupted run is
+    /// `cancelled`.
+    #[tokio::test]
+    async fn collect_reports_error_for_a_refused_run_and_cancelled_for_an_interrupted_one() {
+        let (parent, _store, _rx) = external_parent("", refusing()).await;
+        let tool = AgentTool::new(parent);
+        let spawn = tool
+            .call(
+                json!({"task": "work", "preset": "cursor", "background": true}),
+                &test_cx(&tool),
+            )
+            .await
+            .expect("spawn");
+        let id = spawn.structured.expect("handle")["task_id"].clone();
+        let out = tool
+            .call(
+                json!({"collect": [id], "timeout_ms": 5000}),
+                &test_cx(&tool),
+            )
+            .await
+            .expect("collect");
+        assert_eq!(collected(&out)[0]["status"], "error");
+        assert!(
+            collected(&out)[0]["preview"]
+                .as_str()
+                .is_some_and(|p| p.starts_with("task failed:")),
+            "{out:?}"
+        );
+
+        let tool = scripted_agent_tool("[[turn]]\ntext = \"partial\"\n", 4);
+        let cx = test_cx(&tool);
+        cx.cancel.cancel();
+        let spawn = tool
+            .call(json!({"task": "stop", "background": true}), &cx)
+            .await
+            .expect("spawn");
+        let id = spawn.structured.expect("handle")["task_id"].clone();
+        let input = json!({"collect": [id], "timeout_ms": 5000});
+        let out = tool.call(input, &test_cx(&tool)).await.expect("collect");
+        assert_eq!(collected(&out)[0]["status"], "cancelled");
+    }
+
+    /// T66.2 and T66.3 together: an over-cap background answer collects as
+    /// the capped form, names the archive row, and `expand` gives the full
+    /// text.
+    #[tokio::test]
+    async fn collect_preview_of_an_over_cap_answer_stays_within_the_cap_and_names_the_archive_row()
+    {
+        let full = "x".repeat(EXPLORE.result_cap_tokens * 4 + 400);
+        let toml = format!("[[turn]]\ntext = \"{full}\"\n\n[[turn]]\ntext = \"short summary\"\n");
+        let tool = scripted_agent_tool(&toml, 4);
+        let spawn = tool
+            .call(json!({"task": "dump", "background": true}), &test_cx(&tool))
+            .await
+            .expect("spawn");
+        let id = spawn.structured.expect("handle")["task_id"].clone();
+        let input = json!({"collect": [id], "timeout_ms": 5000});
+        let out = tool.call(input, &test_cx(&tool)).await.expect("collect");
+
+        let entry = &collected(&out)[0];
+        let archive = entry["archive"].as_str().expect("archive id").to_string();
+        let preview = entry["preview"].as_str().expect("preview");
+        assert!(
+            preview.len() <= EXPLORE.result_cap_tokens * 4 + 100,
+            "{}",
+            preview.len()
+        );
+        assert_eq!(
+            preview,
+            format!("short summary\nfull answer: expand {archive}")
+        );
+        assert!(
+            out.text.contains(&format!("expand {archive}")),
+            "{}",
+            out.text
+        );
+        let archive_id = archive.parse().expect("id");
+        let bytes = cox_protocol::traits::Archive::get(&*tool.parent.archive, &archive_id)
+            .await
+            .expect("row");
+        assert_eq!(bytes, full.as_bytes(), "expand gives the answer in full");
+    }
+
+    #[tokio::test]
+    async fn collect_denies_unknown_tasks_mixed_calls_and_oversized_lists() {
+        let tool = agent_tool_with_cap(4);
+        let unknown = json!({"collect": [TaskId::new().to_string()]});
+        let cases = [
+            unknown,
+            json!({"collect": ["no-such-name"]}),
+            json!({"collect": []}),
+            json!({"collect": [1]}),
+            json!({"collect": vec!["a"; MAX_COLLECT_TASKS + 1]}),
+            json!({"collect": [TaskId::new().to_string()], "task": "also run"}),
+        ];
+        for input in cases {
+            let err = tool.call(input.clone(), &test_cx(&tool)).await;
+            assert!(
+                matches!(err, Err(ToolError::Denied { .. })),
+                "{input}: {err:?}"
+            );
+        }
+    }
+
+    /// Collecting reads a result back; it must not need the approval a
+    /// preset that runs commands would.
+    #[test]
+    fn collect_is_read_only_whatever_the_preset() {
+        let tool = test_agent_tool(vec![]);
+        let input = json!({"collect": ["x"], "preset": "unresolvable"});
+        assert_eq!(tool.risk(&input), Risk::ReadOnly);
+        assert_eq!(tool.subject(&input), "collect");
+        assert_eq!(
+            tool.risk(&json!({"task": "t", "preset": "unresolvable"})),
+            Risk::Exec
         );
     }
 }

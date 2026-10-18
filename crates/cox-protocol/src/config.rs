@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::autonomous::AutonomousPolicy;
 use crate::types::{
     ApprovalPolicy, Effort, LinuxBackend, Mode, PermissionMode, SandboxMode, Thinking, Tier,
 };
@@ -83,12 +84,21 @@ pub struct Config {
     pub desktop: DesktopConfig,
     /// `[external_agents.<name>]` (T52.2): user config only.
     pub external_agents: BTreeMap<String, ExternalAgentConfig>,
+    /// `[targets.<name>]` (T68.2): named run targets, user config only.
+    pub targets: BTreeMap<String, TargetConfig>,
+    /// `[launchers]` (T68.2): launcher program paths, user config only.
+    pub launchers: LaunchersConfig,
+    /// `[autonomous]` (T66.10): gates and limits of `cox run -p
+    /// --autonomous`. User config only: the gates are shell commands, so a
+    /// project config cannot set any `autonomous.*` key.
+    pub autonomous: AutonomousPolicy,
 }
 
 impl Config {
     /// Every model id reachable without touching a price file: each
     /// `[tiers.*].model`, the single-model sections' own default
-    /// (`providers.local.model`, `providers.typesafe.model`), and every
+    /// (`providers.local.model`, and `providers.typesafe.model` when that
+    /// legacy table is set), and every
     /// `[providers.*].models` list entry — native and compatible, including
     /// each `[providers.<custom>]` section's own default `model`. Sorted
     /// and deduplicated.
@@ -104,13 +114,15 @@ impl Config {
             self.tiers.code.model.clone(),
             self.tiers.think.model.clone(),
             self.providers.local.model.clone(),
-            self.providers.typesafe.model.clone(),
         ];
+        if let Some(legacy) = &self.providers.typesafe {
+            ids.push(legacy.model.clone());
+            ids.extend(legacy.models.iter().map(|m| m.id.clone()));
+        }
         for section in [
             &self.providers.anthropic.models,
             &self.providers.openai.models,
             &self.providers.local.models,
-            &self.providers.typesafe.models,
         ] {
             ids.extend(section.iter().map(|m| m.id.clone()));
         }
@@ -150,6 +162,19 @@ pub fn keyring_enabled(value: Option<&str>) -> bool {
         Some("off" | "0" | "false")
     )
 }
+
+/// [`keyring_enabled`] applied to the live [`KEYRING_ENV`] value. The one
+/// place the env var is read, so the provider key lookup and the MCP OAuth
+/// store cannot drift apart on what "off" means (T64.22); they live in
+/// crates that may not depend on each other, so the shared policy sits in
+/// the contract crate both already depend on.
+pub fn keyring_enabled_in_env() -> bool {
+    keyring_enabled(std::env::var(KEYRING_ENV).ok().as_deref())
+}
+
+/// Keyring service every cox credential is filed under: entries are
+/// `cox/<account>` (`cox/anthropic`, `cox/mcp/<server>`, ...).
+pub const KEYRING_SERVICE: &str = "cox";
 
 /// `[core]` (plan.md §1.6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -424,8 +449,12 @@ pub struct ProvidersConfig {
     /// `[providers.lmstudio]` (T30.15): LM Studio's Anthropic-compatible
     /// `/v1/messages`, through the Anthropic wire client.
     pub lmstudio: LmStudioProviderConfig,
-    /// `[providers.typesafe]` (Jev System One, type-1 native)
-    pub typesafe: JevProviderConfig,
+    /// `[providers.typesafe]`: the table from when Jev was built in
+    /// (T33.40.14). Unset unless a config file still has it; a named
+    /// field so the table can never fall into `custom` as a chat-shaped
+    /// section. Its knobs configure the `typesafe` plugin section.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typesafe: Option<LegacyTypesafe>,
     /// Every other `[providers.<name>]` table: an OpenAI-compatible
     /// (Type-2) provider — DeepSeek, OpenRouter, Moonshot, Z.AI, or a
     /// hand-rolled one. No code change needed to add a name here.
@@ -454,9 +483,13 @@ impl ProvidersConfig {
             // names its own single model, so efforts pass through
             // unclamped (empty means "any", `ProviderModel`'s doc).
             "lmstudio" => &[],
-            // Jev has one model family; the section default names it, and
-            // the router pins it the same way it pins `local`'s.
-            "typesafe" => &self.typesafe.models,
+            // The plugin's section has no native `models` list; a leftover
+            // table's rows still pin the model the way `local`'s do.
+            "typesafe" => self
+                .typesafe
+                .as_ref()
+                .map(|t| t.models.as_slice())
+                .unwrap_or(&[]),
             other => self
                 .custom
                 .get(other)
@@ -696,10 +729,13 @@ impl Default for LmStudioProviderConfig {
 
 impl_transport!(LmStudioProviderConfig);
 
-/// `[providers.typesafe]` (TypeSafe Jev System One, type-1 native, T21.1).
+/// `[providers.typesafe]` as written while Jev was built in (T21.1,
+/// T33.40.14): kept so an old config still loads and still configures the
+/// `jev` plugin's section. The defaults are the plugin's own, so a partial
+/// table behaves as it did before the move.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
-pub struct JevProviderConfig {
+pub struct LegacyTypesafe {
     /// API base URL; the client appends `/v1/systemone`.
     pub base_url: String,
     /// Env var holding the API key (`TYPESAFE_API_KEY`); falls back to the
@@ -715,7 +751,7 @@ pub struct JevProviderConfig {
     pub models: Vec<ProviderModel>,
 }
 
-impl Default for JevProviderConfig {
+impl Default for LegacyTypesafe {
     fn default() -> Self {
         Self {
             base_url: "https://api.typesafe.ai".to_string(),
@@ -728,7 +764,7 @@ impl Default for JevProviderConfig {
     }
 }
 
-impl_transport!(JevProviderConfig);
+impl_transport!(LegacyTypesafe);
 
 /// Any other `[providers.<name>]` table: an OpenAI-compatible (Type-2)
 /// provider in the opencode custom-provider shape
@@ -901,9 +937,10 @@ impl Default for PermissionsConfig {
 pub struct SandboxConfig {
     /// `sandbox.mode`; project config may not set this to `danger-full-access`.
     pub mode: SandboxMode,
-    /// Whether network access is allowed.
+    /// Whether network access is allowed; project config may not turn it on.
     pub network: bool,
-    /// Extra writable roots beyond the workspace.
+    /// Extra writable roots beyond the workspace; project config may only
+    /// keep roots the user layer already lists.
     pub writable: Vec<PathBuf>,
     /// Paths inside the workspace that stay read-only even in `workspace-write`.
     pub readonly_in_workspace: Vec<PathBuf>,
@@ -917,10 +954,16 @@ impl Default for SandboxConfig {
             mode: SandboxMode::WorkspaceWrite,
             network: false,
             writable: Vec::new(),
+            // Repo-local agent and cloud-credential dirs stay read-only in a
+            // writable workspace; the set follows codex
+            // `codex-rs/protocol/src/permissions.rs` L40-51 at f0c5077c, implemented independently.
             readonly_in_workspace: vec![
                 PathBuf::from(".git"),
                 PathBuf::from(".cox"),
                 PathBuf::from(".claude"),
+                PathBuf::from(".agents"),
+                PathBuf::from(".codex"),
+                PathBuf::from(".aws"),
             ],
             linux_backend: LinuxBackend::Auto,
         }
@@ -1165,7 +1208,8 @@ pub struct McpConfig {
     pub deferred: bool,
     /// `--no-mcp` sets this to `false`; not a `default.toml` key.
     pub enabled: bool,
-    /// `[mcp.servers.<name>]` entries.
+    /// `[mcp.servers.<name>]` entries. User config only: a project config
+    /// cannot add or change a server (T64.7); `.mcp.json` is a separate surface.
     pub servers: HashMap<String, McpServerConfig>,
 }
 
@@ -1258,7 +1302,7 @@ impl Default for LspConfig {
 /// config only: a project config can set none of it (the guards in
 /// `cox-config`'s `load.rs`), because an entry runs a program and widens
 /// where it may write. It always runs under the sandbox wrap, with network
-/// on and file limits kept.
+/// on and file limits kept, unless it names a `target` (T68.7).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct ExternalAgentConfig {
@@ -1270,6 +1314,51 @@ pub struct ExternalAgentConfig {
     pub key_env: String,
     /// Extra directories under your home the agent may write, for its own state.
     pub writable: Vec<PathBuf>,
+    /// Run `cox run --output-format stream-json` on this target instead of a
+    /// local program (T68.7): a `[targets.<name>]` name or a literal
+    /// `kind:name`. `command`, `args`, `key_env` and `writable` then do
+    /// nothing: the remote `cox` uses its own keys and sandbox, and the prompt
+    /// goes over stdin. Each call needs a `TargetAgent(<kind:name>)`
+    /// allow rule in your own config.
+    pub target: Option<String>,
+}
+
+/// One `[targets.<name>]` entry (T68.2): a machine or container a whole
+/// session can run on. The name is the TOML key and what `--on` and the
+/// desktop app show. User config only: a project config can set none of it
+/// (the guards in `cox-config`'s `load.rs`), because a target decides which
+/// machine receives the session, its prompts and its files.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct TargetConfig {
+    /// Where it runs, as `kind:name`: `ssh:devbox`, `docker:web`,
+    /// `lima:default` or `colima:dev`.
+    pub target: String,
+    /// Directory on the target the session starts in; letters, digits and
+    /// `- _ . , / : = @ + \` only, because it goes on the remote command line.
+    pub cwd: Option<String>,
+    /// `docker --context` to reach the container through; `docker:` targets only.
+    pub context: Option<String>,
+    /// Absolute path of the launcher program for this target; beats
+    /// `[launchers]` and the built-in lookup.
+    pub program: Option<PathBuf>,
+}
+
+/// `[launchers]` (T68.2): absolute paths of the programs that reach a
+/// target, for a machine where they are not at the usual place. `PATH` is
+/// never searched. User config only: the path decides which program
+/// receives the session, so a repository must not set it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct LaunchersConfig {
+    /// `ssh`, for `ssh:` targets.
+    pub ssh: Option<PathBuf>,
+    /// `docker`, for `docker:` targets.
+    pub docker: Option<PathBuf>,
+    /// `limactl`, for `lima:` targets.
+    pub limactl: Option<PathBuf>,
+    /// `colima`, for `colima:` targets.
+    pub colima: Option<PathBuf>,
 }
 
 /// `[voice]` (P54, A123): push-to-talk dictation with local whisper, used
@@ -1438,7 +1527,7 @@ pub struct MemoryConfig {
     pub enabled: bool,
     /// Whether end-of-session extraction runs (on the `memory` job's tier).
     pub extract: bool,
-    /// Override for `~/.cox/projects/<slug>/memory`; empty means default.
+    /// Override for `~/.cox/projects/<slug>/memory`; empty means default. A project config may only name an existing absolute directory inside its own git root (T64.17).
     pub dir: String,
     /// The bar a `salience` `Score` must clear to keep an extracted item
     /// (T33.21.1); fixed here, never moved by the plugin's answer.
@@ -1802,6 +1891,7 @@ fn generate_config_docs(toml: &str) -> String {
         }
     }
     out.push_str(EXTERNAL_AGENTS_DOCS);
+    out.push_str(TARGETS_DOCS);
     out.push_str(KEYBINDINGS_DOCS);
     out.push_str(ACCESSIBILITY_DOCS);
     out.push_str(STATUS_LINE_DOCS);
@@ -1820,8 +1910,11 @@ An ACP agent a new session can be driven by instead of cox's own loop (T52.2, DT
 - `args` — arguments to `command`
 - `key_env` — the agent's own API-key variable. Only this one variable is passed through, by name, next to the child allowlist (`PATH`, `HOME`, `LANG`, `LC_*`, `TERM`, `TMPDIR`, `USER`, `SHELL`); cox's own provider keys stay behind. A key that does not resolve (env var, then keychain) leaves the agent out with one warning
 - `writable` — extra directories under your home the agent may write, for its own state (for example `~/.claude`). Each must resolve inside your home, never to your home itself; one that does not refuses the entry with a warning. A project config cannot set it
+- `target` — run the preset on a target (a `[targets.<name>]` name or a literal `kind:name`) instead of a local program (T68.7). The remote `cox run --output-format stream-json` does the work; `command`, `args`, `key_env` and `writable` then do nothing
 
 An external agent always runs under the sandbox wrap. Its file limits are the session's `[sandbox]` ones plus `writable`, but it always has network access, whatever `sandbox.network` says: it has to reach its vendor's API. The agent's model, cost and context are its own: cox writes no usage row for it and shows its cost as \"—\".
+
+A preset with a `target` is not wrapped in the local sandbox: the remote `cox` applies its own, keeps its own keys, and nothing but the launcher's scrubbed environment leaves this machine. The prompt goes over stdin, never onto the remote command line. Every call needs an allow rule `TargetAgent(<kind:name>)` in your own config's `permissions.allow` (`bypass` and `auto` do not waive it, like `CloudAgent`); without one the call is refused with the rule to add. The remote run's token counts become a `$0` usage row named after the preset.
 
 Examples (install the program first; these are not defaults):
 
@@ -1845,6 +1938,58 @@ writable = [\"~/.gemini\"]
 ```
 
 Cursor (`agent acp`, `CURSOR_API_KEY`) comes from the granted Cursor plugin's `[[external_agents]]` entry (`plugins/cursor`), not from this table.
+
+";
+
+/// T68.2: `[targets.<name>]` and `[launchers]` have no default entry, so
+/// the scan of `default.toml` has nothing to list; the tables, their guard
+/// and one example per kind.
+#[cfg(test)]
+const TARGETS_DOCS: &str = "## `[targets.<name>]` and `[launchers]`
+
+Run targets (T68.2, P68): a machine or container a whole cox session can run on, reached with `--on <name>` and in the desktop app. None by default. **User config only**: a project `.cox/config.toml` cannot add, change or remove an entry or a launcher path, because a target decides which machine receives the session and a launcher path decides which program runs; the loader reverts both with a warning. `cox` must already be installed on the target. Setup and a worked example per kind are in [docs/targets.md](targets.md).
+
+- `target` — where it runs, as `kind:name`: `ssh:<host or alias>`, `docker:<container>`, `lima:<instance>` or `colima:<profile>`
+- `cwd` — the directory on the target the session starts in. Letters, digits and `- _ . , / : = @ + \\` only, because it goes on the remote command line
+- `context` — `docker --context` to reach the container through; `docker:` targets only
+- `program` — absolute path of the launcher for this target; beats `[launchers]` and the built-in lookup
+- `[launchers]` `ssh`, `docker`, `limactl`, `colima` — absolute path of that program, for a machine where it is not at the usual place. `PATH` is never searched. A path that is relative or does not exist is refused
+
+A name in `[targets.*]` wins over a literal `kind:name`. Every `desktop.remote_hosts` alias also reads as an `ssh:<alias>` target.
+
+Examples (not defaults):
+
+```toml
+[targets.devbox]                    # ssh
+target = \"ssh:devbox\"
+cwd = \"/srv/app\"
+
+[targets.web]                       # a running container on a remote Docker engine
+target = \"docker:web\"
+context = \"staging\"
+
+[targets.vm]                        # a Lima instance
+target = \"lima:default\"
+
+[targets.dev]                       # a Colima profile
+target = \"colima:dev\"
+
+[launchers]
+docker = \"/opt/orbstack/bin/docker\"
+```
+
+### Running on a target
+
+`cox --on <target>` opens the TUI on the target through its launcher, with a terminal (`ssh -t`, `docker exec -it`, `limactl shell`, `colima ssh`). `cox run --on <target> -p \"…\"` runs without one: the prompt goes to the remote `cox run --prompt-stdin` as the first stdin line, a JSON string, never on the command line; the rest of your stdin stays the approvals channel, the remote stdout and stderr are copied through, and the exit code is the remote's. `<target>` is a name from `[targets.*]` or a literal `kind:name`. The model, tools, sandbox and keys stay on the target; no key or ssh agent crosses the link.
+
+Only `--model`, `--mode`, `--permission-mode`, `--sandbox`, `--max-turns`, `--output-format`, `--resume` and `--continue` are forwarded, each value limited to letters, digits and `- _ . , / : = @ + \\`; the directory is the target's `cwd`. Any other flag, a first-turn prompt for the TUI and every subcommand other than `run` are refused with a message naming them, so nothing is dropped silently.
+
+```bash
+cox --on lima:dev
+cox run --on docker:ci -p \"fix the failing test\" --output-format stream-json
+```
+
+`cox run --prompt-stdin` also works on its own: `printf '\"summarise the diff\"\\n' | cox run --prompt-stdin`. It excludes `-p`.
 
 ";
 
@@ -2043,6 +2188,41 @@ mod tests {
                 .compaction
                 .strategy,
             CompactionStrategy::Llm
+        );
+    }
+
+    /// T69.3: repo-local metadata dirs (`.aws` holds credentials that
+    /// `Read(~/.aws/**)` misses when the repo carries its own) stay read-only
+    /// in a writable workspace by default, in the hand-written default and in
+    /// `default.toml` alike.
+    #[test]
+    fn sandbox_readonly_defaults_cover_metadata_dirs() {
+        use figment::providers::Format as _;
+        let expected = [".git", ".cox", ".claude", ".agents", ".codex", ".aws"];
+        let from_toml: Config =
+            figment::Figment::from(figment::providers::Toml::string(DEFAULT_CONFIG_TOML))
+                .extract()
+                .expect("default.toml parses");
+        assert_eq!(
+            Config::default().sandbox.readonly_in_workspace,
+            expected.map(PathBuf::from).to_vec()
+        );
+        assert_eq!(from_toml.sandbox, SandboxConfig::default());
+    }
+
+    /// T69.3: a user who sets `readonly_in_workspace` keeps exactly their own
+    /// list; the default metadata dirs are not appended to it.
+    #[test]
+    fn user_sandbox_readonly_list_is_kept() {
+        use figment::providers::Format as _;
+        let user: Config = figment::Figment::from(figment::providers::Toml::string(
+            "[sandbox]\nreadonly_in_workspace = [\"vendor\"]\n",
+        ))
+        .extract()
+        .expect("user layer parses");
+        assert_eq!(
+            user.sandbox.readonly_in_workspace,
+            vec![PathBuf::from("vendor")]
         );
     }
 
@@ -2252,7 +2432,7 @@ mod tests {
             }
         );
         assert_eq!(
-            cfg.providers.typesafe.transport(),
+            LegacyTypesafe::default().transport(),
             Transport {
                 base_url: "https://api.typesafe.ai".to_string(),
                 api_key_env: "TYPESAFE_API_KEY".to_string(),
@@ -2279,6 +2459,25 @@ mod tests {
         for on in [None, Some(""), Some("on"), Some("1"), Some("of")] {
             assert!(keyring_enabled(on), "{on:?} keeps it");
         }
+    }
+
+    /// The provider lookup and the MCP store both call this instead of
+    /// reading the env var themselves (T64.22), so the live variable must map
+    /// through `keyring_enabled` exactly. Only the switch is read; no keychain
+    /// is touched.
+    #[test]
+    // why: env::set_var/remove_var are unsafe in edition 2024; one test owns
+    // this variable and nextest runs each test in its own process.
+    #[allow(unsafe_code)]
+    fn keyring_enabled_in_env_follows_the_live_variable() {
+        unsafe { std::env::set_var(KEYRING_ENV, "off") };
+        assert!(!keyring_enabled_in_env());
+        unsafe { std::env::set_var(KEYRING_ENV, " False ") };
+        assert!(!keyring_enabled_in_env());
+        unsafe { std::env::set_var(KEYRING_ENV, "on") };
+        assert!(keyring_enabled_in_env());
+        unsafe { std::env::remove_var(KEYRING_ENV) };
+        assert!(keyring_enabled_in_env());
     }
 
     #[test]

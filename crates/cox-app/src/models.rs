@@ -208,8 +208,14 @@ pub(crate) fn sections(config: &Config) -> Vec<(String, Transport)> {
         ("openai".to_owned(), p.openai.transport()),
         ("local".to_owned(), p.local.transport()),
         ("lmstudio".to_owned(), p.lmstudio.transport()),
-        ("typesafe".to_owned(), p.typesafe.transport()),
     ];
+    // The plugin's section is listed only while a leftover table names it
+    // (T33.40.14); a plugin's own sections are not `[providers.*]` tables.
+    out.extend(
+        p.typesafe
+            .iter()
+            .map(|t| ("typesafe".to_owned(), t.transport())),
+    );
     out.extend(p.custom.iter().map(|(n, c)| (n.clone(), c.transport())));
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
@@ -332,6 +338,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cox_protocol::config::LegacyTypesafe;
 
     #[test]
     fn every_tier_lists_its_providers_models_and_an_unlisted_configured_one_first() {
@@ -515,12 +522,15 @@ mod tests {
         let unset = "COX_MODELS_TEST_UNSET_KEY";
         config.providers.anthropic.api_key_env = unset.into();
         config.providers.openai.api_key_env = unset.into();
-        config.providers.typesafe.api_key_env = unset.into();
+        config.providers.typesafe = Some(LegacyTypesafe {
+            api_key_env: unset.into(),
+            base_url: "https://api.typesafe.ai".into(),
+            ..LegacyTypesafe::default()
+        });
         config.providers.lmstudio.api_key_env = unset.into();
         config.providers.local.base_url = format!("http://127.0.0.1:{up}/v1");
         config.providers.lmstudio.base_url = format!("http://localhost:{down}");
         config.providers.openai.base_url = "https://api.openai.com/v1".into();
-        config.providers.typesafe.base_url = "https://api.typesafe.ai".into();
         let keys = |section: &str| (section == "anthropic").then(|| "sk-test".to_owned());
         assert_eq!(usable(&config, &keys).await, ["anthropic", "local"]);
     }

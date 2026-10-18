@@ -19,6 +19,21 @@ env:
 # version: the `rust` job through the shared pyrlyn/ci workflow, the others
 # through pyrlyn/ci's setup-rust action. Both fail when rustc is not that pin.
 jobs:
+  # Which runner the macOS jobs use: pyrlyn/ci's macos-runner action reads the MACOS_RUNNER
+  # variable (unset or `hosted` = the hosted label, `xcode-27-local` = the dedicated Mac;
+  # fork PRs keep the hosted label).
+  macos-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      value: ${{ steps.r.outputs.value }}
+    steps:
+      - id: r
+        uses: pyrlyn/ci/.github/actions/macos-runner@4b5b5470544893cd515b88c751e92728341c6daa # main
+        with:
+          runner: ${{ vars.MACOS_RUNNER }}
+          value: '["xcode-27"]'
+
   # infra's config action on .github/infra.yml: `docs-only` is "true" when every changed file
   # is documentation (fails open: "false" when unsure, e.g. a .github/ change). The jobs below
   # then do no work but still report under their names, so the required checks pass, and
@@ -31,7 +46,7 @@ jobs:
       docs-only: ${{ steps.config.outputs.docs-only }}
     steps:
       - id: config
-        uses: pyrlyn/ci/.github/actions/config@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+        uses: pyrlyn/ci/.github/actions/config@main
 
   # The shared pyrlyn/ci workflow, pinned by commit (descendant of e6e376e, which
   # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27, and of
@@ -45,13 +60,14 @@ jobs:
     if: >-
       !cancelled()
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+    uses: pyrlyn/ci/.github/workflows/ci-rust.yml@main
     # ci-rust cancels the whole run when a job fails (cancel-run-on-failure), which needs
     # `actions: write` on the calling job.
     permissions:
       contents: read
       actions: write
     with:
+      mold: true # mold + clang on Linux runners (mise.toml [env])
       # The shared matrix minus Windows: the workspace does not build there
       # yet (P57); the `windows` job below checks the crates that do.
       matrix: >-
@@ -69,7 +85,9 @@ jobs:
       setup-command: |
         if [ "$RUNNER_OS" = Linux ]; then bash .github/actions/bwrap/install.sh; fi
         bash .github/actions/voice/install.sh
-      test-command: cargo nextest run --workspace
+      # Same features as build-command and clippy, so nextest reuses the build's artifacts
+      # instead of compiling the default feature set a second time.
+      test-command: cargo nextest run --workspace --all-features
       build-command: cargo build --workspace --all-targets --all-features --target "$TARGET"
       # CI runs only on pull requests, so the default-branch-only cache would
       # never be written.
@@ -90,11 +108,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: ./.github/actions/sccache
+      - uses: pyrlyn/ci/.github/actions/sccache@main
         with:
           access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -110,7 +128,8 @@ jobs:
       - uses: taiki-e/install-action@23d41aa71228a2692ee31bb433f070fd4bdc6661 # nextest
 
       - name: sandbox tests without bwrap
-        run: cargo nextest run -p cox-tools sandbox_ bash_
+        run: |
+          cargo nextest run -p cox-tools sandbox_ bash_ bash::
 
   # P57 (T57.1): `cargo check` and clippy for x64 and ARM64 Windows over the
   # crates that build there, listed once in the justfile (`windows_crates`);
@@ -127,7 +146,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -175,11 +194,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # wasm32-unknown-unknown comes with the mise.toml pin.
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: ./.github/actions/sccache
+      - uses: pyrlyn/ci/.github/actions/sccache@main
         with:
           access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -196,8 +215,8 @@ jobs:
   # Guest-language examples that need a toolchain of their own (PL§13):
   # each is `#[ignore]`d in the main `rust` job with a reason naming
   # `just plugin-examples <lang>`, so a missing toolchain here is a CI
-  # failure rather than a silently skipped test. Dart (T33.38) today;
-  # go/kotlin join this job once T33.34/T33.36 land.
+  # failure rather than a silently skipped test: Dart (T33.38), Go (T33.34)
+  # and Kotlin (T33.36).
   plugin-examples:
     needs: config
     if: >-
@@ -209,11 +228,29 @@ jobs:
 
       # `cox`'s tests build cox-plugin-fixtures, whose build.rs compiles the
       # guest workspace for wasm32 (T33.28); the target comes with the pin.
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: ./.github/actions/sccache
+      # Go, TinyGo, Java and Gradle at the versions plugins/mise.toml pins.
+      # Before the sccache step, which sets RUSTC_WRAPPER after mise's [env]
+      # does. No shims: the template tests run `go` and `gradle` from a
+      # scratch dir, where a shim finds no config; the real bin dirs go on
+      # PATH instead.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          working_directory: plugins
+          install_args: go tinygo java gradle
+          add_shims_to_path: false
+
+      # mise 2026.10 no longer resolves a tool from `plugins/mise.toml` when
+      # a template test runs `tinygo` from a temp dir ("No version is set
+      # for shim"); the Kotlin template test likewise runs `gradle` from a temp
+      # dir. Pin the same versions globally so any cwd resolves them.
+      - name: pin Go, TinyGo, Java and Gradle globally
+        run: mise use -g go@1.27.2 tinygo@0.43.0 java@27.0.0 gradle@9.8.0
+
+      - uses: pyrlyn/ci/.github/actions/sccache@main
         with:
           access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -242,6 +279,39 @@ jobs:
       - name: dart plugin example e2e
         run: cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_dart)'
 
+      - name: build the Go example
+        run: |
+          (cd plugins/sdk-go && go test ./... && tinygo test .)
+          cd plugins/examples/go
+          go test ./...
+          tinygo build -o example_go.wasm -target wasip1 -buildmode=c-shared .
+
+      # Also scaffolds `cox plugin new --lang go` and builds it with TinyGo.
+      # The setup-rust step's mise shims still come first on PATH, and the
+      # `tinygo` shim fails in the template test's scratch dir (no pin
+      # there); hand the test the plugins' real tool PATH, as
+      # `just plugin-examples go` does.
+      - name: go plugin example e2e
+        run: |
+          PLUGIN_TOOLS_PATH="$(cd plugins && eval "$(mise env -s bash)" && printf '%s' "$PATH")"
+          export PLUGIN_TOOLS_PATH
+          cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_go)'
+
+      # Stages plugin.toml and example_kotlin.wasm in build/plugin. No
+      # daemon, so the job leaves no Gradle process running.
+      - name: build the Kotlin example
+        run: |
+          cd plugins/examples/kotlin
+          gradle --no-daemon -q pluginPackage
+
+      # Also scaffolds `cox plugin new --lang kotlin` and builds it with
+      # Gradle, which needs the same real PATH as the Go template test.
+      - name: kotlin plugin example e2e
+        run: |
+          PLUGIN_TOOLS_PATH="$(cd plugins && eval "$(mise env -s bash)" && printf '%s' "$PATH")"
+          export PLUGIN_TOOLS_PATH
+          cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_kotlin)'
+
   deny:
     needs: config
     if: >-
@@ -264,7 +334,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           install_args: rust sccache cargo:cargo-hakari
       - run: cargo hakari generate --diff
@@ -279,7 +349,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
       # cargo-audit does not read deny.toml, so its `[advisories] ignore` list
       # (each entry with its reason and review date) is passed as --ignore
       # flags: one list, one place to remove an entry.
@@ -300,15 +370,16 @@ jobs:
   # A skipped matrix job would report one check under its raw name and leave them waiting.
   footprint-macos:
     name: footprint (xcode-27)
-    needs: config
+    needs: [config, macos-runner]
     if: >-
+      vars.MACOS_CI_DISABLED != 'true' &&
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: xcode-27
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -325,7 +396,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -346,7 +417,7 @@ jobs:
   # own name, which a required check treats as passed.
   changes:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    uses: pyrlyn/ci/.github/workflows/changes.yml@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+    uses: pyrlyn/ci/.github/workflows/changes.yml@main
     permissions:
       contents: read
     with:
@@ -363,20 +434,21 @@ jobs:
   # packages are linted by the SwiftLintPlugins build-tool plugin during
   # desktop-macos' `swift test`. SwiftLint is the mise.toml pin.
   desktop-macos-lint:
-    needs: [config, changes]
+    needs: [config, changes, macos-runner]
     if: >-
+      vars.MACOS_CI_DISABLED != 'true' &&
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: xcode-27
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pyrlyn/ci/.github/actions/setup-xcode@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@main
         with:
           version: '27'
 
-      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           install_args: aqua:realm/SwiftLint aqua:linebender/resvg
 
@@ -388,6 +460,15 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s scripts -p 'test_brand_icons.py'
           python3 scripts/brand_icons.py --check
+
+      # Which Swift packages desktop-macos may skip on a pull request (T63.2).
+      - name: swift test selection
+        run: python3 -m unittest discover -s scripts/desktop -p 'test_swift_test_select.py'
+      - name: sccache wiring
+        run: python3 -m unittest discover -s scripts -p 'test_sccache_config.py'
+
+      - name: xcframework.sh skip stamp
+        run: python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
 
       - name: swiftlint fixtures
         working-directory: desktop/macos
@@ -430,47 +511,74 @@ jobs:
   # (A67), then `swift test` for every package under desktop/macos/Packages,
   # then the app target, unsigned (T37.32.1). xcode-27 is GitHub's arm64 image
   # with Xcode 27 (macos-26 / macos-latest carry Xcode 26.x); setup-xcode selects
-  # the pinned stable Xcode 27 and fails when the image has none. Always the full
-  # build: every package and the app, never only the changed ones. The toolchain
-  # and XCFramework steps are .github/actions/desktop-macos, shared with the
-  # desktop build workflow (T37.32.3).
+  # the pinned stable Xcode 27 and fails when the image has none. The full build on
+  # main and manual runs: every package and the app. On a pull request a package
+  # whose inputs (its sources, tests, snapshots, local dependencies, the files its
+  # tests read, the toolchain) are byte-identical to a run that passed, on main or
+  # earlier on the pull request, is not tested again (T63.2, A141): pass markers
+  # in actions/cache, scripts/desktop/swift_test.sh. The app target is built on
+  # every run. The toolchain and XCFramework steps are
+  # .github/actions/desktop-macos, shared with the desktop build workflow
+  # (T37.32.3).
   desktop-macos:
-    needs: [config, changes]
+    needs: [config, changes, macos-runner]
     if: >-
+      vars.MACOS_CI_DISABLED != 'true' &&
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success'
       || needs.changes.outputs.swift == 'true' || needs.changes.outputs.rust == 'true')
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: xcode-27
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: ./.github/actions/desktop-macos
+        with:
+          sccache-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          sccache-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          sccache-bucket: ${{ vars.SCCACHE_BUCKET }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-read-only: ${{ github.event_name == 'pull_request' }}
+          ffi-cache: 'true'
+
+      # Snapshots are per toolchain (desktop/macos/Packages/*/Tests/*/Snapshots/<key>). The hosted
+      # images' real key is not known yet, so the committed images sit under `hosted-pending`;
+      # this step, after setup-xcode has picked Xcode, prints the real key to the job
+      # summary so a follow-up can rename the directory and drop the override.
+      - uses: pyrlyn/ci/.github/actions/snapshot-version@bb9266564bad04d7e8ec7b8a2b46c90d9f0ca8df # ci/feat/snapshot-version, pin to main after ci#87 merges
+        with:
+          env-prefix: COX
+          override: hosted-pending
+
+      # Pass markers (T63.2): `actions/cache` keys are immutable, so each run saves a new key and
+      # restores the newest by prefix. A pull request reads its own and main's caches only.
+
+      - name: swift test pass markers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: desktop/macos/build/swift-test-pass
+          key: swift-test-pass-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: swift-test-pass-v1-
 
       # Serial: the UI tests share one NSApplication (key window, appearance, main run loop),
       # and the benchmark times the main thread, so tests running alongside break both. Every
-      # package runs before the step fails; snapshots that do not match are uploaded.
+      # package selected runs before the step fails; snapshots that do not match are uploaded.
       - name: swift test
         # A hung test (the run loop waiting on a window) would otherwise hold the runner for 6 h.
         timeout-minutes: 60
         env:
           SNAPSHOT_ARTIFACTS: ${{ runner.temp }}/snapshots
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          failed=()
-          for manifest in desktop/macos/Packages/*/Package.swift; do
-            # swiftbuild emits ColorResource symbols for Colors.xcassets. The native
-            # build system copies the catalog and leaves those symbols missing, so
-            # `Color(.surfaceWindow)` does not type-check (SwiftPM #9655).
-            package=$(dirname "$manifest")
-            swift test --no-parallel --build-system swiftbuild --package-path "$package" \
-              || failed+=("$(basename "$package")")
-          done
-          if [ ${#failed[@]} -gt 0 ]; then
-            echo "swift test failed in: ${failed[*]}" >&2
-            exit 1
-          fi
+          # Only a pull request may skip; any other trigger tests every package.
+          COX_SWIFT_TEST_ALL: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+        run: bash scripts/desktop/swift_test.sh
+
+      # After a failure too, so the packages that passed keep their markers.
+      - name: save swift test pass markers
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: desktop/macos/build/swift-test-pass
+          key: swift-test-pass-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: snapshots that did not match
         if: failure()
@@ -512,7 +620,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           install_args: node
 
@@ -548,7 +656,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:

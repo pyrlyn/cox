@@ -91,6 +91,14 @@ impl PriceTable {
         })
     }
 
+    /// A table over rows already merged elsewhere (`Catalog::price_table`).
+    pub fn from_prices(prices: Vec<Price>) -> Self {
+        PriceTable {
+            prices,
+            warned_models: Mutex::new(HashSet::new()),
+        }
+    }
+
     /// All `[[model]]` rows, for staleness checks and diagnostics.
     pub fn prices(&self) -> &[Price] {
         &self.prices
@@ -145,7 +153,7 @@ mod tests {
     #[test]
     fn usage_prices_toml_parses_and_has_all_tier_models() {
         let table = PriceTable::parse(DEFAULT_PRICES).expect("default prices parse");
-        assert_eq!(table.prices.len(), 24, "T39.5 added the three gemini rows");
+        assert_eq!(table.prices.len(), 23, "T33.40.15 dropped jev-latest");
         // `price_for` is a linear find, so row order carries no meaning and
         // is not asserted on.
         // Verify all required tier models are present.
@@ -154,7 +162,10 @@ mod tests {
         assert!(ids.contains(&"claude-sonnet-5"));
         assert!(ids.contains(&"claude-opus-5"));
         assert!(ids.contains(&"claude-fable-5-1"));
-        assert!(ids.contains(&"jev-latest"));
+        assert!(
+            !ids.contains(&"jev-latest"),
+            "the jev plugin supplies that row"
+        );
     }
 
     #[test]

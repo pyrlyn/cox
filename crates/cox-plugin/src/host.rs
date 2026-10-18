@@ -22,6 +22,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::PluginError;
+use crate::fs::Mounts;
 use crate::hostfn::HostEnv;
 
 /// Control lane depth: hooks, decide, tools, provider, render, commands.
@@ -113,27 +114,41 @@ impl PluginHost {
     /// Compiles `wasm` (binary or WAT text, P15) with no WASI and no
     /// compilation cache yet, under the clamped `limits`, with the
     /// `cox:host/v1` functions bound to `env` (T33.9).
-    ///
-    /// WASI stays off, and filesystem preopens (T33.14) stay blocked, until
-    /// extism ships wasmtime >= 48: wasmtime 43's WASI filesystem has a
-    /// sandbox escape (RUSTSEC-2026-0269, R§4.3.5 P39). Each plugin gets its
-    /// own wasmtime `Engine` because extism 1.30 builds one inside
-    /// `CompiledPlugin::new` and offers no way to pass a shared one; that is
-    /// safe from RUSTSEC-2026-0222 only while nothing here moves a wasmtime
-    /// object from one plugin to another.
     pub fn load_with(wasm: &[u8], limits: &Limits, env: Arc<HostEnv>) -> Result<Self, PluginError> {
+        Self::load_with_fs(wasm, limits, env, &Mounts::default())
+    }
+
+    /// [`Self::load_with`] plus the WASI setup `fs::mounts` computed (T33.14.2).
+    /// WASI is linked only when `mounts.wasi`, and the guest's only
+    /// directories are `mounts.paths`; extism's `WasiCtx` gets no
+    /// environment and no arguments (R§4.3.5 P16). Preopens needed
+    /// wasmtime >= 48 (RUSTSEC-2026-0269), which T33.43 shipped.
+    ///
+    /// Each plugin gets its own wasmtime `Engine` because extism builds one
+    /// inside `CompiledPlugin::new` and offers no way to pass a shared one;
+    /// that is safe from RUSTSEC-2026-0222 only while nothing here moves a
+    /// wasmtime object from one plugin to another.
+    pub fn load_with_fs(
+        wasm: &[u8],
+        limits: &Limits,
+        env: Arc<HostEnv>,
+        mounts: &Mounts,
+    ) -> Result<Self, PluginError> {
         let mib = limits
             .memory_mib
             .unwrap_or(DEFAULT_MEMORY_MIB)
             .min(MAX_MEMORY_MIB);
         let call_cap = Duration::from_millis(limits.call_ms.unwrap_or(DEFAULT_CALL_MS).into());
-        let manifest = Manifest::new([Wasm::data(wasm.to_vec())])
+        let mut manifest = Manifest::new([Wasm::data(wasm.to_vec())])
             .with_memory_max(mib * PAGES_PER_MIB)
             .with_timeout(call_cap);
+        for (host, guest) in &mounts.paths {
+            manifest = manifest.with_allowed_path(host.clone(), guest);
+        }
         // Cache off: the default writes wasmtime's cache under the user's
         // system cache dir; `~/.cox/cache/wasmtime` is wired by a later card.
         let plugin = PluginBuilder::new(manifest)
-            .with_wasi(false)
+            .with_wasi(mounts.wasi)
             .with_cache_disabled()
             .with_functions(env.functions())
             .build()
@@ -552,5 +567,87 @@ pub(crate) mod tests {
         q.control.push_back(job("control"));
         let order: Vec<String> = std::iter::from_fn(|| q.pop()).map(|j| j.export).collect();
         assert_eq!(order, ["control", "event"]);
+    }
+
+    // T33.14.2: preview-1 imports a wasip1 guest (Go, Kotlin) links.
+    const WASI_IMPORTS: &str = r#"
+      (import "wasi_snapshot_preview1" "environ_sizes_get" (func $env_sizes (param i32 i32) (result i32)))
+      (import "wasi_snapshot_preview1" "args_sizes_get" (func $args_sizes (param i32 i32) (result i32)))
+      (import "wasi_snapshot_preview1" "path_open"
+        (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))"#;
+
+    fn wasi_host(body: &str, mounts: &Mounts) -> Result<PluginHost, PluginError> {
+        let wat = module(&format!(
+            "{WASI_IMPORTS} (memory (export \"memory\") 1) {body}"
+        ));
+        PluginHost::load_with_fs(
+            &wat,
+            &Limits::default(),
+            Arc::new(HostEnv::new("t")),
+            mounts,
+        )
+    }
+
+    // The guests here set no output, so a clean call surfaces as an empty
+    // payload that is not JSON; only a trap or a non-zero return is a failure.
+    fn run(host: &PluginHost, export: &str) -> Result<(), PluginError> {
+        match host.call::<_, Value>(Lane::Control, export, &json!({}), Duration::from_secs(5)) {
+            Ok(_) | Err(PluginError::Payload(_)) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    #[test]
+    fn wasi_is_off_unless_the_mounts_turn_it_on() {
+        let body = r#"(func (export "cox_tool_call") (result i32) (i32.const 0))"#;
+        let off = wasi_host(body, &Mounts::default());
+        assert!(off.is_err(), "a WASI import must not link without WASI");
+        let on = Mounts {
+            wasi: true,
+            ..Mounts::default()
+        };
+        assert!(wasi_host(body, &on).is_ok());
+    }
+
+    #[test]
+    fn wasi_ctx_has_no_env() {
+        // The host process has PATH set; the guest must still see an empty
+        // environment and no arguments (R§4.3.5 P16). A non-zero return is
+        // a call error.
+        assert!(std::env::var_os("PATH").is_some());
+        let body = r#"(func (export "cox_tool_call") (result i32)
+              (drop (call $env_sizes (i32.const 0) (i32.const 4)))
+              (drop (call $args_sizes (i32.const 8) (i32.const 12)))
+              (i32.add (i32.load (i32.const 0)) (i32.load (i32.const 8))))"#;
+        let on = Mounts {
+            wasi: true,
+            ..Mounts::default()
+        };
+        let host = wasi_host(body, &on).expect("loads");
+        run(&host, "cox_tool_call").expect("no environment variables and no arguments");
+    }
+
+    #[test]
+    fn read_only_preopen_refuses_a_create_and_a_writable_one_allows_it() {
+        // `path_open("f.txt", O_CREAT)` on the first preopen (fd 3).
+        let body = r#"(data (i32.const 16) "f.txt")
+            (func (export "cox_tool_call") (result i32)
+              (call $path_open (i32.const 3) (i32.const 0) (i32.const 16) (i32.const 5)
+                (i32.const 1) (i64.const 536870911) (i64.const 536870911) (i32.const 0) (i32.const 32)))"#;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let host_path = dir.path().to_str().expect("utf-8").to_string();
+        let mounts = |key: String| Mounts {
+            wasi: true,
+            paths: [(key, std::path::PathBuf::from("/ws"))].into(),
+        };
+        let ro = wasi_host(body, &mounts(format!("ro:{host_path}"))).expect("loads");
+        assert!(
+            run(&ro, "cox_tool_call").is_err(),
+            "a read-only mount creates nothing"
+        );
+        assert!(!dir.path().join("f.txt").exists());
+        let rw = wasi_host(body, &mounts(host_path)).expect("loads");
+        run(&rw, "cox_tool_call").expect("a writable mount creates the file");
+        assert!(dir.path().join("f.txt").exists());
     }
 }

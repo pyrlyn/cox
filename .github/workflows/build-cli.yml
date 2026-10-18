@@ -6,7 +6,7 @@ name: build cli
 #
 # Per target: the mise.toml Rust, `scripts/package.sh <target> dist`, a smoke test of the
 # native tarball, uploaded as the `cli-<target>` artifact. The macOS binary is Developer
-# ID-signed with the identity .github/actions/macos-signing imports (the same action and the
+# ID-signed with the identity pyrlyn/ci's macos-keychain action imports (the same action and the
 # same two secrets desktop-build.yml signs the app with); notarisation stays behind the
 # repository variable COX_NOTARIZE, off until an App Store Connect key exists.
 on:
@@ -62,23 +62,24 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
       # A no-op on the Linux targets.
-      - uses: pyrlyn/ci/.github/actions/setup-xcode@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@main
         with:
           version: '27'
       # The Rust mise.toml pins, checked like in ci.yml; scripts/package.sh
       # adds the matrix target to it.
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
       - uses: Swatinem/rust-cache@v2
 
       # An unsigned release is refused the same way an untested one is: it
       # would be discovered by whoever installs it, not here.
       - name: Import signing certificate
         if: matrix.sign
-        uses: ./.github/actions/macos-signing
+        uses: pyrlyn/ci/.github/actions/macos-keychain@main
         with:
           certificate: ${{ secrets.MACOS_CERTIFICATE }}
           password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           required: ${{ inputs.require-signing && 'true' || 'false' }}
+          identity-env: COX_SIGN_IDENTITY
 
       - name: Package
         run: scripts/package.sh ${{ matrix.target }} dist

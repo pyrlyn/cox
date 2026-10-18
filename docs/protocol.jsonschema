@@ -2019,7 +2019,7 @@
             "default": null
           },
           "note": {
-            "description": "A caution note, for `approve_hint`.",
+            "description": "A caution note for `approve_hint`, or for `risk` the reasons behind\na raise (such as a model's probabilities). The core keeps it, cleaned\nand clipped, only when it applies the advice of one of those points.",
             "type": [
               "string",
               "null"
@@ -2420,6 +2420,29 @@
               "type": {
                 "type": "string",
                 "const": "external_agent"
+              }
+            },
+            "required": [
+              "type",
+              "agent",
+              "message"
+            ]
+          },
+          {
+            "description": "An external agent declined the turn before it made any request\n(T56.11): a cloud driver without an allow rule, on a non-GitHub\norigin or in plan mode. Shown like [`CoreError::ExternalAgent`], but\nthe core writes no ledger row for it, since a row means a request\nwas made.",
+            "type": "object",
+            "properties": {
+              "agent": {
+                "description": "The external agent's name (its plugin/preset id).",
+                "type": "string"
+              },
+              "message": {
+                "description": "Why the agent declined, already sanitized by the caller.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "const": "external_agent_refused"
               }
             },
             "required": [

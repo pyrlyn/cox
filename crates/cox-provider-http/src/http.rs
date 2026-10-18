@@ -38,13 +38,13 @@ pub fn client_with_timeout(timeout_s: u32) -> Result<reqwest::Client, ProviderEr
 /// `env_var` first, else the platform keyring entry `cox/<section>` (the
 /// native store per platform, not a mock). Every provider section resolves
 /// its key this way — `docs/design/providers.md` § Target shape, item 2
-/// (T30.21): `[providers.anthropic]`, `[providers.openai]`, `[providers.
-/// typesafe]` and every `[providers.<name>]` compatible section all read
-/// their own `api_key_env` first, then `cox/<section>`.
+/// (T30.21): `[providers.anthropic]`, `[providers.openai]` and every
+/// `[providers.<name>]` compatible section all read their own
+/// `api_key_env` first, then `cox/<section>`.
 ///
 /// A missing or unreadable credential is [`ProviderError::Auth`]; callers
-/// decide what that means for their section. Anthropic and Jev always need
-/// a key, so they propagate the error with `?`. OpenAI-shaped sections
+/// decide what that means for their section. Anthropic always needs
+/// a key, so it propagates the error with `?`. OpenAI-shaped sections
 /// (`openai`, `local`, and any compatible section) build with an
 /// `Option<String>` key and call `.ok()`: a local server or a self-hosted
 /// gateway commonly needs none, so a missing key there is "no
@@ -81,11 +81,10 @@ pub fn resolve_key_with(
 /// `COX_KEYRING=off` (A49): cargo sets that for every test and dev run so a
 /// rebuilt binary never raises a keychain prompt.
 fn platform_keyring(section: &str) -> Option<String> {
-    let switch = std::env::var(cox_protocol::config::KEYRING_ENV).ok();
-    if !cox_protocol::config::keyring_enabled(switch.as_deref()) {
+    if !cox_protocol::config::keyring_enabled_in_env() {
         return None;
     }
-    keyring::Entry::new("cox", section)
+    keyring::Entry::new(cox_protocol::config::KEYRING_SERVICE, section)
         .and_then(|e| e.get_password())
         .ok()
 }
@@ -225,8 +224,7 @@ mod tests {
     /// nothing instead of raising a keychain prompt.
     #[test]
     fn tests_run_with_the_keyring_switched_off() {
-        let switch = std::env::var(cox_protocol::config::KEYRING_ENV).ok();
-        assert!(!cox_protocol::config::keyring_enabled(switch.as_deref()));
+        assert!(!cox_protocol::config::keyring_enabled_in_env());
     }
 
     #[test]

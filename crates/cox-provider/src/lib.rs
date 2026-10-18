@@ -4,8 +4,7 @@
 
 //! The `Provider` trait implementations: the Anthropic Messages API, the
 //! OpenAI Responses/Chat APIs (also Ollama, vLLM, LM Studio, OpenRouter),
-//! the TypeSafe Jev System One API, and the `Replay`/`Scripted` fakes used
-//! by tests. Separate from `cox-core` so the agent loop never talks to the
+//! and the `Replay`/`Scripted` fakes used by tests. Separate from `cox-core` so the agent loop never talks to the
 //! network directly (AGENTS.md, D3).
 //!
 //! Each backend is split the same way: a *pure* request translator (a
@@ -35,9 +34,9 @@
 
 pub use cox_provider_anthropic as anthropic;
 pub use cox_provider_http::http;
-pub mod jev;
 pub mod lmstudio;
 pub mod replay;
+pub mod retried;
 pub use cox_provider_http::retry;
 pub mod scripted;
 pub use cox_provider_http::sse;

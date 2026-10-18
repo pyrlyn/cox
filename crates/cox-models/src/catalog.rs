@@ -300,6 +300,12 @@ impl Catalog {
         self.rows.values()
     }
 
+    /// Every priced row as a price table, so a call to a model only a
+    /// plugin's `[[models]]` prices is still costed (T33.40.4).
+    pub fn price_table(&self) -> PriceTable {
+        PriceTable::from_prices(self.rows.values().filter_map(|r| r.price.clone()).collect())
+    }
+
     /// `source` is used only when the row does not exist yet.
     fn row_mut(&mut self, id: &str, source: &RowSource) -> &mut ModelRow {
         self.rows
@@ -397,7 +403,9 @@ impl Catalog {
         for model in &config.providers.local.models {
             self.overlay_model(model, source);
         }
-        for model in &config.providers.typesafe.models {
+        // The tombstone of the built-in Jev section (T33.40.14): an old
+        // config's `models` rows keep overriding, like any other section's.
+        for model in config.providers.typesafe.iter().flat_map(|t| &t.models) {
             self.overlay_model(model, source);
         }
         for section in config.providers.custom.values() {
@@ -432,6 +440,8 @@ fn fill<T: PartialEq>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cox_protocol::config::LegacyTypesafe;
+    use cox_protocol::plugin::PluginManifest;
 
     fn user_price_toml(id: &str, input: f64) -> String {
         format!(
@@ -565,6 +575,25 @@ source_url = "https://example.test"
     }
 
     #[test]
+    fn price_table_costs_a_plugin_only_model() {
+        let models = [ModelDecl {
+            price: Some(decl_price(0.042)),
+            ..decl("acme-coder")
+        }];
+        let plugins = [PluginModels {
+            plugin: "jev",
+            models: &models,
+        }];
+        let table = Catalog::load(&Config::default(), &plugins, None)
+            .expect("catalog")
+            .price_table();
+        let model = cox_protocol::types::ModelId("acme-coder".into());
+        assert_eq!(table.price_for(&model).expect("priced").input, 0.042);
+        let builtin = cox_protocol::types::ModelId("claude-haiku-4-5".into());
+        assert!(table.price_for(&builtin).is_some(), "built-in rows stay");
+    }
+
+    #[test]
     fn config_overrides_plugin_row() {
         let models = [ModelDecl {
             context_window: Some(64_000),
@@ -575,11 +604,14 @@ source_url = "https://example.test"
             models: &models,
         }];
         let mut config = Config::default();
-        config.providers.typesafe.models = vec![ProviderModel {
-            id: "acme-coder".into(),
-            context_window: 128_000,
-            ..ProviderModel::default()
-        }];
+        config.providers.typesafe = Some(LegacyTypesafe {
+            models: vec![ProviderModel {
+                id: "acme-coder".into(),
+                context_window: 128_000,
+                ..ProviderModel::default()
+            }],
+            ..LegacyTypesafe::default()
+        });
         let user = user_price_toml("acme-coder", 9.0);
         let catalog = Catalog::load(&config, &plugins, Some(&user)).expect("catalog");
         let row = catalog.get("acme-coder").expect("plugin row");
@@ -588,6 +620,48 @@ source_url = "https://example.test"
         assert_eq!(row.price.as_ref().expect("priced").input, 9.0);
         assert_eq!(row.source, RowSource::Plugin("jev".into()));
         assert!(catalog.warnings().is_empty(), "{:?}", catalog.warnings());
+    }
+
+    /// The shipped jev manifest: the one place its rows are declared.
+    fn jev_manifest() -> PluginManifest {
+        use figment::{
+            Figment,
+            providers::{Format, Toml},
+        };
+        Figment::from(Toml::string(include_str!(
+            "../../../plugins/jev/plugin.toml"
+        )))
+        .extract()
+        .expect("the jev manifest parses")
+    }
+
+    #[test]
+    fn jev_price_comes_from_plugin_row() {
+        let manifest = jev_manifest();
+        let plugins = [PluginModels {
+            plugin: "jev",
+            models: &manifest.models,
+        }];
+        let catalog = Catalog::load(&Config::default(), &plugins, None).expect("catalog");
+        for id in ["jev-1.13.0", "jev-latest"] {
+            let row = catalog.get(id).expect("the plugin supplies the row");
+            assert_eq!(row.source.to_string(), "plugin:jev", "{id}");
+            assert_eq!(row.context_window, Some(64_000), "{id}");
+            let price = row.price.as_ref().expect("priced");
+            assert_eq!((price.input, price.output), (0.042, 0.0), "{id}");
+        }
+        assert!(catalog.warnings().is_empty(), "{:?}", catalog.warnings());
+    }
+
+    #[test]
+    fn catalog_without_plugin_has_no_jev_row() {
+        // The built-in layer and the default config carry no Jev row, so a
+        // missing or ungranted plugin leaves the id unpriced rather than
+        // pricing it from the core.
+        let catalog = Catalog::load(&Config::default(), &[], None).expect("catalog");
+        assert!(catalog.get("jev-latest").is_none());
+        assert!(catalog.get("jev-1.13.0").is_none());
+        assert!(catalog.rows().all(|r| !r.id.starts_with("jev")));
     }
 
     #[test]

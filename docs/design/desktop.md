@@ -317,6 +317,42 @@ client draws the same column from the same fields.
   files worth a look, an empty one has nothing to open). Both are disabled on
   a failed candidate with no changes.
 
+#### 3.3.4 Best of n: the merge a client carries (T52.24, T52.25, A142)
+
+A client merges finished candidates through two calls on the same owner as
+`best_of`: `mergeable(group) -> [index]` lists the candidates a merge may take
+(finished, still holding a worktree, group not picked), so no client decides
+that on its own, and `best_of_merge(BestOfMerge { id, from, by }, theme)`
+returns the same `Launch` as `best_of`: the merger's session, a new candidate
+row (`Launched.merged_from` names the candidates it took) that `compare` and
+`pick` handle like any other. `by` is the existing `Candidate`: cox on a model,
+or an external agent. The core refuses before anything starts for fewer than
+two candidates, one not finished, or a picked group.
+
+The client keeps only the person's choice: the ticked candidates (a subset of
+`mergeable`, trimmed whenever the comparison is read again), the chosen merger,
+and the request built from them once two or more are ticked and a merger is
+set. After the call it reads the comparison again so the merge candidate shows
+at once, clears the ticks when the merge started and keeps them when the core
+refused it, with the refusal as the visible failure. macOS: `BestOfStore`
+(`CoxModel`) over `BestOfClient.merge`/`mergeable`; a Windows or Linux client
+repeats the same store logic over the same two exports.
+
+The compare view shows the screen for it (T52.26). A **Merge** button sits
+beside Done only when `mergeable` lists more than one candidate. It opens a
+sheet with one checkbox per mergeable candidate (all checked at first;
+label, diffstat, cost), a "Merge with" picker over the models and external
+agents the Best of control offers (models first, then agents; an option that
+cannot start here is listed with why and cannot be chosen), and Merge, which
+stays blocked, with the not-allowed pointer (T37.50), until two or more are
+checked and a merger that can start is set. The app presets the first merger
+that can start. A refusal from the core is shown in the sheet; a started merge
+closes it and its session joins the window like a launch's. `CandidateView`
+carries `merged_from`, so the merge's column is headed "Merge by <merger>" with
+"Merges <labels>" under it and is then kept, reviewed or pruned like any other
+column. The picker's list is drawn by the view, not a system menu, so a
+snapshot can show it open.
+
 ## 4. Architecture
 
 ### 4.1 Layers
@@ -1009,6 +1045,34 @@ always names the cause and one action.
   per token; VoiceOver rotors for Approvals, Tool calls and Errors; every
   control reachable by keyboard; contrast checked in both themes.
 - **Language.** English first, String Catalogs from day one; Russian next.
+
+### 5.10 Connect to Target (T68.5)
+
+File › Connect to Target… (also in the command palette) replaces Connect to Host. A target is
+`ssh:<host>`, `docker:<container>`, `lima:<instance>` or `colima:<profile>` (A158, `docs/config.md`
+`[targets.*]`). The sheet is one modal with these parts, which a Windows or Linux app repeats as is:
+
+1. **Kind picker**: SSH, Docker, Lima, Colima, in that order.
+2. **Listed targets of the picked kind**, from the core's `targets()` (configured ones first, then
+   the containers and VMs running now; a launcher that is missing or hangs lists nothing and is
+   never an error). The saved `desktop.remote_hosts` aliases are listed as `ssh:<alias>`. Picking a
+   row connects to that row's target text exactly, so a configured name may differ from the
+   container it names.
+3. **Free-text name** under the picked kind, sent as `kind:name`. The client only refuses an empty
+   name or one with whitespace; the core checks every name again before anything runs and its
+   reason shows in the sheet.
+4. **Connect**, which keeps the sheet up until the target answered. The core's `hello` result
+   (`HostInfo`: wire version, cox version, OS, architecture and sandbox backend) then replaces the
+   picker: `macOS · arm64 · cox 0.9.1` and `Sandbox: bwrap`, or, when the target has no sandbox,
+   `No sandbox there: cox asks before every command` (D7). **Done** closes the sheet; the target's
+   sessions are already a sidebar group, so the person has seen where a session will run before
+   opening one.
+
+An ssh target keeps its bare alias as its group name, as before targets; any other kind shows its
+`kind:name`. Only an ssh alias is saved (to `desktop.remote_hosts`, user config) and reconnected at
+launch; a container or VM comes from `[targets.*]` or from the running listing. The logic (grouping,
+validation, the `hello` wording, the group id) lives in CoxModel's `TargetList` and `HostHello`;
+the view only shows them, and the FFI adds one forward, `RemoteHandle.info()`.
 
 ## 6. Where things live
 

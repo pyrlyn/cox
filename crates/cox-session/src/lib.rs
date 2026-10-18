@@ -28,23 +28,30 @@ use cox_tools::send_message::SendMessageTool;
 
 #[cfg(feature = "plugins")]
 pub mod acp_session;
+pub mod allow_rules;
 #[cfg(feature = "plugins")]
 mod cloud_agents;
 pub mod doctor;
 pub mod env;
 #[cfg(feature = "plugins")]
 pub mod external_agents;
+mod legacy_tier;
 pub mod lineage;
 pub mod mcp;
 #[cfg(feature = "plugins")]
 pub mod plugin_ui;
 pub mod plugins;
 pub mod provider;
+pub mod refine;
 pub mod sandbox;
+#[cfg(feature = "plugins")]
+mod target_agents;
+pub mod targets;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
 pub mod tools;
 
+pub use legacy_tier::install_pointer;
 pub use lineage::{Follow, fork, handoff, resume};
 pub use mcp::{mcp_auth, mcp_servers};
 #[cfg(feature = "plugins")]
@@ -75,6 +82,14 @@ pub enum SessionError {
     },
     #[error("unknown provider `{0}` in tiers.code")]
     UnknownProvider(String),
+    /// A section whose client lives in a plugin, with that plugin not
+    /// loaded (T33.40.12). A typed variant, not `UnknownProvider`, so the
+    /// router can fail open on it and name the install step (T33.40.13).
+    #[error(
+        "provider `{section}` is provided by plugin {plugin}, not loaded; \
+         build `plugins/{plugin}` and run `cox plugin install <dir>`"
+    )]
+    PluginNotLoaded { section: String, plugin: String },
     #[error("unknown api `{api}` for provider `{owner}` (want \"chat\" or \"responses\")")]
     UnknownApi { api: String, owner: String },
     /// T37.34 (A67): another process drives session `id`; one writer per
@@ -308,10 +323,25 @@ pub async fn open_reporting(
             Some(keys) => cox_provider::http::resolve_key_with(var, section, |s| keys(s)),
             None => cox_provider::http::resolve_key(var, section),
         };
-        cox_plugin::provider::backends(&plugins.live, &resolve, estimate)
+        let table = |section: &str| provider::abi_section(&config, section);
+        cox_plugin::provider::backends(&plugins.live, &resolve, &table, estimate)
     };
     #[cfg(not(feature = "plugins"))]
     let abi_raw = std::collections::HashMap::new();
+    // T33.40.13: a tier left on the retired built-in `typesafe` client moves
+    // to the default tier before `assemble` would fail on it, and one
+    // notice says why (D14). A declarative plugin section of that name
+    // counts as loaded too.
+    let mut legacy_notices = Vec::new();
+    if let Some(defaults) = cox_config::load::default_tiers() {
+        let loaded = abi_raw
+            .keys()
+            .chain(config.providers.custom.keys())
+            .cloned()
+            .collect();
+        legacy_notices = legacy_tier::fall_back(&mut config, &loaded, &defaults);
+        legacy_tier::fall_back(&mut base, &loaded, &defaults);
+    }
     let served = provider::lmstudio_served(&config).await?;
     let (provider, abi) = match &served {
         Some(s) => {
@@ -345,6 +375,7 @@ pub async fn open_reporting(
     // warnings land after that borrow ends.
     #[cfg(feature = "plugins")]
     plugins.notices.extend(abi_warnings);
+    plugins.notices.extend(legacy_notices);
     config.providers.abi = abi.keys().cloned().collect();
     let mdir = memory_dir_for(&base, &home, cwd);
     // T27.3: a worktree session's project is still the main checkout, so
@@ -478,6 +509,14 @@ pub async fn open_reporting(
     if !memory_index.is_empty() {
         session.set_memory_index(memory_index);
     }
+    // T66.7: prompt notes from earlier refines (global ones, and a resumed
+    // session's own) join the volatile `system[3]`, never the cached prefix.
+    // A note that cannot be read is skipped with a warning, like any extension.
+    match refine::prompt_notes(&home, &mdir, &session.id()) {
+        Ok(notes) if !notes.is_empty() => session.set_harness_notes(notes),
+        Ok(_) => {}
+        Err(e) => warnings.push(Warning::Instruction(format!("prompt notes: {e}"))),
+    }
     // T35.13: one driver per granted `[[external_agents]]` entry; an entry
     // whose CLI or key is missing is left out with one warning (EA§7).
     #[cfg(feature = "plugins")]
@@ -500,6 +539,9 @@ pub async fn open_reporting(
             cloud_store,
             cox_provider::http::resolve_key,
         );
+        // T68.7: presets that run `cox` on a target, local to this session.
+        let (targeted, targeted_left_out) = target_agents::drivers(&base, cwd);
+        drivers.extend(targeted);
         let shared = cloud
             .iter()
             .map(|d| d.clone() as Arc<dyn cox_protocol::traits::ExternalAgent>);
@@ -514,6 +556,7 @@ pub async fn open_reporting(
             .into_iter()
             .chain(left_out)
             .chain(cloud_left_out)
+            .chain(targeted_left_out)
             .collect::<Vec<_>>()
     };
     // T33.44: each granted plugin's `cox_init` ran once, in `plugin_tools`
@@ -557,6 +600,8 @@ pub async fn open_reporting(
     session.set_checkpointer(Arc::new(cox_tools::checkpoint::GitCheckpointer::new(
         home.clone(),
     )));
+    // T69.2: `permissions.allow_for_session_persists` writes the user config.
+    session.set_allow_rule_store(Arc::new(allow_rules::UserConfigRules::user()));
     // T27.3: `agent(isolation: "worktree")` gets real worktrees on every surface.
     session.set_worktrees(Arc::new(cox_tools::git::GitWorktrees));
     // P43: the repo map, built once on the first submit when
@@ -748,6 +793,48 @@ mod tests {
                 vec![work.path().to_path_buf()],
                 "an empty root list became cwd"
             );
+        });
+    }
+
+    /// T33.40.13: a config that still names the retired built-in `typesafe`
+    /// client opens, with the tier moved to the default one.
+    #[test]
+    fn open_moves_a_legacy_typesafe_tier_to_the_default() {
+        let home = tempfile::tempdir().expect("home");
+        let work = tempfile::tempdir().expect("work");
+        let scenario = work.path().join("scenario.toml");
+        std::fs::write(&scenario, "[[turn]]\ntext = \"hi\"\n").expect("scenario");
+        let mut config = Config::default();
+        config.mcp.enabled = false;
+        config.plugins.enabled = false;
+        config.hooks.enabled = false;
+        config.tiers.code.provider = "typesafe".into();
+        config.tiers.code.model = "jev-latest".into();
+        let spec = SessionSpec {
+            config,
+            cwd: work.path().to_path_buf(),
+            home: home.path().to_path_buf(),
+            worktree: false,
+            answer: None,
+            questions: false,
+            resume: None,
+            mcp_login: None,
+            plugin_ui: None,
+            client: None,
+            surface: "test".into(),
+            tools: Vec::new(),
+        };
+        let scenario = scenario.display().to_string();
+        let vars = [
+            ("COX_PROVIDER", Some("scripted")),
+            ("COX_SCENARIO", Some(scenario.as_str())),
+        ];
+        cox_config::load::temp_env(&vars, || {
+            let rt = tokio::runtime::Runtime::new().expect("runtime");
+            let opened = rt.block_on(open(spec)).expect("the session opens");
+            let default = cox_config::load::default_tiers().expect("defaults").code;
+            assert_eq!(opened.config.tiers.code.provider, default.provider);
+            assert_eq!(opened.config.tiers.code.model, default.model);
         });
     }
 

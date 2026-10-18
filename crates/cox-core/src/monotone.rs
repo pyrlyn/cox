@@ -15,12 +15,13 @@
 use std::time::Duration;
 
 use cox_protocol::errors::CoreError;
-use cox_protocol::plugin::{Advice, Answer, DecidePoint, Question};
+use cox_protocol::plugin::{Advice, Answer, DecidePoint, Question, QuestionItem};
 use cox_protocol::types::{Event, Level, Risk, ToolCall, Why};
 use cox_sanitize::redact::scrub;
 use cox_sanitize::sanitize;
 use serde_json::json;
 
+use crate::compact;
 use crate::memory_extract::Fact;
 use crate::permission::Outcome;
 use crate::session::Session;
@@ -29,6 +30,14 @@ use crate::session::Session;
 const INPUT_CHARS: usize = 2_000;
 /// How much of a caution note reaches the user.
 const NOTE_CHARS: usize = 200;
+
+/// What asking a point came to. `Late` is no answer like `Silent`; it is
+/// kept apart only so a point can say its deadline passed (A163).
+enum Reply {
+    Silent,
+    Late,
+    Advice(String, Advice),
+}
 
 impl Session {
     /// One answer from `plugin` for `point` within `ms`, or `None` when the
@@ -39,14 +48,28 @@ impl Session {
         ms: u64,
         question: Question,
     ) -> Option<(String, Advice)> {
-        let plugin = plugin?;
-        let advisor = self.advisor(plugin)?;
+        match self.ask_timed(plugin, ms, question).await {
+            Reply::Advice(plugin, advice) => Some((plugin, advice)),
+            Reply::Silent | Reply::Late => None,
+        }
+    }
+
+    async fn ask_timed(&self, plugin: Option<&str>, ms: u64, question: Question) -> Reply {
+        let Some((plugin, advisor)) = plugin.and_then(|p| Some((p, self.advisor(p)?))) else {
+            return Reply::Silent;
+        };
         let budget = Duration::from_millis(ms);
+        let started = tokio::time::Instant::now();
         // The core holds the budget itself, as for `route`.
-        let advice = tokio::time::timeout(budget, advisor.advise(question, budget))
-            .await
-            .ok()??;
-        Some((plugin.to_string(), advice))
+        match tokio::time::timeout(budget, advisor.advise(question, budget)).await {
+            Err(_) => Reply::Late,
+            // A plugin advisor gives up on the same budget and returns
+            // silence; when both timers fire on one tick `timeout` sees the
+            // silence first, so a deadline the advisor hit is still late.
+            Ok(None) if started.elapsed() >= budget => Reply::Late,
+            Ok(None) => Reply::Silent,
+            Ok(Some(advice)) => Reply::Advice(plugin.to_string(), advice),
+        }
     }
 
     async fn advised(
@@ -56,11 +79,12 @@ impl Session {
         mut advice: Advice,
         applied: bool,
     ) -> Result<(), CoreError> {
-        // Only an applied `approve_hint` note is shown; any other note is
-        // untrusted text with no use and stays out of the rollout.
-        if point != DecidePoint::ApproveHint || !applied {
-            advice.note = None;
-        }
+        // Only an applied `approve_hint` or `risk` note is kept: the first is
+        // shown, the second carries the probabilities behind a raise (A163).
+        // Any other note is untrusted text with no use and stays out of the
+        // rollout.
+        let kept = matches!(point, DecidePoint::ApproveHint | DecidePoint::Risk);
+        advice.note = clean_note(advice.note.filter(|_| kept && applied));
         self.emit(Event::Advised {
             point,
             plugin,
@@ -70,45 +94,104 @@ impl Session {
         .await
     }
 
-    /// `call` with `risk` advice applied, before `Engine::decide` judges it.
-    /// Asked only when raising the call to `Destructive` would turn the
-    /// engine's `Allow` into `Ask` or `Deny` (J5.1), so a read-only call, a
-    /// call already asked, or `Bypass` never waits on a plugin.
-    pub(crate) async fn advise_risk(&self, mut call: ToolCall) -> Result<ToolCall, CoreError> {
+    /// `calls` (one tool batch, after `PreToolUse`) with `risk` advice
+    /// applied, before `Engine::decide` judges them: one question for the
+    /// batch (J5.1). A call is an item only when raising it to
+    /// `Destructive` would turn the engine's `Allow` into `Ask` or `Deny`,
+    /// so a read-only call, a call already asked, or `Bypass` never waits on
+    /// a plugin.
+    pub(crate) async fn advise_risk(
+        &self,
+        mut calls: Vec<ToolCall>,
+    ) -> Result<Vec<ToolCall>, CoreError> {
         let decide = &self.config.plugins.decide;
-        if decide.risk.is_none() || matches!(call.risk, Risk::ReadOnly | Risk::Destructive) {
-            return Ok(call);
+        if decide.risk.is_none() {
+            return Ok(calls);
         }
-        let raised = ToolCall {
-            risk: Risk::Destructive,
-            ..call.clone()
-        };
         let allowed = |o: Outcome| matches!(o, Outcome::Allow { .. });
-        if !allowed(self.decide(&call).await) || allowed(self.decide(&raised).await) {
-            return Ok(call);
+        let mut asked = Vec::new();
+        for (i, call) in calls.iter().enumerate() {
+            if matches!(call.risk, Risk::ReadOnly | Risk::Destructive) {
+                continue;
+            }
+            let raised = ToolCall {
+                risk: Risk::Destructive,
+                ..call.clone()
+            };
+            if allowed(self.decide(call).await) && !allowed(self.decide(&raised).await) {
+                asked.push(i);
+            }
         }
+        if asked.is_empty() {
+            return Ok(calls);
+        }
+        let task = compact::working_state(&self.inner.lock().await.history).request;
         let question = Question {
             point: DecidePoint::Risk,
             state: json!({
-                "tool": call.name,
-                "subject": clip(&call.subject, INPUT_CHARS),
-                "input": clip(&call.input.to_string(), INPUT_CHARS),
-                "classifier_risk": call.risk,
+                "task": clip(task.as_deref().unwrap_or_default(), INPUT_CHARS),
+                "cwd": self.cwd.to_string_lossy(),
+                "workspace_roots": self
+                    .config
+                    .core
+                    .workspace_roots
+                    .iter()
+                    .map(|r| r.to_string_lossy())
+                    .collect::<Vec<_>>(),
+                "sandbox": self.config.sandbox.mode,
             }),
             options: vec![],
-            items: vec![],
+            items: asked
+                .iter()
+                .map(|&i| QuestionItem {
+                    state: json!({
+                        "tool": calls[i].name,
+                        "subject": clip(&calls[i].subject, INPUT_CHARS),
+                        "input": clip(&calls[i].input.to_string(), INPUT_CHARS),
+                        "classifier_risk": calls[i].risk,
+                    }),
+                    options: vec![],
+                })
+                .collect(),
         };
-        let Some((plugin, advice)) = self
-            .ask_point(decide.risk.as_deref(), decide.risk_ms, question)
-            .await
-        else {
-            return Ok(call);
+        let fits = question.clone();
+        let plugin = decide.risk.as_deref();
+        let (plugin, advice) = match self.ask_timed(plugin, decide.risk_ms, question).await {
+            Reply::Advice(plugin, advice) => (plugin, advice),
+            Reply::Silent => return Ok(calls),
+            Reply::Late => {
+                let text = format!(
+                    "plugin {} gave no risk advice within {} ms; the classifier's risk stands",
+                    plugin.unwrap_or_default(),
+                    decide.risk_ms
+                );
+                self.emit(Event::Notice {
+                    level: Level::Info,
+                    text,
+                })
+                .await?;
+                return Ok(calls);
+            }
         };
-        let (risk, applied) = raise_risk(call.risk, &advice, decide.min_confidence);
-        call.risk = risk;
+        let mut applied = false;
+        // The host checks the shape too; checked again so an advisor that is
+        // not a plugin cannot pin one call's answer on another.
+        if let Answer::Items { answers } = &advice.answer
+            && fits.fits(&advice.answer)
+        {
+            for (&i, answer) in asked.iter().zip(answers) {
+                let one = Advice {
+                    answer: answer.clone(),
+                    ..advice.clone()
+                };
+                let (risk, raised) = raise_risk(calls[i].risk, &one, decide.min_confidence);
+                calls[i].risk = risk;
+                applied |= raised;
+            }
+        }
         self.advised(DecidePoint::Risk, plugin, advice, applied)
             .await?;
-        Ok(call)
+        Ok(calls)
     }
 
     /// `approve_hint` for a call about to be shown for approval: a caution
@@ -143,11 +226,7 @@ impl Session {
             return Ok(());
         };
         let applied = yes(&advice, decide.min_confidence);
-        advice.note = advice
-            .note
-            .as_deref()
-            .map(|n| sanitize(n).chars().take(NOTE_CHARS).collect::<String>())
-            .filter(|n| !n.trim().is_empty());
+        advice.note = clean_note(advice.note);
         if applied {
             let reason = advice.note.as_deref().unwrap_or("check this call closely");
             self.emit(Event::Notice {
@@ -273,6 +352,13 @@ impl Session {
     }
 }
 
+/// A plugin's note as the user or the rollout may see it: no escapes, at
+/// most `NOTE_CHARS`, and none when only blanks are left.
+fn clean_note(note: Option<String>) -> Option<String> {
+    note.map(|n| sanitize(&n).chars().take(NOTE_CHARS).collect::<String>())
+        .filter(|n| !n.trim().is_empty())
+}
+
 /// The same redaction the rollout gets, clipped to a question's size.
 fn clip(text: &str, chars: usize) -> String {
     scrub(text).chars().take(chars).collect()
@@ -371,15 +457,19 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
-    use cox_protocol::ids::{CallId, ItemId};
-    use cox_protocol::traits::Advisor;
-    use cox_protocol::types::PermissionMode;
+    use cox_protocol::errors::ToolError;
+    use cox_protocol::ids::{CallId, ItemId, TurnId};
+    use cox_protocol::traits::{Advisor, Tool, ToolCx};
+    use cox_protocol::types::{
+        Concurrency, Content, Message, PermissionMode, Role, ToolOutput, ToolSpec,
+    };
     use cox_provider::scripted::Scripted;
     use tokio::sync::mpsc;
 
     use super::*;
     use crate::compact::TurnMark;
     use crate::session::MemoryStore;
+    use crate::turn::run_tools;
 
     struct Fake {
         advice: Advice,
@@ -432,6 +522,31 @@ mod tests {
         advice: Advice,
         delay: Duration,
     ) -> (Session, Arc<Fake>, mpsc::Receiver<Event>) {
+        let (session, fake, rx, _) = open_with(mode, advice, delay, vec![]);
+        (session, fake, rx)
+    }
+
+    /// `open_delayed` with `tools` and the store the rollout goes to.
+    fn open_with(
+        mode: PermissionMode,
+        advice: Advice,
+        delay: Duration,
+        tools: Vec<Arc<dyn Tool>>,
+    ) -> (Session, Arc<Fake>, mpsc::Receiver<Event>, Arc<MemoryStore>) {
+        let (session, store) = bare(mode, tools);
+        let fake = Arc::new(Fake {
+            advice,
+            delay,
+            asked: Mutex::new(Vec::new()),
+        });
+        session.set_advisors(vec![fake.clone()]);
+        let rx = session.events().expect("events once");
+        (session, fake, rx, store)
+    }
+
+    /// A session whose every decision point names the advisor `fake`, with
+    /// no advisor set yet.
+    fn bare(mode: PermissionMode, tools: Vec<Arc<dyn Tool>>) -> (Session, Arc<MemoryStore>) {
         let mut config = cox_protocol::Config::default();
         config.permissions.mode = mode;
         let decide = &mut config.plugins.decide;
@@ -449,20 +564,13 @@ mod tests {
         let session = Session::new(
             config,
             provider,
-            vec![],
+            tools,
             store.clone(),
-            store,
+            store.clone(),
             PathBuf::from("/tmp/cox-monotone"),
         )
         .expect("session");
-        let fake = Arc::new(Fake {
-            advice,
-            delay,
-            asked: Mutex::new(Vec::new()),
-        });
-        session.set_advisors(vec![fake.clone()]);
-        let rx = session.events().expect("events once");
-        (session, fake, rx)
+        (session, store)
     }
 
     fn call(risk: Risk) -> ToolCall {
@@ -478,6 +586,21 @@ mod tests {
 
     fn drain(rx: &mut mpsc::Receiver<Event>) -> Vec<Event> {
         std::iter::from_fn(|| rx.try_recv().ok()).collect()
+    }
+
+    /// A batched `risk` answer: one severity `Score` per item.
+    fn items(values: &[f64], confidence: Option<f64>) -> Advice {
+        let answers = values
+            .iter()
+            .map(|&value| Answer::Score { value })
+            .collect();
+        advice(Answer::Items { answers }, confidence, "")
+    }
+
+    /// `advise_risk` for a batch of one call.
+    async fn advise_one(session: &Session, call: ToolCall) -> ToolCall {
+        let mut out = session.advise_risk(vec![call]).await.expect("risk");
+        out.pop().expect("one call in, one out")
     }
 
     fn advised(events: &[Event]) -> Vec<(bool, Option<String>)> {
@@ -520,14 +643,14 @@ mod tests {
 
         // Through the session: a "harmless" answer leaves the call as the
         // classifier left it, and a raise is judged by the engine.
-        let (session, fake, mut rx) = open(PermissionMode::Auto, score(0.0, Some(1.0)));
-        let kept = session.advise_risk(call(Risk::Write)).await.expect("risk");
+        let (session, fake, mut rx) = open(PermissionMode::Auto, items(&[0.0], Some(1.0)));
+        let kept = advise_one(&session, call(Risk::Write)).await;
         assert_eq!((kept.risk, fake.asked()), (Risk::Write, 1));
         assert!(matches!(session.decide(&kept).await, Outcome::Allow { .. }));
         assert_eq!(advised(&drain(&mut rx)), vec![(false, None)]);
 
-        let (session, _, mut rx) = open(PermissionMode::Auto, score(3.0, Some(0.9)));
-        let raised = session.advise_risk(call(Risk::Write)).await.expect("risk");
+        let (session, _, mut rx) = open(PermissionMode::Auto, items(&[3.0], Some(0.9)));
+        let raised = advise_one(&session, call(Risk::Write)).await;
         assert_eq!(raised.risk, Risk::Destructive);
         assert!(matches!(session.decide(&raised).await, Outcome::Ask(_)));
         assert_eq!(advised(&drain(&mut rx)), vec![(true, None)]);
@@ -535,7 +658,7 @@ mod tests {
 
     #[tokio::test]
     async fn risk_not_asked_when_outcome_would_not_change() {
-        let raise = advice(Answer::Score { value: 3.0 }, Some(1.0), "");
+        let raise = items(&[3.0], Some(1.0));
         // Already asked (Write outside `Auto`), always allowed (`Bypass`),
         // read-only, or already destructive: the answer could change nothing.
         for (mode, risk) in [
@@ -545,10 +668,224 @@ mod tests {
             (PermissionMode::Auto, Risk::Destructive),
         ] {
             let (session, fake, mut rx) = open(mode, raise.clone());
-            let out = session.advise_risk(call(risk)).await.expect("risk");
+            let out = advise_one(&session, call(risk)).await;
             assert_eq!((out.risk, fake.asked()), (risk, 0), "{mode:?} {risk:?}");
             assert!(advised(&drain(&mut rx)).is_empty());
         }
+    }
+
+    /// A `Write` tool whose subject is its `path`; `"ro": true` makes a
+    /// call read-only.
+    struct Writes;
+
+    #[async_trait]
+    impl Tool for Writes {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "w".into(),
+                description: "writes".into(),
+                input_schema: json!({ "type": "object" }),
+                deferred: false,
+                risk: Risk::Write,
+                concurrency: Concurrency::Parallel,
+            }
+        }
+        fn subject(&self, input: &serde_json::Value) -> String {
+            input["path"].as_str().unwrap_or_default().into()
+        }
+        fn risk(&self, input: &serde_json::Value) -> Risk {
+            if input["ro"] == true {
+                Risk::ReadOnly
+            } else {
+                Risk::Write
+            }
+        }
+        fn touches(&self, input: &serde_json::Value) -> Option<Vec<String>> {
+            Some(vec![self.subject(input)])
+        }
+        async fn call(
+            &self,
+            _input: serde_json::Value,
+            _cx: &ToolCx,
+        ) -> Result<ToolOutput, ToolError> {
+            Ok(ToolOutput {
+                text: "SECRET-TOOL-OUTPUT".into(),
+                is_error: false,
+                diff: None,
+                structured: None,
+            })
+        }
+    }
+
+    fn write(path: &str) -> ToolCall {
+        ToolCall {
+            id: CallId::new(),
+            name: "w".into(),
+            input: json!({ "path": path }),
+            subject: path.into(),
+            risk: Risk::Write,
+            segments: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn risk_batch_asks_once_with_one_item_per_call() {
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(Writes)];
+        let (session, fake, _rx, _) = open_with(
+            PermissionMode::Auto,
+            items(&[0.0, 0.0], Some(1.0)),
+            Duration::ZERO,
+            tools,
+        );
+        session.inner.lock().await.history.push(Message {
+            role: Role::User,
+            content: vec![Content::Text {
+                text: "tidy the docs".into(),
+            }],
+        });
+        let batch = vec![
+            (CallId::new(), "w".into(), json!({ "path": "a.md" })),
+            (
+                CallId::new(),
+                "w".into(),
+                json!({ "path": "r.md", "ro": true }),
+            ),
+            (CallId::new(), "w".into(), json!({ "path": "b.md" })),
+        ];
+        let ran = run_tools(&session, TurnId::new(), batch)
+            .await
+            .expect("batch");
+        assert!(ran.iter().all(|(_, r)| r.ok), "{ran:?}");
+        assert_eq!(fake.asked(), 1, "one question for the whole batch");
+        let asked = fake.asked.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let question = &asked[0];
+        assert_eq!(question.point, DecidePoint::Risk);
+        assert_eq!(question.state["task"], "tidy the docs");
+        assert_eq!(question.state["cwd"], "/tmp/cox-monotone");
+        assert!(question.state["workspace_roots"].is_array());
+        assert!(question.state.get("sandbox").is_some());
+        // The read-only call could change nothing, so it is not an item.
+        let subjects: Vec<_> = question.items.iter().map(|i| &i.state["subject"]).collect();
+        assert_eq!(subjects, ["a.md", "b.md"]);
+        let item = question.items[0].state.as_object().expect("item");
+        let mut keys: Vec<_> = item.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["classifier_risk", "input", "subject", "tool"]);
+        let sent = serde_json::to_string(question).expect("json");
+        assert!(!sent.contains("SECRET-TOOL-OUTPUT"), "never tool output");
+    }
+
+    #[tokio::test]
+    async fn risk_items_raise_only_their_own_call() {
+        let batch = || vec![write("a.md"), write("b.md"), write("c.md")];
+        let (session, _, mut rx) = open(PermissionMode::Auto, items(&[0.0, 3.0, 1.0], Some(1.0)));
+        let out = session.advise_risk(batch()).await.expect("risk");
+        let risks: Vec<_> = out.iter().map(|c| c.risk).collect();
+        assert_eq!(risks, [Risk::Write, Risk::Destructive, Risk::Write]);
+        assert_eq!(advised(&drain(&mut rx)), vec![(true, None)]);
+
+        // A flat answer, a short list, or low confidence: nothing moves.
+        for wrong in [
+            advice(Answer::Score { value: 3.0 }, Some(1.0), ""),
+            items(&[3.0, 3.0], Some(1.0)),
+            items(&[3.0, 3.0, 3.0], Some(0.1)),
+        ] {
+            let (session, fake, mut rx) = open(PermissionMode::Auto, wrong.clone());
+            let out = session.advise_risk(batch()).await.expect("risk");
+            assert!(out.iter().all(|c| c.risk == Risk::Write), "{wrong:?}");
+            assert_eq!(fake.asked(), 1);
+            assert_eq!(advised(&drain(&mut rx)), vec![(false, None)], "{wrong:?}");
+        }
+    }
+
+    /// Gives up on its own copy of the budget, as `PluginAdvisor` does.
+    struct GivesUp;
+
+    #[async_trait]
+    impl Advisor for GivesUp {
+        fn id(&self) -> &str {
+            "fake"
+        }
+
+        async fn advise(&self, _: Question, budget: Duration) -> Option<Advice> {
+            tokio::time::sleep(budget).await;
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn advisor_silent_at_its_deadline_is_late() {
+        let (session, _) = bare(PermissionMode::Auto, vec![]);
+        session.set_advisors(vec![Arc::new(GivesUp)]);
+        let mut rx = session.events().expect("events once");
+        let out = advise_one(&session, write("a.md")).await;
+        assert_eq!(out.risk, Risk::Write);
+        let events = drain(&mut rx);
+        assert!(advised(&events).is_empty(), "silence is no answer");
+        let late = events.iter().filter(|e| {
+            matches!(e, Event::Notice { text, .. } if text.contains("gave no risk advice within"))
+        });
+        assert_eq!(late.count(), 1, "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn late_risk_answer_records_a_notice() {
+        // Later than `risk_ms` (200 by default): every call keeps its
+        // classifier risk, and the notice names the point and the deadline.
+        let (session, fake, mut rx) = open_delayed(
+            PermissionMode::Auto,
+            items(&[3.0], Some(1.0)),
+            Duration::from_millis(500),
+        );
+        let ms = session.config.plugins.decide.risk_ms;
+        let out = advise_one(&session, write("a.md")).await;
+        assert_eq!((out.risk, fake.asked()), (Risk::Write, 1));
+        let events = drain(&mut rx);
+        assert!(advised(&events).is_empty(), "a late answer is no answer");
+        let notices: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Notice { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            notices,
+            vec![format!(
+                "plugin fake gave no risk advice within {ms} ms; the classifier's risk stands"
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn risk_note_reaches_the_rollout() {
+        use cox_protocol::traits::Store as _;
+        let note = "p(irreversible)=0.91 \u{1b}[31mexternal=0.12";
+        let mut raise = items(&[3.0], Some(1.0));
+        raise.note = Some(note.into());
+        let (session, _, _rx, store) =
+            open_with(PermissionMode::Auto, raise, Duration::ZERO, vec![]);
+        assert_eq!(
+            advise_one(&session, write("a.md")).await.risk,
+            Risk::Destructive
+        );
+        let rollout = store.rollout_read(&session.id()).expect("rollout");
+        let notes: Vec<_> = rollout
+            .iter()
+            .filter_map(|e| match e {
+                Event::Advised {
+                    point: DecidePoint::Risk,
+                    applied: true,
+                    advice,
+                    ..
+                } => Some(advice.note.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            notes,
+            vec![Some("p(irreversible)=0.91 external=0.12".to_string())]
+        );
     }
 
     #[tokio::test]

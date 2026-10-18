@@ -12,8 +12,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use cox_protocol::config::CompactionStrategy;
-use cox_protocol::errors::CoreError;
-use cox_protocol::ids::{ArchiveId, CallId, ItemId};
+use cox_protocol::errors::{CoreError, ProviderError};
+use cox_protocol::ids::{ArchiveId, CallId, ItemId, TaskId};
 use cox_protocol::types::{
     ArchiveRef, CompactReason, Content, Event, HookEvent, HookOutcome, ItemKind, Job, Level,
     Message, ProviderEvent, RepoMapReason, Request, Role, SystemBlock,
@@ -25,12 +25,19 @@ use crate::budget;
 use crate::hooks;
 use crate::session::{Session, State};
 use crate::subagent::first_line;
+use crate::tasks::{Child, TaskKind};
 
 /// The summariser prompt and, after its `---` line, the note `state+llm`
 /// appends: one file so the two texts are reviewed together.
 const PROMPT: &str = include_str!("prompts/compact.md");
 /// §1.10 step 3: the summary itself is capped.
 const MAX_SUMMARY_TOKENS: u32 = 2048;
+/// A model reply shorter than this is not a summary: replacing history with
+/// it would drop the session's memory for nothing. Matches the 500 the prompt
+/// names so the model is told the same number it is held to.
+const MIN_SUMMARY_CHARS: usize = 500;
+/// The ladder's second rung keeps this much from each end of a tool result.
+const CUT_RESULT_BYTES: usize = 200;
 /// How `compact` opens the summary message; a later compaction finds the
 /// earlier state block by it.
 const SUMMARY_HEAD: &str = "[Compacted summary of ";
@@ -38,10 +45,19 @@ const FILES: &str = "## Files touched";
 const ERRORS: &str = "## Errors seen";
 const REQUEST: &str = "## Last request";
 const ARCHIVED: &str = "## Archived outputs";
+const RUNNING: &str = "## Still running";
+const TODOS: &str = "## Open todos";
+const SUBAGENTS: &str = "## Subagents";
+const LIVE_HEADINGS: [&str; 3] = [RUNNING, TODOS, SUBAGENTS];
 /// The section is bounded so a long session cannot grow its own summary
 /// without limit; the ids past either cap are only counted.
 const MAX_HANDLES: usize = 32;
 const MAX_NOTICE_BYTES: usize = 2048;
+/// The live block is bounded for the same reason: a session with many
+/// subagents or a long todo list must not grow its own summary.
+const MAX_LIVE_BYTES: usize = 2048;
+/// One entry is a pointer back to a task or item, not its whole text.
+const LIVE_LINE_CHARS: usize = 160;
 /// A pasted log as the request would crowd out the rest of the state.
 const REQUEST_CHARS: usize = 500;
 
@@ -115,7 +131,16 @@ pub(crate) fn needs_compaction(
     max_context: u32,
     compact_at: f64,
 ) -> bool {
-    threshold(max_context, compact_at).is_some_and(|limit| f64::from(last_context_tokens) >= limit)
+    // A NaN `compact_at` must keep the old never-fires answer; the float-to-int
+    // cast below would read it as 0 and fire on every turn.
+    if max_context == 0 || compact_at.is_nan() {
+        return false;
+    }
+    // Parts per 10 000 keep the boundary exact: a float product like
+    // 0.07 * 100 can land just above an integer token count.
+    let scaled_compact_at = (compact_at * 10_000.0).round() as u64;
+    u64::from(last_context_tokens) * 10_000
+        >= scaled_compact_at.saturating_mul(u64::from(max_context))
 }
 
 /// ⌈bytes/4⌉ of the serialised messages: the same heuristic `truncate` and
@@ -148,6 +173,32 @@ fn near(estimate: u32, limit: f64) -> bool {
 
 /// The summariser's input: one line per block, archived results as pointers.
 pub(crate) fn transcript(messages: &[Message]) -> String {
+    render_transcript(messages, usize::MAX)
+}
+
+/// The ladder's second rung: `transcript` with every tool result cut to its
+/// head and tail, since results are what blow a summariser's own window.
+fn transcript_cut(messages: &[Message]) -> String {
+    render_transcript(messages, CUT_RESULT_BYTES)
+}
+
+/// `text` with the middle dropped when it is longer than `2 × keep` bytes,
+/// cutting on char boundaries and saying how much went.
+fn clip(text: &str, keep: usize) -> String {
+    if text.len() <= keep.saturating_mul(2) {
+        return text.to_string();
+    }
+    let head = text.floor_char_boundary(keep);
+    let tail = text.ceil_char_boundary(text.len() - keep);
+    format!(
+        "{}\n[… {} bytes omitted …]\n{}",
+        &text[..head],
+        tail - head,
+        &text[tail..]
+    )
+}
+
+fn render_transcript(messages: &[Message], keep: usize) -> String {
     let mut out = String::new();
     for m in messages {
         let role = match m.role {
@@ -168,7 +219,7 @@ pub(crate) fn transcript(messages: &[Message]) -> String {
                     } else {
                         "tool_result"
                     };
-                    out.push_str(&format!("{tag}: {content}\n"));
+                    out.push_str(&format!("{tag}: {}\n", clip(content, keep)));
                 }
                 Content::Pointer { summary, archive } => {
                     out.push_str(&format!(
@@ -497,6 +548,236 @@ pub(crate) fn notice_text(handles: &SurvivingHandles) -> String {
     out
 }
 
+/// A background task or subagent as the registry holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LiveTask {
+    pub id: TaskId,
+    /// The name `send_message` also accepts (`explore-2`); subagents only.
+    pub name: Option<String>,
+    /// The stored command (`bash: sleep 300`) or `preset: description`.
+    pub label: String,
+    /// A subagent that ended and can be woken by a message.
+    pub finished: bool,
+}
+
+/// One item of the model's own todo list, as the `todo` tool received it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Todo {
+    pub id: String,
+    pub text: String,
+    pub in_progress: bool,
+}
+
+/// What is still going on when history is cut: the work a summary of the
+/// transcript cannot be trusted to name again (T69.6). Tasks come from the
+/// registry, todos from the `todo` calls the cut drops.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct LiveState {
+    pub running: Vec<LiveTask>,
+    pub todos: Vec<Todo>,
+    pub subagents: Vec<LiveTask>,
+}
+
+/// `text` on one line and at most `max` characters, so a value the model or a
+/// repository wrote can never open a heading of its own.
+fn flat(text: &str, max: usize) -> String {
+    let one: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    one.chars().take(max).collect()
+}
+
+fn todo_state(todo: &Todo) -> &'static str {
+    if todo.in_progress {
+        "in_progress"
+    } else {
+        "pending"
+    }
+}
+
+/// The items of a successful `todo` call; the tool replaces the whole list,
+/// so the latest call is the list.
+fn todo_items(c: &Content, failed: &HashSet<CallId>) -> Option<Vec<Todo>> {
+    let Content::ToolUse { id, name, input } = c else {
+        return None;
+    };
+    if name != "todo" || failed.contains(id) {
+        return None;
+    }
+    let items = input.get("items")?.as_array()?;
+    Some(
+        items
+            .iter()
+            .filter_map(|item| {
+                let field = |k: &str| item.get(k).and_then(Value::as_str);
+                let in_progress = match field("state")? {
+                    "pending" => false,
+                    "in_progress" => true,
+                    _ => return None,
+                };
+                Some(Todo {
+                    id: flat(field("id")?, LIVE_LINE_CHARS),
+                    text: flat(field("text")?, LIVE_LINE_CHARS),
+                    in_progress,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// An earlier summary's open todos, for the stretch where the `todo` call
+/// that wrote them was itself dropped by that compaction.
+fn carried_todos(summary: &str) -> Vec<Todo> {
+    section(summary, TODOS)
+        .filter_map(|line| {
+            let (state, rest) = line.strip_prefix("- [")?.split_once("] ")?;
+            let (id, text) = rest.split_once(": ")?;
+            Some(Todo {
+                id: id.to_string(),
+                text: text.to_string(),
+                in_progress: match state {
+                    "pending" => false,
+                    "in_progress" => true,
+                    _ => return None,
+                },
+            })
+        })
+        .collect()
+}
+
+/// The unfinished items of the latest todo list in `dropped`. A list in
+/// `kept` is newer and still verbatim, so nothing is carried then.
+pub(crate) fn open_todos(dropped: &[Message], kept: &[Message]) -> Vec<Todo> {
+    let failed: HashSet<CallId> = dropped
+        .iter()
+        .chain(kept)
+        .flat_map(|m| &m.content)
+        .filter_map(|c| match c {
+            Content::ToolResult {
+                call_id,
+                is_error: true,
+                ..
+            } => Some(*call_id),
+            _ => None,
+        })
+        .collect();
+    if kept
+        .iter()
+        .flat_map(|m| &m.content)
+        .any(|c| todo_items(c, &failed).is_some())
+    {
+        return Vec::new();
+    }
+    let mut list = Vec::new();
+    for m in dropped {
+        let typed = m.content.iter().find_map(|c| match c {
+            Content::Text { text } if m.role == Role::User => Some(text),
+            _ => None,
+        });
+        if let Some(text) = typed.filter(|t| t.starts_with(SUMMARY_HEAD)) {
+            list = carried_todos(text);
+        }
+        for items in m.content.iter().filter_map(|c| todo_items(c, &failed)) {
+            list = items;
+        }
+    }
+    list
+}
+
+/// `summary` without a live block of an earlier compaction. The registry is
+/// read afresh each time, so a copy the model made of the old block would
+/// only be stale or a duplicate.
+fn strip_live(summary: &str) -> String {
+    if !summary.lines().any(|l| LIVE_HEADINGS.contains(&l)) {
+        return summary.to_string();
+    }
+    let mut skipping = false;
+    let mut out = Vec::new();
+    for line in summary.lines() {
+        if line.starts_with("## ") {
+            skipping = LIVE_HEADINGS.contains(&line);
+        }
+        if !skipping {
+            out.push(line);
+        }
+    }
+    out.join("\n")
+}
+
+impl LiveTask {
+    fn line(&self) -> String {
+        let state = if self.finished { "finished" } else { "running" };
+        let label = flat(&self.label, LIVE_LINE_CHARS);
+        match &self.name {
+            Some(name) => format!("- task {} ({name}, {state}): {label}", self.id),
+            None => format!("- task {} ({state}): {label}", self.id),
+        }
+    }
+}
+
+/// The block that ends a summary after the archive section; empty when
+/// nothing is live, so an idle session's summary is unchanged. Ids are the
+/// ones `send_message` and `todo` accept, with what each stands for, and the
+/// whole block stays under `MAX_LIVE_BYTES`; entries past that are counted.
+pub(crate) fn live_text(live: &LiveState) -> String {
+    let sections: [(&str, Vec<String>); 3] = [
+        (RUNNING, live.running.iter().map(LiveTask::line).collect()),
+        (
+            TODOS,
+            live.todos
+                .iter()
+                .map(|t| format!("- [{}] {}: {}", todo_state(t), t.id, t.text))
+                .collect(),
+        ),
+        (
+            SUBAGENTS,
+            live.subagents.iter().map(LiveTask::line).collect(),
+        ),
+    ];
+    // Room for the "more" line, so it always fits after the last entry.
+    const MORE: usize = "\n… and 99999 more".len();
+    let mut out = String::new();
+    for (heading, lines) in sections {
+        let sep = if out.is_empty() { "" } else { "\n\n" };
+        let head = format!("{sep}{heading}");
+        let mut shown = 0;
+        let mut body = String::new();
+        let mut used = out.len() + head.len();
+        for line in &lines {
+            let entry = format!("\n{line}");
+            if used + entry.len() + MORE > MAX_LIVE_BYTES {
+                break;
+            }
+            used += entry.len();
+            body.push_str(&entry);
+            shown += 1;
+        }
+        if shown == 0 {
+            continue;
+        }
+        if shown < lines.len() {
+            body.push_str(&format!("\n… and {} more", lines.len() - shown));
+        }
+        out.push_str(&head);
+        out.push_str(&body);
+    }
+    out
+}
+
+/// Why `summarise` produced no summary.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SummaryFailure {
+    /// The provider failed, or there was no route for the job.
+    Failed,
+    /// The model answered, but under the minimum length.
+    TooShort,
+    /// Every rung of the ladder was rejected as too long for the summariser.
+    TooLong,
+}
+
+/// Whether the model's own text is long enough to stand in for history.
+pub(crate) fn summary_is_usable(text: &str, min_chars: usize) -> bool {
+    text.trim().chars().count() >= min_chars
+}
+
 impl Session {
     /// §1.10 steps 1–5. `Ok(true)` when history changed; every failure is a
     /// notice and `Ok(false)`, since a session that cannot compact still runs.
@@ -505,6 +786,9 @@ impl Session {
         trigger: Trigger,
         focus: Option<String>,
     ) -> Result<bool, CoreError> {
+        if self.compaction_paused(trigger).await {
+            return Ok(false);
+        }
         let payload = json!({ "trigger": trigger.name(), "focus": focus });
         if let HookOutcome::Block { reason } =
             hooks::fire(self, HookEvent::PreCompact, payload.clone()).await
@@ -531,13 +815,38 @@ impl Session {
                 ))
                 .await;
         };
-        self.set_state(State::Compacting).await;
-        let summary = self.summarise(&history[..cut], focus.as_deref()).await;
+        // Any non-`Idle` state keeps `/rewind`, `/mode` and user shells out
+        // while the summary is written; compaction builds the next request's
+        // context, which is what `Assembling` names.
+        self.set_state(State::Assembling).await;
+        let summary = self
+            .summarise(&history[..cut], focus.as_deref(), MIN_SUMMARY_CHARS)
+            .await;
         // Back to where it was: a pre-call compaction runs mid-turn, and an
         // `Idle` there would let `/rewind` in before the turn's next call.
         self.set_state(state).await;
-        let Some(summary) = summary else {
-            return self.compaction_notice("summariser returned nothing").await;
+        let summary = match summary {
+            Ok(summary) => summary,
+            Err(SummaryFailure::Failed) => {
+                return self.compaction_notice("summariser returned nothing").await;
+            }
+            Err(failure) => {
+                // History stays as it was, so the same trigger would fire
+                // and fail again on every turn; wait for `/compact` instead.
+                let at = self.inner.lock().await.last_context_tokens;
+                self.inner.lock().await.compact_suppressed_at = Some(at);
+                let why = match failure {
+                    SummaryFailure::TooShort => {
+                        format!("summary too short (under {MIN_SUMMARY_CHARS} characters)")
+                    }
+                    _ => "transcript too long for the summariser".to_string(),
+                };
+                return self
+                    .compaction_notice(&format!(
+                        "failed: {why}; history kept, auto-compaction paused until /compact"
+                    ))
+                    .await;
+            }
         };
         let item = ItemId::new();
         // Last under both strategies: the model's own text can end anywhere.
@@ -546,10 +855,17 @@ impl Session {
             &history[cut..],
             &archives,
         ));
-        let summary = if notice.is_empty() {
+        let live = live_text(&self.live_state(&history[..cut], &history[cut..]).await);
+        let summary = strip_live(&summary);
+        let tail = [notice, live]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let summary = if tail.is_empty() {
             summary
         } else {
-            format!("{}\n\n{notice}", summary.trim_end())
+            format!("{}\n\n{tail}", summary.trim_end())
         };
         let text = format!(
             "{SUMMARY_HEAD}{} earlier turn(s)]\n\n{summary}",
@@ -608,6 +924,66 @@ impl Session {
         // map is rebuilt with it; no notice of its own.
         self.rebuild_repomap(RepoMapReason::Compaction).await?;
         Ok(true)
+    }
+
+    /// T69.6: the registry's running tasks and addressable subagents plus
+    /// the todos the cut drops. Read after the summary is written, since a
+    /// task can end while the summariser runs.
+    async fn live_state(&self, dropped: &[Message], kept: &[Message]) -> LiveState {
+        // Taken one lock at a time: nothing else holds both.
+        let names = self.task_names.lock().await.clone();
+        let name_of = |id: TaskId| {
+            names
+                .iter()
+                .find(|(_, task)| **task == id)
+                .map(|(name, _)| name.clone())
+                .filter(|name| is_label(name))
+        };
+        let inner = self.inner.lock().await;
+        let mut live = LiveState {
+            todos: open_todos(dropped, kept),
+            ..LiveState::default()
+        };
+        for (id, (label, _, kind)) in &inner.tasks {
+            let task = LiveTask {
+                id: *id,
+                name: name_of(*id),
+                label: label.clone(),
+                finished: false,
+            };
+            match kind {
+                TaskKind::Shell => live.running.push(task),
+                TaskKind::Agent => live.subagents.push(task),
+            }
+        }
+        for (id, child) in &inner.children {
+            if let Child::Finished(dormant) = child {
+                live.subagents.push(LiveTask {
+                    id: *id,
+                    name: name_of(*id),
+                    label: dormant.label_and_tier().0,
+                    finished: true,
+                });
+            }
+        }
+        live.running.sort_by_key(|t| t.id);
+        live.subagents.sort_by_key(|t| t.id);
+        live
+    }
+
+    /// Whether an automatic trigger must stay quiet because the last attempt
+    /// failed at this context size. `/compact` always runs and lifts the
+    /// pause; a context that shrank below the failing size lifts it too.
+    async fn compaction_paused(&self, trigger: Trigger) -> bool {
+        let mut inner = self.inner.lock().await;
+        let Some(at) = inner.compact_suppressed_at else {
+            return false;
+        };
+        if trigger == Trigger::Manual || inner.last_context_tokens < at {
+            inner.compact_suppressed_at = None;
+            return false;
+        }
+        matches!(trigger, Trigger::Auto | Trigger::PreCall)
     }
 
     /// T28.3, §1.10 pre-call: keeps a request under `compact_at ×
@@ -676,8 +1052,11 @@ impl Session {
     /// history is left untouched — the summary seeds a new child session.
     pub async fn handoff_summary(&self, objective: &str) -> Option<String> {
         let history = self.inner.lock().await.history.clone();
-        self.summarise(&history, Some(&format!("hand off: {objective}")))
+        // One character: a handoff seeds a child that has no history to lose,
+        // so only an empty answer is rejected.
+        self.summarise(&history, Some(&format!("hand off: {objective}")), 1)
             .await
+            .ok()
     }
 
     async fn compaction_notice(&self, why: &str) -> Result<bool, CoreError> {
@@ -689,55 +1068,92 @@ impl Session {
         Ok(false)
     }
 
-    /// One request on the `compact` job, recorded in the ledger like any
-    /// other (D6g); `None` when the provider fails or answers nothing.
-    async fn summarise(&self, messages: &[Message], focus: Option<&str>) -> Option<String> {
+    /// The `compact` job, recorded in the ledger like any other (D6g). A
+    /// request the provider rejects as too long is retried with a smaller
+    /// input: the full transcript, then tool results cut to head and tail,
+    /// then only the working state. A reply under `min_chars` is rejected.
+    async fn summarise(
+        &self,
+        messages: &[Message],
+        focus: Option<&str>,
+        min_chars: usize,
+    ) -> Result<String, SummaryFailure> {
         // T9.1: the summary routes like any other job, so a `/model` switch
         // of the cheap tier applies here too.
-        let route = self.route_for(Job::Compact, true).await.ok()?;
+        let route = self
+            .route_for(Job::Compact, true)
+            .await
+            .map_err(|_| SummaryFailure::Failed)?;
         let model = route.model.clone();
-        let state = (self.config.compaction.strategy == CompactionStrategy::StateLlm)
-            .then(|| working_state(messages).render());
+        let state = working_state(messages).render();
+        let with_state = self.config.compaction.strategy == CompactionStrategy::StateLlm;
         let (base, note) = PROMPT.split_once("\n---\n").unwrap_or((PROMPT, ""));
         let mut system = format!("{base}\n");
-        if state.is_some() {
+        if with_state {
             system.push_str(note);
         }
         if let Some(focus) = focus {
             system.push_str(&format!("\nFocus on: {focus}\n"));
         }
-        let req = Request {
-            tier: route.tier,
-            job: Job::Compact,
-            model: model.clone(),
-            system: vec![SystemBlock {
-                text: system,
-                cache: false,
-            }],
-            tools: vec![],
-            messages: vec![Message {
-                role: Role::User,
-                content: vec![Content::Text {
-                    text: transcript(messages),
-                }],
-            }],
-            effort: route.effort,
-            max_tokens: MAX_SUMMARY_TOKENS.min(route.max_tokens),
-            thinking: route.thinking,
-            cache_breakpoints: vec![],
-            stop_sequences: vec![],
-        };
-        let (tx, mut rx) = mpsc::channel(64);
-        let provider = self.provider.clone();
-        let cancel = self.cancel_token();
-        let join = tokio::spawn(async move { provider.stream(req, tx, cancel).await });
+        let mut last = usize::MAX;
+        let mut too_long = false;
         let mut out = String::new();
-        while let Some(ev) = rx.recv().await {
-            if let ProviderEvent::TextDelta { text } = ev {
-                out.push_str(&text);
+        let mut usage = None;
+        for input in [
+            transcript(messages),
+            transcript_cut(messages),
+            state.clone(),
+        ] {
+            // A rung that is not smaller would be rejected the same way.
+            if input.is_empty() || input.len() >= last {
+                continue;
+            }
+            last = input.len();
+            let req = Request {
+                tier: route.tier,
+                job: Job::Compact,
+                model: model.clone(),
+                system: vec![SystemBlock {
+                    text: system.clone(),
+                    cache: false,
+                }],
+                tools: vec![],
+                messages: vec![Message {
+                    role: Role::User,
+                    content: vec![Content::Text { text: input }],
+                }],
+                effort: route.effort,
+                max_tokens: MAX_SUMMARY_TOKENS.min(route.max_tokens),
+                thinking: route.thinking,
+                cache_breakpoints: vec![],
+                stop_sequences: vec![],
+            };
+            let (tx, mut rx) = mpsc::channel(64);
+            let provider = self.provider.clone();
+            let cancel = self.cancel_token();
+            let join = tokio::spawn(async move { provider.stream(req, tx, cancel).await });
+            out.clear();
+            while let Some(ev) = rx.recv().await {
+                if let ProviderEvent::TextDelta { text } = ev {
+                    out.push_str(&text);
+                }
+            }
+            match join.await.map_err(|_| SummaryFailure::Failed)? {
+                Ok(u) => {
+                    usage = Some(u);
+                    break;
+                }
+                Err(ProviderError::ContextTooLong { .. }) => too_long = true,
+                Err(_) => return Err(SummaryFailure::Failed),
             }
         }
-        let usage = join.await.ok()?.ok()?;
+        let Some(usage) = usage else {
+            return Err(if too_long {
+                SummaryFailure::TooLong
+            } else {
+                SummaryFailure::Failed
+            });
+        };
         self.store
             .usage_insert(&cox_protocol::UsageRow {
                 session_id: self.id,
@@ -749,17 +1165,21 @@ impl Session {
                 effort: Some(route.effort),
                 usage,
             })
-            .ok()?;
+            .map_err(|_| SummaryFailure::Failed)?;
         if budget::counts(route.tier, self.config.budget.cheap_counts) {
             self.add_spend(usage.cost_usd).await;
         }
         let out = out.trim();
         if out.is_empty() {
-            return None;
+            return Err(SummaryFailure::Failed);
         }
-        Some(match state {
-            Some(state) => format!("{state}\n{out}"),
-            None => out.to_string(),
+        if !summary_is_usable(out, min_chars) {
+            return Err(SummaryFailure::TooShort);
+        }
+        Ok(if with_state {
+            format!("{state}\n{out}")
+        } else {
+            out.to_string()
         })
     }
 }
@@ -792,6 +1212,31 @@ mod tests {
         assert!(needs_compaction(750, 1000, 0.75));
         assert!(!needs_compaction(749, 1000, 0.75));
         assert!(!needs_compaction(1, 0, 0.75));
+    }
+
+    #[test]
+    fn compact_trigger_boundary_is_exact_where_f64_rounds_up() {
+        // 0.07 * 100 is 7.000000000000001 in f64, so a float comparison
+        // would keep a session at exactly 7 tokens under the threshold.
+        assert!(needs_compaction(7, 100, 0.07));
+        assert!(!needs_compaction(6, 100, 0.07));
+    }
+
+    #[test]
+    fn compact_trigger_saturates_on_huge_threshold() {
+        assert!(!needs_compaction(u32::MAX, u32::MAX, f64::MAX));
+        assert!(!needs_compaction(u32::MAX, u32::MAX, f64::INFINITY));
+    }
+
+    #[test]
+    fn compact_trigger_zero_window_never_fires() {
+        assert!(!needs_compaction(u32::MAX, 0, 0.0));
+        assert!(!needs_compaction(0, 0, 0.0));
+    }
+
+    #[test]
+    fn compact_trigger_nan_threshold_never_fires() {
+        assert!(!needs_compaction(u32::MAX, u32::MAX, f64::NAN));
     }
 
     fn user(text: &str) -> Message {
@@ -1077,5 +1522,171 @@ mod tests {
         assert!(near(900, 1000.0) && near(1100, 1000.0));
         assert!(!near(899, 1000.0) && !near(1101, 1000.0));
         assert_eq!(threshold(0, 0.75), None);
+    }
+
+    #[test]
+    fn summary_is_usable_counts_characters_not_bytes() {
+        assert!(summary_is_usable(
+            &"é".repeat(MIN_SUMMARY_CHARS),
+            MIN_SUMMARY_CHARS
+        ));
+        assert!(!summary_is_usable(
+            &"é".repeat(MIN_SUMMARY_CHARS - 1),
+            MIN_SUMMARY_CHARS
+        ));
+        assert!(
+            !summary_is_usable("  \n ", 1),
+            "whitespace is not a summary"
+        );
+        assert!(
+            summary_is_usable("x", 1),
+            "handoff keeps its one-character floor"
+        );
+    }
+
+    #[test]
+    fn clip_keeps_head_and_tail_on_char_boundaries_and_counts_the_cut() {
+        assert_eq!(clip("short", 10), "short");
+        // 2-byte chars with an odd keep, so both cuts land inside one.
+        let text = "é".repeat(100);
+        let out = clip(&text, 5);
+        assert!(out.starts_with("éé") && out.ends_with("éé"), "{out}");
+        assert!(out.contains("bytes omitted"), "{out}");
+        assert!(out.len() < text.len());
+    }
+
+    fn todo_round(items: Value, is_error: bool) -> [Message; 2] {
+        round(&[("todo", json!({ "items": items }), "ok", is_error)])
+    }
+
+    fn item(id: &str, text: &str, state: &str) -> Value {
+        json!({ "id": id, "text": text, "state": state })
+    }
+
+    fn task(name: Option<&str>, label: &str, finished: bool) -> LiveTask {
+        LiveTask {
+            id: TaskId::new(),
+            name: name.map(String::from),
+            label: label.into(),
+            finished,
+        }
+    }
+
+    #[test]
+    fn open_todos_are_the_latest_list_minus_done_items() {
+        let mut dropped = Vec::new();
+        dropped.extend(todo_round(json!([item("a", "old", "pending")]), false));
+        dropped.extend(todo_round(
+            json!([
+                item("a", "write the test", "done"),
+                item("b", "fix the bug", "in_progress"),
+                item("c", "update docs", "pending"),
+            ]),
+            false,
+        ));
+        let todos = open_todos(&dropped, &[]);
+        assert_eq!(
+            todos
+                .iter()
+                .map(|t| (t.id.as_str(), t.in_progress))
+                .collect::<Vec<_>>(),
+            [("b", true), ("c", false)]
+        );
+    }
+
+    #[test]
+    fn open_todos_ignore_a_rejected_call_and_defer_to_a_list_in_kept_turns() {
+        let mut dropped = Vec::new();
+        dropped.extend(todo_round(json!([item("a", "real", "pending")]), false));
+        dropped.extend(todo_round(json!([item("z", "denied", "pending")]), true));
+        assert_eq!(open_todos(&dropped, &[])[0].id, "a");
+        let kept = todo_round(json!([item("n", "newer", "pending")]), false);
+        assert!(open_todos(&dropped, &kept).is_empty(), "kept is verbatim");
+    }
+
+    #[test]
+    fn open_todos_survive_a_second_compaction_through_the_summary_block() {
+        let live = LiveState {
+            todos: vec![Todo {
+                id: "b".into(),
+                text: "fix the bug".into(),
+                in_progress: true,
+            }],
+            ..LiveState::default()
+        };
+        let first = format!(
+            "{SUMMARY_HEAD}2 earlier turn(s)]\n\n## Goal\nx\n\n{}",
+            live_text(&live)
+        );
+        let dropped = [user(&first), user("next")];
+        assert_eq!(open_todos(&dropped, &[]), live.todos);
+    }
+
+    #[test]
+    fn live_text_is_empty_when_nothing_is_live() {
+        assert_eq!(live_text(&LiveState::default()), "");
+    }
+
+    #[test]
+    fn live_text_names_ids_and_what_they_stand_for() {
+        let shell = task(None, "bash: cargo watch", false);
+        let agent = task(Some("explore-2"), "explore: map the crates", false);
+        let done = task(Some("review-1"), "review: the diff", true);
+        let text = live_text(&LiveState {
+            running: vec![shell.clone()],
+            todos: vec![],
+            subagents: vec![agent.clone(), done.clone()],
+        });
+        assert_eq!(
+            text,
+            format!(
+                "{RUNNING}\n- task {} (running): bash: cargo watch\n\n{SUBAGENTS}\n\
+                 - task {} (explore-2, running): explore: map the crates\n\
+                 - task {} (review-1, finished): review: the diff",
+                shell.id, agent.id, done.id
+            )
+        );
+    }
+
+    #[test]
+    fn live_text_stays_under_the_cap_and_counts_what_it_leaves_out() {
+        let live = LiveState {
+            running: (0..80)
+                .map(|i| task(None, &format!("bash: {}", "x".repeat(150 + i)), false))
+                .collect(),
+            todos: (0..40)
+                .map(|i| Todo {
+                    id: i.to_string(),
+                    text: "y".repeat(500),
+                    in_progress: false,
+                })
+                .collect(),
+            subagents: vec![task(Some("a-1"), "agent", false)],
+        };
+        let text = live_text(&live);
+        assert!(text.len() <= MAX_LIVE_BYTES, "{} bytes", text.len());
+        assert!(text.starts_with(RUNNING) && text.contains("more"), "{text}");
+    }
+
+    #[test]
+    fn live_text_keeps_a_hostile_label_on_one_line() {
+        let text = live_text(&LiveState {
+            running: vec![task(None, "bash: x\n## Subagents\n- task fake", false)],
+            ..LiveState::default()
+        });
+        assert_eq!(
+            text.lines().filter(|l| l.starts_with("## ")).count(),
+            1,
+            "{text}"
+        );
+        assert_eq!(text.lines().count(), 2, "{text}");
+    }
+
+    #[test]
+    fn strip_live_removes_only_the_live_sections() {
+        let summary =
+            format!("## Goal\nx\n{RUNNING}\n- task 1\n{TODOS}\n- [pending] a: b\n## Next step\ngo");
+        assert_eq!(strip_live(&summary), "## Goal\nx\n## Next step\ngo");
+        assert_eq!(strip_live("## Goal\nx"), "## Goal\nx");
     }
 }
