@@ -193,7 +193,7 @@ func assertCoxSnapshot(
     sample, variant, reduceMotion: true, reduceTransparency: reduceTransparency
   ).image()
   // Anti-aliasing differs slightly between machines; a real change moves far more pixels.
-  assertSnapshot(
+  try assertVersionedSnapshot(
     of: image, as: .image(precision: 0.995, perceptualPrecision: 0.98), named: name,
     fileID: fileID, file: filePath, testName: testName, line: line)
 }
@@ -223,7 +223,7 @@ func assertCoxWindowSnapshot(
   NSGraphicsContext.restoreGraphicsState()
   let image = NSImage(size: rep.size)
   image.addRepresentation(rep)
-  assertSnapshot(
+  try assertVersionedSnapshot(
     of: image, as: .image(precision: 0.995, perceptualPrecision: 0.98),
     named: name ?? variant.name,
     fileID: fileID, file: filePath, testName: testName, line: line)
