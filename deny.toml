@@ -35,6 +35,8 @@ allow = [
 exceptions = [
     { allow = ["Unlicense"], crate = "whisper-rs" },
     { allow = ["Unlicense"], crate = "whisper-rs-sys" },
+    { allow = ["GPL-3.0-or-later"], crate = "config-schema" },
+    { allow = ["GPL-3.0-or-later"], crate = "shell-completions" },
 ]
 
 [bans]
