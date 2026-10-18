@@ -1,0 +1,138 @@
+// `{{id}}`: a cox plugin scaffolded by `cox plugin new`. Only the exports
+// `--with` asked for are here; `plugin.toml`'s `[capabilities]` matches
+// them exactly. See `docs/design/plugins.md` PL§4 in the cox repository
+// for what each export and host call does; payloads are `JsonElement`s
+// shaped as docs/plugin-abi.schema.json says.
+import cox.pdk.Cox
+import kotlin.wasm.WasmExport
+import kotlinx.serialization.json.*
+
+@WasmExport
+fun cox_init(): Int = Cox.export {
+    buildJsonObject {
+        // cox:with=status
+        putJsonArray("status") { add("status.right") }
+        // cox:end
+        // cox:with=panel
+        putJsonArray("panels") { add("panel") }
+        // cox:end
+        // cox:with=command
+        putJsonArray("commands") {
+            addJsonObject {
+                put("name", "hello")
+                put("description", "Say hello")
+            }
+        }
+        // cox:end
+        // cox:with=key
+        putJsonArray("keys") {
+            addJsonObject {
+                put("key", "g h")
+                put("name", "hello")
+                put("description", "Say hello")
+            }
+        }
+        // cox:end
+        // cox:with=renderer
+        putJsonArray("renderers") { add("item:assistant_message") }
+        // cox:end
+        // cox:with=event
+        putJsonArray("subscribe") { add("turn_started") }
+        // cox:end
+        // cox:with=tool
+        putJsonArray("tools") {
+            addJsonObject {
+                put("name", "hello")
+                put("description", "TODO: describe what this tool does")
+                putJsonObject("input_schema") {
+                    put("type", "object")
+                    putJsonObject("properties") {}
+                }
+            }
+        }
+        // cox:end
+    }
+}
+
+// cox:with=event
+@WasmExport
+fun cox_on_event(): Int = Cox.export {
+    // TODO: react to the events this plugin subscribed to in cox_init.
+    buildJsonObject {}
+}
+
+// cox:end
+// cox:with=hook
+@WasmExport
+fun cox_hook(): Int = Cox.export {
+    // TODO: inspect the call's `payload` and answer with the hook's own
+    // outcome shape.
+    buildJsonObject { put("type", "continue") }
+}
+
+// cox:end
+// cox:with=tool
+@WasmExport
+fun cox_tool_call(): Int = Cox.export {
+    // TODO: implement the `hello` tool declared in cox_init.
+    buildJsonObject { put("output", "TODO: implement this tool") }
+}
+
+// cox:end
+// cox:with=provider
+@WasmExport
+fun cox_provider_stream(): Int = Cox.export {
+    // TODO: translate the call's `request` and stream `ProviderEvent`s back.
+    JsonArray(emptyList())
+}
+
+// cox:end
+// cox:with=command
+@WasmExport
+fun cox_command(): Int = Cox.export { command ->
+    if (command.jsonObject["name"]?.jsonPrimitive?.contentOrNull != "hello") {
+        buildJsonObject { put("kind", "nothing") }
+    } else {
+        buildJsonObject {
+            put("kind", "notice")
+            put("level", "info")
+            put("text", "hello from {{id}}")
+        }
+    }
+}
+
+// cox:end
+// cox:with=key
+@WasmExport
+fun cox_key(): Int = Cox.export {
+    // TODO: react to the key named in the input's `name`.
+    buildJsonObject { put("kind", "nothing") }
+}
+
+// cox:end
+// cox:with=status,panel
+@WasmExport
+fun cox_render(): Int = Cox.export { input ->
+    val slot = input.jsonObject["slot"]?.jsonPrimitive?.contentOrNull
+    // cox:with=status
+    if (slot == "status.left" || slot == "status.right") return@export text("{{id}} ready")
+    // cox:end
+    // cox:with=panel
+    if (slot == "panel") return@export text("TODO: panel content")
+    // cox:end
+    buildJsonObject { put("text", JsonArray(emptyList())) }
+}
+
+/** A `text` widget of one line holding one span. */
+private fun text(line: String) = buildJsonObject {
+    put("text", buildJsonArray { addJsonArray { addJsonObject { put("text", line) } } })
+}
+
+// cox:end
+// cox:with=renderer
+@WasmExport
+fun cox_render_item(): Int = Cox.export {
+    // TODO: return a widget, or null to keep the default rendering.
+    JsonNull
+}
+// cox:end

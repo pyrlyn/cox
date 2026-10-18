@@ -1,0 +1,5 @@
+# Kotlin compiles inside Gradle's own process, so a build leaves no Kotlin
+# compiler daemon running behind it.
+kotlin.compiler.execution.strategy=in-process
+# A cox checkout's plugins/sdk-kotlin (see settings.gradle.kts).
+#coxSdk=/path/to/cox/plugins/sdk-kotlin
