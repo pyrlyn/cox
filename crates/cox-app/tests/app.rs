@@ -1742,10 +1742,11 @@ async fn a_turn_intent_is_refused_while_the_provider_is_not_ready() {
 /// A background shell that names itself after its working directory, records
 /// that name and then sleeps for good. A name rather than `$$`: under bwrap's
 /// `--unshare-pid` the shell's pid is the sandbox's, which the host cannot see.
+/// `bash` because `exec -a` is not POSIX: the default `sh` is dash on Linux.
 const DETACHED_SLEEP: &str = r#"
 [[turn]]
 text = "Starting."
-tool_calls = [{ name = "bash", input = { command = "echo \"$PWD/detached\" > shell.pid && exec -a \"$PWD/detached\" sleep 300", background = true } }]
+tool_calls = [{ name = "bash", input = { command = "echo \"$PWD/detached\" > shell.pid && exec -a \"$PWD/detached\" sleep 300", shell = "bash", background = true } }]
 
 [[turn]]
 text = "Done."
