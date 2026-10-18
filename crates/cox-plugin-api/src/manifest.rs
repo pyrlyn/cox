@@ -134,6 +134,11 @@ pub struct Capabilities {
     /// Desktop-only contributions (PL§15.4).
     #[serde(default)]
     pub desktop: DesktopCaps,
+    /// IDE permission classes (Kerf T4.1): the buffer, LSP, DAP, index,
+    /// terminal-panel and git gates. Nested so a cox-only manifest stays
+    /// valid: an absent table is every field false.
+    #[serde(default)]
+    pub ide: IdeCaps,
 }
 
 /// A place a plugin can run: who drives the session (PL§15.1).
@@ -274,6 +279,65 @@ pub struct DesktopCaps {
     /// The canvas pane of static HTML frames (`docs/design/plugin-canvas.md`).
     #[serde(default)]
     pub canvas: bool,
+}
+
+/// `capabilities.ide`: the IDE permission classes Kerf adds to cox's model
+/// (T4.1). Each flag is a class, not a process: a plugin that holds `lsp` or
+/// `dap` is a *client* of servers the **host** spawned from a declared
+/// command (T4.2 owns those tables). None of these lets a WASM guest spawn a
+/// process — PL§10's no-bypass rule still holds.
+///
+/// Empty vs absent: both mean "no class requested", matching every other
+/// `#[serde(default)]` flag in [`Capabilities`]. There is no `Option` here
+/// because a present-but-false flag is the same grant as an absent one.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IdeCaps {
+    /// Read and edit open text buffers through the host's buffer API. Not a
+    /// filesystem grant (`fs` is) and not a shell.
+    #[serde(default)]
+    pub buffer: bool,
+    /// Language-server client against servers the host spawned. Not a
+    /// process spawn and not a language server of its own.
+    #[serde(default)]
+    pub lsp: bool,
+    /// Debug-adapter client against adapters the host spawned. Not a
+    /// process spawn and not a debugger launch.
+    #[serde(default)]
+    pub dap: bool,
+    /// Symbol and reference queries against the host's semantic index. Does
+    /// not replace the core's own index (Kerf's semantic layer stays the
+    /// source of truth).
+    #[serde(default)]
+    pub index: bool,
+    /// Terminal-panel I/O through the host's terminal. Distinct from
+    /// [`TerminalCaps`] (terminal-only UI contributions) and from a shell.
+    #[serde(default)]
+    pub terminal: bool,
+    /// Git status/diff integration through the host's git facade. Does not
+    /// run `git` as a process from the guest.
+    #[serde(default)]
+    pub git: bool,
+}
+
+impl IdeCaps {
+    /// The grant-line names of every requested class, in declaration order
+    /// (PL§3: one sorted line per capability). `ide.` prefixes the class so
+    /// `ide.terminal` never reads as the unrelated `terminal.keys`.
+    pub fn grant_lines(&self) -> Vec<String> {
+        [
+            ("ide.buffer", self.buffer),
+            ("ide.lsp", self.lsp),
+            ("ide.dap", self.dap),
+            ("ide.index", self.index),
+            ("ide.terminal", self.terminal),
+            ("ide.git", self.git),
+        ]
+        .into_iter()
+        .filter(|(_, on)| *on)
+        .map(|(name, _)| name.to_string())
+        .collect()
+    }
 }
 
 /// A `[[provider]]` section (PL§7a).
@@ -899,6 +963,70 @@ args = ["--stdio"]
             let err = parse(&toml).expect_err("an unknown surface key is refused");
             assert!(err.contains("unknown field"), "{err}");
         }
+    }
+
+    #[test]
+    fn ide_caps_absent_is_the_same_as_an_empty_table() {
+        // The PL§2 example has no `[capabilities.ide]`; that is every class
+        // off, the same as writing the table with every flag false.
+        let absent = example();
+        assert_eq!(absent.capabilities.ide, IdeCaps::default());
+        assert_eq!(absent.capabilities.ide.grant_lines(), [] as [String; 0]);
+        let empty =
+            parse(&EXAMPLE.replace("[limits]", "[capabilities.ide]\nbuffer = false\n\n[limits]"))
+                .expect("an empty ide table parses");
+        assert_eq!(empty.capabilities.ide, IdeCaps::default());
+        assert_eq!(empty.validate(), Ok(()));
+    }
+
+    #[test]
+    fn ide_caps_parse_per_family_and_validate() {
+        for key in ["buffer", "lsp", "dap", "index", "terminal", "git"] {
+            let toml = EXAMPLE.replace(
+                "[limits]",
+                &format!("[capabilities.ide]\n{key} = true\n\n[limits]"),
+            );
+            let m = parse(&toml).expect("the family parses");
+            let mut expected = IdeCaps::default();
+            match key {
+                "buffer" => expected.buffer = true,
+                "lsp" => expected.lsp = true,
+                "dap" => expected.dap = true,
+                "index" => expected.index = true,
+                "terminal" => expected.terminal = true,
+                "git" => expected.git = true,
+                _ => unreachable!(),
+            }
+            assert_eq!(m.capabilities.ide, expected, "{key}");
+            assert_eq!(m.validate(), Ok(()), "{key}");
+            assert_eq!(
+                m.capabilities.ide.grant_lines(),
+                [format!("ide.{key}")],
+                "{key}"
+            );
+            // Only the named class is granted; a false sibling is not a line.
+            assert_eq!(m.capabilities.ide.grant_lines().len(), 1, "{key}");
+            let empty = IdeCaps::default();
+            assert_eq!(empty.grant_lines(), [] as [String; 0], "{key}");
+        }
+    }
+
+    #[test]
+    fn ide_caps_deny_unknown_keys() {
+        let toml = EXAMPLE.replace("[limits]", "[capabilities.ide]\nshell = true\n\n[limits]");
+        let err = parse(&toml).expect_err("an unknown ide key is refused");
+        assert!(err.contains("unknown field"), "{err}");
+    }
+
+    #[test]
+    fn ide_grant_lines_are_the_ide_namespace() {
+        // `ide.terminal` is the terminal-panel class and must not be read as
+        // `terminal.keys`, the leader-key contribution.
+        let mut caps = Capabilities::default();
+        caps.ide.terminal = true;
+        caps.terminal.keys = true;
+        assert_eq!(caps.ide.grant_lines(), ["ide.terminal"]);
+        assert!(caps.terminal_keys());
     }
 
     #[test]

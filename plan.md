@@ -42,6 +42,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
+| T4.1 | in progress | P2 | 3 | 80% | MiMo Desktop / mimo |
 | T33.36 | todo | P2 | 4 | 0% | |
 | T33.40.6 | todo | P2 | 4 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
@@ -1072,6 +1073,25 @@ Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a sel
 Split by A157 into T33.47.8.1–T33.47.8.10, one layer each; this card closes when they are done.
 
 Remaining (all ten sub-cards are done): the hand check — ⌘⇧D and the palette row toggle the pane, two frames show, a click adds a chip and a second replaces it — and the falsifier 3 measurement in Instruments. Both need a person at the app: the agent that built the cards cannot drive a native window, and no fixture plugin declares a canvas.
+
+#### T4.1 IDE permission set (from Kerf)
+
+Model: MiMo Desktop / mimo · Status: in progress · Depends: — · Size: ~150 · Priority: P2 · Complexity: 3
+Goal: the buffer, LSP, DAP, index, terminal and git permission classes exist in `cox-plugin-api` as `[capabilities.ide]`, with validation, grant lines, JSON Schema and a design-doc section — Kerf T4.1's permission *classes* only (T4.2 owns the LSP/DAP manifest tables).
+Files: `crates/cox-plugin-api/src/manifest.rs`, `crates/cox-plugin-api/src/lib.rs`, `crates/cox-plugin/src/grant.rs`, `docs/design/plugins.md`, generated `docs/plugin.schema.json` and `docs/plugins.md` API index.
+Steps:
+1. `IdeCaps` nested under `Capabilities::ide`, six `bool` classes (`buffer`, `lsp`, `dap`, `index`, `terminal`, `git`), `deny_unknown_fields`, absent = empty = none requested.
+2. `IdeCaps::grant_lines` emits `ide.<class>`; `grant::capability_list` appends them (`ide.terminal` is never `terminal.keys`).
+3. Unit tests: each family present/absent, unknown key rejected, empty vs absent, grant-line namespace.
+4. Regenerate `docs/plugin.schema.json` and the `docs/plugins.md` API index; PL§16 documents what each class allows and what it does not (plugins still never spawn processes).
+Check:
+```bash
+mise exec -- cargo test -p cox-plugin-api -p cox-plugin
+mise exec -- cargo clippy -p cox-plugin-api -p cox-plugin --all-targets -- -D warnings
+mise exec -- cargo fmt --check -p cox-plugin-api -p cox-plugin
+```
+Done when: the Check is green, `plugin_schema_matches_committed_file` and `plugin_api_reference_covers_both_schemas` pass, and PL§16 names every class with its no-bypass rule. Named as Kerf's T4.1; cox's historical sandbox T4.1/T4.2 (invariant 11) are long done and live in `done.md`.
+Out of scope: LSP/DAP manifest tables (Kerf T4.2), host spawn logic, IDE host functions or ABI payloads, Kerf's own crates.
 
 ### P34 — Subagents (goal: a subagent can be a custom named definition, capped in number, able to ask the user, and able to exchange follow-up messages with its parent and its siblings — all through the parent's own `Submission`/`Event` stream)
 

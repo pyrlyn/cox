@@ -155,6 +155,9 @@ pub fn capability_list(manifest: &PluginManifest) -> Vec<String> {
             .filter(|(_, on)| *on)
             .map(|(k, _)| k.to_string()),
     );
+    // IDE classes (Kerf T4.1) carry their own `ide.` lines so `ide.terminal`
+    // never covers `terminal.keys`.
+    out.extend(caps.ide.grant_lines());
     match caps.model {
         Some(ModelTier::Cheap) => out.insert(MODEL_CHEAP.to_string()),
         Some(ModelTier::Code) => out.insert(MODEL_CODE.to_string()),
@@ -520,6 +523,21 @@ mod tests {
                 added: vec!["desktop.inspector".into(), "desktop.notify".into()],
                 removed: vec!["terminal.keys".into()],
             }
+        );
+    }
+
+    #[test]
+    fn ide_classes_are_their_own_grant_lines() {
+        let mut caps = Capabilities::default();
+        caps.ide.buffer = true;
+        caps.ide.lsp = true;
+        caps.ide.terminal = true;
+        caps.terminal.keys = true;
+        let m = manifest(caps);
+        // `ide.terminal` is the panel class; `terminal.keys` stays its own line.
+        assert_eq!(
+            capability_list(&m),
+            ["ide.buffer", "ide.lsp", "ide.terminal", "terminal.keys"]
         );
     }
 
