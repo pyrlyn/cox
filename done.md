@@ -13532,3 +13532,12 @@ Use the managed crates.io release so an independent checkout builds without sibl
 Validation: `cargo metadata --format-version 1` and `cargo metadata --locked --format-version 1` passed. Standalone `cargo metadata --locked` passed from a temporary archive with the current manifest and lockfile overlaid (38 workspace members, 832 packages; `shell-completions` resolved from crates.io). `Cargo.lock` changed only by adding the registry source and checksum for `shell-completions` 0.1.0; no other versions or dependency edges changed. The focused registry-backed checks passed: completion integration tests (2), CLI unit tests (4), `plugin_docs_translations_match_the_english_page` (1), and `cargo fmt --all -- --check`.
 
 The two app-server test joins were formatted for CI. The Russian and Ukrainian plugin API field indexes now match the English index exactly; translated prose was preserved. The registry dependency and its lockfile resolution are ready for the PR checks.
+
+
+### T379.2. Restore completions PR CI gates
+
+The published shell-completions dependency exposed CI gates that needed to stay enforced. Preserve the explicit license policy, synchronize generated workspace-hack dependencies without changing locked package versions, and resolve the missing desktop macOS sccache action reference using an existing shared action.
+
+What landed: regenerated `workspace-hack/Cargo.toml` with the existing cargo-hakari tool; replaced the missing local `.github/actions/sccache` reference with `pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979`; and updated the existing sccache wiring regression test to check the pinned reference, all inputs, and invocation order. The repository's license policy and dependency versions were left unchanged.
+
+Validation: the existing regression suite failed before the action update (1 failed, 5 passed) and passed afterward (6 passed). `cargo hakari generate --diff` is clean after regeneration. Comparison against HEAD found all 848 locked package name/version/source/checksum tuples unchanged; only generated workspace-hack dependency edges changed. `git diff --check` passed. `actionlint` could not run because no version is configured in mise; the reusable CI pipeline already runs its actionlint validation.
