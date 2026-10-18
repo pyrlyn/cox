@@ -520,8 +520,18 @@ jobs:
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           sccache-read-only: ${{ github.event_name == 'pull_request' }}
 
+      # Snapshots are per toolchain (desktop/macos/Packages/*/Tests/*/Snapshots/<key>). The hosted
+      # images' real key is not known yet, so the committed images sit under `hosted-pending`;
+      # this step, after setup-xcode has picked Xcode, prints the real key to the job
+      # summary so a follow-up can rename the directory and drop the override.
+      - uses: pyrlyn/ci/.github/actions/snapshot-version@bb9266564bad04d7e8ec7b8a2b46c90d9f0ca8df # ci/feat/snapshot-version, pin to main after ci#87 merges
+        with:
+          env-prefix: COX
+          override: hosted-pending
+
       # Pass markers (T63.2): `actions/cache` keys are immutable, so each run saves a new key and
       # restores the newest by prefix. A pull request reads its own and main's caches only.
+
       - name: swift test pass markers
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
