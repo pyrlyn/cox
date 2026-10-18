@@ -56,6 +56,7 @@ app-server = ["dep:cox-app", "plugins"]
 voice = ["dep:cox-voice"]
 
 [dependencies]
+shell-completions = { path = "../../../../packages/crates/rust/shell-completions" }
 clap = { workspace = true }
 cox-protocol = { path = "../cox-protocol", version = "0.1.2" }
 cox-plugin = { path = "../cox-plugin", version = "0.1.2", optional = true }

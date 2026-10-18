@@ -213,3 +213,17 @@ colours are stripped. [config.md](config.md) lists every field and rule.
 
 cox is under active development. APIs, configuration, and install paths are not
 yet stable. Treat this tree as the current manual, not a frozen release surface.
+
+## Shell completions
+
+Run `cox completions <shell>` to print a completion script for `bash`, `zsh`,
+`fish`, `powershell`, `elvish`, or `clink`. For example:
+
+```sh
+cox completions bash > cox.bash
+source ./cox.bash
+```
+
+Generation does not load application configuration or start a session. It does
+not install files or edit shell startup files; save and load the script using
+your shell's normal completion setup.

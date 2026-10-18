@@ -61,6 +61,7 @@ Programs the project uses and the direct packages from its manifests.
 | bytes | local | https://crates.io/crates/bytes | T1.2: turns a reqwest byte stream into SSE frames (`sse.rs`) and drives the in-memory fixture parser (`parse_sse_str`) through the same code path. |
 | chrono | local (`clock`) | https://crates.io/crates/chrono | cox-app: local midnight and week start for the desktop's project spend (T37.29.3.3) |
 | clap | local | https://crates.io/crates/clap | cox (CLI) |
+| shell-completions | local | https://github.com/pyrlyn/crates/tree/main/rust/shell-completions | Shared clap shell scripts and Clink generator; local path dependency |
 | cpal | local | https://github.com/RustAudio/cpal | cox-voice: the default microphone (CoreAudio, ALSA, WASAPI) for push-to-talk, in memory only (T54.3, A123); Linux builds need the ALSA headers (libasound2-dev) |
 | crossterm | local | https://crates.io/crates/crossterm | Terminal I/O |
 | diesel | local | https://crates.io/crates/diesel | cox-store diesel/diesel_migrations pinned "2.2" per plan.md D9 resolve to the latest 2.x compatible release (2.3.x) on crates.io as of 2026-09-02; verified no semver-breaking API change vs. 2.2 for the sqlite backend used here. |
