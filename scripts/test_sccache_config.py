@@ -41,8 +41,9 @@ class MiseEnv(unittest.TestCase):
 class Workflows(unittest.TestCase):
     def test_the_desktop_action_runs_the_shared_sccache_action_before_cargo(self):
         text = (ROOT / ".github/actions/desktop-macos/action.yml").read_text()
-        self.assertIn("uses: ./.github/actions/sccache", text)
-        self.assertLess(text.index("./.github/actions/sccache"), text.index("scripts/desktop/xcframework.sh"))
+        shared = "uses: pyrlyn/ci/.github/actions/sccache@"
+        self.assertIn(shared, text)
+        self.assertLess(text.index(shared), text.index("scripts/desktop/xcframework.sh"))
 
     def test_the_pr_desktop_job_passes_the_backend_read_only_on_pull_requests(self):
         text = (ROOT / ".github/workflows/ci.yml").read_text()
