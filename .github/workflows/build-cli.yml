@@ -62,19 +62,19 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
       # A no-op on the Linux targets.
-      - uses: pyrlyn/ci/.github/actions/setup-xcode@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@main
         with:
           version: '27'
       # The Rust mise.toml pins, checked like in ci.yml; scripts/package.sh
       # adds the matrix target to it.
-      - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
       - uses: Swatinem/rust-cache@v2
 
       # An unsigned release is refused the same way an untested one is: it
       # would be discovered by whoever installs it, not here.
       - name: Import signing certificate
         if: matrix.sign
-        uses: pyrlyn/ci/.github/actions/macos-keychain@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
+        uses: pyrlyn/ci/.github/actions/macos-keychain@main
         with:
           certificate: ${{ secrets.MACOS_CERTIFICATE }}
           password: ${{ secrets.MACOS_CERTIFICATE_PWD }}

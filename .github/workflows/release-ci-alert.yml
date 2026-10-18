@@ -29,4 +29,4 @@ jobs:
       actions: read
       contents: read
       pull-requests: write
-    uses: pyrlyn/ci/.github/workflows/release-ci-alert.yml@341896b491b89d93a1940313c0149ddfd8fae9c2 # main
+    uses: pyrlyn/ci/.github/workflows/release-ci-alert.yml@main
