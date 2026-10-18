@@ -112,7 +112,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T61.4 | todo | P1 | 2 | 0% | |
+| T61.4 | in progress | P1 | 2 | 0% | Claude Code / claude-sonnet-5-5 |
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
 | T61.7 | todo | P2 | 2 | 0% | |
@@ -1877,6 +1877,8 @@ Steps:
 Check: two runs of `desktop-macos` on one pull request, the second after a Swift-only commit: its log shows the cache hit and no `cargo build`.
 
 Done when: §4.3.9 has both job times; the desktop build workflow, which shares the action, still builds `dist`.
+
+Execution plan (Claude Code / claude-sonnet-5-5): (1) in `.github/actions/desktop-macos/action.yml`, an `actions/cache` step (id `ffi`, exact key only) for the XCFramework and bindings; the Rust setup, `rust-cache`, sccache and `xcframework.sh` steps run only on a miss, the `arm64 only` check always; a hit installs mise with XcodeGen only, because the callers' `Cox.app` step runs `mise exec` and `setup-rust` is what installed mise. (2) The existing `Swift build cache` step already caches `~/Library/Caches/org.swift.swiftpm` and `Packages/*/.build` on the `Package.resolved` hash with a hash-free restore key, so step 2 needs no second cache on the same paths. (3) `scripts/test_desktop_ffi_cache.py` pins both caches, the miss conditions and the SHA pins. (4) `scripts/test_sccache_config.py` looks for the run command instead of the first mention of `xcframework.sh`, which the cache key now names. Verify: the scripts suite, then two `desktop-macos` runs on the pull request.
 
 Out of scope: sccache (T61.7).
 
