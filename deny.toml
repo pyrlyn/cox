@@ -54,11 +54,13 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 ignore = [
     "RUSTSEC-2025-0141", # bincode 1.3.3 via syntect
     "RUSTSEC-2024-0320", # yaml-rust 0.4.5 via syntect
-    # Marked unmaintained (no vulnerability) on 2026-10; transitive via zbus, no
-    # maintained replacement yet. Re-review when zbus moves on.
-    "RUSTSEC-2026-0370", # zvariant
-    "RUSTSEC-2026-0371", # zbus_names
-    "RUSTSEC-2026-0372", # zvariant_derive
+    # Unmaintained only because zbus 6 absorbed them; reached through
+    # keyring 4.2 -> secret-service 5.2 -> zbus 5 on Linux, with no
+    # vulnerability attached and no release on zbus 6 yet. Re-review when
+    # keyring or secret-service moves to zbus 6.
+    "RUSTSEC-2026-0370", # zvariant 5 via zbus 5
+    "RUSTSEC-2026-0371", # zbus_names 4 via zbus 5
+    "RUSTSEC-2026-0372", # zvariant_derive 5 via zbus 5
 ]
 
 [sources]
