@@ -39,7 +39,7 @@
       "default": ""
     },
     "wasm": {
-      "description": "The module to load, relative to the package directory. Absent only\nfor a data-only package — `[[mcp]]` servers, `[[agents]]` files\nand/or `[[skills]]` folders (PL§13/§14, T33.38, T45.3, T33.46):\n`validate` then requires\n`capabilities` to be its default and `provider`/`models`/\n`external_agents` to be empty, since every other capability class\nneeds a wasm export to back it.",
+      "description": "The module to load, relative to the package directory. Absent only\nfor a data-only package — `[[mcp]]` servers, `[[language_servers]]`,\n`[[debug_adapters]]`, `[[agents]]` files and/or `[[skills]]` folders\n(PL§13/§14, T33.38, T45.3, T33.46, Kerf T4.2): `validate` then\nrequires `capabilities` to be its default and `provider`/`models`/\n`external_agents` to be empty, since every other capability class\nneeds a wasm export to back it.",
       "type": [
         "string",
         "null"
@@ -116,6 +116,22 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/McpDecl"
+      },
+      "default": []
+    },
+    "language_servers": {
+      "description": "`[[language_servers]]` entries: a language server process the plugin\ndeclares and the host spawns (Kerf T4.2, PL§7e). Same \"no bypass\"\nrule as `[[mcp]]`: the guest never starts a process.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LanguageServerDecl"
+      },
+      "default": []
+    },
+    "debug_adapters": {
+      "description": "`[[debug_adapters]]` entries: a Debug Adapter Protocol process the\nplugin declares and the host spawns (Kerf T4.2, PL§7e).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DebugAdapterDecl"
       },
       "default": []
     },
@@ -643,6 +659,108 @@
       "additionalProperties": false,
       "required": [
         "name"
+      ]
+    },
+    "LanguageServerDecl": {
+      "description": "A `[[language_servers]]` entry (Kerf T4.2, PL§7e): a language server the\nplugin declares and the **host** spawns, never a wasm export — the same\n\"no bypass\" rule as `[[mcp]]` and `[[external_agents]]`. The command is a\nprogram inside the package (covered by the digest) or on PATH (shown\nverbatim at approval); the host wraps it under the session sandbox and\ncaps its stdout/stderr buffers.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Server name; unique in the package, joined as `<id>-<name>`.",
+          "type": "string"
+        },
+        "languages": {
+          "description": "Language ids it serves (`\"rust\"`, `\"python\"`), matched against the\nbuffer language. Empty with `globs` empty means never selected.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "globs": {
+          "description": "Glob patterns it serves, matched against workspace-relative paths.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "command": {
+          "description": "Program inside the package or on PATH. Non-empty.",
+          "type": "string"
+        },
+        "args": {
+          "description": "Arguments for `command`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "env": {
+          "description": "Environment the host sets on the child. Keys are env var names and\nvalues are literals; the host starts from an empty environment plus\nthese (as `cox-mcp` clears its child's env). Secrets stay out: a key\nis named through `key_env` on a decl that has one, never written here.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "config": {
+          "description": "Optional server configuration the host passes on initialize (LSP\n`initializationOptions` / a settings blob). Opaque to the host.",
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "command"
+      ]
+    },
+    "DebugAdapterDecl": {
+      "description": "A `[[debug_adapters]]` entry (Kerf T4.2, PL§7e): a Debug Adapter Protocol\nprocess the plugin declares and the host spawns. Same shape and spawn\nrule as [`LanguageServerDecl`]; `languages` is the buffer languages it\ndebugs.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Adapter name; unique in the package, joined as `<id>-<name>`.",
+          "type": "string"
+        },
+        "languages": {
+          "description": "Language ids it debugs (`\"rust\"`, `\"python\"`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "command": {
+          "description": "Program inside the package or on PATH. Non-empty.",
+          "type": "string"
+        },
+        "args": {
+          "description": "Arguments for `command`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "env": {
+          "description": "Environment the host sets on the child; see [`LanguageServerDecl::env`].",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "config": {
+          "description": "Optional adapter configuration the host passes at launch. Opaque.",
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "command"
       ]
     },
     "ExternalAgentDecl": {
