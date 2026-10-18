@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-// A remote host's workspace (DT§4.4, T52.21): cox on another machine, reached over the person's
-// own `ssh` (or in a container or VM, T68.5) as `cox app-server --stdio`, listed in the sidebar as
-// its own group and opened like a local session. The protocol CoxModel depends on instead of cox-ffi's `RemoteHandle`; the
-// live one is in CoxCore. Separate from `Workspace.swift` because every read crosses the network
-// and is async, and the host can drop.
+// A remote host's workspace (DT§4.4, T52.21): cox on another machine, reached over the person's own
+// `ssh` (or in a container or VM, T68.5) as `cox app-server --stdio`, listed in the sidebar as its
+// own group and opened like a local session. The protocol CoxModel depends on instead of cox-ffi's
+// `RemoteHandle`; the live one is in CoxCore. Separate from `Workspace.swift` because every read
+// crosses the network and is async, and the host can drop.
 
 import Foundation
 

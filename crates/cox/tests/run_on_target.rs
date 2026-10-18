@@ -62,6 +62,10 @@ impl Rig {
     }
 
     fn cox(&self) -> Command {
+        self.cox_with(PROMPT)
+    }
+
+    fn cox_with(&self, prompt: &str) -> Command {
         let root = self.dir.path();
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_cox"));
         cmd.current_dir(root.join("work"))
@@ -69,7 +73,7 @@ impl Rig {
             .env("HOME", root.join("local"))
             .env("COX_KEYRING", "off")
             .env_remove("COX_PROVIDER")
-            .args(["run", "--on", "ci", "-p", PROMPT])
+            .args(["run", "--on", "ci", "-p", prompt])
             .write_stdin("");
         cmd
     }
@@ -96,6 +100,19 @@ fn run_on_target_returns_remote_exit_code() {
     // and exits 97, which must come back unchanged, with its message.
     let rig = Rig::new("ssh", Kind::Docker, "ssh:ci");
     rig.cox()
+        .assert()
+        .code(fake_launcher::BAD_ARGV)
+        .stderr(predicates::str::contains("unexpected argv"));
+}
+
+#[test]
+fn a_launcher_that_exits_before_reading_the_prompt_keeps_its_exit_code() {
+    // A prompt larger than any pipe buffer cannot be written before the
+    // launcher, which refuses the argv unread, exits: the write always meets
+    // a closed pipe, which used to turn exit 97 into our own error.
+    let rig = Rig::new("ssh", Kind::Docker, "ssh:ci");
+    let prompt = format!("{PROMPT} {}", "x".repeat(100 * 1024));
+    rig.cox_with(&prompt)
         .assert()
         .code(fake_launcher::BAD_ARGV)
         .stderr(predicates::str::contains("unexpected argv"));
