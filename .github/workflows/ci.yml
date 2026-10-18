@@ -450,6 +450,9 @@ jobs:
       - name: sccache wiring
         run: python3 -m unittest discover -s scripts -p 'test_sccache_config.py'
 
+      - name: xcframework.sh skip stamp
+        run: python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
+
       - name: swiftlint fixtures
         working-directory: desktop/macos
         run: |
