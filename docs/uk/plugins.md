@@ -243,19 +243,22 @@ cox не завантажує жодних інших файлів. Cursor кл�
 
 ### Спільна частина
 
-- manifest `PluginManifest`: `api`, `surfaces`, `id`, `version`, `name`, `description`, `wasm`, `wasi`, `limits`, `capabilities`, `provider`, `models`, `mcp`, `external_agents`, `cloud_agents`, `agents`, `skills`
+- manifest `PluginManifest`: `api`, `surfaces`, `id`, `version`, `name`, `description`, `wasm`, `wasi`, `limits`, `capabilities`, `provider`, `models`, `mcp`, `language_servers`, `debug_adapters`, `external_agents`, `cloud_agents`, `agents`, `skills`
 - manifest `Surface`: `terminal`, `desktop`, `headless`, `acp`
 - manifest `Limits`: `memory_mib`, `call_ms`
-- manifest `Capabilities`: `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui`
+- manifest `Capabilities`: `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui`, `ide`
 - manifest `ModelTier`: `cheap`, `code`
 - manifest `FsCaps`: `read`, `write`
 - manifest `UiCaps`: `status`, `panel`, `overlay`, `commands`, `render`
+- manifest `IdeCaps`: `buffer`, `lsp`, `dap`, `index`, `terminal`, `git`
 - manifest `ProviderDecl`: `name`, `api`, `base_url`, `api_key_env`, `auth`
 - manifest `ProviderApi`: `chat`, `responses`, `plugin`
 - manifest `ProviderAuth`: `bearer`, `x-api-key`, `none`
 - manifest `ModelDecl`: `id`, `provider`, `context_window`, `max_output`, `price`
 - manifest `PriceDecl`: `input`, `output`, `cache_read`, `cache_write`
 - manifest `McpDecl`: `name`, `command`, `args`, `url`
+- manifest `LanguageServerDecl`: `name`, `languages`, `globs`, `command`, `args`, `env`, `config`
+- manifest `DebugAdapterDecl`: `name`, `languages`, `command`, `args`, `env`, `config`
 - manifest `ExternalAgentDecl`: `name`, `command`, `args`, `mode`, `key_env`
 - manifest `AgentMode`: `acp`, `stream-json`
 - manifest `CloudAgentDecl`: `name`, `backend`, `key_env`, `model`, `description`

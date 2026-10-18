@@ -148,7 +148,7 @@ The complete version is `plugins/examples/go`; `cox plugin new <name> --lang go`
 
 ## Shared
 
-The manifest's package identity, resource limits, providers, models, agents, MCP servers, and shared capabilities apply wherever the plugin loads. `surfaces` optionally narrows loading to `terminal`, `desktop`, `headless`, or `acp`; when absent, it permits all four. `InitIn.surface` tells the guest which one opened the session. `cox:host/v1`, the exports above except `cox_key`, commands, renderers, and the `status.left`, `status.right`, `panel`, and `overlay` slots use this part. Headless and ACP sessions have no UI, so they omit UI grants. `[[skills]]` entries (`name`, `dir`) ship Agent Skills: `dir` is a package folder named for the skill that holds a `SKILL.md` in the `.cox/skills` format. A granted plugin's skills join the session's skill index, and a user or project skill of the same name wins. A package of only `[[mcp]]`, `[[agents]]` and `[[skills]]` needs no `wasm`. `Span.link` accepts an HTTPS URL or workspace-relative path and opens only on a person's click; unsupported links remain text.
+The manifest's package identity, resource limits, providers, models, agents, MCP servers, language servers, debug adapters, and shared capabilities apply wherever the plugin loads. `surfaces` optionally narrows loading to `terminal`, `desktop`, `headless`, or `acp`; when absent, it permits all four. `InitIn.surface` tells the guest which one opened the session. `cox:host/v1`, the exports above except `cox_key`, commands, renderers, and the `status.left`, `status.right`, `panel`, and `overlay` slots use this part. Headless and ACP sessions have no UI, so they omit UI grants. `[[skills]]` entries (`name`, `dir`) ship Agent Skills: `dir` is a package folder named for the skill that holds a `SKILL.md` in the `.cox/skills` format. A granted plugin's skills join the session's skill index, and a user or project skill of the same name wins. `[[language_servers]]` and `[[debug_adapters]]` declare a process the host spawns under the session sandbox (the plugin never spawns); a package of only `[[mcp]]`, `[[language_servers]]`, `[[debug_adapters]]`, `[[agents]]` and `[[skills]]` needs no `wasm`. `Span.link` accepts an HTTPS URL or workspace-relative path and opens only on a person's click; unsupported links remain text.
 
 ## Terminal-only
 
@@ -241,19 +241,22 @@ Generated from [manifest](plugin.schema.json) and [ABI](plugin-abi.schema.json) 
 
 ### Shared
 
-- manifest `PluginManifest`: `api`, `surfaces`, `id`, `version`, `name`, `description`, `wasm`, `wasi`, `limits`, `capabilities`, `provider`, `models`, `mcp`, `external_agents`, `cloud_agents`, `agents`, `skills`
+- manifest `PluginManifest`: `api`, `surfaces`, `id`, `version`, `name`, `description`, `wasm`, `wasi`, `limits`, `capabilities`, `provider`, `models`, `mcp`, `language_servers`, `debug_adapters`, `external_agents`, `cloud_agents`, `agents`, `skills`
 - manifest `Surface`: `terminal`, `desktop`, `headless`, `acp`
 - manifest `Limits`: `memory_mib`, `call_ms`
-- manifest `Capabilities`: `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui`
+- manifest `Capabilities`: `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `ui`, `ide`
 - manifest `ModelTier`: `cheap`, `code`
 - manifest `FsCaps`: `read`, `write`
 - manifest `UiCaps`: `status`, `panel`, `overlay`, `commands`, `render`
+- manifest `IdeCaps`: `buffer`, `lsp`, `dap`, `index`, `terminal`, `git`
 - manifest `ProviderDecl`: `name`, `api`, `base_url`, `api_key_env`, `auth`
 - manifest `ProviderApi`: `chat`, `responses`, `plugin`
 - manifest `ProviderAuth`: `bearer`, `x-api-key`, `none`
 - manifest `ModelDecl`: `id`, `provider`, `context_window`, `max_output`, `price`
 - manifest `PriceDecl`: `input`, `output`, `cache_read`, `cache_write`
 - manifest `McpDecl`: `name`, `command`, `args`, `url`
+- manifest `LanguageServerDecl`: `name`, `languages`, `globs`, `command`, `args`, `env`, `config`
+- manifest `DebugAdapterDecl`: `name`, `languages`, `command`, `args`, `env`, `config`
 - manifest `ExternalAgentDecl`: `name`, `command`, `args`, `mode`, `key_env`
 - manifest `AgentMode`: `acp`, `stream-json`
 - manifest `CloudAgentDecl`: `name`, `backend`, `key_env`, `model`, `description`
