@@ -304,7 +304,9 @@ mod tests {
             panic!("a moved section needs no key lookup")
         });
         assert_eq!(result.status, "warn");
-        assert!(result.fix.contains("cox plugin install"), "{}", result.fix);
+        // No message argument: CodeQL reads printing a key-check result as
+        // logging the key, though the result never holds one.
+        assert!(result.fix.contains("cox plugin install"));
     }
 
     #[test]
