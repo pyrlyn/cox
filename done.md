@@ -724,6 +724,41 @@ Goal: dependencies compiled in one worktree are reused by another without sharin
 - Test: `scripts/test_sccache_config.py` pins the variables and the wiring (config-only change, so the assertion on the config is the test).
 Check: `python3 -m unittest discover -s scripts -p 'test_sccache_config.py'` ran 6 tests, OK. `mise exec -- env` shows `RUSTC_WRAPPER`, `CMAKE_C_COMPILER_LAUNCHER`, `CMAKE_CXX_COMPILER_LAUNCHER` set to the mise sccache and `SCCACHE_CACHE_SIZE=10G`. `cargo build -p cox-config` in a second worktree with an empty `target/`: 667 hits of 670 requests, 35 to 36 s with the cache against 105 to 106 s without it (research.md §4.3.9, T61.7).
 Done: §4.3.9 has the clean build of the second worktree with and without sccache.
+
+#### T33.36 Kotlin: thin PDK, template, example
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-17 · Priority: P2 · Complexity: 4 · Depends: T33.35, A61 (extism `wasmtime-exceptions` is on; `exception_handling_module_loads`), T33.43 (Kotlin's stdlib imports `wasi_snapshot_preview1::random_get`, and the host keeps WASI off until then, A55, A63) · Size: ~200 · Files: `plugins/sdk-kotlin/src/…/Cox.kt`, `plugins/examples/kotlin/src/…/Main.kt`, `plugins/templates/kotlin/*.tmpl`; `plugins/mise.toml` gets java, gradle and kotlin
+Goal: a cox-owned minimal Kotlin PDK over the raw extism imports (there is no maintained one, R§4.3.5 P30), the same example, and `--lang kotlin`.
+Draft: the PDK (`plugins/sdk-kotlin`, ~150 lines over the raw extism imports and `cox:host/v1`) and the example (`plugins/examples/kotlin`, id `example-kotlin`, same behaviour as the Rust example, `gradle pluginPackage`) build with Kotlin 2.4.20, Gradle 9.8.0 and OpenJDK 27.0.0 and are kept on branch `wip/t33.36-kotlin`. Left to do once WASI is on: templates, `Lang::Kotlin`, `PLUGIN_LANGS`, `just plugin-examples kotlin`, the CI step, the e2e, docs and `toolchain.md` rows.
+Check: `plugin_example_kotlin` is ignored with its reason locally and runs in the CI job.
+Execution plan (2026-10-17): WASI is on per plugin since T33.14.2/T33.43 (`wasi = true` in `plugin.toml`, no env, no preopens; `crates/cox-plugin/src/host.rs` `with_wasi(mounts.wasi)`), so the example sets `wasi = true` like Go. (1) Bring `plugins/sdk-kotlin` and `plugins/examples/kotlin` over from the draft (889db46a), check they build with the pinned Kotlin/Gradle/JDK. (2) `plugins/templates/kotlin/*.tmpl`, `Lang::Kotlin` in `crates/cox/src/plugin_new.rs`, `PLUGIN_LANGS` and the picker snapshot. (3) `just plugin-examples kotlin`, `crates/cox/tests/plugin_example_kotlin.rs` (ignored locally, run in CI's plugin-examples job with `PLUGIN_TOOLS_PATH`). (4) `docs/plugins.md`, `toolchain.md` rows. Verify: `just plugin-examples kotlin`, `cargo nextest run -p cox -E 'test(plugin)' --run-ignored only` for the Kotlin tests, clippy and fmt on `cox`.
+What landed:
+- Blocker check: WASI is on per plugin since T33.14.2/T33.43 (`with_wasi(mounts.wasi)` in `crates/cox-plugin/src/host.rs`, `wasi = true` in `plugin.toml`, no environment and no preopens), so the example and the template set `wasi = true`; the host is not loosened. The built example imports only `random_get` from WASI.
+- `plugins/sdk-kotlin` and `plugins/examples/kotlin` (from the draft) now document `wasi = true` and compile Kotlin in-process (`gradle.properties`), so a build leaves no Kotlin daemon.
+- `plugins/templates/kotlin`: `settings.gradle.kts` (the PDK through `includeBuild` of `coxSdk`, since it is not published), `build.gradle.kts` (`pluginPackage` stages `plugin.toml` and `<crate>.wasm` in `build/plugin`, because `cox plugin install` copies a whole directory), `gradle.properties`, `plugin.toml` (`wasi = true`), `Main.kt` with one `@WasmExport` per `--with` block, a `justfile` whose `smoke` installs into a scratch `COX_HOME`, `README.md`, `.gitignore`.
+- `Lang::Kotlin` scaffolds through `scaffold_blocks`; `PluginNewError::UnsupportedLang` and its test are removed, since every PL§13 language has a template. `PLUGIN_LANGS` and the picker snapshot list kotlin.
+- `crates/cox/tests/plugin_example_kotlin.rs`: `plugin_example_kotlin` (T33.28's two-process rollout check), `plugin_example_kotlin_counts_turns_in_its_status_and_resets_them`, and `plugin_example_kotlin_template` (scaffolds every wasm capability, builds with Gradle against the in-repo PDK, starts it in the host, installs it). All `#[ignore]`d with "needs java and gradle: run `just plugin-examples kotlin`". The Go and Kotlin tests share `tests/common/wasm_example.rs` instead of copies of the same checks.
+- `just plugin-examples kotlin` and the `plugin-examples` CI job (mise-action installs java and gradle too) build the example and run the tests; both e2e steps pass `PLUGIN_TOOLS_PATH`, because CI's `cargo` is a mise shim.
+- Docs: a "Kotlin" section in `docs/plugins.md`; the PL§13 Kotlin row and §15 decision 3 in `docs/design/plugins.md`; java, gradle, kotlin and the Gradle packages in `toolchain.md`; the `plugins/sdk-kotlin` row in `plan.md` §1.
+Not done:
+- The PDK is not published (PL§14 decision 1), so a plugin outside this repository needs a cox checkout for `coxSdk`.
+- No version was bumped; Kotlin 2.4.20, Gradle 9.8.0 and OpenJDK 27.0.0 stay as pinned.
+- The task touches more files than the project's 3-file rule allows, as the card's own file list already did.
+Check:
+```text
+$ just plugin-examples kotlin
+        PASS (1/3) cox::plugin_example_kotlin plugin_example_kotlin_counts_turns_in_its_status_and_resets_them
+        PASS (2/3) cox::plugin_example_kotlin plugin_example_kotlin
+        PASS (3/3) cox::plugin_example_kotlin plugin_example_kotlin_template
+     Summary 3 tests run: 3 passed, 221 skipped
+$ just plugin-examples go   (after the shared-helper refactor)
+     Summary 3 tests run: 3 passed, 221 skipped
+$ cargo nextest run -p cox -p cox-tui -E 'binary(docs) | binary(doc_examples) | test(/plugin_new|picker|plugin_cli/) | binary(plugin_new_cli) | binary(deps)'
+     Summary 51 tests run: 51 passed, 471 skipped
+$ cargo clippy -p cox -p cox-tui --all-targets -- -D warnings   clean
+$ cargo fmt --check   clean
+$ cox plugin new demo-kt --lang kotlin --with status,command; just smoke   demo-kt loaded
+
 ```
 
 #### T61.11 No feature-unification rebuilds between `just test` and `just check-all`
