@@ -112,7 +112,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
 | T59.4 | todo | P2 | 4 | 0% | |
-| T61.3 | todo | P1 | 2 | 0% | |
 | T61.4 | todo | P1 | 2 | 0% | |
 | T61.5.3 | todo | P2 | 3 | 0% | |
 | T61.6 | todo | P2 | 2 | 0% | |
@@ -1852,32 +1851,6 @@ Rationale in §6 A140. Found by reading the build configuration (2026-10-07), no
 **Order.** T61.1 first (the baseline every later card compares against). Then T61.3 → T61.4 (the desktop path, the largest gain). T61.5.1–T61.5.3, T61.6, T61.7 and T61.9 are independent of each other. T61.8, T61.10 and T61.11 last; each may end as "rejected" with the measurement that rejected it.
 
 Timings go to a new `research.md` §4.3.9 "Build times", in the shape of R§4.3.4: each row is the median of 5 runs, with the machine, load average and commit. A card whose change gains nothing measurable is reverted and closed with that row.
-
-#### T61.3 Bindings generator on the host dev profile, skipped when the library did not change
-
-Model: sonnet · Status: open · Depends: - · Size: ~40 · Priority: P1 · Complexity: 2
-
-Goal: `uniffi-bindgen` is built once in the dev profile for the host, and `xcframework.sh` regenerates the bindings and the XCFramework only when `libcox_ffi.a` changed.
-
-Files:
-- `scripts/desktop/xcframework.sh`
-
-Steps:
-1. Run the generator with `cargo run -p cox-ffi --features bindgen --bin uniffi-bindgen` and no `--profile`/`--target`: library mode reads the metadata from the archive passed as `--library`, so the generator's own profile does not matter.
-2. After `cargo build`, hash the library (`shasum -a 256`) and compare with `desktop/macos/build/CoxFFI.xcframework/.source-sha256`; on a match print "unchanged" and exit 0. Write the stamp after a successful `-create-xcframework`.
-
-Check:
-```bash
-just desktop-xcframework
-cp desktop/macos/build/bindings/cox_ffi.swift "$TMPDIR/before.swift"
-just desktop-xcframework   # prints "unchanged"
-git stash && just desktop-xcframework && git stash pop
-diff "$TMPDIR/before.swift" desktop/macos/build/bindings/cox_ffi.swift
-```
-
-Done when: the bindings are byte-identical to the ones the `dist`-profile generator wrote; a second run with no Rust change is a no-op; §4.3.9 has the time of that no-op.
-
-Out of scope: CI caching (T61.4).
 
 #### T61.4 CI: cache the XCFramework and SwiftPM
 
