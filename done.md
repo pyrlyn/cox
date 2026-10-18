@@ -13524,3 +13524,11 @@ Execution plan: establish existing completion tests; extract the clap generator 
 Validation: The two new binary tests failed before implementation and passed afterward, covering six shells, invalid configuration, no application state writes, and shell validation. All 119 CLI unit tests and 11 dependency-boundary tests passed. All-target clippy passed. The command documentation test passed; the existing plugin translation parity test failed. Workspace formatting still reports unchanged cox-app/src/server.rs; the changed cox package is formatted.
 
 Reused `clap_complete` and the existing rtok Clink generator. No replacement library or custom generator was introduced. Local path dependencies resolve in the standard apps/packages layout.
+
+### T379.1. Consume the published shell-completions crate
+
+Use the managed crates.io release so an independent checkout builds without sibling repositories. The `cox` binary now uses the published `shell-completions` 0.1.0 dependency. Execution plan: replace the local Cargo path with the published version, resolve Cargo.lock only after publication, preserve existing dependency versions, format the two app-server test joins required by CI, synchronize language-neutral plugin API index lines in the RU and UK docs, verify locked metadata outside the sibling layout, and run completion checks through CI.
+
+Validation: `cargo metadata --format-version 1` and `cargo metadata --locked --format-version 1` passed. Standalone `cargo metadata --locked` passed from a temporary archive with the current manifest and lockfile overlaid (38 workspace members, 832 packages; `shell-completions` resolved from crates.io). `Cargo.lock` changed only by adding the registry source and checksum for `shell-completions` 0.1.0; no other versions or dependency edges changed. The focused registry-backed checks passed: completion integration tests (2), CLI unit tests (4), `plugin_docs_translations_match_the_english_page` (1), and `cargo fmt --all -- --check`.
+
+The two app-server test joins were formatted for CI. The Russian and Ukrainian plugin API field indexes now match the English index exactly; translated prose was preserved. The registry dependency and its lockfile resolution are ready for the PR checks.
