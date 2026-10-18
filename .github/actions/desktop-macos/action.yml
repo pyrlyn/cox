@@ -28,16 +28,16 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: pyrlyn/ci/.github/actions/setup-xcode@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+    - uses: pyrlyn/ci/.github/actions/setup-xcode@main
       with:
         version: '27'
 
     # Since Xcode 26 the Metal toolchain is a separate component the xcode-27 image lacks:
     # SwiftTerm's Shaders.metal (CoxPlatform) fails to compile without it.
-    - uses: pyrlyn/ci/.github/actions/metal-toolchain@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
+    - uses: pyrlyn/ci/.github/actions/metal-toolchain@main
 
     # SwiftPM clone cache, each package's .build and the app's DerivedData (see the action).
-    - uses: pyrlyn/ci/.github/actions/swift-cache@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
+    - uses: pyrlyn/ci/.github/actions/swift-cache@main
       with:
         paths: |
           desktop/macos/Packages/*/.build
@@ -65,7 +65,7 @@ runs:
           swift-${{ runner.os }}-${{ runner.arch }}-xcode27-${{ hashFiles('desktop/macos/Packages/*/Package.resolved', 'desktop/macos/project.yml', 'desktop/macos/Packages/*/Package.swift') }}-
           swift-${{ runner.os }}-${{ runner.arch }}-xcode27-
 
-    - uses: pyrlyn/ci/.github/actions/setup-rust@4e652d891cc6e6f0be316eda1a1f9630d76a8b7e # main
+    - uses: pyrlyn/ci/.github/actions/setup-rust@main
 
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
