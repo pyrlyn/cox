@@ -125,6 +125,12 @@ pub enum Command {
     /// Serve this machine's sessions to a remote desktop app (T52.19).
     #[cfg(feature = "app-server")]
     AppServer(AppServerArgs),
+    /// Keep sessions alive on this machine with no client attached (T66.23).
+    #[cfg(feature = "app-server")]
+    Serve(ServeArgs),
+    /// Reach `cox serve`'s sessions over stdio (what `ssh <host> cox attach --stdio` runs).
+    #[cfg(feature = "app-server")]
+    Attach(AttachArgs),
     /// Scaffold an AGENTS.md for the repo.
     Init(InitArgs),
     /// Instruction files, skills, commands, agents, hooks, MCP servers in effect.
@@ -180,6 +186,29 @@ pub enum VoiceModelAction {
 #[derive(Args, Debug, Clone)]
 pub struct AppServerArgs {
     /// Serve on stdin and stdout (what `ssh <host> cox app-server --stdio` runs).
+    #[arg(long, required = true)]
+    pub stdio: bool,
+}
+
+/// `cox serve` (T66.23, `docs/design/serve.md` D3): the supervisor, in the
+/// foreground. Resident sessions live in worker processes it starts and
+/// restarts.
+#[cfg(feature = "app-server")]
+#[derive(Args, Debug, Clone)]
+pub struct ServeArgs {
+    /// What the supervisor starts for each session: one session over stdin
+    /// and stdout. Hidden because a person never runs it by hand.
+    #[arg(long, hide = true)]
+    pub worker: bool,
+}
+
+/// `cox attach --stdio` (T66.23, D4.6): bridges stdin and stdout to a running
+/// `cox serve`. It never starts one; stdio is the only transport, as for
+/// `app-server`.
+#[cfg(feature = "app-server")]
+#[derive(Args, Debug, Clone)]
+pub struct AttachArgs {
+    /// Bridge stdin and stdout to the supervisor's socket.
     #[arg(long, required = true)]
     pub stdio: bool,
 }

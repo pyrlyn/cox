@@ -2436,38 +2436,6 @@ Done when these tests pass, with a fake worker program as `crates/cox/tests/remo
 
 Out of scope: the `cox serve` command and its `--worker` flag, the router and the bridge (later cards).
 
-#### T66.23 `cox serve` and `cox attach --stdio`
-
-Model: sonnet · Status: open · Depends: T66.22 · Size: ~80 · Priority: P2 · Complexity: 2
-
-Goal: the supervisor and the bridge are commands a person can run. `docs/design/serve.md` S8, D3, D4 item 7 and D8. `crates/cox` stays clap and dispatch only.
-
-Files:
-- `crates/cox/src/cli.rs`, `crates/cox/src/main.rs`
-- `crates/cox/Cargo.toml` (`cox-serve` as an optional workspace path dependency behind the existing `app-server` feature; the `deps.rs` rule T66.19 adds lists `crates/cox` as an allowed dependent)
-- `docs/app-server.md` (a "Resident sessions" section that names both commands, which `docs_name_every_subcommand` requires)
-
-Steps:
-1. `cox serve` runs the supervisor in the foreground; it does not daemonize. The hidden `--worker` flag, not shown in `--help`, runs `cox_app::server::serve` in worker mode over stdin and stdout, and is the argv T66.21's supervisor spawns through `current_exe()`.
-2. `cox attach --stdio` runs T66.22's bridge. It never starts a supervisor: with no `cox serve` running it fails, naming the socket path.
-3. On Windows both commands refuse with "not supported yet".
-4. The docs section states what is resident (a session lives in its worker until `end`), that a TUI session is never resident, and that the desktop app's ssh command stays `cox app-server --stdio` (D8).
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox --test docs
-COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- serve --help
-COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- attach --stdio
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-The last `attach` run exits non-zero and names `COX_HOME/run/serve.sock`; `COX_HOME` is a scratch tree, never `~/.cox`.
-
-Done when `docs_name_every_subcommand` passes, `serve --help` does not list `--worker`, and `cox attach --stdio` with no supervisor fails naming the socket path.
-
-Out of scope: the end-to-end test (T66.24), the desktop app choosing `cox attach --stdio` for a host that runs `cox serve` (a P52 desktop card), and heartbeat (T66.13).
-
 #### T66.24 End-to-end: kill the client, reattach, and the rollout grows only by the turn
 
 Model: sonnet · Status: open · Depends: T66.23 · Size: ~200 test lines · Priority: P2 · Complexity: 3

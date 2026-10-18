@@ -1124,6 +1124,7 @@ dependencies = [
  "cox-protocol",
  "cox-provider",
  "cox-sanitize",
+ "cox-serve",
  "cox-session",
  "cox-store",
  "cox-target",

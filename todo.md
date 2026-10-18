@@ -89,7 +89,6 @@
 - T66.11. `cox run -p --autonomous`: shell gates and the headless loop
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
-- T66.23. `cox serve` and `cox attach --stdio`
 - T66.24. End-to-end: kill the client, reattach, and the rollout grows only by the turn
 - T67.3. Five more hook events
 - T67.4. `/goal`: a judged stop condition
