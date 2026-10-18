@@ -9,7 +9,7 @@
     "check": "node build.mjs --check"
   },
   "dependencies": {
-    "@pyrlyn/brand": "github:pyrlyn/brand#v0.3.0"
+    "@pyrlyn/brand": "github:pyrlyn/brand#v0.4.0"
   },
   "engines": {
     "node": ">=18"
