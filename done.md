@@ -13712,3 +13712,7 @@ $ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test
 $ cargo nextest run -p cox --test ide ; -p cox-models ; -p cox-protocol -E 'test(config)' ; -p cox-tui -E 'test(keymap_table_matches_docs)' ; -p cox-provider-http -p cox-session
 3 + 23 + 20 + 1 + 123 tests run: all passed
 ```
+
+### T71.1 Format the app-server test calls
+
+The workspace `cargo fmt --check` failed on two overlong `tokio::join!` expressions in `crates/cox-app/src/server.rs`. Rustfmt wrapped both calls across lines; behavior is unchanged. `CARGO_BUILD_JOBS=2 mise exec -- cargo fmt --check` passes. `cox-app` tests and Clippy were not run because compiling its dependency graph reduced free disk to 9.8 GiB; the build was stopped before tests ran.

@@ -51,7 +51,7 @@ jobs:
       - uses: ./.github/actions/desktop-macos
 
       - name: Import signing certificate
-        uses: pyrlyn/ci/.github/actions/macos-keychain@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge
+        uses: pyrlyn/ci/.github/actions/macos-keychain@main
         with:
           certificate: ${{ secrets.MACOS_CERTIFICATE }}
           password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
