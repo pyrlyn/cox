@@ -19,6 +19,21 @@ env:
 # version: the `rust` job through the shared pyrlyn/ci workflow, the others
 # through pyrlyn/ci's setup-rust action. Both fail when rustc is not that pin.
 jobs:
+  # Which runner the macOS jobs use: pyrlyn/ci's macos-runner action reads the MACOS_RUNNER
+  # variable (unset or `hosted` = the hosted label, `xcode-27-local` = the dedicated Mac;
+  # fork PRs keep the hosted label).
+  macos-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      value: ${{ steps.r.outputs.value }}
+    steps:
+      - id: r
+        uses: pyrlyn/ci/.github/actions/macos-runner@4b5b5470544893cd515b88c751e92728341c6daa # main
+        with:
+          runner: ${{ vars.MACOS_RUNNER }}
+          value: '["xcode-27"]'
+
   # infra's config action on .github/infra.yml: `docs-only` is "true" when every changed file
   # is documentation (fails open: "false" when unsure, e.g. a .github/ change). The jobs below
   # then do no work but still report under their names, so the required checks pass, and
@@ -59,7 +74,7 @@ jobs:
         [
         {"os": "ubuntu-latest", "target": "x86_64-unknown-linux-gnu"},
         {"os": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-gnu"},
-        {"os": "xcode-27-local", "target": "aarch64-apple-darwin"}
+        {"os": "xcode-27", "target": "aarch64-apple-darwin"}
         ]
       # The manifest is virtual with `default-members`; ci-rust's default `package-args`
       # (--workspace) already covers every member, so no `clippy-args` here.
@@ -334,11 +349,11 @@ jobs:
   # A skipped matrix job would report one check under its raw name and leave them waiting.
   footprint-macos:
     name: footprint (xcode-27)
-    needs: config
+    needs: [config, macos-runner]
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: xcode-27-local
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -397,12 +412,12 @@ jobs:
   # packages are linted by the SwiftLintPlugins build-tool plugin during
   # desktop-macos' `swift test`. SwiftLint is the mise.toml pin.
   desktop-macos-lint:
-    needs: [config, changes]
+    needs: [config, changes, macos-runner]
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: xcode-27-local
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -480,13 +495,13 @@ jobs:
   # .github/actions/desktop-macos, shared with the desktop build workflow
   # (T37.32.3).
   desktop-macos:
-    needs: [config, changes]
+    needs: [config, changes, macos-runner]
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success'
       || needs.changes.outputs.swift == 'true' || needs.changes.outputs.rust == 'true')
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: xcode-27
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
