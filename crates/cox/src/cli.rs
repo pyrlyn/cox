@@ -102,6 +102,11 @@ pub struct Cli {
 /// Top-level subcommands (plan.md §1.12); `main.rs` dispatches each one.
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
+    /// Print a shell completion script without starting a session.
+    Completions {
+        #[arg(value_enum)]
+        shell: shell_completions::Shell,
+    },
     /// Headless run: `cox run -p <prompt>`.
     Run(RunArgs),
     /// List / search rollouts.

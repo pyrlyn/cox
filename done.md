@@ -13919,3 +13919,30 @@ $ cargo nextest run -p cox --test ide ; -p cox-models ; -p cox-protocol -E 'test
 ### T71.1 Format the app-server test calls
 
 The workspace `cargo fmt --check` failed on two overlong `tokio::join!` expressions in `crates/cox-app/src/server.rs`. Rustfmt wrapped both calls across lines; behavior is unchanged. `CARGO_BUILD_JOBS=2 mise exec -- cargo fmt --check` passes. `cox-app` tests and Clippy were not run because compiling its dependency graph reduced free disk to 9.8 GiB; the build was stopped before tests ran.
+
+### T379. Add shell completions through the shared crate
+
+Use the local `shell-completions` crate in `packages/crates/rust`. Preserve rtok scripts and ketch package-name completion and installation behavior. Add `cox completions <shell>` without loading configuration, credentials, telemetry or a session.
+
+Execution plan: establish existing completion tests; extract the clap generator and Clink implementation with regression tests into the shared crate; connect consumers through local Cargo paths; update dependency inventories; run focused tests, formatting and clippy. Application-specific installation policies and ketch dynamic package lookup stay with their owners. Done when generation has one owner and the three CLI surfaces pass their checks.
+
+Validation: The two new binary tests failed before implementation and passed afterward, covering six shells, invalid configuration, no application state writes, and shell validation. All 119 CLI unit tests and 11 dependency-boundary tests passed. All-target clippy passed. The command documentation test passed; the existing plugin translation parity test failed. Workspace formatting still reports unchanged cox-app/src/server.rs; the changed cox package is formatted.
+
+Reused `clap_complete` and the existing rtok Clink generator. No replacement library or custom generator was introduced. Local path dependencies resolve in the standard apps/packages layout.
+
+### T379.1. Consume the published shell-completions crate
+
+Use the managed crates.io release so an independent checkout builds without sibling repositories. The `cox` binary now uses the published `shell-completions` 0.1.0 dependency. Execution plan: replace the local Cargo path with the published version, resolve Cargo.lock only after publication, preserve existing dependency versions, format the two app-server test joins required by CI, synchronize language-neutral plugin API index lines in the RU and UK docs, verify locked metadata outside the sibling layout, and run completion checks through CI.
+
+Validation: `cargo metadata --format-version 1` and `cargo metadata --locked --format-version 1` passed. Standalone `cargo metadata --locked` passed from a temporary archive with the current manifest and lockfile overlaid (38 workspace members, 832 packages; `shell-completions` resolved from crates.io). `Cargo.lock` changed only by adding the registry source and checksum for `shell-completions` 0.1.0; no other versions or dependency edges changed. The focused registry-backed checks passed: completion integration tests (2), CLI unit tests (4), `plugin_docs_translations_match_the_english_page` (1), and `cargo fmt --all -- --check`.
+
+The two app-server test joins were formatted for CI. The Russian and Ukrainian plugin API field indexes now match the English index exactly; translated prose was preserved. The registry dependency and its lockfile resolution are ready for the PR checks.
+
+
+### T379.2. Restore completions PR CI gates
+
+The published shell-completions dependency exposed CI gates that needed to stay enforced. Preserve the explicit license policy, synchronize generated workspace-hack dependencies without changing locked package versions, and resolve the missing desktop macOS sccache action reference using an existing shared action.
+
+What landed: regenerated `workspace-hack/Cargo.toml` with the existing cargo-hakari tool; replaced the missing local `.github/actions/sccache` reference with `pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979`; and updated the existing sccache wiring regression test to check the pinned reference, all inputs, and invocation order. The repository's license policy and dependency versions were left unchanged.
+
+Validation: the existing regression suite failed before the action update (1 failed, 5 passed) and passed afterward (6 passed). `cargo hakari generate --diff` is clean after regeneration. Comparison against HEAD found all 848 locked package name/version/source/checksum tuples unchanged; only generated workspace-hack dependency edges changed. `git diff --check` passed. `actionlint` could not run because no version is configured in mise; the reusable CI pipeline already runs its actionlint validation.

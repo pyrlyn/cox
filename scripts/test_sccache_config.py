@@ -43,6 +43,14 @@ class Workflows(unittest.TestCase):
         text = (ROOT / ".github/actions/desktop-macos/action.yml").read_text()
         shared = "uses: pyrlyn/ci/.github/actions/sccache@"
         self.assertIn(shared, text)
+        for action_input, caller_input in {
+            "access-key-id": "sccache-access-key-id",
+            "secret-access-key": "sccache-secret-access-key",
+            "bucket": "sccache-bucket",
+            "endpoint": "sccache-endpoint",
+            "read-only": "sccache-read-only",
+        }.items():
+            self.assertIn(f"{action_input}: ${{{{ inputs.{caller_input} }}}}", text)
         self.assertLess(text.index(shared), text.index("scripts/desktop/xcframework.sh"))
 
     def test_the_pr_desktop_job_passes_the_backend_read_only_on_pull_requests(self):
