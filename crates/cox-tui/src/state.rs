@@ -2673,7 +2673,8 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
         Event::SessionStarted { .. }
         | Event::Compacted { .. }
         | Event::GrantRevoked { .. }
-        | Event::RepoMapBuilt { .. } => {}
+        | Event::RepoMapBuilt { .. }
+        | Event::GoalVerdict { .. } => {}
     }
     cmds
 }

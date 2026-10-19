@@ -315,6 +315,18 @@ pub enum StopReason {
     Error,
 }
 
+/// What `/goal`'s cheap-tier judge decided (T67.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalStop {
+    /// The condition holds.
+    Met,
+    /// The condition does not hold yet.
+    NotMet,
+    /// The condition cannot be met.
+    Impossible,
+}
+
 /// Severity of a `Notice` event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1466,6 +1478,15 @@ pub enum Event {
         /// Why it stopped.
         stop: StopReason,
     },
+    /// `/goal` judged the stop condition after a turn (T67.4).
+    GoalVerdict {
+        /// Met, not yet, or impossible.
+        verdict: GoalStop,
+        /// The judge's reason, or why the loop stopped without one.
+        reason: String,
+        /// Main turns used since the goal was set, including this one.
+        turns_used: u32,
+    },
     /// An error occurred.
     Error {
         /// What went wrong.
@@ -1920,6 +1941,7 @@ mod tests {
     #[case::advised(Event::Advised { point: crate::plugin::DecidePoint::Route, plugin: "jev".into(), advice: crate::plugin::Advice { answer: crate::plugin::Answer::Choice { order: vec![0] }, confidence: Some(0.9), note: None }, applied: true })]
     #[case::notice(Event::Notice { level: Level::Warn, text: "hook skipped".into() })]
     #[case::turn_done(Event::TurnDone { turn: TurnId::new(), stop: StopReason::EndTurn })]
+    #[case::goal_verdict(Event::GoalVerdict { verdict: GoalStop::Met, reason: "tests pass".into(), turns_used: 1 })]
     #[case::error(Event::Error { error: CoreError::Interrupted, fatal: false })]
     #[case::task_message(Event::TaskMessage { task: TaskId::new(), from: Some(TaskId::new()), hop: 1, text: "ping".into() })]
     fn event_json_roundtrip(#[case] event: Event) {

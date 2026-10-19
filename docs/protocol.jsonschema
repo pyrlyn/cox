@@ -837,6 +837,36 @@
         ]
       },
       {
+        "description": "`/goal` judged the stop condition after a turn (T67.4).",
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "description": "Met, not yet, or impossible.",
+            "$ref": "#/$defs/GoalStop"
+          },
+          "reason": {
+            "description": "The judge's reason, or why the loop stopped without one.",
+            "type": "string"
+          },
+          "turns_used": {
+            "description": "Main turns used since the goal was set, including this one.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "type": {
+            "type": "string",
+            "const": "goal_verdict"
+          }
+        },
+        "required": [
+          "type",
+          "verdict",
+          "reason",
+          "turns_used"
+        ]
+      },
+      {
         "description": "An error occurred.",
         "type": "object",
         "properties": {
@@ -2225,6 +2255,26 @@
             "required": [
               "type"
             ]
+          }
+        ]
+      },
+      "GoalStop": {
+        "description": "What `/goal`'s cheap-tier judge decided (T67.4).",
+        "oneOf": [
+          {
+            "description": "The condition holds.",
+            "type": "string",
+            "const": "met"
+          },
+          {
+            "description": "The condition does not hold yet.",
+            "type": "string",
+            "const": "not_met"
+          },
+          {
+            "description": "The condition cannot be met.",
+            "type": "string",
+            "const": "impossible"
           }
         ]
       },

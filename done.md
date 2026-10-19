@@ -1,3 +1,27 @@
+#### T67.4 `/goal`: a judged stop condition
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~190 · Priority: P1 · Complexity: 3
+
+Goal: `/goal <condition>` sets a goal, `/goal` shows it and `/goal clear` drops it. After every `TurnDone` while a goal is set, the cheap tier judges the condition through `Session::side_call`. `Met` stops; `NotMet` submits a continue turn; `Impossible` stops with the reason. The loop also stops at `max_turns` or when `budget::decide` says so.
+
+`Event::GoalVerdict` lives on `Event` in `types.rs` (the card named `commands.rs`). The turn cap is `[autonomous].max_turns` from T66.9, not a second limit. The judge is the existing cheap `summarize` job, so no new `Job` variant. The TUI already forwards every built-in name to `Submission::Command`, so `/goal` reaches the core; drawing the verdict is T67.5, and the fold ignores it until then.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core -p cox-protocol
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when `goal_stops_when_met`, `goal_unparseable_verdict_continues`, `goal_respects_budget_cap` and `goal_stops_at_max_turns` pass with the scripted provider.
+
+Check output (2026-10-19):
+```
+mise exec -- cargo nextest run -p cox-core -p cox-protocol: 603 passed, 1 skipped (includes goal_stops_when_met, goal_unparseable_verdict_continues, goal_respects_budget_cap, goal_stops_at_max_turns, unparseable_verdict_is_not_met, tagged_lines_keep_the_reason, protocol_jsonschema_matches_committed_file)
+mise exec -- cargo clippy -p cox-core -p cox-protocol -p cox-config -p cox-session -p cox-tui --all-targets -- -D warnings: clean
+mise exec -- cargo fmt -p cox-core -p cox-protocol -p cox-config -p cox-session -p cox-tui: clean
+```
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4

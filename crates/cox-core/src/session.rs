@@ -18,9 +18,9 @@ use cox_protocol::traits::{
     HunkReverter, Provider, RepoMapper, Store, Tool, Worktrees,
 };
 use cox_protocol::types::{
-    ArchiveRef, Attachment, Content, ContextBreakdown, Decision, Event, HookEvent, HookOutcome,
-    ItemKind, Job, Level, Message, Mode, ModelId, PermissionMode, ProviderId, Request, Role,
-    SandboxMode, StopReason, Submission, Tier, ToolCall, ToolResult,
+    ArchiveRef, Attachment, Content, ContextBreakdown, Decision, Event, GoalStop, HookEvent,
+    HookOutcome, ItemKind, Job, Level, Message, Mode, ModelId, PermissionMode, ProviderId, Request,
+    Role, SandboxMode, StopReason, Submission, Tier, ToolCall, ToolResult,
 };
 use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -67,6 +67,8 @@ pub(crate) struct Inner {
     provider_calls: u32,
     spent_usd: f64,
     budget_warned: bool,
+    /// `/goal` while it is set (T67.4). `None` after `/goal clear`.
+    goal: Option<crate::goal::Goal>,
     pub(crate) permission_mode: PermissionMode,
     /// `AllowForSession` grants as `(tool, subject prefix)`.
     pub(crate) grants: Vec<(String, String)>,
@@ -597,6 +599,7 @@ impl Session {
                 provider_calls: 0,
                 spent_usd: 0.0,
                 budget_warned: false,
+                goal: None,
                 permission_mode,
                 grants,
                 pending: HashMap::new(),
@@ -1118,6 +1121,9 @@ impl Session {
                 self.switch_mode(command.args.first().map(String::as_str))
                     .await
             }
+            Submission::Command { command } if command.name == "goal" => {
+                self.goal_command(&command.args).await
+            }
             Submission::Command { command } if command.name == "init" => {
                 let force = command.args.iter().any(|a| a == "--force" || a == "force");
                 self.run_init(force).await
@@ -1443,6 +1449,13 @@ impl Session {
         // T33.20: `route` advice holds for its own turn only, however the
         // turn ended.
         self.inner.lock().await.routed = None;
+        // T67.4: a set goal is judged after the turn, and may run further
+        // turns. A failed turn does not continue.
+        let result = if result.is_ok() && self.job == Job::Main {
+            self.pursue_goal().await
+        } else {
+            result
+        };
         if let Err(error) = &result {
             span.record("error.type", error.to_string());
             span.record("otel.status_code", "ERROR");
@@ -2387,6 +2400,146 @@ impl Session {
         self.inner.lock().await.state = state;
     }
 
+    /// `/goal`, `/goal <condition>`, `/goal clear` (T67.4).
+    async fn goal_command(&self, args: &[String]) -> Result<(), CoreError> {
+        if args.is_empty() {
+            let text = {
+                let inner = self.inner.lock().await;
+                match &inner.goal {
+                    Some(goal) => format!(
+                        "goal: {} ({}/{} turns)",
+                        goal.condition, goal.turns_used, goal.max_turns
+                    ),
+                    None => "no goal".to_string(),
+                }
+            };
+            return self
+                .emit(Event::Notice {
+                    level: Level::Info,
+                    text,
+                })
+                .await;
+        }
+        if args.len() == 1 && args[0] == "clear" {
+            self.inner.lock().await.goal = None;
+            return self
+                .emit(Event::Notice {
+                    level: Level::Info,
+                    text: "goal cleared".into(),
+                })
+                .await;
+        }
+        let condition = args.join(" ");
+        let max_turns = self.config.autonomous.max_turns.max(1);
+        self.inner.lock().await.goal = Some(crate::goal::Goal {
+            condition,
+            turns_used: 0,
+            max_turns,
+        });
+        self.emit(Event::Notice {
+            level: Level::Info,
+            text: "goal set".into(),
+        })
+        .await
+    }
+
+    /// After a main turn: judge the goal, stop, or submit one continue turn.
+    async fn pursue_goal(&self) -> Result<(), CoreError> {
+        loop {
+            let Some(goal) = self.bump_goal().await else {
+                return Ok(());
+            };
+            let (spent, warned) = {
+                let inner = self.inner.lock().await;
+                (inner.spent_usd, inner.budget_warned)
+            };
+            if budget::decide(
+                spent,
+                self.config.budget.session_usd,
+                self.config.budget.warn_at,
+                warned,
+            ) == budget::Decision::Stop
+            {
+                return self
+                    .goal_event(GoalStop::Impossible, "budget cap", goal.turns_used)
+                    .await;
+            }
+            let summary = self.goal_summary(&goal.condition).await;
+            let answer = self
+                .side_call(crate::goal::evaluator_request(&goal, &summary))
+                .await;
+            let verdict = crate::goal::parse_verdict(answer.as_deref().unwrap_or(""));
+            let (kind, reason) = match &verdict {
+                crate::goal::Verdict::Met(reason) => (GoalStop::Met, reason.clone()),
+                crate::goal::Verdict::NotMet(reason) => (GoalStop::NotMet, reason.clone()),
+                crate::goal::Verdict::Impossible(reason) => (GoalStop::Impossible, reason.clone()),
+            };
+            self.goal_event(kind, &reason, goal.turns_used).await?;
+            if !matches!(verdict, crate::goal::Verdict::NotMet(_)) {
+                return Ok(());
+            }
+            if goal.turns_used >= goal.max_turns {
+                return self
+                    .goal_event(GoalStop::Impossible, "reached max_turns", goal.turns_used)
+                    .await;
+            }
+            let follow = format!(
+                "The goal is not met yet: {reason}\nContinue toward: {}",
+                goal.condition
+            );
+            self.run_turn_inner(TurnId::new(), follow, Vec::new(), false)
+                .await?;
+        }
+    }
+
+    /// Counts the turn that just finished. `None` when no goal is set.
+    async fn bump_goal(&self) -> Option<crate::goal::Goal> {
+        let mut inner = self.inner.lock().await;
+        let goal = inner.goal.as_mut()?;
+        goal.turns_used = goal.turns_used.saturating_add(1);
+        Some(crate::goal::Goal {
+            condition: goal.condition.clone(),
+            turns_used: goal.turns_used,
+            max_turns: goal.max_turns,
+        })
+    }
+
+    /// Condition plus the last assistant text. The judge sees nothing else.
+    async fn goal_summary(&self, condition: &str) -> String {
+        let history = self.inner.lock().await.history.clone();
+        let last = history.iter().rev().find_map(|message| {
+            if message.role != Role::Assistant {
+                return None;
+            }
+            let text: String = message
+                .content
+                .iter()
+                .filter_map(|part| match part {
+                    Content::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(text)
+        });
+        let last: String = last.unwrap_or_default().chars().take(2000).collect();
+        format!("Condition: {condition}\n\nLast turn:\n{last}")
+    }
+
+    async fn goal_event(
+        &self,
+        verdict: GoalStop,
+        reason: &str,
+        turns_used: u32,
+    ) -> Result<(), CoreError> {
+        self.emit(Event::GoalVerdict {
+            verdict,
+            reason: reason.to_string(),
+            turns_used,
+        })
+        .await
+    }
+
     async fn finish(&self, turn: TurnId, stop: StopReason) -> Result<(), CoreError> {
         {
             let mut inner = self.inner.lock().await;
@@ -3209,5 +3362,192 @@ mod tests {
         assert!(!b.system[3].cache);
         assert!(!a.system[3].text.contains("Write the test first."));
         assert!(b.system[3].text.contains("Write the test first."));
+    }
+
+    fn goal_session(toml: &str, max_turns: u32, session_usd: f64) -> (Session, Arc<MemoryStore>) {
+        let mut config = cox_protocol::Config::default();
+        config.session.auto_title = false;
+        config.autonomous.max_turns = max_turns;
+        config.budget.session_usd = session_usd;
+        let store = Arc::new(MemoryStore::new());
+        let provider = Arc::new(Scripted::from_toml(toml, "").expect("scenario"));
+        let session = Session::new(
+            config,
+            provider,
+            vec![],
+            store.clone(),
+            store.clone(),
+            PathBuf::from("/tmp/cox-goal"),
+        )
+        .expect("session");
+        (session, store)
+    }
+
+    async fn set_goal(session: &Session, condition: &str) {
+        session
+            .submit(Submission::Command {
+                command: cox_protocol::types::SlashCommand {
+                    name: "goal".into(),
+                    args: vec![condition.into()],
+                },
+            })
+            .await
+            .expect("goal");
+    }
+
+    fn goal_events(store: &MemoryStore, id: &SessionId) -> Vec<Event> {
+        store.rollout_read(id).expect("rollout")
+    }
+
+    #[tokio::test]
+    async fn goal_stops_when_met() {
+        let (session, store) = goal_session(
+            "[[turn]]\ntext = \"shipped\"\n\n[[turn]]\njob = \"summarize\"\ntext = \"MET: tests pass\"\n",
+            4,
+            5.0,
+        );
+        set_goal(&session, "tests pass").await;
+        session
+            .submit(Submission::UserTurn {
+                text: "do it".into(),
+                attachments: vec![],
+                confirm_think: false,
+            })
+            .await
+            .expect("turn");
+        let events = goal_events(&store, &session.id());
+        let verdicts: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::GoalVerdict {
+                    verdict,
+                    reason,
+                    turns_used,
+                } => Some((*verdict, reason.clone(), *turns_used)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(verdicts, [(GoalStop::Met, "tests pass".into(), 1)]);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::TurnDone { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn goal_unparseable_verdict_continues() {
+        let (session, store) = goal_session(
+            "[[turn]]\ntext = \"partial\"\n\n[[turn]]\njob = \"summarize\"\ntext = \"hmm maybe\"\n\n[[turn]]\ntext = \"finished\"\n\n[[turn]]\njob = \"summarize\"\ntext = \"MET: now done\"\n",
+            4,
+            5.0,
+        );
+        set_goal(&session, "the work is finished").await;
+        session
+            .submit(Submission::UserTurn {
+                text: "start".into(),
+                attachments: vec![],
+                confirm_think: false,
+            })
+            .await
+            .expect("turn");
+        let events = goal_events(&store, &session.id());
+        let kinds: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::GoalVerdict { verdict, .. } => Some(*verdict),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kinds, [GoalStop::NotMet, GoalStop::Met]);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::TurnDone { .. }))
+                .count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn goal_respects_budget_cap() {
+        let (session, store) = goal_session("[[turn]]\ntext = \"should not run\"\n", 4, 0.0);
+        set_goal(&session, "finish the task").await;
+        session
+            .submit(Submission::UserTurn {
+                text: "go".into(),
+                attachments: vec![],
+                confirm_think: false,
+            })
+            .await
+            .expect("turn");
+        let events = goal_events(&store, &session.id());
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::TurnDone {
+                stop: StopReason::Budget,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::GoalVerdict {
+                verdict: GoalStop::Impossible,
+                reason,
+                ..
+            } if reason == "budget cap"
+        )));
+        assert!(!events.iter().any(|event| match event {
+            Event::TextDelta { text, .. } => text.contains("should not run"),
+            _ => false,
+        }));
+    }
+
+    #[tokio::test]
+    async fn goal_stops_at_max_turns() {
+        let (session, store) = goal_session(
+            "[[turn]]\ntext = \"nope\"\n\n[[turn]]\njob = \"summarize\"\ntext = \"NOTMET: still open\"\n\n[[turn]]\ntext = \"should not start\"\n",
+            1,
+            5.0,
+        );
+        set_goal(&session, "be done").await;
+        session
+            .submit(Submission::UserTurn {
+                text: "go".into(),
+                attachments: vec![],
+                confirm_think: false,
+            })
+            .await
+            .expect("turn");
+        let events = goal_events(&store, &session.id());
+        let kinds: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::GoalVerdict {
+                    verdict, reason, ..
+                } => Some((*verdict, reason.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (GoalStop::NotMet, "still open".into()),
+                (GoalStop::Impossible, "reached max_turns".into()),
+            ]
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::TurnDone { .. }))
+                .count(),
+            1
+        );
+        assert!(!events.iter().any(|event| match event {
+            Event::TextDelta { text, .. } => text.contains("should not start"),
+            _ => false,
+        }));
     }
 }
