@@ -39,7 +39,7 @@ check-all: && swarfr
 # The crates that build for Windows (P57, T57.1): the one list `just
 # windows-check` and CI's `windows` job use. Each P57 card adds the crates it
 # ports; T57.11 replaces the list with the whole workspace.
-windows_crates := "cox-plugin-api cox-protocol cox-sanitize cox-i18n cox-models cox-permission cox-config cox-tokens cox-patch cox-search cox-syntax cox-web cox-sandbox cox-render cox-telemetry cox-provider-http cox-provider-testkit cox-provider-anthropic cox-provider-openai cox-provider cox-store cox-plugin cox-core cox-tui cox-tools cox-acp"
+windows_crates := "cox-plugin-api cox-protocol cox-sanitize cox-i18n cox-models cox-permission cox-config cox-tokens cox-patch cox-search cox-syntax cox-web cox-ext cox-sandbox cox-render cox-telemetry cox-provider-http cox-provider-testkit cox-provider-anthropic cox-provider-openai cox-provider cox-store cox-plugin cox-core cox-tui cox-tools cox-acp"
 
 # `cargo check` and clippy over `windows_crates` for x64 and ARM64 Windows
 # (A128 (4)), library targets only (tests join in T57.11). On Windows cargo

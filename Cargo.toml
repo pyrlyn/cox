@@ -189,6 +189,10 @@ rubato = "5"
 polib = "0.3"
 unic-langid = "0.9"
 sys-locale = "0.3"
+# T57.5: one kill path for a process tree. Unix process groups and Windows
+# job objects. Apache-2.0 OR MIT. Only the tokio frontend and the wrappers
+# the helper uses; the crate's default feature set is not what we want.
+process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object"] }
 
 # dev-deps
 insta = { version = "1.48", features = ["json"] }

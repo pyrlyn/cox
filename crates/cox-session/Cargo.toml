@@ -70,9 +70,8 @@ tokio-util = { workspace = true, features = ["compat"] }
 # T35.13: the ACP driver sends `session/new`/`session/prompt` and frames
 # the CLI's stdio (`ByteStreams`); already `cox-acp`'s dependency.
 agent-client-protocol = { workspace = true }
-# T37.11: a login shell past its timeout is killed with its process group,
-# so nothing an rc file started keeps running (as in cox-ext's hooks).
-nix = { workspace = true, features = ["signal"] }
+# T57.5: the login-shell probe kills its tree through cox-ext's helper, so
+# this crate no longer links nix.
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]

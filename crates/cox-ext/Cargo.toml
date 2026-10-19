@@ -20,10 +20,11 @@ serde-saphyr = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
-# T7.4: the hook runner spawns `sh -c` with a timeout that kills the whole
-# process group (nix, as in cox-tools).
+# T7.4 / T57.5: the hook runner spawns `sh -c` with a timeout that kills the
+# whole tree. process-wrap is the one kill path (process group on Unix, job
+# object on Windows); nix left this crate with T57.5.
 tokio = { workspace = true }
-nix = { workspace = true, features = ["signal"] }
+process-wrap = { workspace = true }
 pathdiff = { workspace = true }
 # T22.3: a `matcher` that is not a plain tool name compiles as a regex.
 regex = { workspace = true }
