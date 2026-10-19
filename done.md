@@ -1,3 +1,21 @@
+#### T67.13 Design: a GitHub Action and scheduled runs
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~150 (doc) · Priority: P3 · Complexity: 2 · Files: `docs/design/github-action.md`, `docs/design/schedule.md`
+
+Goal: `docs/design/github-action.md` and `docs/design/schedule.md`: how `cox run -p` runs in a GitHub workflow (inputs, key handling, sandbox, cost cap, what it may push) and on a schedule (where the schedule lives, locking, the ledger). No code until the creator approves; implementation cards come in a later amendment.
+
+What landed:
+- `docs/design/github-action.md`: `workflow_dispatch` and `schedule` on the default branch only, secrets mapped to the existing provider env vars, `COX_KEYRING=off`, a fresh `COX_HOME`, `--approve never`, workspace-write, no GitHub token inside the cox process, and no push from cox. A later workflow step may open a pull request from a branch.
+- `docs/design/schedule.md`: a user-owned `~/.cox/schedules.toml` (not project config), one fresh `cox run -p` per fire, the existing session lock plus a per-job lock so a slow fire does not overlap, and the existing `usage` ledger. GitHub's ephemeral home does not accumulate `budget.monthly_usd`; a local schedule does.
+- No implementation cards. `presence.rs` and `cox serve` are unchanged.
+
+Not done: no workflow file and no parser, by the card. `doctor` was not re-run; this change does not build the binary, and `main` at `c0c3b6a1` does not resolve `workspace-hack` (`crypto-common` 0.2 has no `std` feature).
+
+Check:
+```text
+docs only — no cargo test, clippy or fmt change
+```
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
