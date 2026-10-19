@@ -1,3 +1,34 @@
+#### T67.3 Five more hook events
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~150 (landed larger; see Not done) · Priority: P1 · Complexity: 2 · Files: `crates/cox-protocol/src/types.rs`, `crates/cox-core/src/session.rs`, `docs/config.md`, plus the `cwd` call sites and `default.toml`
+
+Goal: `HookEvent` gains `PostToolBatch` (after every tool call of one assistant message has a result), `PermissionDenied` (the engine or the user denied a call), `InstructionsLoaded` (instruction files were read at session open), `CwdChanged` and `StopFailure` (a turn ended in an error). Each fires at the existing point in the session, is observe-only, and has a Claude Code name in `HookEvent::name()`.
+
+What landed:
+- Five variants and `name()` arms. `config_doc_lists_every_hook_event` is exhaustive, and the `fail_open` comment in `default.toml` lists them, so generated `docs/config.md` does too.
+- All five are observe-only (`let _ =`) and go through `fire_configured`, so a runner that did not ask for them is not called. `Stop` still uses `fire` and runs only on `EndTurn`. `StopFailure` replaces it on `StopReason::Error`.
+- `PostToolBatch` runs in `step` after `run_signed_tools` returns. `tool_response` is `ToolResult.visible`.
+- `PermissionDenied` runs from `Session::emit` on `ApprovalDecided` / `Deny`, naming the tool from the `ToolCallRequested` recorded for that call. An engine deny and a user deny share that event.
+- `InstructionsLoaded` runs once, on the first submission, when the instruction block is non-empty (`load_reason` `session_start`, `memory_type` `Project`).
+- `Session::change_cwd` fires `CwdChanged` when the directory actually moves. The directory is an `Arc` shared by clones, so the next tool call sees it. The permission engine keeps the directory it was compiled with at `build`.
+
+Not done: the card names three files and ~150 lines. Sharing the directory touches every `session.cwd` call site, and `default.toml` has to change with `docs/config.md` or the drift test fails. `cargo clippy --workspace` on this machine does not get past two breaks already on `c0c3b6a1`: `workspace-hack` asks `crypto-common` 0.2 for a `std` feature it no longer has (the hakari job on that commit failed), and `cox-session` calls `cox_config::load::default_tiers`, which #364 added no definition for. This PR restores `default_tiers` and carries the regenerated hack from #408 so the crates resolve. The touched crates' clippy is clean.
+
+Check:
+```text
+$ cargo +1.99.0 nextest run -p cox-core -p cox-protocol
+602 tests run: 602 passed, 1 skipped
+(post_tool_batch_fires_after_last_result, permission_denied_fires_when_the_engine_or_user_denies, instructions_loaded_fires_at_session_open, cwd_changed_fires_when_the_directory_changes, stop_failure_fires_when_a_turn_ends_in_error, config_doc_lists_every_hook_event)
+$ cargo +1.99.0 clippy -p cox-core -p cox-protocol -p cox-config --all-targets -- -D warnings
+clean
+$ cargo +1.99.0 fmt --check
+clean
+$ cargo +1.99.0 nextest run -p cox-config default_tiers_are_the_embedded_code_tier -p cox-session legacy_typesafe
+5 passed
+$ COX_HOME=/tmp/cox-scratch cargo +1.99.0 run -q -p cox -- doctor
+exit 1: ANTHROPIC_API_KEY is not set (expected here; keyring is off). toolchain, COX_HOME, db, sandbox, git, prices and plugin cache passed.
+```
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4

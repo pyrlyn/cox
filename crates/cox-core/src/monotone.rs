@@ -126,11 +126,12 @@ impl Session {
             return Ok(calls);
         }
         let task = compact::working_state(&self.inner.lock().await.history).request;
+        let cwd = self.cwd();
         let question = Question {
             point: DecidePoint::Risk,
             state: json!({
                 "task": clip(task.as_deref().unwrap_or_default(), INPUT_CHARS),
-                "cwd": self.cwd.to_string_lossy(),
+                "cwd": cwd.to_string_lossy(),
                 "workspace_roots": self
                     .config
                     .core

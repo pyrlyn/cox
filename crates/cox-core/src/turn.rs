@@ -312,7 +312,7 @@ pub(crate) async fn run_signed_tools(
                 tool.touches(&call.input)
                     .unwrap_or_default()
                     .iter()
-                    .map(|p| lexical_path(&session.cwd, p))
+                    .map(|p| lexical_path(&session.cwd(), p))
                     .collect()
             };
             parallel.push((paths, (id, tool, call.input)));
@@ -509,12 +509,13 @@ pub(crate) async fn approve_writes(
     let failed = |e: CoreError| ToolError::Denied { why: e.to_string() };
     // `confine` hands back canonical paths, but rules anchor relative globs
     // at the cwd as configured, which may sit behind a symlink (`/var`).
-    let canon = std::fs::canonicalize(&session.cwd).unwrap_or_else(|_| session.cwd.clone());
+    let cwd = session.cwd();
+    let canon = std::fs::canonicalize(&cwd).unwrap_or_else(|_| cwd.clone());
     let mut calls = Vec::with_capacity(paths.len());
     let mut shown = Vec::with_capacity(paths.len());
     for path in paths {
         let (subject, label) = match path.strip_prefix(&canon) {
-            Ok(rel) => (session.cwd.join(rel), rel.to_path_buf()),
+            Ok(rel) => (cwd.join(rel), rel.to_path_buf()),
             Err(_) => (path.clone(), path.clone()),
         };
         let subject = subject.to_string_lossy().into_owned();
@@ -681,7 +682,7 @@ async fn run_one(
     let cx = ToolCx {
         roots: session.config.core.workspace_roots.clone(),
         writable_roots: session.writable_roots().to_vec(),
-        cwd: session.cwd.clone(),
+        cwd: session.cwd(),
         sandbox: SandboxPolicy {
             mode: session.config.sandbox.mode,
             network: session.config.sandbox.network,

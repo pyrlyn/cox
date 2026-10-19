@@ -95,7 +95,7 @@ impl Session {
             return self.emit(warn(text.into())).await;
         };
         let confined = cp
-            .preimages(self.writable_roots(), &self.cwd, &[path.to_string()])
+            .preimages(self.writable_roots(), &self.cwd(), &[path.to_string()])
             .await
             .into_iter()
             .next()
@@ -161,7 +161,7 @@ impl Session {
             return self.emit(warn(text.into())).await;
         };
         let current = cp
-            .preimages(self.writable_roots(), &self.cwd, &[path.to_string()])
+            .preimages(self.writable_roots(), &self.cwd(), &[path.to_string()])
             .await
             .into_iter()
             .next();
@@ -218,7 +218,7 @@ impl Session {
         let written = cp
             .restore(
                 self.writable_roots(),
-                &self.cwd,
+                &self.cwd(),
                 &confined,
                 Some(reverted.as_bytes()),
             )
@@ -368,14 +368,18 @@ impl Session {
                 }
             };
             let current = cp
-                .preimages(roots, &self.cwd, &[row.path.to_string_lossy().into_owned()])
+                .preimages(
+                    roots,
+                    &self.cwd(),
+                    &[row.path.to_string_lossy().into_owned()],
+                )
                 .await
                 .into_iter()
                 .map(|p| (p.path, false, p.before))
                 .collect();
             checkpoint::store_rows(self, seq, None, current).await;
             match cp
-                .restore(roots, &self.cwd, &row.path, bytes.as_deref())
+                .restore(roots, &self.cwd(), &row.path, bytes.as_deref())
                 .await
             {
                 Ok(()) => restored.push(row.path),

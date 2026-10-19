@@ -74,6 +74,17 @@ fn project_config_in(git_root: &Path) -> PathBuf {
     git_root.join(".cox").join("config.toml")
 }
 
+/// Tiers from the embedded `default.toml`, with no user or project file
+/// (T33.40.13). A tier still naming the retired built-in `typesafe` client
+/// falls back to these. `None` when that file no longer parses.
+pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
+    Layers::new()
+        .toml_text("default", DEFAULT_CONFIG_TOML)
+        .extract::<Config>()
+        .ok()
+        .map(|config| config.tiers)
+}
+
 /// One project-config guard violation (plan.md §1.6): the project layer set
 /// a key it isn't allowed to, so the loader reverted it and is reporting why.
 #[derive(Debug, Clone, PartialEq)]
@@ -1121,6 +1132,13 @@ mod tests {
         assert_eq!(cfg.tiers.code.model, "claude-sonnet-5");
         assert!(cfg.providers.custom.contains_key("deepseek"));
         assert!(!cfg.providers.anthropic.models.is_empty());
+    }
+
+    #[test]
+    fn default_tiers_are_the_embedded_code_tier() {
+        let tiers = default_tiers().expect("embedded tiers");
+        assert_eq!(tiers.code.model, "claude-sonnet-5");
+        assert_ne!(tiers.code.provider, "typesafe");
     }
 
     #[test]

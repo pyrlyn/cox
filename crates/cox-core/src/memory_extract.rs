@@ -175,7 +175,7 @@ impl Session {
             self.add_spend(usage.cost_usd).await;
         }
         let mut saved = Vec::new();
-        let project = slug_for(&self.cwd);
+        let project = slug_for(&self.cwd());
         // `salience` (T33.21.1) may drop a low-scoring candidate before it
         // ever reaches the store; it cannot add or edit one.
         let facts = self.advise_salience(parse_facts(&out)).await;

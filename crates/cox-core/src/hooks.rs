@@ -17,10 +17,11 @@ use crate::session::Session;
 use crate::side::Side;
 
 /// Dispatches `event` only when the installed runner is interested in it
-/// (T22.3, T33.11). `SessionStart`/`Notification` are observe-only trigger
-/// points nothing else listens for, so an unwanted dispatch would be pure
-/// noise to a runner. The runner answers rather than `[hooks]` because a
-/// plugin's hooks are granted, not configured (PL§6).
+/// (T22.3, T33.11). `SessionStart`, `Notification` and the T67.3
+/// observe-only points (`PostToolBatch`, `PermissionDenied`,
+/// `InstructionsLoaded`, `CwdChanged`, `StopFailure`) would otherwise be
+/// noise to a runner that did not ask for them. The runner answers rather
+/// than `[hooks]` because a plugin's hooks are granted, not configured (PL§6).
 pub(crate) async fn fire_configured(
     session: &Session,
     event: HookEvent,
@@ -71,7 +72,7 @@ pub(crate) async fn fire(session: &Session, event: HookEvent, extra: Value) -> H
     };
     let mut payload = json!({
         "session_id": session.id.to_string(),
-        "cwd": session.cwd,
+        "cwd": session.cwd(),
         "hook_event_name": event.name(),
     });
     if let (Some(into), Some(from)) = (payload.as_object_mut(), extra.as_object()) {

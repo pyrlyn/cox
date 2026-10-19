@@ -186,7 +186,14 @@ pub struct Session {
     pub(crate) store: Arc<dyn Store>,
     pub(crate) archive: Arc<dyn Archive>,
     pub(crate) engine: Arc<Engine>,
-    pub(crate) cwd: PathBuf,
+    /// Shared by every clone, so [`Self::change_cwd`] is what a later tool
+    /// call and hook payload see (T67.3). The permission engine keeps the
+    /// directory it was compiled with at `build`.
+    cwd: Arc<StdMutex<PathBuf>>,
+    /// Calls the model requested, so a denial can name the tool (T67.3).
+    requested: Arc<StdMutex<HashMap<CallId, (String, serde_json::Value)>>>,
+    /// Detail for the next `StopFailure`, taken in `finish` (T67.3).
+    stop_error: Arc<StdMutex<Option<String>>>,
     /// What this session's turns are for; `Main` unless it is a subagent.
     pub(crate) job: Job,
     /// The tier every provider call in this session is routed to.
@@ -424,7 +431,7 @@ impl Session {
             tools,
             self.store.clone(),
             self.archive.clone(),
-            cwd.unwrap_or_else(|| self.cwd.clone()),
+            cwd.unwrap_or_else(|| self.cwd()),
             resume,
             SessionId::new(),
             Some(self.id),
@@ -560,7 +567,9 @@ impl Session {
             store,
             archive,
             engine: Arc::new(engine),
-            cwd: cwd.clone(),
+            cwd: Arc::new(StdMutex::new(cwd.clone())),
+            requested: Arc::new(StdMutex::new(HashMap::new())),
+            stop_error: Arc::new(StdMutex::new(None)),
             job,
             tier,
             agent,
@@ -639,7 +648,7 @@ impl Session {
         let started = Event::SessionStarted {
             session: id,
             config_digest: String::new(),
-            cwd: session.cwd.clone(),
+            cwd: session.cwd(),
         };
         if !is_resume {
             session
@@ -647,7 +656,7 @@ impl Session {
                 .session_create(&cox_protocol::SessionRow {
                     id,
                     created_at: String::new(),
-                    cwd: session.cwd.clone(),
+                    cwd: session.cwd(),
                     project_slug: String::new(),
                     title: None,
                     parent_id,
@@ -731,6 +740,70 @@ impl Session {
         self.clone()
     }
 
+    /// The session directory. Clones share it (T67.3).
+    pub(crate) fn cwd(&self) -> PathBuf {
+        self.cwd.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Points later tool calls and hook payloads at `new_cwd` and fires
+    /// `CwdChanged` when the directory actually moves (T67.3). Observe-only.
+    /// Workspace roots and the permission engine stay as they were at open:
+    /// the engine was compiled against the opening directory.
+    pub async fn change_cwd(&self, new_cwd: PathBuf) {
+        let old = {
+            let mut guard = self.cwd.lock().unwrap_or_else(|e| e.into_inner());
+            if *guard == new_cwd {
+                return;
+            }
+            std::mem::replace(&mut *guard, new_cwd.clone())
+        };
+        let _ = hooks::fire_configured(
+            self,
+            HookEvent::CwdChanged,
+            serde_json::json!({
+                "old_cwd": old,
+                "new_cwd": new_cwd,
+            }),
+        )
+        .await;
+    }
+
+    /// Stashes the message `finish` puts on the next `StopFailure` (T67.3).
+    fn note_stop_error(&self, message: &str) {
+        *self.stop_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(message.to_string());
+    }
+
+    /// `PostToolBatch` once the assistant message's calls all have results
+    /// (T67.3). Observe-only. `tool_response` is the text the model sees.
+    async fn post_tool_batch(
+        &self,
+        calls: &[(CallId, String, serde_json::Value)],
+        results: &[(CallId, ToolResult)],
+    ) {
+        if calls.is_empty() {
+            return;
+        }
+        let by_id: HashMap<CallId, &ToolResult> =
+            results.iter().map(|(id, result)| (*id, result)).collect();
+        let tool_calls: Vec<serde_json::Value> = calls
+            .iter()
+            .map(|(id, name, input)| {
+                serde_json::json!({
+                    "tool_name": name,
+                    "tool_input": input,
+                    "tool_use_id": id.to_string(),
+                    "tool_response": by_id.get(id).map(|result| result.visible.clone()).unwrap_or_default(),
+                })
+            })
+            .collect();
+        let _ = hooks::fire_configured(
+            self,
+            HookEvent::PostToolBatch,
+            serde_json::json!({ "tool_calls": tool_calls }),
+        )
+        .await;
+    }
+
     /// Replaces the ABI provider map session open built (T33.18). The
     /// main-turn provider is unchanged.
     pub fn set_plugin_providers(&self, map: HashMap<String, Arc<dyn Provider>>) {
@@ -762,6 +835,53 @@ impl Session {
         // before `TurnDone` (§1.15 rule 7).
         if let Some(extra) = hooks::notification_payload(&ev) {
             let _ = hooks::fire_configured(self, HookEvent::Notification, extra).await;
+        }
+        // T67.3: a denial names the tool from the request recorded here.
+        // The map lock is dropped before `await` — `fire` can re-enter `emit`.
+        let denied = match &ev {
+            Event::ToolCallRequested { call } => {
+                self.requested
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(call.id, (call.name.clone(), call.input.clone()));
+                None
+            }
+            Event::ApprovalDecided {
+                call_id,
+                decision: Decision::Deny { reason },
+                ..
+            } => {
+                let remembered = self
+                    .requested
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(call_id)
+                    .cloned();
+                remembered.map(|(tool_name, tool_input)| {
+                    (tool_name, tool_input, call_id.to_string(), reason.clone())
+                })
+            }
+            Event::ToolCallDone { call_id, .. } => {
+                self.requested
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(call_id);
+                None
+            }
+            _ => None,
+        };
+        if let Some((tool_name, tool_input, tool_use_id, reason)) = denied {
+            let _ = hooks::fire_configured(
+                self,
+                HookEvent::PermissionDenied,
+                serde_json::json!({
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "tool_use_id": tool_use_id,
+                    "reason": reason,
+                }),
+            )
+            .await;
         }
         // T28.4: the rollout is what leaves the session, so the copy written
         // here is scrubbed; `ev` — the in-memory history and every surface —
@@ -1016,6 +1136,23 @@ impl Session {
             if let HookOutcome::Modify { input } = outcome {
                 let (_, context) = hooks::prompt_rewrite(String::new(), input);
                 self.inner.lock().await.startup_context = context.unwrap_or_default();
+            }
+            // T67.3: the surface installed the instruction block before this
+            // first submission. Observe-only, and silent when nothing was read.
+            if self
+                .instructions
+                .get()
+                .is_some_and(|block| !block.is_empty())
+            {
+                let _ = hooks::fire_configured(
+                    self,
+                    HookEvent::InstructionsLoaded,
+                    serde_json::json!({
+                        "load_reason": "session_start",
+                        "memory_type": "Project",
+                    }),
+                )
+                .await;
             }
             // P43: the same once-per-session slot, before the first request.
             self.start_repomap().await?;
@@ -1536,10 +1673,12 @@ impl Session {
                     ModelId(tc.model.clone()),
                 )
                 .await?;
+                let message = e.notice();
+                self.note_stop_error(&message);
                 self.emit(Event::Error {
                     error: CoreError::Config {
                         key: "tiers".into(),
-                        message: e.notice(),
+                        message,
                     },
                     fatal: false,
                 })
@@ -1699,6 +1838,7 @@ impl Session {
             Ok(Ok(reported)) => (true, reported),
             Ok(Err(error)) => {
                 let refused = matches!(error, CoreError::ExternalAgentRefused { .. });
+                self.note_stop_error(&error.to_string());
                 self.emit(Event::Error {
                     error,
                     fatal: false,
@@ -1785,10 +1925,12 @@ impl Session {
         let route = match self.route_for(Job::Main, true).await {
             Ok(route) => route,
             Err(e) => {
+                let message = e.notice();
+                self.note_stop_error(&message);
                 self.emit(Event::Error {
                     error: CoreError::Config {
                         key: "tiers".into(),
-                        message: e.notice(),
+                        message,
                     },
                     fatal: false,
                 })
@@ -1799,6 +1941,7 @@ impl Session {
         };
         // One assembly for the first try and T28.3's pre-call retry, so the
         // retried request differs only in the history it is given.
+        let cwd = self.cwd();
         let build = |history: &[Message], marks: &[usize], microcompact_after: u32| {
             let req_messages = crate::context::microcompact(
                 history,
@@ -1825,7 +1968,7 @@ impl Session {
                 route.tier,
                 &self.tools,
                 &discovered,
-                &self.cwd,
+                &cwd,
                 "",
                 &Stable {
                     instructions: self.instructions.get().map_or("", String::as_str),
@@ -1965,6 +2108,7 @@ impl Session {
                 provider_span.record("error.type", e.to_string());
                 provider_span.record("otel.status_code", "ERROR");
                 let _ = join.await;
+                self.note_stop_error(&e.to_string());
                 self.emit(Event::Error {
                     error: e.clone(),
                     fatal: false,
@@ -1992,6 +2136,7 @@ impl Session {
                         return Ok(Step::Continue);
                     }
                 }
+                self.note_stop_error(&error.to_string());
                 self.emit(Event::Error {
                     error: CoreError::Provider { error },
                     fatal: false,
@@ -2143,7 +2288,9 @@ impl Session {
             });
             inner.state = State::RunningTools;
         }
+        let calls = streamed.calls.clone();
         let results = run_signed_tools(self, turn, streamed.calls, &streamed.signatures).await?;
+        self.post_tool_batch(&calls, &results).await;
         if self.cancel_token().is_cancelled() {
             self.set_state(State::Interrupted).await;
             self.finish(turn, StopReason::Interrupted).await?;
@@ -2395,6 +2542,19 @@ impl Session {
         if stop == StopReason::EndTurn {
             // §1.8 step 4: `Stop` is informational; its verdict is not applied.
             let _ = hooks::fire(self, HookEvent::Stop, serde_json::json!({})).await;
+        } else if stop == StopReason::Error {
+            // T67.3: an error ends on `StopFailure` instead of `Stop`.
+            // Observe-only, and only when a runner asked for it.
+            let details = self
+                .stop_error
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
+            let mut extra = serde_json::json!({ "error": "unknown" });
+            if let Some(details) = details {
+                extra["error_details"] = serde_json::Value::String(details);
+            }
+            let _ = hooks::fire_configured(self, HookEvent::StopFailure, extra).await;
         }
         self.emit(Event::TurnDone {
             turn,
@@ -2690,10 +2850,14 @@ mod tests {
         }
     }
 
-    /// A session over one scripted reply whose hook config enables exactly
-    /// the events in `configured` (T22.3 dispatches its two new ones only
+    /// A session over `scenario` whose hook config enables exactly the
+    /// events in `configured` (T22.3 dispatches its observe-only points only
     /// where a user configured them).
-    fn open(configured: &[&str]) -> (Session, Arc<Probe>) {
+    fn open_with(
+        configured: &[&str],
+        tools: Vec<Arc<dyn Tool>>,
+        scenario: &str,
+    ) -> (Session, Arc<Probe>) {
         let mut config = cox_protocol::Config::default();
         for name in configured {
             config.hooks.events.insert(
@@ -2705,12 +2869,11 @@ mod tests {
             );
         }
         let store = Arc::new(MemoryStore::new());
-        let provider =
-            Arc::new(Scripted::from_toml("[[turn]]\ntext = \"ok\"\n", "").expect("scenario"));
+        let provider = Arc::new(Scripted::from_toml(scenario, "").expect("scenario"));
         let session = Session::new(
             config,
             provider,
-            vec![],
+            tools,
             store.clone(),
             store,
             PathBuf::from("/tmp/cox-turn"),
@@ -2719,6 +2882,97 @@ mod tests {
         let probe = Arc::new(Probe::default());
         session.set_hook(probe.clone());
         (session, probe)
+    }
+
+    fn open(configured: &[&str]) -> (Session, Arc<Probe>) {
+        open_with(configured, vec![], "[[turn]]\ntext = \"ok\"\n")
+    }
+
+    /// Read-only stand-in so a batch can finish without a real tool crate.
+    struct Echo;
+
+    #[async_trait::async_trait]
+    impl Tool for Echo {
+        fn spec(&self) -> cox_protocol::types::ToolSpec {
+            cox_protocol::types::ToolSpec {
+                name: "echo".into(),
+                description: "echo".into(),
+                input_schema: serde_json::json!({ "type": "object" }),
+                deferred: false,
+                risk: cox_protocol::types::Risk::ReadOnly,
+                concurrency: cox_protocol::types::Concurrency::Parallel,
+            }
+        }
+        fn subject(&self, input: &Value) -> String {
+            input
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .into()
+        }
+        async fn call(
+            &self,
+            input: Value,
+            _cx: &cox_protocol::traits::ToolCx,
+        ) -> Result<cox_protocol::types::ToolOutput, ToolError> {
+            Ok(cox_protocol::types::ToolOutput {
+                text: input
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .into(),
+                is_error: false,
+                diff: None,
+                structured: None,
+            })
+        }
+    }
+
+    /// A write the plan-mode engine denies before `call`.
+    struct Touch;
+
+    #[async_trait::async_trait]
+    impl Tool for Touch {
+        fn spec(&self) -> cox_protocol::types::ToolSpec {
+            cox_protocol::types::ToolSpec {
+                name: "touch".into(),
+                description: "touch".into(),
+                input_schema: serde_json::json!({ "type": "object" }),
+                deferred: false,
+                risk: cox_protocol::types::Risk::Write,
+                concurrency: cox_protocol::types::Concurrency::Exclusive,
+            }
+        }
+        fn subject(&self, input: &Value) -> String {
+            input
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .into()
+        }
+        async fn call(
+            &self,
+            _input: Value,
+            _cx: &cox_protocol::traits::ToolCx,
+        ) -> Result<cox_protocol::types::ToolOutput, ToolError> {
+            Ok(cox_protocol::types::ToolOutput {
+                text: "touched".into(),
+                is_error: false,
+                diff: None,
+                structured: None,
+            })
+        }
+    }
+
+    async fn user_turn(session: &Session, text: &str) {
+        session
+            .submit(Submission::UserTurn {
+                text: text.into(),
+                attachments: vec![],
+                confirm_think: false,
+            })
+            .await
+            .expect("turn");
     }
 
     /// `Scripted` on a wire without image input: `Scripted` itself stands
@@ -2832,6 +3086,161 @@ mod tests {
         assert_eq!(payload["title"], "Turn done");
         assert_eq!(payload["message"], "end_turn");
         assert_eq!(payload["hook_event_name"], "Notification");
+    }
+
+    #[tokio::test]
+    async fn post_tool_batch_fires_after_last_result() {
+        let scenario = "\
+[[turn]]
+tool_calls = [{ name = \"echo\", input = { text = \"a\" } }, { name = \"echo\", input = { text = \"b\" } }]
+[[turn]]
+text = \"ok\"
+";
+        let (session, probe) = open_with(&["PostToolBatch"], vec![Arc::new(Echo)], scenario);
+        user_turn(&session, "echo").await;
+        let seen = probe.0.lock().unwrap_or_else(|e| e.into_inner());
+        let events: Vec<HookEvent> = seen.iter().map(|(event, _)| *event).collect();
+        let batches: Vec<_> = events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| **event == HookEvent::PostToolBatch)
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(batches.len(), 1, "{events:?}");
+        let uses: Vec<_> = events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| **event == HookEvent::PostToolUse)
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(uses.len(), 2, "{events:?}");
+        assert!(uses.iter().all(|index| *index < batches[0]), "{events:?}");
+        let payload = &seen[batches[0]].1;
+        assert_eq!(payload["tool_calls"].as_array().map(Vec::len), Some(2));
+        assert_eq!(payload["tool_calls"][0]["tool_response"], "a");
+        assert_eq!(payload["tool_calls"][1]["tool_response"], "b");
+        assert_eq!(payload["hook_event_name"], "PostToolBatch");
+    }
+
+    #[tokio::test]
+    async fn permission_denied_fires_when_the_engine_or_user_denies() {
+        // Plan mode and a user deny both emit `ApprovalDecided` through
+        // `Session::emit`, which is the only fire point.
+        let scenario = "\
+[[turn]]
+tool_calls = [{ name = \"touch\", input = { path = \"a.txt\" } }]
+[[turn]]
+text = \"ok\"
+";
+        let (session, probe) = open_with(&["PermissionDenied"], vec![Arc::new(Touch)], scenario);
+        session
+            .submit(Submission::SetPermissionMode {
+                mode: PermissionMode::Plan,
+            })
+            .await
+            .expect("plan");
+        user_turn(&session, "write").await;
+        let seen = probe.0.lock().unwrap_or_else(|e| e.into_inner());
+        let denied: Vec<_> = seen
+            .iter()
+            .filter(|(event, _)| *event == HookEvent::PermissionDenied)
+            .map(|(_, payload)| payload)
+            .collect();
+        assert_eq!(denied.len(), 1, "{seen:?}");
+        assert_eq!(denied[0]["tool_name"], "touch");
+        assert_eq!(denied[0]["tool_input"]["path"], "a.txt");
+        assert!(
+            denied[0]["reason"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("plan mode"),
+            "{}",
+            denied[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn instructions_loaded_fires_at_session_open() {
+        let (session, probe) = open(&["InstructionsLoaded"]);
+        session.set_instructions("follow AGENTS.md".into(), String::new());
+        for _ in 0..2 {
+            session
+                .submit(Submission::SetEffort { effort: None })
+                .await
+                .expect("submit");
+        }
+        let loaded: Vec<Value> = {
+            let seen = probe.0.lock().unwrap_or_else(|e| e.into_inner());
+            seen.iter()
+                .filter(|(event, _)| *event == HookEvent::InstructionsLoaded)
+                .map(|(_, payload)| payload.clone())
+                .collect()
+        };
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0]["load_reason"], "session_start");
+        assert_eq!(loaded[0]["memory_type"], "Project");
+        let (empty, probe) = open(&["InstructionsLoaded"]);
+        empty
+            .submit(Submission::SetEffort { effort: None })
+            .await
+            .expect("submit");
+        let seen = probe.0.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            !seen
+                .iter()
+                .any(|(event, _)| *event == HookEvent::InstructionsLoaded)
+        );
+    }
+
+    #[tokio::test]
+    async fn cwd_changed_fires_when_the_directory_changes() {
+        let (session, probe) = open(&["CwdChanged"]);
+        let same = PathBuf::from("/tmp/cox-turn");
+        let next = PathBuf::from("/tmp/cox-other");
+        session.change_cwd(same).await;
+        session.change_cwd(next.clone()).await;
+        session.change_cwd(next.clone()).await;
+        assert_eq!(session.cwd(), next);
+        assert_eq!(session.clone().cwd(), next);
+        let seen = probe.0.lock().unwrap_or_else(|e| e.into_inner());
+        let changed: Vec<_> = seen
+            .iter()
+            .filter(|(event, _)| *event == HookEvent::CwdChanged)
+            .map(|(_, payload)| payload)
+            .collect();
+        assert_eq!(changed.len(), 1, "{seen:?}");
+        assert_eq!(changed[0]["old_cwd"], "/tmp/cox-turn");
+        assert_eq!(changed[0]["new_cwd"], "/tmp/cox-other");
+    }
+
+    #[tokio::test]
+    async fn stop_failure_fires_when_a_turn_ends_in_error() {
+        let (session, probe) = open_with(
+            &["Stop", "StopFailure"],
+            vec![],
+            "[[turn]]\nerror = \"rate limit\"\n",
+        );
+        user_turn(&session, "go").await;
+        let seen = probe.0.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            !seen.iter().any(|(event, _)| *event == HookEvent::Stop),
+            "{seen:?}"
+        );
+        let failed: Vec<_> = seen
+            .iter()
+            .filter(|(event, _)| *event == HookEvent::StopFailure)
+            .map(|(_, payload)| payload)
+            .collect();
+        assert_eq!(failed.len(), 1, "{seen:?}");
+        assert_eq!(failed[0]["error"], "unknown");
+        assert!(
+            failed[0]["error_details"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("rate limit"),
+            "{}",
+            failed[0]
+        );
     }
 
     /// The script, plus every request it was sent (P42's prefix claim is
