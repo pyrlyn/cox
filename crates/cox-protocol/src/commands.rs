@@ -75,6 +75,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "repeat a prompt on a timer with its own budget cap",
     ),
     (
+        "goal",
+        "/goal <condition> | /goal | /goal clear",
+        "keep going until a judged condition holds",
+    ),
+    (
         "refine",
         "/refine <text|list|undo> [--global]",
         "review, apply or undo a change to notes, memory, skills",

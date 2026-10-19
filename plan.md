@@ -1910,30 +1910,6 @@ mise exec -- cargo fmt --check
 
 Done when one test per event proves it fires once at its point (`post_tool_batch_fires_after_last_result`, and so on) and the doc test lists all events.
 
-#### T67.4 `/goal`: a judged stop condition
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~190 · Priority: P1 · Complexity: 3
-
-Goal: `/goal <condition>` sets a goal, `/goal` shows it and `/goal clear` drops it. After every `TurnDone` while a goal is set, the cheap tier judges the condition through `Session::side_call`. `Met` stops; `NotMet` submits a continue turn; `Impossible` stops with the reason. The loop also stops at `max_turns` (default 20) or when `budget::decide` says so.
-
-Files:
-- `crates/cox-protocol/src/commands.rs`: the three commands, and `Event::GoalVerdict { verdict, reason, turns_used }`.
-- `crates/cox-core/src/goal.rs` (new, pure): `Goal { condition, turns_used, max_turns }`, `Verdict { Met(String), NotMet(String), Impossible(String) }`, `evaluator_request(&Goal, last_turn_summary) -> Side`, `parse_verdict(&str) -> Verdict`.
-- `crates/cox-core/src/session.rs`
-
-Steps:
-1. The judge sees only the transcript summary and the condition, with no tools. An answer it cannot parse is `NotMet`, never `Met`.
-2. If T66.9 has landed, reuse its turn and token limits instead of a separate `max_turns`.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core -p cox-protocol
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `goal_stops_when_met`, `goal_unparseable_verdict_continues`, `goal_respects_budget_cap` and `goal_stops_at_max_turns` pass with the scripted provider.
-
 #### T67.5 `/goal` in the TUI and stream-json
 
 Model: grok-4.7 · Status: open · Depends: T67.4 · Size: ~100 · Priority: P2 · Complexity: 2

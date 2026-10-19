@@ -151,6 +151,11 @@ pub(crate) struct Inner {
     /// Where that map's text is archived; on resume, set from the rollout
     /// before the text is read back on the first submit.
     pub(crate) repomap_archive: Option<ArchiveId>,
+    /// `/goal` (T67.4). `None` until the command sets one.
+    goal: Option<crate::goal::Goal>,
+    /// Why the turn that just finished stopped. The goal loop reads it
+    /// after `TurnDone`, so a budget or interrupt stop is not judged.
+    last_stop: Option<StopReason>,
 }
 
 /// The mode and effort as they stand after a change, for every surface to
@@ -634,6 +639,8 @@ impl Session {
                 startup_context: String::new(),
                 repomap: None,
                 repomap_archive,
+                goal: None,
+                last_stop: None,
             })),
         };
         let started = Event::SessionStarted {
@@ -1025,7 +1032,10 @@ impl Session {
                 text,
                 confirm_think,
                 attachments,
-            } => self.run_turn(text, attachments, confirm_think).await,
+            } => {
+                self.run_turn(text, attachments, confirm_think).await?;
+                self.pursue_goal().await
+            }
             Submission::Interrupt => {
                 self.interrupt();
                 Ok(())
@@ -1121,6 +1131,11 @@ impl Session {
             Submission::Command { command } if command.name == "init" => {
                 let force = command.args.iter().any(|a| a == "--force" || a == "force");
                 self.run_init(force).await
+            }
+            // T67.4: `/goal` sets a condition, `/goal` shows it, `/goal clear`
+            // drops it. The loop runs after the next turn, not from here.
+            Submission::Command { command } if command.name == "goal" => {
+                self.goal_command(&command.args).await
             }
             Submission::Shutdown => {
                 // T10.2: optional cheap extraction first; a failure warns but
@@ -2420,9 +2435,144 @@ impl Session {
         );
         {
             let mut inner = self.inner.lock().await;
+            inner.last_stop = Some(stop);
             inner.state = State::Idle;
         }
         Ok(())
+    }
+
+    /// `/goal`, `/goal <condition>` and `/goal clear`.
+    async fn goal_command(&self, args: &[String]) -> Result<(), CoreError> {
+        if args.first().map(String::as_str) == Some("clear") && args.len() == 1 {
+            self.inner.lock().await.goal = None;
+            return self
+                .emit(Event::Notice {
+                    level: Level::Info,
+                    text: "goal cleared".into(),
+                })
+                .await;
+        }
+        if args.is_empty() {
+            let text = match self.inner.lock().await.goal.as_ref() {
+                Some(goal) => format!(
+                    "goal: {} ({}/{})",
+                    goal.condition, goal.turns_used, goal.max_turns
+                ),
+                None => "no goal".into(),
+            };
+            return self
+                .emit(Event::Notice {
+                    level: Level::Info,
+                    text,
+                })
+                .await;
+        }
+        let condition = args.join(" ");
+        let goal = crate::goal::Goal {
+            condition: condition.clone(),
+            turns_used: 0,
+            max_turns: self.config.autonomous.max_turns,
+            tokens_used: 0,
+            max_tokens: self.config.autonomous.max_tokens,
+        };
+        self.inner.lock().await.goal = Some(goal);
+        self.emit(Event::Notice {
+            level: Level::Info,
+            text: format!("goal: {condition}"),
+        })
+        .await
+    }
+
+    /// After a turn, while a goal is set: judge it on the cheap tier and
+    /// either stop or submit the next turn. A turn the budget, an
+    /// interrupt, an error or a refusal already ended is not judged.
+    async fn pursue_goal(&self) -> Result<(), CoreError> {
+        loop {
+            let ready = {
+                let mut inner = self.inner.lock().await;
+                // Copy the turn's usage and stop before borrowing the goal
+                // mutably; both borrows cannot live together.
+                let tokens = inner.last_usage.as_ref().map(|usage| {
+                    u64::from(usage.input_tokens)
+                        + u64::from(usage.output_tokens)
+                        + u64::from(usage.cache_read_tokens)
+                        + u64::from(usage.cache_write_tokens)
+                });
+                let stop = inner.last_stop.clone();
+                let Some(goal) = inner.goal.as_mut() else {
+                    return Ok(());
+                };
+                goal.turns_used = goal.turns_used.saturating_add(1);
+                if let Some(tokens) = tokens {
+                    goal.tokens_used = goal.tokens_used.saturating_add(tokens);
+                }
+                (goal.clone(), stop)
+            };
+            let (goal, stop) = ready;
+            if let Some((verdict, reason)) = goal_hard_stop(stop.as_ref()) {
+                return self.emit_goal(verdict, reason, goal.turns_used).await;
+            }
+            let (spent, warned) = {
+                let inner = self.inner.lock().await;
+                (inner.spent_usd, inner.budget_warned)
+            };
+            if budget::decide(
+                spent,
+                self.config.budget.session_usd,
+                self.config.budget.warn_at,
+                warned,
+            ) == budget::Decision::Stop
+            {
+                return self
+                    .emit_goal("budget", "session budget reached", goal.turns_used)
+                    .await;
+            }
+            let summary = {
+                let inner = self.inner.lock().await;
+                crate::goal::summary_of(&inner.history)
+            };
+            let prompt = crate::goal::judge_prompt(&goal, &summary);
+            let answer = self
+                .side_call(crate::goal::evaluator_request(&goal, &prompt))
+                .await;
+            let verdict = crate::goal::parse_verdict(answer.as_deref().unwrap_or(""));
+            self.emit_goal(verdict.tag(), verdict.reason(), goal.turns_used)
+                .await?;
+            if !matches!(verdict, crate::goal::Verdict::NotMet(_)) {
+                return Ok(());
+            }
+            if let Some(why) = crate::goal::limit_hit(&goal) {
+                return self.emit_goal(why, why, goal.turns_used).await;
+            }
+            let next = crate::goal::continue_prompt(&goal, verdict.reason());
+            self.run_turn(next, Vec::new(), false).await?;
+        }
+    }
+
+    async fn emit_goal(
+        &self,
+        verdict: &str,
+        reason: &str,
+        turns_used: u32,
+    ) -> Result<(), CoreError> {
+        self.emit(Event::GoalVerdict {
+            verdict: verdict.to_string(),
+            reason: reason.to_string(),
+            turns_used,
+        })
+        .await
+    }
+}
+
+/// A turn that already stopped for the user or the provider is not a
+/// reason to spend another judge call.
+fn goal_hard_stop(stop: Option<&StopReason>) -> Option<(&'static str, &'static str)> {
+    match stop {
+        Some(StopReason::Budget) => Some(("budget", "session budget reached")),
+        Some(StopReason::Interrupted) => Some(("interrupted", "interrupted")),
+        Some(StopReason::Error) => Some(("error", "error")),
+        Some(StopReason::Refusal { .. }) => Some(("refusal", "refusal")),
+        _ => None,
     }
 }
 
@@ -3209,5 +3359,208 @@ mod tests {
         assert!(!b.system[3].cache);
         assert!(!a.system[3].text.contains("Write the test first."));
         assert!(b.system[3].text.contains("Write the test first."));
+    }
+
+    fn goal_session(
+        toml: &str,
+        max_turns: u32,
+        session_usd: f64,
+    ) -> (Session, Arc<MemoryStore>, mpsc::Receiver<Event>) {
+        let mut config = cox_protocol::Config::default();
+        config.session.auto_title = false;
+        config.autonomous.max_turns = max_turns;
+        config.budget.session_usd = session_usd;
+        let store = Arc::new(MemoryStore::new());
+        let provider = Arc::new(Scripted::from_toml(toml, "").expect("scenario"));
+        let session = Session::new(
+            config,
+            provider,
+            vec![],
+            store.clone(),
+            store.clone(),
+            PathBuf::from("/tmp/cox-goal"),
+        )
+        .expect("session");
+        let rx = session.events().expect("event receiver");
+        (session, store, rx)
+    }
+
+    async fn submit_goal(session: &Session, args: &[&str]) {
+        session
+            .submit(Submission::Command {
+                command: cox_protocol::types::SlashCommand {
+                    name: "goal".into(),
+                    args: args.iter().map(|arg| (*arg).to_string()).collect(),
+                },
+            })
+            .await
+            .expect("/goal");
+    }
+
+    async fn submit_text(session: &Session, text: &str) {
+        session
+            .submit(Submission::UserTurn {
+                text: text.into(),
+                attachments: vec![],
+                confirm_think: false,
+            })
+            .await
+            .expect("turn");
+    }
+
+    fn taken(rx: &mut mpsc::Receiver<Event>) -> Vec<Event> {
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
+        events
+    }
+
+    fn goal_verdicts(events: &[Event]) -> Vec<(String, String)> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                Event::GoalVerdict {
+                    verdict, reason, ..
+                } => Some((verdict.clone(), reason.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn goal_stops_when_met() {
+        let (session, store, mut rx) = goal_session(
+            "[[turn]]\ntext = \"I added the test.\"\n\n[[turn]]\njob = \"summarize\"\ntext = \"MET: the test exists\"\n",
+            20,
+            5.0,
+        );
+        submit_goal(&session, &["tests", "pass"]).await;
+        submit_text(&session, "add a test").await;
+        let events = taken(&mut rx);
+        let starts = events
+            .iter()
+            .filter(|event| matches!(event, Event::TurnStarted { .. }))
+            .count();
+        assert_eq!(starts, 1, "a met goal does not start another turn");
+        assert_eq!(
+            goal_verdicts(&events),
+            vec![("met".into(), "the test exists".into())]
+        );
+        assert!(
+            store
+                .usage_rows()
+                .iter()
+                .any(|row| row.job == Job::Summarize && row.tier == Tier::Cheap),
+            "the judge is a cheap usage row"
+        );
+    }
+
+    #[tokio::test]
+    async fn goal_unparseable_verdict_continues() {
+        let (session, _, mut rx) = goal_session(
+            "[[turn]]\ntext = \"looking\"\n\n[[turn]]\njob = \"summarize\"\ntext = \"maybe later\"\n\n[[turn]]\ntext = \"still going\"\n\n[[turn]]\njob = \"summarize\"\ntext = \"MET: done\"\n",
+            5,
+            5.0,
+        );
+        submit_goal(&session, &["the file exists"]).await;
+        submit_text(&session, "check the file").await;
+        let events = taken(&mut rx);
+        let starts = events
+            .iter()
+            .filter(|event| matches!(event, Event::TurnStarted { .. }))
+            .count();
+        assert_eq!(starts, 2);
+        assert_eq!(
+            goal_verdicts(&events)
+                .into_iter()
+                .map(|(verdict, _)| verdict)
+                .collect::<Vec<_>>(),
+            vec!["not_met".to_string(), "met".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn goal_respects_budget_cap() {
+        let (session, store, mut rx) =
+            goal_session("[[turn]]\ntext = \"should not run\"\n", 5, 0.0);
+        submit_goal(&session, &["keep going"]).await;
+        submit_text(&session, "start").await;
+        let events = taken(&mut rx);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::TurnStarted { .. }))
+                .count(),
+            1
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::TurnDone {
+                stop: StopReason::Budget,
+                ..
+            }
+        )));
+        assert_eq!(
+            goal_verdicts(&events),
+            vec![("budget".into(), "session budget reached".into())]
+        );
+        assert!(
+            store
+                .usage_rows()
+                .iter()
+                .all(|row| row.job != Job::Summarize),
+            "a capped session does not pay for a judge"
+        );
+    }
+
+    #[tokio::test]
+    async fn goal_stops_at_max_turns() {
+        let (session, _, mut rx) = goal_session(
+            "[[turn]]\ntext = \"partial\"\n\n[[turn]]\njob = \"summarize\"\ntext = \"NOT_MET: still missing\"\n",
+            1,
+            5.0,
+        );
+        submit_goal(&session, &["finish the job"]).await;
+        submit_text(&session, "start").await;
+        let events = taken(&mut rx);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::TurnStarted { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            goal_verdicts(&events)
+                .into_iter()
+                .map(|(verdict, _)| verdict)
+                .collect::<Vec<_>>(),
+            vec!["not_met".to_string(), "max_turns".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn goal_command_shows_and_clears() {
+        let (session, _, mut rx) = goal_session("[[turn]]\ntext = \"unused\"\n", 4, 5.0);
+        submit_goal(&session, &["tests", "pass"]).await;
+        submit_goal(&session, &[]).await;
+        submit_goal(&session, &["clear"]).await;
+        submit_goal(&session, &[]).await;
+        let notices: Vec<String> = taken(&mut rx)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::Notice { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert!(notices.iter().any(|text| text == "goal: tests pass"));
+        assert!(
+            notices
+                .iter()
+                .any(|text| text.starts_with("goal: tests pass (0/"))
+        );
+        assert!(notices.iter().any(|text| text == "goal cleared"));
+        assert!(notices.iter().any(|text| text == "no goal"));
     }
 }

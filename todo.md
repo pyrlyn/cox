@@ -68,7 +68,6 @@
 - T66.13. Heartbeat re-entry for a resident session
 - T66.14. Archive old sessions without deleting them
 - T67.3. Five more hook events
-- T67.4. `/goal`: a judged stop condition
 - T67.5. `/goal` in the TUI and stream-json
 - T67.6. Path-scoped rules, loaded on demand
 - T67.7. Leaving Plan mode needs approval

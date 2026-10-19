@@ -2673,7 +2673,9 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
         Event::SessionStarted { .. }
         | Event::Compacted { .. }
         | Event::GrantRevoked { .. }
-        | Event::RepoMapBuilt { .. } => {}
+        | Event::RepoMapBuilt { .. }
+        // T67.5 draws the goal; until then the verdict is recorded and not shown.
+        | Event::GoalVerdict { .. } => {}
     }
     cmds
 }
