@@ -254,6 +254,13 @@ fn apply_replace(
     new: &str,
     replace_all: bool,
 ) -> Result<String, ToolError> {
+    // An empty needle matches between every pair of characters: one call with
+    // `replace_all` would splice `new` all through the file.
+    if old.is_empty() {
+        return Err(ToolError::Denied {
+            why: "`old` must not be empty; use `write` to create or overwrite a file".to_string(),
+        });
+    }
     let exact: Vec<usize> = content.match_indices(old).map(|(i, _)| i).collect();
 
     if !exact.is_empty() {
@@ -473,6 +480,26 @@ mod tests {
             }
             other => panic!("expected Denied, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn edit_refuses_an_empty_old_and_leaves_the_file_alone() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, "abc\n").expect("seed");
+        let cx = cx(dir.path());
+
+        for replace_all in [false, true] {
+            let err = EditTool
+                .call(
+                    json!({"path": "f.txt", "old": "", "new": "X", "replace_all": replace_all}),
+                    &cx,
+                )
+                .await
+                .expect_err("empty old must be refused");
+            assert!(matches!(err, ToolError::Denied { .. }), "{err:?}");
+        }
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "abc\n");
     }
 
     #[cfg(unix)]
