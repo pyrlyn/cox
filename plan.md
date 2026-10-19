@@ -44,9 +44,9 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | --- | --- | --- | --- | --- | --- |
 | T32.17 | in progress | P2 | 3 | 80% | Claude / opus-5.5 |
 | T33.40.7 | todo | P2 | 3 | 0% | |
-| T33.40.9 | todo | P2 | 4 | 0% | |
+| T33.40.9 | done | P2 | 4 | 100% | grok-4.7 |
 | T33.40.10 | todo | P3 | 3 | 0% | |
-| T33.40.11 | todo | P2 | 2 | 0% | |
+| T33.40.11 | done | P2 | 2 | 100% | grok-4.7 |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | todo | P2 | 4 | 10% | |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
