@@ -72,6 +72,9 @@ struct Outcome {
     files_changed: bool,
     // Why an `--autonomous` run ended; `None` for every other run.
     autonomous: Option<AutonomousStop>,
+    // T67.11: the second answer still failed `--json-schema`. Printed on
+    // stderr; `failed` is what makes the exit code 1.
+    schema_errors: Option<String>,
 }
 
 impl Outcome {
@@ -208,6 +211,9 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
     } else {
         args.prompt.clone()
     };
+    if args.json_schema.is_some() && prompt.is_none() {
+        anyhow::bail!("--json-schema needs -p or --prompt-stdin");
+    }
     let Some(prompt) = prompt else {
         resume::run(cli, args)?;
         return Ok(EXIT_OK);
@@ -236,6 +242,12 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
         .autonomous
         .then(|| autonomous_driver(cli, cwd))
         .transpose()?;
+    // T67.11: a schema that will not parse is refused before a session
+    // opens, so the run spends no provider call on it.
+    let schema = match args.json_schema.as_ref() {
+        Some(path) => Some(load_schema(path)?),
+        None => None,
+    };
     // T40.7: every `--image` is read and checked before any request, so a
     // bad one costs nothing.
     let attachments = match read_images(&args.images) {
@@ -356,7 +368,21 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
             }
             (None, None) => {
                 let prompt = (prompt, attachments);
-                drive(&session, &mut rx, prompt, format, approvals, confirm_think).await
+                let outcome =
+                    drive(&session, &mut rx, prompt, format, approvals, confirm_think).await?;
+                match &schema {
+                    Some(schema) => {
+                        retry_for_schema(
+                            &session,
+                            &mut rx,
+                            outcome,
+                            schema,
+                            (format, approvals, confirm_think),
+                        )
+                        .await
+                    }
+                    None => Ok(outcome),
+                }
             }
         };
         // T34.9 follow-up: `drive`/`run_loop` above already awaited
@@ -377,6 +403,9 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
     })?;
     if let Some(stop) = &outcome.autonomous {
         eprintln!("cox: autonomous run stopped: {}", describe(stop));
+    }
+    if let Some(errors) = &outcome.schema_errors {
+        eprintln!("cox: answer does not match --json-schema:\n{errors}");
     }
     if unconfirmed_architect && matches!(outcome.stop, Some(StopReason::Refusal { .. })) {
         eprintln!(
@@ -432,6 +461,84 @@ fn read_images(paths: &[PathBuf]) -> Result<Vec<Attachment>, String> {
             image::attachment(name, &data).map_err(|e| why(&e))
         })
         .collect()
+}
+
+/// Marker the retry turn includes, so a scripted scenario can pin its
+/// second answer to the turn that carried the validation errors.
+const SCHEMA_RETRY_MARKER: &str = "JSON schema validation";
+
+/// The user's schema file, compiled once. `$ref` to another file or URL is
+/// not resolved: the flag takes one document, and this process does not
+/// fetch a schema.
+fn load_schema(path: &Path) -> anyhow::Result<jsonschema::Validator> {
+    let why = |detail: &dyn std::fmt::Display| {
+        anyhow::anyhow!("--json-schema {}: {detail}", path.display())
+    };
+    let text = std::fs::read_to_string(path).map_err(|e| why(&e))?;
+    let value: Value = serde_json::from_str(&text).map_err(|e| why(&e))?;
+    jsonschema::validator_for(&value).map_err(|e| why(&e))
+}
+
+/// `None` when `text` is a JSON value the schema accepts. Anything else is
+/// the error text the retry turn (or stderr) shows.
+fn schema_mismatch(validator: &jsonschema::Validator, text: &str) -> Option<String> {
+    let value = match serde_json::from_str::<Value>(text.trim()) {
+        Ok(value) => value,
+        Err(error) => return Some(format!("answer is not JSON: {error}")),
+    };
+    let errors: Vec<String> = validator
+        .iter_errors(&value)
+        .map(|error| format!("{}: {error}", error.instance_path()))
+        .collect();
+    if errors.is_empty() {
+        None
+    } else {
+        Some(errors.join("\n"))
+    }
+}
+
+fn schema_retry_prompt(errors: &str) -> String {
+    format!(
+        "The previous answer failed {SCHEMA_RETRY_MARKER}. Reply with only a JSON value that satisfies the schema.\n{errors}"
+    )
+}
+
+/// One retry after a schema failure (T67.11). A turn that already failed
+/// for another reason is left alone. The second answer replaces the first
+/// in the summary; a second schema failure sets `failed` and keeps the
+/// errors for stderr.
+async fn retry_for_schema(
+    session: &Session,
+    rx: &mut mpsc::Receiver<Event>,
+    outcome: Outcome,
+    schema: &jsonschema::Validator,
+    ctx: (Format, Option<Duration>, bool),
+) -> anyhow::Result<Outcome> {
+    if outcome.exit_code() != EXIT_OK {
+        return Ok(outcome);
+    }
+    let Some(errors) = schema_mismatch(schema, &outcome.result) else {
+        return Ok(outcome);
+    };
+    let (format, approvals, confirm_think) = ctx;
+    let second = drive(
+        session,
+        rx,
+        (schema_retry_prompt(&errors), Vec::new()),
+        format,
+        approvals,
+        confirm_think,
+    )
+    .await?;
+    let mut total = outcome;
+    total.merge(second);
+    if total.exit_code() == EXIT_OK
+        && let Some(errors) = schema_mismatch(schema, &total.result)
+    {
+        total.schema_errors = Some(errors);
+        total.failed = true;
+    }
+    Ok(total)
 }
 
 /// Runs one turn to completion on an already-open `session`, reading its
@@ -831,6 +938,23 @@ mod tests {
         assert_eq!(total.tokens, [2, 3, 4, 5]);
         assert_eq!(total.cost_usd, 0.75);
         assert_eq!(total.turns, 2);
+    }
+
+    /// A matching answer is silent; a non-JSON answer and a missing
+    /// required property both name what failed (T67.11).
+    #[test]
+    fn json_schema_mismatch_names_a_bad_answer_and_accepts_a_good_one() {
+        let schema = jsonschema::validator_for(&json!({
+            "type": "object",
+            "required": ["ok"],
+            "properties": { "ok": { "type": "boolean" } }
+        }))
+        .expect("schema");
+        assert!(schema_mismatch(&schema, r#"{"ok":true}"#).is_none());
+        let not_json = schema_mismatch(&schema, "nope").expect("not json");
+        assert!(not_json.contains("answer is not JSON"), "{not_json}");
+        let missing = schema_mismatch(&schema, "{}").expect("missing ok");
+        assert!(missing.contains("ok"), "{missing}");
     }
 
     #[test]

@@ -56,6 +56,8 @@ fn dropped(cli: &Cli, run: Option<&RunArgs>) -> Vec<&'static str> {
             ("--loop", run.r#loop.is_some()),
             ("--max-iterations", run.max_iterations.is_some()),
             ("--image", !run.images.is_empty()),
+            // The schema file is on this machine; the target cannot read it.
+            ("--json-schema", run.json_schema.is_some()),
             ("--resume", cli.resume.is_some()),
             ("--continue", cli.r#continue),
         ]),
@@ -235,6 +237,23 @@ mod tests {
         assert_eq!(tui.remote[tui.remote.len() - 2..], ["--resume", "s1"]);
         let run = plan_of(&["cox", "run", "--on", "a:b", "-p", "x", "--continue"]).unwrap();
         assert_eq!(run.remote.last().map(String::as_str), Some("--continue"));
+    }
+
+    #[test]
+    fn json_schema_is_not_forwarded_to_a_target() {
+        let error = plan_of(&[
+            "cox",
+            "run",
+            "--on",
+            "ssh:box",
+            "-p",
+            "hi",
+            "--json-schema",
+            "schema.json",
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("--json-schema"), "{error}");
     }
 
     #[test]

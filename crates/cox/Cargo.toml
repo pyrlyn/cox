@@ -119,6 +119,9 @@ reqwest = { workspace = true }
 sha2 = { workspace = true }
 # T5.8: the binary owns the async runtime the TUI and core loop run on.
 tokio = { workspace = true }
+# T67.11: `--json-schema` checks the final answer. Default features pull
+# reqwest to resolve remote `$ref`s; this flag only compiles one local document.
+jsonschema = { version = "0.59.0", default-features = false }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]

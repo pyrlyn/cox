@@ -1,3 +1,36 @@
+#### T67.11 `cox run -p --json-schema`
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
+
+Goal: `--json-schema <file>` validates the final answer against the schema. On failure cox sends one retry turn with the validation errors; a second failure exits non-zero and prints the errors.
+
+Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`, `crates/cox/src/config_load.rs`, `crates/cox/src/on_target.rs`, `crates/cox/tests/it/run_cli.rs`
+
+Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
+
+Result:
+- `--json-schema <file>` compiles one local JSON Schema (`jsonschema` 0.59, default features off: no remote `$ref` fetch) before a session opens. A bad file exits before any provider call.
+- The final assistant text is parsed as JSON and checked. A failure submits one more user turn whose text includes the errors and the marker `JSON schema validation`. A second failure prints the errors on stderr and exits 1. A turn that already failed for another reason is not retried.
+- The flag is `runtime.json_schema` in the flag map, and `--on` refuses it: the schema file is on this machine.
+- `deny.toml` allows `MIT-0` for `borrow-or-share`, which jsonschema 0.59 uses.
+
+Check output (2026-10-19):
+```
+mise exec -- cargo nextest run --locked -p cox json_schema
+  6 passed (json_schema_accepts_a_matching_answer_the_first_time,
+  json_schema_accepts_the_retry_after_one_failure,
+  json_schema_exits_nonzero_after_two_failures,
+  json_schema_mismatch_names_a_bad_answer_and_accepts_a_good_one,
+  json_schema_is_not_forwarded_to_a_target,
+  plus config_every_flag_has_a_config_key in the same run)
+mise exec -- cargo clippy --locked -p cox --all-targets -- -D warnings
+  clean
+mise exec -- cargo fmt --check
+  clean
+mise exec -- cargo hakari verify
+  workspace-hack works correctly
+```
+
 #### T67.10 MCP resources and prompts
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3

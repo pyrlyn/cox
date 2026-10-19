@@ -15,6 +15,19 @@ use cox_protocol::ids::TaskId;
 use cox_protocol::types::Event;
 use serde_json::Value;
 
+const JSON_SCHEMA: &str = r#"{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}},"additionalProperties":false}"#;
+
+fn json_schema(work: &Path, home: &Path, scenario: &str) -> Command {
+    let scenario_path = work.join("scenario.toml");
+    let schema_path = work.join("schema.json");
+    std::fs::write(&scenario_path, scenario).unwrap();
+    std::fs::write(&schema_path, JSON_SCHEMA).unwrap();
+    let scenario = scenario_path.to_string_lossy();
+    let mut cmd = cox(work, home, scenario.as_ref());
+    cmd.arg("--json-schema").arg(&schema_path);
+    cmd
+}
+
 fn cox(work: &Path, home: &Path, scenario: &str) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_cox"));
     cmd.current_dir(work)
@@ -568,4 +581,58 @@ fn image_flag_refuses_a_text_file_before_any_request() {
         .stderr(predicates_str_contains(
             "--image notes.txt: not a PNG, JPEG, GIF or WebP image",
         ));
+}
+
+/// T67.11: a first answer that already matches the schema is the run.
+/// A second provider call would exhaust the one-turn scenario.
+#[test]
+fn json_schema_accepts_a_matching_answer_the_first_time() {
+    let (work, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    json_schema(
+        work.path(),
+        home.path(),
+        "[[turn]]\ntext = '{\"ok\":true}'\n",
+    )
+    .assert()
+    .success()
+    .stdout("{\"ok\":true}\n");
+}
+
+/// T67.11: the first answer fails, the retry prompt carries the errors,
+/// and the second answer is what the run prints.
+#[test]
+fn json_schema_accepts_the_retry_after_one_failure() {
+    let scenario = "\
+[[turn]]
+text = 'nope'
+
+[[turn]]
+text = '{\"ok\":true}'
+when_contains = 'JSON schema validation'
+";
+    let (work, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    json_schema(work.path(), home.path(), scenario)
+        .assert()
+        .success()
+        .stdout("{\"ok\":true}\n");
+}
+
+/// T67.11: two failures exit 1 and print the second answer's errors.
+#[test]
+fn json_schema_exits_nonzero_after_two_failures() {
+    let scenario = "\
+[[turn]]
+text = 'nope'
+
+[[turn]]
+text = 'still-nope'
+";
+    let (work, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    json_schema(work.path(), home.path(), scenario)
+        .assert()
+        .code(1)
+        .stderr(predicates_str_contains(
+            "cox: answer does not match --json-schema:",
+        ))
+        .stderr(predicates_str_contains("answer is not JSON"));
 }
