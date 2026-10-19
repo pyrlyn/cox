@@ -40,7 +40,7 @@ futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 gimli = { version = "0.33", default-features = false, features = ["read", "std", "write"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17", features = ["serde"] }
-hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16" }
+hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.17" }
 indexmap = { version = "2", features = ["serde"] }
 itertools-582f2526e08bb6a0 = { package = "itertools", version = "0.14" }
 libc = { version = "0.2", features = ["extra_traits"] }
@@ -117,7 +117,7 @@ fastrand = { version = "2" }
 fnv = { version = "1" }
 gimli = { version = "0.33", default-features = false, features = ["read", "std", "write"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17", features = ["serde"] }
-hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16" }
+hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.17" }
 indexmap = { version = "2", features = ["serde"] }
 itertools-594e8ee84c453af0 = { package = "itertools", version = "0.13" }
 libc = { version = "0.2", features = ["extra_traits"] }
