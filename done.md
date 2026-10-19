@@ -1,3 +1,37 @@
+#### T33.40.11 User guide: the Jev plugin
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: T33.40.6, T33.40.9 · Size: ~150
+
+Goal: one page for users covering what Jev is, how to build and install it, the key, the decision points, the state each point sends, cost, fail-open, doctor, and the old `[providers.typesafe]` table.
+
+Files:
+- `docs/plugins/jev.md`
+- `docs/plugins.md`
+- `crates/cox/tests/it/doc_examples.rs`
+
+Result:
+- The page states J13: Jev answers decisions and is not a tier. `risk` only raises; `route` only downgrades a main turn to `cheap`.
+- `just plugin jev` is not a recipe. The page gives the cargo build that produces `cox_plugin_jev.wasm`, the copy to `plugins/jev/jev.wasm`, and `cox plugin install plugins/jev --yes`. `just plugin-test` is named as the test command, which does not write the wasm.
+- The key is `TYPESAFE_API_KEY`, then keyring entry `cox/typesafe`. A missing key fails that call open.
+- The state lists match the code: `risk` sends `task`, `cwd`, `workspace_roots`, `sandbox` and per call `tool`, `subject`, `input`, `classifier_risk`. `route` forwards `prompt`, `todo`, `last_turn`, `files_touched_count` and `static`. The core today fills `prompt` and `static` on the route question.
+- E1 and E2 are not in `research.md`. Both points stay off, which is the default, until those live runs exist. They need `TYPESAFE_API_KEY` and, for E2, `ANTHROPIC_API_KEY`.
+- `[providers.typesafe]` still sets the base URL and the key env var. `tiers.code.provider = "typesafe"` without the plugin loaded is the doctor warning that the section moved.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo nextest run -p cox --test it jev_guide_toml_blocks_match_config_or_the_manifest
+     PASS. The three toml fences parse as Config: [plugins.decide] names
+     jev for risk and route, [plugins.jev.risk] keeps irreversible 0.7 and
+     exfiltration 0.5, [providers.typesafe] keeps api_key_env TYPESAFE_API_KEY.
+$ mise exec -- cargo clippy -p cox --test it -- -D warnings
+     clean
+$ mise exec -- cargo fmt --check
+     clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     exit 1 only for the unset ANTHROPIC_API_KEY (COX_KEYRING=off).
+     Every other row passed on this branch.
+```
+
 #### T33.40.9 `route` advisor: downgrade only
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: T33.40.8, T33.40.1, T33.40.4 · Size: ~170 (route.rs plus the decide dispatcher and the manifest capability)
