@@ -4,6 +4,47 @@ https://github.com/pyrlyn/cox
 
 A modular terminal coding agent in Rust (coxswain: steers work while models, tools, and extensions row). TUI, headless, ACP, MCP.
 
+## Audit 2026-10-19
+
+Three review passes over clean `main` (`c0c3b6a`): pass 1 walked the crates module by module,
+pass 2 followed entry points and threats (tool inputs, MCP, the serve socket, OAuth loopback,
+self-update, `web_fetch`), pass 3 checked docs against code and the tests. It follows the find-only
+QA audit `docs/qa/2026-10-01-audit.md` (PR #88). Most of those F-items were never tracked here;
+the ones still open on `main` are fixed in this branch, the rest are listed below. IDs are
+`A19.n`; to take one, add its row to the task table and write a card the usual way (§2).
+
+Fixed in this branch (one commit each, with a regression test):
+
+| QA | Pass | Where | Fix |
+| --- | --- | --- | --- |
+| F8 | 1, 2 | `cox-sandbox/src/write.rs` unix `stage_confined` | A replaced file keeps its mode: no lost exec bit, no `0o600` widened to `0o644`. |
+| F7 | 1, 3 | `cox-tools/src/edit.rs` `apply_replace` | An empty `old` is refused instead of splicing `new` between every character. |
+| F2, F3 | 1, 3 | `cox-patch/src/apply.rs` `stage` | `Move to:` its own path, an existing file or a path another op touches is refused. |
+| F5 | 2 | `cox-tools/src/v4a/tool.rs` `call` | Two spellings of one confined file (`a.rs`, `./a.rs`) are refused. |
+| F6 | 3 | `cox-patch/src/apply.rs` `apply_hunks` | A pure insertion goes right after its `@@` header; a missing header is refused. |
+| F10 | 2, 3 | `cox-tools/src/bash/classify.rs` `command_risk` | `sort -o`, `tree -o`, `uniq IN OUT`, `xxd IN OUT`, `xxd -r` are `Write`, not `ReadOnly`. |
+| F12 | 3 | `cox-tools/src/edit.rs` `edit_at` | Only an all-CRLF file is normalised; a mixed file keeps its endings. |
+| F11 (part) | 2 | `cox-tools/src/web_fetch.rs` `max_bytes` | A model-chosen `max_bytes` is held to 1..=10 MiB. |
+
+Still open:
+
+| ID | Severity | Pass | Where | What | Why |
+| --- | --- | --- | --- | --- | --- |
+| A19.1 | high | 3 | `workspace-hack/Cargo.toml` (lines 28, 113) after the Renovate bumps #401–#406 | `cargo metadata --locked --all-features`, and so `cargo nextest run --locked`, fails on clean `main`: the hack asks for `crypto-common` feature `std`, which the locked 0.2.2 lacks, and then `digest` has the same problem. Run `cargo hakari generate`, and add `cargo hakari verify` to the checks Renovate PRs must pass. | Nobody can build or test `main` with `--locked`; this audit had to empty the hack locally to run tests. |
+| A19.2 | medium | 2 | `cox-web/src/lib.rs` `private_guard_policy`; `cox-permission` `WebFetch(domain:…)` | Redirects are checked against the private-address guard but not against the domain rules, so `deny WebFetch(domain:evil.example)` is bypassed by a redirect from an allowed host. Re-run the domain rules in the redirect policy, or refuse cross-host redirects. Rest of QA F11. | A deny rule that a redirect skips gives false assurance under prompt injection. |
+| A19.3 | medium | 2 | `cox/src/self_update.rs` `run`; `plugin_fetch` | `cox update` checks the archive against a `.sha256` from the same release, which proves integrity but not who built it. Verify a signature or GitHub build attestation before `self_replace`. | Anyone who can write a release asset can replace both files; a self-replacing binary is the worst place to trust that. |
+| A19.4 | low | 1 | `cox-config/src/cmd.rs` `append_allow_rule_in`; `cox-tools/src/write.rs` `atomic_write_trusted` | The temp-file-and-rename writes create the new file with the default mode, so a `config.toml` the user made `0o600` ends up `0o644`. Copy the old file's permissions onto the temp file, as `write_confined` now does. | A private config becomes readable to other local users after one "allow always". |
+| A19.5 | low | 1 | `cox-sandbox/src/write.rs` `#[cfg(not(unix))]` `stage_confined` | The F8 fix is unix-only; on Windows a replaced file still loses its read-only attribute. Copy the attribute before the rename. | Same bug class as F8, smaller impact. |
+| A19.6 | low | 3 | `scripts/leftovers.sh`; `.github/workflows/ci.yml` | QA F14 is still open: the script exits 1 with 590 messages on `main`, `just check` runs it, CI does not. Update the mapping or drop it from `just check`, then add it to CI. | A local gate that is always red teaches people to ignore it. |
+| A19.7 | low | 2 | `cox-tools/src/web_fetch.rs` `call` | The scheme check is case-sensitive, so `HTTPS://x` is refused. Compare the scheme case-insensitively. Rest of QA F11. | A valid URL fails; harmless, but confusing. |
+
+Checked and not a finding: the serve socket (`cox-serve/src/socket.rs`: owner-only, umask 077,
+symlink and group-bit refusals), the MCP OAuth loopback (`cox-mcp/src/auth.rs`: PKCE, `state`
+checked before a connection is accepted), `cox-app/src/remote.rs`, the project-config guards
+(T64.1–T64.7), path-rule normalisation (QA F4 is fixed in `cox-permission/src/lib.rs`
+`normalize`), and `config set` validation (QA F9 is fixed by `check_user_toml`; F13's
+`memory.rs` half is gone with the move of memory into the store).
+
 ## Cloud review findings (2026-10-08)
 
 New bugs, dead code and moves from a read-only Cursor cloud review of clean `main` (agent `bc-31eef317-b77c-5beb-976e-00002188574d`; full report: `cloud/cox.md` in the private `listepo/roadmap` repo). They form phase P64: T64.1–T64.23, ordered P0, P1, P2. **confirmed** means seen in the tree; **suspected** means plausible from the code but not proven. Crate paths are under `crates/`; line numbers are as of the review. None of these is in the task table yet: to take one, add its row and write a card the usual way (§2).
