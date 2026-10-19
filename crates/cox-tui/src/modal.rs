@@ -708,6 +708,18 @@ mod tests {
         crate::view::buffer_to_string(term.backend().buffer())
     }
 
+    /// T67.7: leaving plan mode asks through the same modal as `ask_user`,
+    /// with the plan's first line and the two answers.
+    #[test]
+    fn exit_plan_modal() {
+        let question = Question::new(
+            CallId::new(),
+            "Approve this plan and leave plan mode? ship the ledger".into(),
+            vec!["Approve".into(), "Keep planning".into()],
+        );
+        insta::assert_snapshot!(render_question(&question));
+    }
+
     /// T47.3: an MCP elicitation question names the server that asks and
     /// reads `mcp`, not the model's `ask_user`.
     #[test]

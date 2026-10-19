@@ -427,7 +427,26 @@ impl PermissionMode {
             PermissionMode::Bypass => 3,
         }
     }
+
+    /// Where an approved `exit_plan` leaves this mode (T67.7). Only `Plan`
+    /// becomes `Default`; `Auto` and `Bypass` stay, so an approval never
+    /// widens them. The tool does not call this — the session does.
+    pub fn after_exit_plan(self, approved: bool) -> Self {
+        if approved && self == Self::Plan {
+            Self::Default
+        } else {
+            self
+        }
+    }
 }
+
+/// The `exit_plan` tool (T67.7). Also the `structured` field whose value
+/// [`EXIT_PLAN_APPROVED`] means the person approved leaving plan mode.
+pub const EXIT_PLAN_TOOL: &str = "exit_plan";
+
+/// `structured[EXIT_PLAN_TOOL]` when the person approved. Any other value
+/// keeps the current mode.
+pub const EXIT_PLAN_APPROVED: &str = "approve";
 
 /// `core.mode` / `--mode` / `/mode` (P42, A73): a named preset over the
 /// permission mode and the main tier only. It never filters tools, so the
@@ -704,6 +723,15 @@ impl ToolResult {
     /// payload is not one.
     pub fn todo_list(&self) -> Option<Vec<TodoItem>> {
         Vec::<TodoItem>::deserialize(self.structured.as_deref()?).ok()
+    }
+
+    /// Whether this successful `exit_plan` result is an approval (T67.7).
+    /// The session is what turns that into `PermissionMode::Default`.
+    pub fn exits_plan(&self) -> bool {
+        self.ok
+            && self.structured.as_ref().is_some_and(|value| {
+                value.get(EXIT_PLAN_TOOL).and_then(Value::as_str) == Some(EXIT_PLAN_APPROVED)
+            })
     }
 }
 

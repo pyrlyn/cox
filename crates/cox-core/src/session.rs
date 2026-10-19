@@ -2143,11 +2143,29 @@ impl Session {
             });
             inner.state = State::RunningTools;
         }
+        // Taken before `calls` moves into `run_signed_tools`. Only an
+        // approval from the real `exit_plan` tool may leave plan mode
+        // (T67.7); a structured field on some other tool does not.
+        let exit_ids: Vec<CallId> = streamed
+            .calls
+            .iter()
+            .filter(|(_, name, _)| name == cox_protocol::types::EXIT_PLAN_TOOL)
+            .map(|(id, _, _)| *id)
+            .collect();
         let results = run_signed_tools(self, turn, streamed.calls, &streamed.signatures).await?;
         if self.cancel_token().is_cancelled() {
             self.set_state(State::Interrupted).await;
             self.finish(turn, StopReason::Interrupted).await?;
             return Ok(Step::Done);
+        }
+        // The session applies Default, never the tool. The next provider
+        // call in this turn already sees the new mode. `ToolCallDone` is
+        // already emitted, so the notice is what the rollout records.
+        if results
+            .iter()
+            .any(|(id, result)| result.exits_plan() && exit_ids.contains(id))
+        {
+            self.apply_exit_plan().await?;
         }
         let order: Vec<CallId> = results.iter().map(|(id, _)| *id).collect();
         let mut msg = results_message(results);
@@ -2237,6 +2255,49 @@ impl Session {
             model,
         })
         .await
+    }
+
+    /// An approved `exit_plan` leaves `Plan` for `Default` (T67.7). Other
+    /// modes stay. Architect, which exists to force plan, returns to editor
+    /// and the tier it replaced, the same restore `/mode editor` does.
+    /// Returns whether the live mode changed.
+    async fn apply_exit_plan(&self) -> Result<bool, CoreError> {
+        let pending = {
+            let mut inner = self.inner.lock().await;
+            let next = inner.permission_mode.after_exit_plan(true);
+            if next == inner.permission_mode {
+                None
+            } else {
+                let before = inner.overrides.main_tier;
+                inner.permission_mode = next;
+                let mode_event = if inner.mode == Mode::Architect {
+                    inner.mode = Mode::Editor;
+                    if let Some(saved) = inner.mode_tier.take() {
+                        inner.overrides.main_tier = saved;
+                    }
+                    if inner.overrides.main_tier != before {
+                        inner.history = crate::router::strip_thinking(&inner.history);
+                    }
+                    Some(mode_changed(&inner))
+                } else {
+                    None
+                };
+                Some((state_changed(&inner), mode_event))
+            }
+        };
+        let Some((state, mode)) = pending else {
+            return Ok(false);
+        };
+        self.emit(state).await?;
+        if let Some(mode) = mode {
+            self.emit(mode).await?;
+        }
+        self.emit(Event::Notice {
+            level: Level::Info,
+            text: "left plan mode".into(),
+        })
+        .await?;
+        Ok(true)
     }
 
     /// `/mode architect|editor` (P42, T42.3): architect narrows the live
@@ -2916,6 +2977,108 @@ mod tests {
             })
             .await
             .expect("turn");
+    }
+
+    /// T67.7: approving `exit_plan` during a turn leaves Plan for Default
+    /// through the session, and the tool result says so.
+    #[tokio::test]
+    async fn approved_exit_plan_switches_to_default() {
+        let mut config = cox_protocol::Config::default();
+        config.permissions.mode = PermissionMode::Plan;
+        config.core.workspace_roots = vec![PathBuf::from("/tmp/cox-turn")];
+        let scenario = r#"
+[[turn]]
+text = "planning"
+tool_calls = [{ name = "exit_plan", input = { plan = "ship the ledger" } }]
+
+[[turn]]
+text = "done"
+"#;
+        let store = Arc::new(MemoryStore::new());
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(cox_tools::plan::ExitPlanTool::surface())];
+        let session = Session::new(
+            config,
+            Arc::new(Scripted::from_toml(scenario, "").expect("scenario")),
+            tools,
+            store.clone(),
+            store.clone(),
+            PathBuf::from("/tmp/cox-turn"),
+        )
+        .expect("session");
+        assert_eq!(session.permission_mode().await, PermissionMode::Plan);
+        let mut rx = session.events().expect("events");
+        let runner = session.clone();
+        let running = tokio::spawn(async move {
+            runner
+                .submit(Submission::UserTurn {
+                    text: "go".into(),
+                    attachments: vec![],
+                    confirm_think: false,
+                })
+                .await
+        });
+        loop {
+            let ev = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("event timeout")
+                .expect("event stream closed");
+            match ev {
+                Event::QuestionAsked {
+                    call_id,
+                    question,
+                    options,
+                    ..
+                } => {
+                    assert!(question.contains("ship the ledger"), "{question}");
+                    assert_eq!(options, ["Approve", "Keep planning"]);
+                    session
+                        .submit(Submission::Answer {
+                            call_id,
+                            text: Some("Approve".into()),
+                        })
+                        .await
+                        .expect("answer");
+                }
+                Event::TurnDone { .. } => break,
+                _ => {}
+            }
+        }
+        running.await.expect("join").expect("turn");
+        assert_eq!(session.permission_mode().await, PermissionMode::Default);
+        let rollout = store.rollout_read(&session.id()).expect("rollout");
+        assert!(rollout.iter().any(|event| matches!(
+            event,
+            Event::StateChanged {
+                mode: PermissionMode::Default,
+                ..
+            }
+        )));
+        assert!(rollout.iter().any(|event| matches!(
+            event,
+            Event::Notice { text, .. } if text == "left plan mode"
+        )));
+    }
+
+    /// T67.7: leaving architect restores the editor tier. A mode that is
+    /// not Plan does not move.
+    #[tokio::test]
+    async fn approved_exit_leaves_architect_and_ignores_other_modes() {
+        let (session, _, _) = recorded(cox_protocol::Config::default(), 0);
+        set_mode(&session, "architect").await;
+        assert_eq!(session.permission_mode().await, PermissionMode::Plan);
+        assert!(session.apply_exit_plan().await.expect("leave"));
+        assert_eq!(session.permission_mode().await, PermissionMode::Default);
+        assert_eq!(session.inner.lock().await.mode, Mode::Editor);
+        assert_eq!(session.inner.lock().await.overrides.main_tier, None);
+
+        session
+            .submit(Submission::SetPermissionMode {
+                mode: PermissionMode::Auto,
+            })
+            .await
+            .expect("set mode");
+        assert!(!session.apply_exit_plan().await.expect("stay"));
+        assert_eq!(session.permission_mode().await, PermissionMode::Auto);
     }
 
     #[tokio::test]

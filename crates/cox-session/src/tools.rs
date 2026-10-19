@@ -24,6 +24,7 @@ use cox_tools::lsp::nav::{Nav, NavTool};
 use cox_tools::lsp::rename::RenameTool;
 use cox_tools::lsp::{AfterEdit, DiagnosticsTool, LspPool};
 use cox_tools::memory::{MemoryGetTool, MemorySaveTool, MemorySearchTool};
+use cox_tools::plan::ExitPlanTool;
 use cox_tools::read::ReadTool;
 use cox_tools::todo::TodoTool;
 use cox_tools::tool_search::ToolSearchTool;
@@ -48,6 +49,9 @@ pub fn tools(answer: Option<String>, store: &Arc<Store>, mdir: PathBuf) -> Vec<A
         // Headless/ACP/MCP: `--answer` or nothing. `open` swaps this for
         // `Answers::Surface` when a caller passes `questions` (T22.1).
         Arc::new(AskUserTool::new(Answers::Fixed(answer))),
+        // Headless/ACP: decline. `open` swaps this when a caller passes
+        // `questions`, the same way `ask_user` becomes a surface (T67.7).
+        Arc::new(ExitPlanTool::headless()),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemorySearchTool::new(mem.clone(), mdir.clone())),
@@ -181,6 +185,7 @@ pub(crate) fn with_question_surface(tools: Vec<Arc<dyn Tool>>) -> Vec<Arc<dyn To
         .into_iter()
         .map(|t| match t.spec().name.as_str() {
             "ask_user" => Arc::new(AskUserTool::new(Answers::Surface)) as Arc<dyn Tool>,
+            "exit_plan" => Arc::new(ExitPlanTool::surface()) as Arc<dyn Tool>,
             _ => t,
         })
         .collect()
@@ -446,5 +451,73 @@ mod tests {
             "{}",
             out.text
         );
+    }
+
+    /// T67.7: the built-in list declines `exit_plan`; a question surface is
+    /// what swaps in the tool that asks.
+    #[tokio::test]
+    async fn exit_plan_asks_only_on_a_question_surface() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open(tmp.path()).expect("store"));
+        let mdir = tmp.path().join("memory");
+        let plan = serde_json::json!({"plan": "ship the ledger"});
+        let (out_tx, _out_rx) = tokio::sync::mpsc::channel(1);
+        let mut cx = cox_tools::tool_cx(
+            vec![tmp.path().to_path_buf()],
+            tmp.path().to_path_buf(),
+            cox_protocol::SandboxPolicy {
+                mode: cox_protocol::types::SandboxMode::ReadOnly,
+                network: false,
+                writable: vec![],
+                readonly_in_workspace: vec![],
+                linux_backend: Default::default(),
+            },
+            Arc::new(NoopArchive) as Arc<dyn cox_protocol::Archive>,
+            tokio_util::sync::CancellationToken::new(),
+            out_tx,
+            SessionId::new(),
+            cox_protocol::ids::CallId::new(),
+        );
+        let headless = tools(None, &store, mdir.clone())
+            .into_iter()
+            .find(|tool| tool.spec().name == "exit_plan")
+            .expect("exit_plan");
+        let err = headless
+            .call(plan.clone(), &cx)
+            .await
+            .expect_err("headless");
+        assert!(matches!(err, cox_protocol::ToolError::Denied { .. }));
+
+        struct Approve;
+
+        #[async_trait::async_trait]
+        impl cox_protocol::Relay for Approve {
+            async fn send_message(
+                &self,
+                _to: &str,
+                _text: &str,
+            ) -> Result<(), cox_protocol::ToolError> {
+                Ok(())
+            }
+            async fn ask(
+                &self,
+                _call_id: cox_protocol::CallId,
+                question: &str,
+                options: &[String],
+                _source: Option<cox_protocol::types::Source>,
+            ) -> Result<Option<String>, cox_protocol::ToolError> {
+                assert!(question.contains("ship the ledger"), "{question}");
+                assert_eq!(options, ["Approve", "Keep planning"]);
+                Ok(Some("Approve".into()))
+            }
+        }
+
+        cx.relay = Some(Arc::new(Approve));
+        let surface = with_question_surface(tools(None, &store, mdir))
+            .into_iter()
+            .find(|tool| tool.spec().name == "exit_plan")
+            .expect("exit_plan");
+        let out = surface.call(plan, &cx).await.expect("asked");
+        assert_eq!(out.structured.expect("structured")["exit_plan"], "approve");
     }
 }

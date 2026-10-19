@@ -22,6 +22,7 @@ Core tools are always in context; deferred tools join through `tool_search`
 | `todo` | ReadOnly | no | — | drives the TUI todo panel |
 | `expand` | ReadOnly | no | archive id | reads back archived output, capped |
 | `ask_user` | ReadOnly | yes | question | blocks the turn; `--answer` headless; TUI: modal |
+| `exit_plan` | ReadOnly | no | plan | asks before leaving plan mode; headless and ACP without a prompt decline; the session applies Default |
 | `tool_search` | ReadOnly | no | query | reveals up to 5 deferred schemas |
 | `web_fetch` | ReadOnly | yes | URL | readability fallback; domain rules apply |
 | `agent` | max of its tools; Destructive with `isolation: "worktree"` | yes | preset | `explore` / `shell` presets, own budget; worktree isolation asks (denied in plan); `background: true` returns a task handle and `collect: [id or name, …]` (with `timeout_ms`) reads back each task's status and capped preview |
