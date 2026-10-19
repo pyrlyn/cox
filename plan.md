@@ -1892,7 +1892,7 @@ Rationale in §6 A148. Idea-only: the source is the public Claude Code documenta
 
 #### T67.3 Five more hook events
 
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P1 · Complexity: 2
+Model: grok-4.7 · Status: in progress · Depends: — · Size: ~150 · Priority: P1 · Complexity: 2
 
 Goal: `HookEvent` gains `PostToolBatch` (after every tool call of one assistant message has a result), `PermissionDenied` (the engine or the user denied a call), `InstructionsLoaded` (instruction files were read at session open), `CwdChanged` and `StopFailure` (a turn ended in an error). Each fires at the existing point in the session, is observe-only, and has a Claude Code name in `HookEvent::name()`.
 

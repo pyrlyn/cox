@@ -543,7 +543,7 @@ impl Tool for AgentTool {
                 })?;
                 let owner = format!("cox / {}", self.parent.id);
                 let wt = worktrees
-                    .add(&self.parent.cwd, &task.to_string(), &owner)
+                    .add(&self.parent.cwd(), &task.to_string(), &owner)
                     .await
                     .map_err(|e| ToolError::Denied {
                         why: format!("worktree: {e}"),
@@ -2264,7 +2264,7 @@ text = "it was 42"
         ToolCx {
             roots: tool.parent.config.core.workspace_roots.clone(),
             writable_roots: tool.parent.config.core.workspace_roots.clone(),
-            cwd: tool.parent.cwd.clone(),
+            cwd: tool.parent.cwd(),
             sandbox: cox_protocol::types::SandboxPolicy {
                 mode: tool.parent.config.sandbox.mode,
                 network: tool.parent.config.sandbox.network,
@@ -2533,7 +2533,7 @@ text = "it was 42"
         ToolCx {
             roots: session.config.core.workspace_roots.clone(),
             writable_roots: session.config.core.workspace_roots.clone(),
-            cwd: session.cwd.clone(),
+            cwd: session.cwd(),
             sandbox: cox_protocol::types::SandboxPolicy {
                 mode: session.config.sandbox.mode,
                 network: session.config.sandbox.network,

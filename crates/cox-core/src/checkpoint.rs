@@ -51,7 +51,7 @@ pub(crate) async fn before(
     let roots = session.writable_roots();
     if let Some(paths) = tool.touches(input) {
         let files = cp
-            .preimages(roots, &session.cwd, &paths)
+            .preimages(roots, &session.cwd(), &paths)
             .await
             .into_iter()
             .map(|p| (p.path, false, p.before))

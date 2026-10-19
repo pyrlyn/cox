@@ -150,11 +150,12 @@ impl Session {
         };
         let engine = self.engine.clone();
         let (approval, sandbox) = (self.config.permissions.approval, self.config.sandbox.mode);
-        let cwd = self.cwd.clone();
+        let cwd = self.cwd();
+        let admit_cwd = cwd.clone();
         // Both spellings a model could use, so a relative rule and an
         // absolute one each get their match.
         let admit = move |path: &Path| {
-            let relative = path.strip_prefix(&cwd).ok();
+            let relative = path.strip_prefix(&admit_cwd).ok();
             [Some(path), relative].into_iter().flatten().all(|p| {
                 let subject = p.display().to_string();
                 let call = ToolCall {
@@ -174,7 +175,7 @@ impl Session {
         let budget = usize::try_from(tokens)
             .unwrap_or(usize::MAX)
             .saturating_mul(BYTES_PER_TOKEN);
-        let text = mapper.build(&self.cwd, budget, &admit).await;
+        let text = mapper.build(&cwd, budget, &admit).await;
         (!text.is_empty()).then_some(text)
     }
 

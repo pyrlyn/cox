@@ -299,8 +299,8 @@ impl Session {
             }
             None => None,
         };
-        let name = self
-            .cwd
+        let cwd = self.cwd();
+        let name = cwd
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "repo".to_string());

@@ -536,18 +536,29 @@ pub enum HookEvent {
     PostToolUse,
     /// After a tool call fails.
     PostToolUseFailure,
+    /// After every tool call of one assistant message has a result (T67.3).
+    /// Observe-only: the verdict is ignored.
+    PostToolBatch,
     /// After a turn finishes normally.
     Stop,
+    /// A turn ended in an error, instead of `Stop` (T67.3). Observe-only.
+    StopFailure,
     /// Before compaction runs; may `Block` it.
     PreCompact,
     /// After compaction runs.
     PostCompact,
     /// A session opened.
     SessionStart,
+    /// Instruction files were read at session open (T67.3). Observe-only.
+    InstructionsLoaded,
+    /// The session directory changed (T67.3). Observe-only.
+    CwdChanged,
     /// A session closed.
     SessionEnd,
     /// The engine escalated a call to the user.
     PermissionRequest,
+    /// The engine or the user denied a call (T67.3). Observe-only.
+    PermissionDenied,
     /// A subagent started.
     SubagentStart,
     /// A subagent finished.
@@ -564,12 +575,17 @@ impl HookEvent {
             Self::PreToolUse => "PreToolUse",
             Self::PostToolUse => "PostToolUse",
             Self::PostToolUseFailure => "PostToolUseFailure",
+            Self::PostToolBatch => "PostToolBatch",
             Self::Stop => "Stop",
+            Self::StopFailure => "StopFailure",
             Self::PreCompact => "PreCompact",
             Self::PostCompact => "PostCompact",
             Self::SessionStart => "SessionStart",
+            Self::InstructionsLoaded => "InstructionsLoaded",
+            Self::CwdChanged => "CwdChanged",
             Self::SessionEnd => "SessionEnd",
             Self::PermissionRequest => "PermissionRequest",
+            Self::PermissionDenied => "PermissionDenied",
             Self::SubagentStart => "SubagentStart",
             Self::SubagentStop => "SubagentStop",
             Self::Notification => "Notification",
@@ -2106,6 +2122,57 @@ mod tests {
                 state: TodoState::InProgress,
             }])
         );
+    }
+
+    /// T67.3: `docs/config.md` names every hook event. The match is
+    /// exhaustive, so a new variant fails this test until it is listed.
+    #[test]
+    fn config_doc_lists_every_hook_event() {
+        let docs = include_str!("../../../docs/config.md");
+        const ALL: [HookEvent; 18] = [
+            HookEvent::UserPromptSubmit,
+            HookEvent::PreToolUse,
+            HookEvent::PostToolUse,
+            HookEvent::PostToolUseFailure,
+            HookEvent::PostToolBatch,
+            HookEvent::Stop,
+            HookEvent::StopFailure,
+            HookEvent::PreCompact,
+            HookEvent::PostCompact,
+            HookEvent::SessionStart,
+            HookEvent::InstructionsLoaded,
+            HookEvent::CwdChanged,
+            HookEvent::SessionEnd,
+            HookEvent::PermissionRequest,
+            HookEvent::PermissionDenied,
+            HookEvent::SubagentStart,
+            HookEvent::SubagentStop,
+            HookEvent::Notification,
+        ];
+        for event in ALL {
+            let name = match event {
+                HookEvent::UserPromptSubmit => "UserPromptSubmit",
+                HookEvent::PreToolUse => "PreToolUse",
+                HookEvent::PostToolUse => "PostToolUse",
+                HookEvent::PostToolUseFailure => "PostToolUseFailure",
+                HookEvent::PostToolBatch => "PostToolBatch",
+                HookEvent::Stop => "Stop",
+                HookEvent::StopFailure => "StopFailure",
+                HookEvent::PreCompact => "PreCompact",
+                HookEvent::PostCompact => "PostCompact",
+                HookEvent::SessionStart => "SessionStart",
+                HookEvent::InstructionsLoaded => "InstructionsLoaded",
+                HookEvent::CwdChanged => "CwdChanged",
+                HookEvent::SessionEnd => "SessionEnd",
+                HookEvent::PermissionRequest => "PermissionRequest",
+                HookEvent::PermissionDenied => "PermissionDenied",
+                HookEvent::SubagentStart => "SubagentStart",
+                HookEvent::SubagentStop => "SubagentStop",
+                HookEvent::Notification => "Notification",
+            };
+            assert_eq!(name, event.name());
+            assert!(docs.contains(name), "docs/config.md does not list {name}");
+        }
     }
 
     /// A113: a `TitleSet` written before T37.22.9 has no `by_user` and

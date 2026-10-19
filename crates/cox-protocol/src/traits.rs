@@ -620,8 +620,8 @@ pub trait RepoMapper: Send + Sync {
 /// panic or a fatal error (D14/AGENTS.md: "fail open on extensions").
 #[async_trait]
 pub trait Hook: Send + Sync {
-    /// Whether an observe-only trigger (`SessionStart`, `Notification`)
-    /// should be dispatched to this source at all. The default is the
+    /// Whether an observe-only trigger (`SessionStart`, `Notification`, and
+    /// the T67.3 points) should be dispatched to this source at all. The default is the
     /// `[hooks]` config check; a source configured elsewhere (a plugin's
     /// granted hooks, PL§6) answers for itself, or it would never run.
     fn interested(
