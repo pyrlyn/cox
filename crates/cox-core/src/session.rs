@@ -3169,16 +3169,16 @@ text = \"ok\"
                 .await
                 .expect("submit");
         }
-        let seen = probe.0.lock().unwrap_or_else(|e| e.into_inner());
-        let loaded: Vec<_> = seen
-            .iter()
-            .filter(|(event, _)| *event == HookEvent::InstructionsLoaded)
-            .map(|(_, payload)| payload)
-            .collect();
+        let loaded: Vec<Value> = {
+            let seen = probe.0.lock().unwrap_or_else(|e| e.into_inner());
+            seen.iter()
+                .filter(|(event, _)| *event == HookEvent::InstructionsLoaded)
+                .map(|(_, payload)| payload.clone())
+                .collect()
+        };
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0]["load_reason"], "session_start");
         assert_eq!(loaded[0]["memory_type"], "Project");
-        drop(seen);
         let (empty, probe) = open(&["InstructionsLoaded"]);
         empty
             .submit(Submission::SetEffort { effort: None })
