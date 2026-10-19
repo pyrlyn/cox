@@ -59,7 +59,7 @@ ppv-lite86 = { version = "0.2", default-features = false, features = ["simd", "s
 proc-macro2 = { version = "1" }
 pulley-interpreter = { version = "49", default-features = false, features = ["disas", "interp", "std"] }
 quote = { version = "1" }
-rand = { version = "0.9", default-features = false, features = ["small_rng", "thread_rng"] }
+rand = { version = "0.10", default-features = false, features = ["small_rng", "thread_rng"] }
 rand_chacha = { version = "0.10", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4" }
