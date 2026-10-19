@@ -983,6 +983,19 @@ fn core_error(err: config_schema::Error) -> CoreError {
     }
 }
 
+/// The `[tiers]` table of the embedded `default.toml` (T33.40.13).
+///
+/// Session open uses this when a tier still names the retired `typesafe`
+/// client and no plugin serves it. `None` only if that file no longer
+/// deserializes, which `config_defaults_parse` rules out.
+pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
+    Layers::new()
+        .toml_text("default", DEFAULT_CONFIG_TOML)
+        .extract::<Config>()
+        .ok()
+        .map(|config| config.tiers)
+}
+
 /// Loads and layers config (plan.md §1.6/D13), applies the project guard
 /// list, and returns the effective config plus provenance.
 ///
@@ -1121,6 +1134,17 @@ mod tests {
         assert_eq!(cfg.tiers.code.model, "claude-sonnet-5");
         assert!(cfg.providers.custom.contains_key("deepseek"));
         assert!(!cfg.providers.anthropic.models.is_empty());
+    }
+
+    /// T33.40.13: the fallback a legacy `typesafe` tier copies is the
+    /// embedded table, not `TiersConfig::default()`'s neutral values.
+    #[test]
+    fn default_tiers_reads_the_embedded_code_tier() {
+        let tiers = default_tiers().expect("embedded defaults");
+        assert_eq!(tiers.code.provider, "anthropic");
+        assert_eq!(tiers.code.model, "claude-sonnet-5");
+        assert_eq!(tiers.cheap.model, "claude-haiku-4-5");
+        assert!(tiers.think.confirm);
     }
 
     #[test]
