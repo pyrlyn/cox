@@ -45,4 +45,4 @@ pub use cox_permission as permission;
 pub use context::{assemble, assemble_with, microcompact};
 pub use permission::{Engine, Outcome};
 pub use rollout::{History, HistoryTurn};
-pub use session::{MemoryStore, Session};
+pub use session::{MemoryStore, PathRules, Session};

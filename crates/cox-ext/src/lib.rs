@@ -20,4 +20,5 @@ pub mod hooks;
 pub mod instructions;
 pub mod memory;
 pub mod presence;
+pub mod rules;
 pub mod skills;

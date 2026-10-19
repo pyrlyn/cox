@@ -1,3 +1,29 @@
+#### T67.6 Path-scoped rules, loaded on demand
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~190 · Priority: P2 · Complexity: 3
+
+Goal: `.cox/rules/*.md` and `.claude/rules/*.md` with a frontmatter `paths:` glob list reach the model only when it reads or edits a matching file, once per rule per session. Instruction files keep loading as today.
+
+Files:
+- `crates/cox-ext/src/rules.rs` (new): `Rule { globs, body, source }`, `load_rules(roots) -> Loaded { rules, notices }` (re-read each time; a broken file is a notice and is skipped), `rules_for(touched, rules) -> Vec<&Rule>` (pure). Reuses `frontmatter.rs` and the `globset` the workspace already links.
+- `crates/cox-core`: `PathRules` trait; after a `read`/`edit`/`write` result, `append_rule_text` appends new matching rules to volatile `system[3]` after the last cache breakpoint, never in the system prefix. `cox-session` loads the git root (or `cwd` outside a repository) and registers `DiskPathRules`.
+- `docs/config.md` (generated from `cox-protocol`'s config docs)
+
+Steps:
+1. A rule body is untrusted repository text: it goes through `cox_sanitize::sanitize` and is framed as `<project_rule source="…">`, not as a system instruction.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-ext -p cox-core
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+`cox-ext` 61 passed, `cox-core` 490 passed (551 total). `rule_matches_only_its_globs`, `rule_injected_once`, `system_prefix_unchanged_by_rules` and `config_docs_config_md_matches_default_toml` pass. Clippy and fmt clean.
+
+Done when `rule_matches_only_its_globs`, `rule_injected_once` and `system_prefix_unchanged_by_rules` (byte-equal prefix with and without rules) pass.
+
+Deviations: `load_rules` returns `Loaded { rules, notices }` so a broken file is a warning the session can log, matching the fail-open rule. Injection lands in `system[3]` (the volatile block after the cache breakpoint) rather than a new message item, which is where volatile context already goes and keeps `system[0..=2]` byte-identical. `cox-session` wires the loader; `cox-core` only sees the `PathRules` trait. Also restores `cox_config::load::default_tiers` (callers in `cox-session` no longer compiled) and a needless-borrow in `target_agents`, and regenerates `workspace-hack` the same way as #408 so the workspace resolves after the rand/digest bumps.
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4

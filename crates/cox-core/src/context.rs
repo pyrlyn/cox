@@ -6,7 +6,7 @@
 //! prefix order can be snapshot-tested without running tools. `Breakdown`
 //! (T25.7) attributes a request's estimated tokens back to those segments.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -584,6 +584,77 @@ fn text_body(a: &Attachment) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+/// Paths a successful `read`, `edit` or `write` named. A failed call did not
+/// touch the file, so its path does not pull a rule into the prompt.
+pub(crate) fn touched_paths(messages: &[Message]) -> Vec<String> {
+    let mut answered = HashSet::new();
+    for message in messages {
+        for block in &message.content {
+            if let Content::ToolResult {
+                call_id, is_error, ..
+            } = block
+                && !is_error
+            {
+                answered.insert(*call_id);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for message in messages {
+        for block in &message.content {
+            let Content::ToolUse { id, name, input } = block else {
+                continue;
+            };
+            if !matches!(name.as_str(), "read" | "edit" | "write") || !answered.contains(id) {
+                continue;
+            }
+            let Some(path) = input.get("path").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if path.is_empty() || out.iter().any(|seen| seen == path) {
+                continue;
+            }
+            out.push(path.to_string());
+        }
+    }
+    out
+}
+
+/// Appends rule blocks whose opening line is not already present. The
+/// session keeps the result and sends it on later requests, so a rule is
+/// injected once per session even after the tool result scrolls away.
+pub(crate) fn merge_new_rules(already: &str, blocks: &[(String, String)]) -> String {
+    let mut out = already.to_string();
+    for (_source, text) in blocks {
+        let Some(marker) = text.lines().next().filter(|line| !line.is_empty()) else {
+            continue;
+        };
+        if out.contains(marker) {
+            continue;
+        }
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(text);
+    }
+    out
+}
+
+/// Puts `rules` on `system[3]`, the block after the prefix cache breakpoint.
+/// `system[0..=2]` and the breakpoints stay put.
+pub(crate) fn append_rule_text(req: &mut Request, rules: &str) {
+    if rules.is_empty() {
+        return;
+    }
+    let Some(block) = req.system.get_mut(3) else {
+        return;
+    };
+    if !block.text.is_empty() && !block.text.ends_with('\n') {
+        block.text.push('\n');
+    }
+    block.text.push_str(rules);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1140,5 +1211,90 @@ mod tests {
             );
             map.len()
         });
+    }
+
+    #[test]
+    fn rule_injected_once() {
+        use cox_protocol::types::Role;
+
+        let id = CallId::new();
+        let denied = CallId::new();
+        let history = vec![
+            Message {
+                role: Role::Assistant,
+                content: vec![
+                    Content::ToolUse {
+                        id,
+                        name: "read".into(),
+                        input: serde_json::json!({"path": "src/lib.rs"}),
+                    },
+                    Content::ToolUse {
+                        id: denied,
+                        name: "write".into(),
+                        input: serde_json::json!({"path": "secret.txt"}),
+                    },
+                ],
+            },
+            Message {
+                role: Role::User,
+                content: vec![
+                    Content::ToolResult {
+                        call_id: id,
+                        content: "ok".into(),
+                        is_error: false,
+                    },
+                    Content::ToolResult {
+                        call_id: denied,
+                        content: "denied".into(),
+                        is_error: true,
+                    },
+                ],
+            },
+        ];
+        assert_eq!(touched_paths(&history), vec!["src/lib.rs".to_string()]);
+        let block = (
+            ".cox/rules/rust.md".to_string(),
+            "<project_rule source=\".cox/rules/rust.md\">\nUse rustfmt.\n</project_rule>\n"
+                .to_string(),
+        );
+        let once = merge_new_rules("", std::slice::from_ref(&block));
+        let twice = merge_new_rules(&once, std::slice::from_ref(&block));
+        assert_eq!(once, twice);
+        assert_eq!(once.matches("<project_rule").count(), 1);
+        let mut req = assemble(
+            &history,
+            &cox_protocol::Config::default(),
+            &[],
+            Path::new("/w"),
+            "2026-10-19",
+        );
+        append_rule_text(&mut req, &once);
+        assert_eq!(req.system[3].text.matches("<project_rule").count(), 1);
+    }
+
+    #[test]
+    fn system_prefix_unchanged_by_rules() {
+        let history = vec![Message {
+            role: cox_protocol::types::Role::User,
+            content: vec![Content::Text { text: "hi".into() }],
+        }];
+        let config = cox_protocol::Config::default();
+        let plain = assemble(&history, &config, &[], Path::new("/w"), "2026-10-19");
+        let mut with_rules = plain.clone();
+        append_rule_text(
+            &mut with_rules,
+            "<project_rule source=\".cox/rules/rust.md\">\nUse rustfmt.\n</project_rule>\n",
+        );
+        assert_eq!(
+            serde_json::to_vec(&plain.system[0..=2]).expect("plain"),
+            serde_json::to_vec(&with_rules.system[0..=2]).expect("with rules"),
+        );
+        assert_eq!(plain.cache_breakpoints, with_rules.cache_breakpoints);
+        assert!(!with_rules.system[3].cache);
+        assert!(with_rules.system[3].text.contains("Use rustfmt."));
+        assert!(!plain.system[2].text.contains("Use rustfmt."));
+        for block in &with_rules.system[0..=2] {
+            assert!(!block.text.contains("Use rustfmt."));
+        }
     }
 }
