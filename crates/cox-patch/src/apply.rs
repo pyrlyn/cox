@@ -98,6 +98,9 @@ pub fn stage(
                 after: None,
             },
             Op::Update { move_to, hunks, .. } => {
+                if let Some(to) = move_to {
+                    check_move_target(&path, to, read, &staged)?;
+                }
                 let before = require(read, &path)?;
                 let after = apply_hunks(&before, hunks)?;
                 Change {
@@ -111,6 +114,27 @@ pub fn stage(
         staged.insert(path, change);
     }
     Ok(staged.into_values().collect())
+}
+
+/// A move writes `to` and then removes `path`. Onto itself that removal
+/// deletes the file just written; onto an existing file it replaces content
+/// nothing archived; onto a path another op touches the two ops race.
+fn check_move_target(
+    path: &str,
+    to: &str,
+    read: &dyn Fn(&str) -> Option<String>,
+    staged: &BTreeMap<String, Change>,
+) -> Result<(), ToolError> {
+    let why = if to == path {
+        format!("`*** Move to: {to}` names the file being updated")
+    } else if read(to).is_some() {
+        format!("`*** Move to: {to}` but the file already exists")
+    } else if staged.contains_key(to) || staged.values().any(|c| c.path == to) {
+        format!("patch touches {to} twice")
+    } else {
+        return Ok(());
+    };
+    Err(ToolError::Denied { why })
 }
 
 fn require(read: &dyn Fn(&str) -> Option<String>, path: &str) -> Result<String, ToolError> {
@@ -326,6 +350,31 @@ mod tests {
         assert_eq!(changes[0].path, "b.rs");
         assert_eq!(changes[0].from.as_deref(), Some("a.rs"));
         assert_eq!(changes[0].status(), 'R');
+    }
+
+    #[test]
+    fn v4a_move_refuses_its_own_path_an_existing_file_and_a_touched_path() {
+        let files = [("a.rs", "x\n"), ("b.rs", "keep\n")];
+        for (src, want) in [
+            (
+                "*** Begin Patch\n*** Update File: a.rs\n*** Move to: a.rs\n@@\n-x\n+y\n*** End Patch",
+                "names the file being updated",
+            ),
+            (
+                "*** Begin Patch\n*** Update File: a.rs\n*** Move to: b.rs\n@@\n-x\n+y\n*** End Patch",
+                "already exists",
+            ),
+            (
+                "*** Begin Patch\n*** Add File: c.rs\n+z\n*** Update File: a.rs\n\
+                 *** Move to: c.rs\n@@\n-x\n+y\n*** End Patch",
+                "twice",
+            ),
+        ] {
+            match staged(&files, src) {
+                Err(ToolError::Denied { why }) => assert!(why.contains(want), "{why}"),
+                other => panic!("expected Denied for {src:?}, got {other:?}"),
+            }
+        }
     }
 
     #[test]
