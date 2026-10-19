@@ -184,8 +184,11 @@ async fn edit_at(path: PathBuf, mode: &Mode, cx: &ToolCx) -> Result<ToolOutput, 
 
     // Normalise to `\n` for matching/splicing, then restore CRLF (if the
     // file had it) and let the untouched-region splice carry the
-    // trailing-newline state through unchanged.
-    let crlf = original.contains("\r\n");
+    // trailing-newline state through unchanged. Only a file whose every line
+    // ends in CRLF round-trips: in a mixed file the restore would turn each
+    // bare `\n` into CRLF too, so a mixed file is edited as it is.
+    let crlf = original.contains("\r\n")
+        && original.matches('\n').count() == original.matches("\r\n").count();
     let work = if crlf {
         original.replace("\r\n", "\n")
     } else {
@@ -201,7 +204,8 @@ async fn edit_at(path: PathBuf, mode: &Mode, cx: &ToolCx) -> Result<ToolOutput, 
         Mode::Anchored(ops) => anchor::apply(&work, ops)?,
     };
     let result = if crlf {
-        new_work.replace('\n', "\r\n")
+        // `new` may carry its own CRLF; fold it first so it is not doubled.
+        new_work.replace("\r\n", "\n").replace('\n', "\r\n")
     } else {
         new_work
     };
@@ -479,6 +483,25 @@ mod tests {
                 assert!(why.contains("beta"));
             }
             other => panic!("expected Denied, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn edit_keeps_line_endings_it_did_not_touch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cx = cx(dir.path());
+        for (seed, old, new, want) in [
+            ("a\r\nb\nc\n", "b", "B", "a\r\nB\nc\n"),
+            ("a\r\nb\r\n", "b", "B", "a\r\nB\r\n"),
+            ("a\r\nb\r\n", "b", "B\r\nC", "a\r\nB\r\nC\r\n"),
+        ] {
+            std::fs::write(dir.path().join("f.txt"), seed).expect("seed");
+            EditTool
+                .call(json!({"path": "f.txt", "old": old, "new": new}), &cx)
+                .await
+                .expect("edit");
+            let got = std::fs::read_to_string(dir.path().join("f.txt")).expect("read");
+            assert_eq!(got, want, "{seed:?}");
         }
     }
 
