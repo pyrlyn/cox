@@ -486,10 +486,23 @@ impl Question {
     }
 
     pub fn height(&self) -> u16 {
-        3
+        if self.is_exit_plan() {
+            u16::try_from(self.lines(&Glyphs::default(), &Theme::dark()).len()).unwrap_or(12)
+        } else {
+            3
+        }
+    }
+
+    /// `exit_plan` reuses this modal (T67.7). The options are the protocol's
+    /// pair, so the TUI does not need a second event.
+    fn is_exit_plan(&self) -> bool {
+        cox_protocol::types::exit_plan_options(&self.options)
     }
 
     pub fn lines(&self, g: &Glyphs, theme: &Theme) -> Vec<Line<'static>> {
+        if self.is_exit_plan() {
+            return self.exit_plan_lines(g, theme);
+        }
         let options = if self.options.is_empty() {
             " type an answer".to_string()
         } else {
@@ -526,6 +539,48 @@ impl Question {
                 self.input, g.caret, g.sep
             )),
         ]
+    }
+
+    /// The plan is repository-untrusted model text: each line is sanitized,
+    /// and a long plan stops after eight lines so the composer stays on screen.
+    fn exit_plan_lines(&self, g: &Glyphs, theme: &Theme) -> Vec<Line<'static>> {
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let mut lines = vec![Line::styled(
+            " exit_plan  Leave Plan mode?".to_string(),
+            bold.fg(theme.warn),
+        )];
+        let mut plan = self
+            .question
+            .lines()
+            .skip(1)
+            .map(sanitize)
+            .filter(|line| !line.is_empty())
+            .take(9)
+            .collect::<Vec<_>>();
+        if plan.len() == 9 {
+            plan.pop();
+            plan.push("…".to_string());
+        }
+        if plan.is_empty() {
+            plan.push(sanitize(&self.question));
+        }
+        lines.extend(
+            plan.into_iter()
+                .map(|line| Line::styled(format!(" {line}"), Style::default().fg(theme.dim))),
+        );
+        lines.push(Line::styled(
+            format!(
+                " 1) {}  2) {}",
+                cox_protocol::types::EXIT_PLAN_APPROVE,
+                cox_protocol::types::EXIT_PLAN_KEEP
+            ),
+            Style::default().add_modifier(Modifier::DIM),
+        ));
+        lines.push(Line::raw(format!(
+            " > {}{}   1 approves {} 2 keeps planning {} Esc dismisses",
+            self.input, g.caret, g.sep, g.sep
+        )));
+        lines
     }
 }
 
@@ -720,6 +775,29 @@ mod tests {
         .from_agent(Some("mcp:github".into()));
         let text = render_question(&question);
         assert!(text.contains("mcp:github asks: mcp Sign up"), "{text}");
+        assert!(!text.contains("ask_user"), "{text}");
+        insta::assert_snapshot!(text);
+    }
+
+    /// T67.7: leaving Plan mode is the ask_user modal with the plan and the
+    /// two decisions, not a second dialog. Escape sequences in the plan do
+    /// not reach the terminal.
+    #[test]
+    fn exit_plan_modal() {
+        let question = Question::new(
+            CallId::new(),
+            "Leave Plan mode and carry out this plan?\nrename the helper\n\u{1b}[31mred".into(),
+            vec![
+                cox_protocol::types::EXIT_PLAN_APPROVE.into(),
+                cox_protocol::types::EXIT_PLAN_KEEP.into(),
+            ],
+        );
+        let text = render_question(&question);
+        assert!(text.contains("exit_plan"));
+        assert!(text.contains("rename the helper"));
+        assert!(text.contains("Approve"));
+        assert!(text.contains("Keep planning"));
+        assert!(!text.contains('\u{1b}'), "{text:?}");
         assert!(!text.contains("ask_user"), "{text}");
         insta::assert_snapshot!(text);
     }

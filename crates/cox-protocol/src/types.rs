@@ -429,6 +429,18 @@ impl PermissionMode {
     }
 }
 
+/// The option that leaves Plan mode (T67.7). `exit_plan` and the modal
+/// share it, so a digit pick and a typed answer are the same decision.
+pub const EXIT_PLAN_APPROVE: &str = "Approve";
+
+/// The option that keeps Plan mode. Any other reply is feedback, not approval.
+pub const EXIT_PLAN_KEEP: &str = "Keep planning";
+
+/// Whether `options` are the `exit_plan` pair, in that order.
+pub fn exit_plan_options(options: &[String]) -> bool {
+    options.len() == 2 && options[0] == EXIT_PLAN_APPROVE && options[1] == EXIT_PLAN_KEEP
+}
+
 /// `core.mode` / `--mode` / `/mode` (P42, A73): a named preset over the
 /// permission mode and the main tier only. It never filters tools, so the
 /// cache prefix stays byte-stable, and it only narrows `permissions.mode`.

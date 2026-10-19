@@ -34,6 +34,7 @@ pub mod grep;
 pub mod lsp;
 pub mod mcp_exec;
 pub mod memory;
+pub mod plan;
 pub mod project;
 pub mod read;
 pub mod repomap;

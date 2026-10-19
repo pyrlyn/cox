@@ -24,6 +24,7 @@ use cox_tools::lsp::nav::{Nav, NavTool};
 use cox_tools::lsp::rename::RenameTool;
 use cox_tools::lsp::{AfterEdit, DiagnosticsTool, LspPool};
 use cox_tools::memory::{MemoryGetTool, MemorySaveTool, MemorySearchTool};
+use cox_tools::plan::ExitPlanTool;
 use cox_tools::read::ReadTool;
 use cox_tools::todo::TodoTool;
 use cox_tools::tool_search::ToolSearchTool;
@@ -48,6 +49,9 @@ pub fn tools(answer: Option<String>, store: &Arc<Store>, mdir: PathBuf) -> Vec<A
         // Headless/ACP/MCP: `--answer` or nothing. `open` swaps this for
         // `Answers::Surface` when a caller passes `questions` (T22.1).
         Arc::new(AskUserTool::new(Answers::Fixed(answer))),
+        // Headless and ACP have no client prompt, so leaving Plan mode is
+        // declined until `with_question_surface` swaps this (T67.7).
+        Arc::new(ExitPlanTool::headless()),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemorySearchTool::new(mem.clone(), mdir.clone())),
@@ -181,6 +185,7 @@ pub(crate) fn with_question_surface(tools: Vec<Arc<dyn Tool>>) -> Vec<Arc<dyn To
         .into_iter()
         .map(|t| match t.spec().name.as_str() {
             "ask_user" => Arc::new(AskUserTool::new(Answers::Surface)) as Arc<dyn Tool>,
+            "exit_plan" => Arc::new(ExitPlanTool::surface()) as Arc<dyn Tool>,
             _ => t,
         })
         .collect()
@@ -446,5 +451,85 @@ mod tests {
             "{}",
             out.text
         );
+    }
+
+    /// T67.7: `tools()` declines `exit_plan` (headless and ACP). A question
+    /// surface swaps in the tool that asks, and Plan mode can run either
+    /// because the spec stays `ReadOnly`.
+    #[tokio::test]
+    async fn exit_plan_is_headless_until_a_question_surface() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open(tmp.path()).expect("open store"));
+        let mdir = tmp.path().join("memory");
+        let headless = tools(None, &store, mdir.clone());
+        let surface = with_question_surface(tools(None, &store, mdir));
+        for list in [&headless, &surface] {
+            let spec = list
+                .iter()
+                .find(|t| t.spec().name == "exit_plan")
+                .expect("exit_plan")
+                .spec();
+            assert_eq!(spec.risk, cox_protocol::Risk::ReadOnly);
+            assert!(!spec.deferred);
+        }
+        let (out_tx, _out_rx) = tokio::sync::mpsc::channel(1);
+        let mut cx = cox_tools::tool_cx(
+            vec![tmp.path().to_path_buf()],
+            tmp.path().to_path_buf(),
+            cox_protocol::SandboxPolicy {
+                mode: cox_protocol::types::SandboxMode::ReadOnly,
+                network: false,
+                writable: vec![],
+                readonly_in_workspace: vec![],
+                linux_backend: Default::default(),
+            },
+            Arc::new(NoopArchive) as Arc<dyn cox_protocol::Archive>,
+            tokio_util::sync::CancellationToken::new(),
+            out_tx,
+            SessionId::new(),
+            cox_protocol::ids::CallId::new(),
+        );
+        cx.relay = Some(Arc::new(ApprovingRelay));
+        let plan = serde_json::json!({"plan": "rename the helper"});
+        let declined = headless
+            .iter()
+            .find(|t| t.spec().name == "exit_plan")
+            .expect("headless")
+            .call(plan.clone(), &cx)
+            .await
+            .expect_err("headless declines");
+        assert!(declined.to_string().contains("approval"));
+        let approved = surface
+            .iter()
+            .find(|t| t.spec().name == "exit_plan")
+            .expect("surface")
+            .call(plan, &cx)
+            .await
+            .expect("surface asks");
+        assert!(cox_tools::plan::approved_exit(&approved));
+    }
+
+    struct ApprovingRelay;
+
+    #[async_trait::async_trait]
+    impl cox_protocol::Relay for ApprovingRelay {
+        async fn send_message(
+            &self,
+            _to: &str,
+            _text: &str,
+        ) -> Result<(), cox_protocol::ToolError> {
+            Ok(())
+        }
+        async fn ask(
+            &self,
+            _call_id: cox_protocol::CallId,
+            question: &str,
+            options: &[String],
+            _source: Option<cox_protocol::types::Source>,
+        ) -> Result<Option<String>, cox_protocol::ToolError> {
+            assert!(question.contains("rename the helper"), "{question}");
+            assert!(cox_protocol::types::exit_plan_options(options));
+            Ok(Some(cox_protocol::types::EXIT_PLAN_APPROVE.to_string()))
+        }
     }
 }

@@ -1,3 +1,28 @@
+#### T67.7 Leaving Plan mode needs approval
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
+
+Goal: in Plan mode the model calls `exit_plan { plan }` (`Risk::ReadOnly`). It asks the user through the `ask_user` modal: approve, or keep planning with feedback. Approval switches the mode to Default through the session, never from inside the tool. Headless runs and ACP without a client prompt decline it by construction.
+
+Files:
+- `crates/cox-protocol/src/types.rs`: `EXIT_PLAN_APPROVE`, `EXIT_PLAN_KEEP`, `exit_plan_options`
+- `crates/cox-tools/src/plan.rs` (new): `ExitPlanTool`. `headless()` declines without asking; `surface()` asks through `Relay::ask`. `structured.approved` is true only for the approve option.
+- `crates/cox-tui/src/modal.rs`: the question modal renders an `exit_plan` header and the plan when the options are that pair.
+- `crates/cox-session/src/tools.rs`: the built-in list carries the headless tool; `with_question_surface` swaps in the asking one (TUI and the desktop app). ACP leaves `questions` false, so it keeps the declining tool.
+- `crates/cox-core`: `Session::leave_plan_mode` sets `PermissionMode::Default` only when the live mode is Plan. `turn` calls it after a successful `exit_plan` whose structured payload says approved. The tool never writes the mode.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-tools -p cox-core -p cox-tui
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+1283 tests passed across `cox-tools`, `cox-core`, `cox-tui`, `cox-session` and `cox-protocol` (the check's three crates plus the two this change also touches), 2 skipped. `exit_plan_requires_approval`, `headless_declines_exit_plan`, `exit_plan_is_headless_until_a_question_surface` and the `exit_plan_modal` snapshot pass. Clippy and fmt clean.
+
+`COX_HOME=/tmp/cox-scratch cargo run -- doctor`: sandbox, db, git and prefix pass. The API-key row fails because `ANTHROPIC_API_KEY` is unset in this environment.
+
+Done when `exit_plan_requires_approval`, `headless_declines_exit_plan` and the `exit_plan_modal` insta snapshot pass.
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
