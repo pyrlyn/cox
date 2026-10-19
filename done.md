@@ -1,3 +1,37 @@
+#### T67.10 MCP resources and prompts
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Goal: the MCP client lists and reads resources (`resources/list`, `resources/read`) and lists prompts (`prompts/list`). The model reaches them through one deferred read-only tool found by `tool_search`. Their output is untrusted: sanitized, and archived when over the cap.
+
+Files: `crates/cox-mcp/src/client.rs`, `crates/cox-mcp/tests/client.rs`, `crates/cox-tools/src/tool_search.rs`, `crates/cox-session/src/mcp.rs`
+
+Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
+
+Result:
+- `McpClient::list_resources`, `list_prompts` and `read_resource` follow rmcp's paginated list helpers and `resources/read`. A blob is named (`[binary … N bytes]`), not inlined. An MRTR `InputRequired` result is an error the model can read.
+- One deferred read-only tool, `mcp_resources` (`action` `resources` | `read` | `prompts`, optional `server`, `uri` for `read`). `tool_search`'s description names it. The session registers it only when at least one MCP server connected.
+- Server text is passed through the caller's sanitizer (the session passes `cox_sanitize::sanitize`; this crate does not depend on that guard) before it is archived or returned. Over `VISIBLE_BYTES` (8192), the archive row is written first and the model sees the head, the tail and `expand #id`. A failed archive returns no pointer.
+
+Check output (2026-10-19):
+```
+mise exec -- cargo nextest run --locked -p cox-mcp -p cox-tools
+  Summary: 319 tests run: 319 passed, 1 skipped
+  includes mcp_resources_lists_reads_and_archives_over_cap_first
+mise exec -- cargo clippy --locked -p cox-mcp -p cox-tools -p cox-session -p cox-config --all-targets -- -D warnings
+  clean
+mise exec -- cargo fmt --check
+  clean
+mise exec -- cargo hakari generate --diff
+  empty
+mise exec -- cargo hakari verify
+  workspace-hack works correctly
+mise exec -- cargo nextest run --locked -p cox-session -p cox-config -E 'test(/legacy_typesafe|open_moves_a_legacy|config_defaults_parse/)'
+  Summary: 5 tests run: 5 passed
+```
+
+Also on this branch, so the Check could run: restored `workspace-hack` to the last `cargo hakari generate` (renovate had bumped pins onto features those versions do not have); added the missing `cox_config::load::default_tiers` the jev fallback already calls; dropped a needless borrow clippy 1.99 rejects in `target_agents`.
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4

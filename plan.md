@@ -2022,18 +2022,6 @@ mise exec -- cargo fmt --check
 
 Done when `deny_rule_beats_classifier`, `classifier_error_asks`, `classifier_timeout_asks` and `injected_tool_output_cannot_widen` pass.
 
-#### T67.10 MCP resources and prompts
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
-
-Goal: the MCP client lists and reads resources (`resources/list`, `resources/read`) and lists prompts (`prompts/list`). The model reaches them through one deferred read-only tool found by `tool_search`. Their output is untrusted: sanitized, and archived when over the cap.
-
-Files: `crates/cox-mcp/src/*` (at most two files), `crates/cox-tools/src/tool_search.rs`
-
-Check: `mise exec -- cargo nextest run -p cox-mcp -p cox-tools`, then clippy and fmt as above.
-
-Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
-
 #### T67.11 `cox run -p --json-schema`
 
 Model: grok-4.7 · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2

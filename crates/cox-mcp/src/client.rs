@@ -28,6 +28,7 @@ use cox_protocol::types::{Concurrency, Risk, ToolOutput, ToolSpec};
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ClientConfig, ElicitRequestParams, ElicitResult,
     ElicitationAction, ElicitationCapability, ErrorData, FormElicitationCapability,
+    ReadResourceRequestParams, ReadResourceResponse, Resource, ResourceContents,
     UrlElicitationCapability,
 };
 use rmcp::service::{ClientInitializeError, RequestContext, RoleClient, RunningService};
@@ -37,7 +38,7 @@ use rmcp::transport::streamable_http_client::{
 };
 use rmcp::transport::{IntoTransport, TokioChildProcess};
 use rmcp::{ClientHandler, RmcpError, ServiceExt};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
@@ -58,6 +59,18 @@ pub enum ClientError {
     Handshake(Box<RmcpError>),
     #[error("tools/list: {0}")]
     List(rmcp::ServiceError),
+    /// `resources/list`, `resources/read` or `prompts/list` failed (T67.10).
+    #[error("{operation}: {error}")]
+    Exchange {
+        operation: &'static str,
+        error: rmcp::ServiceError,
+    },
+    /// The same call exceeded the server's timeout.
+    #[error("{operation}: timed out")]
+    ExchangeTimeout { operation: &'static str },
+    /// The server answered in a shape this client does not drive (MRTR).
+    #[error("{0}")]
+    Failed(String),
     /// The server wants a token this surface cannot obtain right now.
     #[error("{} run `cox mcp login {name}`", if *.expired { "token expired," } else { "login required," })]
     LoginRequired { name: String, expired: bool },
@@ -429,6 +442,54 @@ impl McpClient {
         &self.name
     }
 
+    /// `resources/list`, following every cursor. A server that does not
+    /// offer resources is an error the caller shows; it is not fatal to
+    /// the session (D14).
+    pub async fn list_resources(&self) -> Result<Vec<Resource>, ClientError> {
+        self.exchange("resources/list", self.service.list_all_resources())
+            .await
+    }
+
+    /// `prompts/list`, following every cursor.
+    pub async fn list_prompts(&self) -> Result<Vec<rmcp::model::Prompt>, ClientError> {
+        self.exchange("prompts/list", self.service.list_all_prompts())
+            .await
+    }
+
+    /// `resources/read` for `uri`, as text. A blob is named, not inlined:
+    /// base64 is not something the model can use, and it is untrusted bytes.
+    pub async fn read_resource(&self, uri: &str) -> Result<String, ClientError> {
+        let response = self
+            .exchange(
+                "resources/read",
+                self.service
+                    .read_resource_once(ReadResourceRequestParams::new(uri)),
+            )
+            .await?;
+        match response {
+            ReadResourceResponse::Complete(result) => Ok(contents_text(&result.contents)),
+            ReadResourceResponse::InputRequired(_) => Err(ClientError::Failed(
+                "resources/read needs more input".into(),
+            )),
+            // non_exhaustive: a future arm is an error the model can read
+            _ => Err(ClientError::Failed(
+                "resources/read returned an unsupported result".into(),
+            )),
+        }
+    }
+
+    async fn exchange<T>(
+        &self,
+        operation: &'static str,
+        fut: impl Future<Output = Result<T, rmcp::ServiceError>>,
+    ) -> Result<T, ClientError> {
+        match within(&self.asking, self.timeout, fut).await {
+            Some(Ok(value)) => Ok(value),
+            Some(Err(error)) => Err(ClientError::Exchange { operation, error }),
+            None => Err(ClientError::ExchangeTimeout { operation }),
+        }
+    }
+
     /// Ends the session; a stdio server's process is killed with it.
     pub async fn close(self) {
         if let Ok(service) = Arc::try_unwrap(self.service) {
@@ -697,6 +758,260 @@ fn output_of(result: CallToolResult) -> ToolOutput {
         is_error: result.is_error.unwrap_or(false),
         diff: None,
         structured: result.structured_content,
+    }
+}
+
+/// Bytes of resource or prompt text the model sees before the rest is an
+/// archive pointer. The same budget as the default
+/// `tool_output_visible_bytes`, so a short read is not cut twice by the loop.
+const VISIBLE_BYTES: usize = 8192;
+/// Each side of an over-cap body kept beside the archive pointer.
+const EDGE_BYTES: usize = 2000;
+
+/// The one deferred tool for MCP resources and prompts (T67.10). Server
+/// text is untrusted: `sanitize` runs before anything is archived or
+/// returned, and an over-cap body is archived before the shortened text
+/// that names that row is built.
+pub struct McpResources {
+    clients: Vec<McpClient>,
+    sanitize: fn(&str) -> String,
+}
+
+/// `clients` are the connected servers. `sanitize` is
+/// `cox_sanitize::sanitize` at the session; tests pass the same function.
+pub fn resources_tool(clients: Vec<McpClient>, sanitize: fn(&str) -> String) -> Arc<dyn Tool> {
+    Arc::new(McpResources { clients, sanitize })
+}
+
+impl McpResources {
+    fn selected(&self, server: Option<&str>) -> Result<Vec<&McpClient>, ToolError> {
+        match server {
+            Some(name) => self
+                .clients
+                .iter()
+                .find(|client| client.name == name)
+                .map(|client| vec![client])
+                .ok_or_else(|| ToolError::Denied {
+                    why: format!("no mcp server `{name}`"),
+                }),
+            None => Ok(self.clients.iter().collect()),
+        }
+    }
+
+    async fn render(
+        &self,
+        action: &str,
+        clients: &[&McpClient],
+        uri: Option<&str>,
+    ) -> (String, bool) {
+        let mut out = String::new();
+        let mut ok = false;
+        for client in clients {
+            let part = match action {
+                "resources" => listed(&client.name, client.list_resources().await, |row| {
+                    format!(
+                        "- {} ({}) {}",
+                        row.name,
+                        row.uri,
+                        row.description.unwrap_or_default()
+                    )
+                }),
+                "prompts" => listed(&client.name, client.list_prompts().await, |row| {
+                    format!("- {} {}", row.name, row.description.unwrap_or_default())
+                }),
+                "read" => match uri {
+                    Some(uri) => client.read_resource(uri).await,
+                    None => Err(ClientError::Failed("read requires uri".into())),
+                },
+                _ => Err(ClientError::Failed(format!("unknown action {action}"))),
+            };
+            match part {
+                Ok(text) => {
+                    ok = true;
+                    out.push_str(&text);
+                }
+                Err(error) => out.push_str(&format!("{}: {error}\n", client.name)),
+            }
+        }
+        (out, ok)
+    }
+}
+
+fn listed<T>(
+    server: &str,
+    result: Result<Vec<T>, ClientError>,
+    line: impl Fn(T) -> String,
+) -> Result<String, ClientError> {
+    let rows = result?;
+    let mut text = format!("{server}\n");
+    for row in rows {
+        text.push_str(&line(row));
+        text.push('\n');
+    }
+    Ok(text)
+}
+
+fn contents_text(contents: &[ResourceContents]) -> String {
+    contents
+        .iter()
+        .map(|item| match item {
+            ResourceContents::TextResourceContents { text, .. } => text.clone(),
+            ResourceContents::BlobResourceContents {
+                mime_type, blob, ..
+            } => format!(
+                "[binary {} {} bytes]",
+                mime_type.as_deref().unwrap_or("application/octet-stream"),
+                blob.len()
+            ),
+            _ => "[unsupported resource content]".into(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Archive `clean` first when it exceeds the cap, then the shortened text
+/// that names that row. A failed archive returns no tail: a pointer with
+/// nothing behind it would break the lossless rule.
+async fn cap_output(cx: &ToolCx, subject: &str, clean: String) -> ToolOutput {
+    if clean.len() <= VISIBLE_BYTES {
+        return ToolOutput {
+            text: clean,
+            is_error: false,
+            diff: None,
+            structured: None,
+        };
+    }
+    let put = cox_protocol::ArchivePut {
+        session: cx.session,
+        call: cx.call,
+        tool: "mcp_resources".into(),
+        subject: Some(subject.to_string()),
+        bytes: clean.as_bytes().to_vec(),
+    };
+    let id = match cx.archive.put(put).await {
+        Ok(id) => id,
+        Err(_) => {
+            return ToolOutput {
+                text: "resource output could not be archived".into(),
+                is_error: true,
+                diff: None,
+                structured: None,
+            };
+        }
+    };
+    ToolOutput {
+        text: shorten(&clean, &id),
+        is_error: false,
+        diff: None,
+        structured: None,
+    }
+}
+
+fn shorten(text: &str, id: &cox_protocol::ArchiveId) -> String {
+    let kib = text.len().div_ceil(1024);
+    let pointer = format!("[… {kib} KiB archived; expand #{id}]");
+    format!(
+        "{}\n{pointer}\n{}",
+        prefix(text, EDGE_BYTES),
+        suffix(text, EDGE_BYTES)
+    )
+}
+
+fn prefix(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+fn suffix(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut start = text.len() - max;
+    while start < text.len() && !text.is_char_boundary(start) {
+        start += 1;
+    }
+    &text[start..]
+}
+
+#[async_trait]
+impl Tool for McpResources {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "mcp_resources".into(),
+            description: "List or read an MCP resource, or list MCP prompts from a connected \
+                server. `action` is `resources`, `read` or `prompts`. Pass `server` when more \
+                than one MCP server is connected, and `uri` for `read`."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["resources", "read", "prompts"]},
+                    "server": {"type": "string"},
+                    "uri": {"type": "string"}
+                },
+                "required": ["action"]
+            }),
+            deferred: true,
+            risk: Risk::ReadOnly,
+            concurrency: Concurrency::Parallel,
+        }
+    }
+
+    fn subject(&self, input: &Value) -> String {
+        input
+            .get("uri")
+            .and_then(Value::as_str)
+            .or_else(|| input.get("action").and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    async fn call(&self, input: Value, cx: &ToolCx) -> Result<ToolOutput, ToolError> {
+        let action =
+            input
+                .get("action")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ToolError::Denied {
+                    why: "missing or non-string \"action\" field".into(),
+                })?;
+        if !matches!(action, "resources" | "read" | "prompts") {
+            return Err(ToolError::Denied {
+                why: format!("action must be resources, read, or prompts, not {action}"),
+            });
+        }
+        let server = input.get("server").and_then(Value::as_str);
+        let uri = input.get("uri").and_then(Value::as_str);
+        if action == "read" && uri.is_none() {
+            return Err(ToolError::Denied {
+                why: "read requires uri".into(),
+            });
+        }
+        let clients = self.selected(server)?;
+        if action == "read" && clients.len() > 1 {
+            return Err(ToolError::Denied {
+                why: "read requires server when more than one MCP server is connected".into(),
+            });
+        }
+        let work = self.render(action, &clients, uri);
+        let (raw, ok) = tokio::select! {
+            _ = cx.cancel.cancelled() => {
+                for client in &self.clients {
+                    client.asking.abort_all();
+                }
+                return Err(ToolError::Cancelled);
+            }
+            raw = work => raw,
+        };
+        let clean = (self.sanitize)(&raw);
+        let mut output = cap_output(cx, &self.subject(&input), clean).await;
+        output.is_error = !ok;
+        Ok(output)
     }
 }
 
