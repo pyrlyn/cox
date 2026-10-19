@@ -953,6 +953,18 @@ fn env_layer() -> Result<EnvLayer, CoreError> {
     ]))
 }
 
+/// `[tiers]` from the embedded `default.toml`, with no user, project or env
+/// layer on top. `None` only if that file no longer deserializes, which
+/// `config_defaults_parse` rules out. Session open uses this to move a tier
+/// whose provider became a plugin onto the built-in default (T33.40.13).
+pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
+    let config: Config = Layers::new()
+        .toml_text("default", DEFAULT_CONFIG_TOML)
+        .extract()
+        .ok()?;
+    Some(config.tiers)
+}
+
 /// config-schema reads a variable for a list key as a comma list, but a
 /// `COX_*` value has always been read as TOML (`["a", "b"]`), so the tree
 /// the names resolve against shows no lists. The resolver needs only the
