@@ -26,7 +26,7 @@ bstr = { version = "1" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "wasmbind"] }
 crossbeam-utils = { version = "0.8" }
 crypto-common = { version = "0.1", default-features = false, features = ["std"] }
-digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["std"] }
+digest-93f6ce9d446188ac = { package = "digest", version = "0.11", features = ["std"] }
 either = { version = "1", features = ["use_std"] }
 fastrand = { version = "2" }
 figment = { version = "0.10", default-features = false, features = ["env", "toml"] }
@@ -111,7 +111,7 @@ anyhow = { version = "1" }
 bitflags = { version = "2", default-features = false, features = ["std"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 crypto-common = { version = "0.1", default-features = false, features = ["std"] }
-digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["std"] }
+digest-93f6ce9d446188ac = { package = "digest", version = "0.11", features = ["std"] }
 either = { version = "1", features = ["use_std"] }
 fastrand = { version = "2" }
 fnv = { version = "1" }
