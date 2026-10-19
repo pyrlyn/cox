@@ -775,6 +775,11 @@ async fn run_one(
     if let Some(pending) = pending {
         checkpoint::after(session, turn, id, pending).await;
     }
+    // T67.7: `exit_plan` only asks. Approval switches Plan to Default here,
+    // never inside the tool.
+    if tool.spec().name == cox_protocol::types::EXIT_PLAN_TOOL {
+        session.note_exit_plan(&output).await;
+    }
     // §1.8 step vii: informational; the verdict is not applied.
     let event = if output.is_error {
         HookEvent::PostToolUseFailure

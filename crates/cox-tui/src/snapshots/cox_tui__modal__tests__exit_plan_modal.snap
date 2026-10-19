@@ -1,0 +1,7 @@
+---
+source: crates/cox-tui/src/modal.rs
+expression: text
+---
+ ask_user Leave plan mode and start editing? Ship the cache fix.
+ 1) Approve  2) Keep planning
+ > ▏   Enter sends · Esc dismisses

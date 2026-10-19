@@ -708,6 +708,22 @@ mod tests {
         crate::view::buffer_to_string(term.backend().buffer())
     }
 
+    /// T67.7: leaving Plan mode reuses the question modal. Approve is the
+    /// first option; anything else is feedback and stays in Plan.
+    #[test]
+    fn exit_plan_modal() {
+        let question = Question::new(
+            CallId::new(),
+            "Leave plan mode and start editing? Ship the cache fix.".into(),
+            vec!["Approve".into(), "Keep planning".into()],
+        );
+        let text = render_question(&question);
+        assert!(text.contains("ask_user Leave plan mode"), "{text}");
+        assert!(text.contains("1) Approve"), "{text}");
+        assert!(text.contains("2) Keep planning"), "{text}");
+        insta::assert_snapshot!(text);
+    }
+
     /// T47.3: an MCP elicitation question names the server that asks and
     /// reads `mcp`, not the model's `ask_user`.
     #[test]

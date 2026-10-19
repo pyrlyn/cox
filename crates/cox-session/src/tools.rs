@@ -24,6 +24,7 @@ use cox_tools::lsp::nav::{Nav, NavTool};
 use cox_tools::lsp::rename::RenameTool;
 use cox_tools::lsp::{AfterEdit, DiagnosticsTool, LspPool};
 use cox_tools::memory::{MemoryGetTool, MemorySaveTool, MemorySearchTool};
+use cox_tools::plan::ExitPlanTool;
 use cox_tools::read::ReadTool;
 use cox_tools::todo::TodoTool;
 use cox_tools::tool_search::ToolSearchTool;
@@ -48,6 +49,9 @@ pub fn tools(answer: Option<String>, store: &Arc<Store>, mdir: PathBuf) -> Vec<A
         // Headless/ACP/MCP: `--answer` or nothing. `open` swaps this for
         // `Answers::Surface` when a caller passes `questions` (T22.1).
         Arc::new(AskUserTool::new(Answers::Fixed(answer))),
+        // T67.7: headless and ACP without a prompt decline. `open` swaps
+        // this for `asking` when a caller passes `questions`.
+        Arc::new(ExitPlanTool::declining()),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemorySearchTool::new(mem.clone(), mdir.clone())),
@@ -181,6 +185,9 @@ pub(crate) fn with_question_surface(tools: Vec<Arc<dyn Tool>>) -> Vec<Arc<dyn To
         .into_iter()
         .map(|t| match t.spec().name.as_str() {
             "ask_user" => Arc::new(AskUserTool::new(Answers::Surface)) as Arc<dyn Tool>,
+            cox_protocol::types::EXIT_PLAN_TOOL => {
+                Arc::new(ExitPlanTool::asking()) as Arc<dyn Tool>
+            }
             _ => t,
         })
         .collect()

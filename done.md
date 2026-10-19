@@ -1,3 +1,30 @@
+#### T67.7 Leaving Plan mode needs approval
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~320 (landed larger) · Priority: P2 · Complexity: 3
+
+Goal: in Plan mode the model calls `exit_plan { plan }` (`Risk::ReadOnly`). It asks the user through the `ask_user` modal: approve, or keep planning with feedback. Approval switches the mode to Default through the session, never from inside the tool. Headless runs and ACP without a client prompt decline it by construction.
+
+Files: `crates/cox-protocol/src/types.rs`, `crates/cox-tools/src/plan.rs` (new), `crates/cox-tools/src/lib.rs`, `crates/cox-tui/src/modal.rs`, `crates/cox-core/src/session.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-session/src/tools.rs`
+
+Plan: `exit_plan` is read-only, so Plan mode's engine allows it, and `Concurrency::Exclusive` because it waits on the person. The declining tool is what headless and ACP without `questions` get; `with_question_surface` swaps in the asking one, same as `ask_user`. The question offers `Approve` and `Keep planning`. Only `Approve` sets `structured.approved`. `Session::note_exit_plan` is the only place that switches `PermissionMode::Plan` to `Default`, and only then. Feedback and a dismissed question leave the mode alone.
+
+Landed larger than the card's three files: the tool has to be registered, and the mode change has to live in the session (`cox-core` does not depend on `cox-tools` outside tests, so `ToolOutput::exit_plan_approved` is the shared flag).
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo nextest run --locked -p cox-tools -p cox-core -p cox-tui
+     Summary [   5.484s] 1053 tests run: 1053 passed, 2 skipped
+     (includes exit_plan_requires_approval, headless_declines_exit_plan, exit_plan_modal, only_the_approve_answer_reports_approval)
+$ mise exec -- cargo clippy --locked -p cox-protocol -p cox-tools -p cox-core -p cox-tui -p cox-session --all-targets -- -D warnings
+     Finished clean
+$ mise exec -- cargo fmt --check
+     clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     toolchain, db, sandbox (bwrap), git, prefix ok; API keys row fails because ANTHROPIC_API_KEY is unset (exit 1)
+```
+
+Workspace `--all-features` clippy was not re-run: `whisper-rs-sys` does not link in this environment.
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
