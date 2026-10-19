@@ -1,3 +1,27 @@
+#### T67.13 Design: a GitHub Action and scheduled runs
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~150 (doc; two design docs, see Result) · Priority: P3 · Complexity: 2
+
+Goal: `docs/design/github-action.md` and `docs/design/schedule.md`: how `cox run -p` runs in a GitHub workflow (inputs, key handling, sandbox, cost cap, what it may push) and on a schedule (where the schedule lives, locking, the ledger). No code until the creator approves; implementation cards come in a later amendment.
+
+Result:
+- `docs/design/github-action.md` specifies a composite action around `cox run -p`: prompt on stdin, `--budget` default 1, `--max-turns` default 4, headless `never` unless the workflow opts into `on-failure`, `permission-mode` limited to plan/default/auto, sandbox limited to read-only/workspace-write. `bypass` and `danger-full-access` are rejected. The cox job is `contents: read`, checkout uses `persist-credentials: false`, and the child env allowlist does not carry the provider key or `GITHUB_TOKEN`. A push, if any, is a later job that does not run cox. `cox.db` is uploaded as an artifact because the runner disk dies with the job.
+- `docs/design/schedule.md` puts the schedule in GitHub `on.schedule` plus a `concurrency` group. A fire opens a new session and takes the existing session lock. It does not resume and it does not talk to `cox serve`. A project file cannot name a schedule. A user-level scheduler is deferred so it does not collide with T66.13.
+- Both docs end with proposed cards. Those cards are not in `plan.md`.
+- No Rust, no workflow, no new dependency.
+
+Check output (2026-10-19):
+```
+$ test -s docs/design/github-action.md && test -s docs/design/schedule.md
+     both non-empty (146 and 126 lines)
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     did not start. cargo cannot resolve workspace-hack on main:
+     crypto-common 0.2 has no `std` feature. That break is #408, not
+     this design. On the branch that contains #408, the same command
+     the same day exited 1 only because ANTHROPIC_API_KEY is unset
+     (COX_KEYRING=off). Every other doctor row passed.
+```
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
