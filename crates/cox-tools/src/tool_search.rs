@@ -108,9 +108,10 @@ impl Tool for ToolSearchTool {
         ToolSpec {
             name: "tool_search".to_string(),
             description: "Find tools that are not in your current tool list. Only the core \
-                tools are always present; MCP servers, `ask_user`, `web_fetch`, `agent` and \
-                other extras are found here. Pass a short `query` describing what you need \
-                (\"create github issue\", \"fetch a web page\"); up to 5 matching tools \
+                tools are always present; MCP server tools, MCP resources and prompts \
+                (`mcp_resources`), `ask_user`, `web_fetch`, `agent` and other extras are \
+                found here. Pass a short `query` describing what you need \
+                (\"create github issue\", \"read an mcp resource\"); up to 5 matching tools \
                 are returned and become callable on your next turn. `detail` is \
                 `summary` (name and description only; the default) or `full`."
                 .to_string(),
@@ -195,6 +196,17 @@ mod tests {
             spec("mcp__db__tables", "List database tables", true),
             spec("mcp__slack__post", "Post a Slack message", true),
         ])
+    }
+
+    #[test]
+    fn tool_search_finds_mcp_resources() {
+        let idx = ToolSearchTool::new([spec(
+            "mcp_resources",
+            "List and read MCP resources and list MCP prompts from connected servers.",
+            true,
+        )]);
+        assert_eq!(idx.search("read an mcp resource")[0].name, "mcp_resources");
+        assert_eq!(idx.search("mcp prompts")[0].name, "mcp_resources");
     }
 
     #[test]

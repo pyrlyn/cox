@@ -491,6 +491,15 @@ fn challenge_of(e: &ClientInitializeError) -> Option<String> {
         .map(str::to_string)
 }
 
+#[path = "resources.rs"]
+mod resources;
+
+/// The deferred `mcp_resources` tool over servers that connected (T67.10).
+/// `sanitize` is `cox_sanitize::sanitize`; this crate cannot depend on it.
+pub fn resources_tool(clients: Vec<McpClient>, sanitize: fn(&str) -> String) -> Arc<dyn Tool> {
+    resources::catalog(clients, sanitize)
+}
+
 /// Connects every server; one that fails is a notice, not an error (step 5).
 /// `trust` is the store and the origin of each server. Without it, tool
 /// definitions pass through (tests that are not about quarantine).

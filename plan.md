@@ -1882,7 +1882,7 @@ Rationale in §6 A148. Idea-only: the source is the public Claude Code documenta
 
 **Workflow for every P67 card.** Each card is done by a Cursor model (`grok-4.7`) and lands through a pull request. Merge only after CI is green, with `gh pr merge <n> --squash --delete-branch --match-head-commit <head>`; never `--auto`, `--admin` or an API merge. If the model's quota runs out, stop, push the branch and open the PR with the title prefix `[#285]`. No `Co-Authored-By` or "Generated with" lines. Every card also runs `COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor` after its Check. Documentation is English only (`docs/` has no translations).
 
-**Order.** T67.1 → T67.2; T67.3 is independent. T67.4 → T67.5. T67.6 and T67.7 are independent. T67.8 is a design gate for T67.9. T67.10–T67.12 are spare cards, and T67.13 is design only.
+**Order.** T67.1 → T67.2; T67.3 is independent. T67.4 → T67.5. T67.6 and T67.7 are independent. T67.8 is a design gate for T67.9. T67.11 and T67.12 are spare cards, and T67.13 is design only.
 
 **Already in cox, so no card:**
 - the side-model call (`cox-core/src/side.rs` `Session::side_call`), which T67.2 and T67.4 reuse instead of a new `SideModel` trait;
@@ -2021,18 +2021,6 @@ mise exec -- cargo fmt --check
 ```
 
 Done when `deny_rule_beats_classifier`, `classifier_error_asks`, `classifier_timeout_asks` and `injected_tool_output_cannot_widen` pass.
-
-#### T67.10 MCP resources and prompts
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
-
-Goal: the MCP client lists and reads resources (`resources/list`, `resources/read`) and lists prompts (`prompts/list`). The model reaches them through one deferred read-only tool found by `tool_search`. Their output is untrusted: sanitized, and archived when over the cap.
-
-Files: `crates/cox-mcp/src/*` (at most two files), `crates/cox-tools/src/tool_search.rs`
-
-Check: `mise exec -- cargo nextest run -p cox-mcp -p cox-tools`, then clippy and fmt as above.
-
-Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
 
 #### T67.11 `cox run -p --json-schema`
 

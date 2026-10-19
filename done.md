@@ -1,3 +1,25 @@
+#### T67.10 MCP resources and prompts
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Goal: the MCP client lists and reads resources (`resources/list`, `resources/read`) and lists prompts (`prompts/list`). The model reaches them through one deferred read-only tool found by `tool_search`. Their output is untrusted: sanitized, and archived when over the cap.
+
+Files: `crates/cox-mcp/src/resources.rs`, `crates/cox-mcp/src/client.rs`, `crates/cox-tools/src/tool_search.rs`. Session wiring is `crates/cox-session/src/mcp.rs` so `cox mcp trust` does not list the catalog as a server tool. `cox-mcp` cannot depend on `cox-sanitize`, so the session passes `cox_sanitize::sanitize`.
+
+`default_tiers()` is restored in `cox-config` from the embedded `default.toml` (T33.40.13 call sites already expected it). A leftover `typesafe` tier still falls open. `workspace-hack` is regenerated so crates that dropped the `std` feature still resolve.
+
+Check: `mise exec -- cargo nextest run -p cox-mcp -p cox-tools`, then clippy and fmt.
+
+Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
+
+Check output (2026-10-19):
+```
+mise exec -- cargo nextest run -p cox-mcp -p cox-tools (plus config_defaults_parse, the legacy typesafe tier tests, and open_moves_a_legacy_typesafe_tier_to_the_default): 326 passed in the combined run; the session open test passed on its own. Includes mcp_resources_lists_and_reads_one_resource_and_one_prompt, over_cap_resource_is_archived_before_the_model_sees_it, and tool_search_finds_mcp_resources.
+mise exec -- cargo clippy -p cox-mcp -p cox-tools -p cox-session -p cox-config --all-targets -- -D warnings: clean
+mise exec -- cargo fmt --check -p cox-mcp -p cox-tools -p cox-session -p cox-config: clean
+mise exec -- cargo hakari verify: workspace-hack works correctly
+```
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4

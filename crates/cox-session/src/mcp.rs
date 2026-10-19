@@ -60,9 +60,18 @@ pub(crate) async fn mcp_tools(
     writable: &[PathBuf],
     store: &Store,
 ) -> (Vec<Arc<dyn Tool>>, Vec<String>) {
-    let (listed, warnings) =
+    let (clients, listed, warnings) =
         connect_discovered(config, cwd, login, ask, plugins, writable, store, None).await;
-    (listed.into_iter().map(|row| row.tool).collect(), warnings)
+    let mut tools: Vec<Arc<dyn Tool>> = listed.into_iter().map(|row| row.tool).collect();
+    if !clients.is_empty() {
+        // Server text is untrusted. The guard lives in cox-sanitize, which
+        // cox-mcp is not allowed to depend on.
+        tools.push(cox_mcp::client::resources_tool(
+            clients,
+            cox_sanitize::sanitize,
+        ));
+    }
+    (tools, warnings)
 }
 
 /// The tools `cox mcp trust` lists or approves. `only` restricts the
@@ -84,7 +93,9 @@ pub async fn mcp_tool_trust_list(
             return Err(name.to_string());
         }
     }
-    Ok(connect_discovered(config, cwd, None, None, plugins, writable, store, only).await)
+    let (_clients, listed, warnings) =
+        connect_discovered(config, cwd, None, None, plugins, writable, store, only).await;
+    Ok((listed, warnings))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -97,7 +108,11 @@ async fn connect_discovered(
     writable: &[PathBuf],
     store: &Store,
     only: Option<&str>,
-) -> (Vec<cox_mcp::client::ListedTool>, Vec<String>) {
+) -> (
+    Vec<cox_mcp::client::McpClient>,
+    Vec<cox_mcp::client::ListedTool>,
+    Vec<String>,
+) {
     let mut found = mcp_servers(config, cwd);
     for (id, servers) in plugins {
         cox_mcp::discovery::add_plugin(&mut found, &id, servers);
@@ -118,7 +133,7 @@ async fn connect_discovered(
         sources: &found.sources,
         store: &adapter,
     };
-    let (_clients, listed, notices) = cox_mcp::client::connect_listed(
+    let (clients, listed, notices) = cox_mcp::client::connect_listed(
         &found.servers,
         timeout,
         config.mcp.deferred,
@@ -127,7 +142,7 @@ async fn connect_discovered(
     )
     .await;
     let warnings = found.notices.into_iter().chain(notices).collect();
-    (listed, warnings)
+    (clients, listed, warnings)
 }
 
 struct StoreTrust<'a>(&'a Store);
