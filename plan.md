@@ -878,25 +878,6 @@ Plan:
 Falsifier: if the false-raise rate exceeds 10 %, or the p95 late-fallback rate exceeds 20 %, `risk` is not recommended by default, and the user guide says so.
 Check: `just test-evals` is green offline (corpus schema, metric maths, budget stop, command line). R§5 has the E1 table.
 
-#### T33.40.9 `route` advisor: downgrade only
-
-Depends: T33.40.8, T33.40.1, T33.40.4 · Size: ~170 · Files: `plugins/jev/src/route.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/it/plugins_jev.rs`
-Goal: J§5.2, plugin side.
-- The state is the prompt, the todo list, a summary of the last turn and the number of files touched.
-- The questions are the `tier` Choice over the offered tiers (with the plugin's descriptions and `other` → `code`) and the `wants_depth` Noul.
-- The advice is `cheap` only when:
-  - the choice is `cheap`;
-  - confidence ≥ 0.8;
-  - `wants_depth` < 0.3;
-  - the last turn did not error.
-- `capabilities.decide` gains `route`.
-Check:
-- guest tests `route_needs_high_confidence`, `route_keeps_code_after_error_turn` and `route_other_means_code`;
-- e2e over two scripted turns:
-  - a fixture choosing `cheap` at 0.9 gives a main-turn `usage` row on tier `cheap` and `Advised { applied: true }`;
-  - at 0.7 the turn runs on `code`;
-  - a fixture naming `think` is ignored, and the static pick runs.
-
 #### T33.40.10 Eval E2: route downgrade against the static pick
 
 Depends: T33.40.9 · Size: ~180 · Files: `evals/src/cox_evals/harness.py` (the `jev-route` preset), `evals/tests/test_harness.py`, `evals/tasks/11-…14-*.yaml` (data: four tasks that need the code tier, such as a multi-file rename with a failing test)

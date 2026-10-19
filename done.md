@@ -1,3 +1,46 @@
+#### T33.40.9 `route` advisor: downgrade only
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: T33.40.8, T33.40.1, T33.40.4 · Size: ~170 (route.rs plus the decide dispatcher and the manifest capability)
+
+Goal: J§5.2, plugin side. A main turn may move from `code` to `cheap` and never the other way. Silence keeps the static pick.
+
+Files:
+- `plugins/jev/src/route.rs`
+- `plugins/jev/src/lib.rs`
+- `crates/cox/tests/it/plugins_jev.rs`
+- `plugins/jev/src/decide.rs` (the call-out already lived here; `route` has to leave through it)
+- `plugins/jev/plugin.toml` (`capabilities.decide` gains `route`)
+
+Result:
+- The System One state is an allowlist: `prompt`, `todo`, `last_turn`, `files_touched_count`, and `static` (the core already sends `static` and `prompt`). Tool output is dropped.
+- Questions are `tier` (Choice over the offered names plus `other`; `cheap` is "mechanical: read, print, list, rename, run a named command, answer from context", `code` is "reasoning over code: multi-file edits, debugging, design") and `wants_depth` (Noul, "the user asks for careful or deep work"). No call-out when `cheap` is not offered.
+- Advice selects `cheap` only when the choice is `cheap`, confidence is at least 0.8, `wants_depth` is below 0.3, and `last_turn.error` / `last_turn.ended_in_error` is not set. `other`, `think` and `code` are silence, so the static pick (`code`) runs.
+- The core still applies its own monotone rule. This advisor returns no advice rather than a low-confidence `cheap`, so a 0.7 answer cannot pass the core's 0.6 `min_confidence`.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo test --manifest-path plugins/Cargo.toml -p cox-plugin-jev
+     30 passed, including route_needs_high_confidence,
+     route_keeps_code_after_error_turn, route_other_means_code,
+     route_questions_describe_the_offered_tiers,
+     route_question_asks_tier_and_depth
+$ mise exec -- cargo clippy --manifest-path plugins/Cargo.toml -p cox-plugin-jev --all-targets -- -D warnings
+     clean
+$ mise exec -- cargo nextest run -p cox --test it route_cheap_at_high_confidence_downgrades_both_calls route_below_the_confidence_gate_stays_on_code route_think_is_ignored_and_the_static_pick_runs
+     3 passed. The 0.9 fixture downgrades both scripted calls of the turn
+     to tier cheap and records Advised { point: route, applied: true }.
+     0.7 stays on code. A choice of think is ignored and the static pick runs.
+$ mise exec -- cargo nextest run -p cox --test it jev_request_carries_host_injected_bearer
+     passed (the risk call-out is unchanged)
+$ mise exec -- cargo fmt --check
+     clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     exit 1. API keys: ANTHROPIC_API_KEY is not set and keyring entry
+     'cox/anthropic' not found. Cargo sets COX_KEYRING=off. Every other row passed.
+```
+
+`low_risk_answer_leaves_the_call_allowed` failed in this environment after the call was allowed: confined `git` could not open `/dev/null`, and that sandbox denial asked for approval. It is not a change in the risk verdict. `cargo clippy --workspace` including `cox-voice` was not run here: `whisper-rs-sys` cannot link `libstdc++` with the local clang.
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
