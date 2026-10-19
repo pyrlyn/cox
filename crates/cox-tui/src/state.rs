@@ -388,6 +388,9 @@ pub struct State {
     /// `/loop` (T27.4), if one is running. Named `active_loop` rather than
     /// the card's literal `loop` — a reserved word.
     pub active_loop: Option<Loop>,
+    /// `/goal` (T67.5): the condition the session is pursuing, and how many
+    /// judged turns have already run. `None` until a goal notice arrives.
+    pub goal: Option<GoalLine>,
     /// `Modal::PluginGrant` dialogs still waiting (T33.8): `on_key` pops the
     /// next one into `modal` once the current one is decided (`y`/`n`).
     pub pending_grants: VecDeque<PluginGrantDialog>,
@@ -430,6 +433,46 @@ pub struct State {
     /// Push-to-talk (T54.6): whether a `Dictation` exists, `[voice]
     /// auto_submit`, and the recording in progress.
     pub voice: crate::voice::Voice,
+}
+
+/// The goal the status line shows (T67.5). Filled from the `/goal` notices
+/// the core already emits, then updated by each `GoalVerdict`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GoalLine {
+    pub condition: String,
+    pub turns_used: u32,
+    /// Set when a notice carried `(used/max)`; a freshly set goal has none
+    /// until `/goal` with no arguments prints the counters.
+    pub max_turns: Option<u32>,
+}
+
+/// Remembers a `/goal` notice. Other notices stay ordinary transcript lines.
+fn note_goal(state: &mut State, text: &str) {
+    if text == "goal cleared" || text == "no goal" {
+        state.goal = None;
+        return;
+    }
+    let Some(rest) = text.strip_prefix("goal: ") else {
+        return;
+    };
+    let (condition, turns_used, max_turns) = match rest.rsplit_once(" (") {
+        Some((condition, tail)) => match parse_goal_counts(tail) {
+            Some((used, max)) => (condition.to_string(), used, Some(max)),
+            None => (rest.to_string(), 0, None),
+        },
+        None => (rest.to_string(), 0, None),
+    };
+    state.goal = Some(GoalLine {
+        condition,
+        turns_used,
+        max_turns,
+    });
+}
+
+/// `3/12)` from the tail of `goal: cond (3/12)`.
+fn parse_goal_counts(tail: &str) -> Option<(u32, u32)> {
+    let (used, max) = tail.strip_suffix(')')?.split_once('/')?;
+    Some((used.parse().ok()?, max.parse().ok()?))
 }
 
 /// `/loop`'s running state (T27.4). `interval_ticks`/`next_at` are
@@ -818,6 +861,7 @@ impl State {
             focused: true,
             mouse: true,
             active_loop: None,
+            goal: None,
             pending_grants: VecDeque::new(),
             plugin_status: Vec::new(),
             plugin_leader_armed: false,
@@ -2645,7 +2689,10 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
                 text,
             });
         }
-        Event::Notice { level, text } => state.transcript.push(Cell::Notice { level, text }),
+        Event::Notice { level, text } => {
+            note_goal(state, &text);
+            state.transcript.push(Cell::Notice { level, text });
+        }
         Event::Error { error, fatal } => state.transcript.push(Cell::Error {
             text: error.to_string(),
             fatal,
@@ -2670,12 +2717,24 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
             mode,
             permission_mode,
         } => mode_changed(state, mode, permission_mode),
+        Event::GoalVerdict {
+            verdict,
+            reason,
+            turns_used,
+        } => {
+            if let Some(goal) = &mut state.goal {
+                goal.turns_used = turns_used;
+            }
+            let reason = crate::text::sanitize(&reason);
+            state.transcript.push(Cell::Notice {
+                level: Level::Info,
+                text: format!("goal {verdict}: {reason}"),
+            });
+        }
         Event::SessionStarted { .. }
         | Event::Compacted { .. }
         | Event::GrantRevoked { .. }
-        | Event::RepoMapBuilt { .. }
-        // T67.5 draws the goal; until then the verdict is recorded and not shown.
-        | Event::GoalVerdict { .. } => {}
+        | Event::RepoMapBuilt { .. } => {}
     }
     cmds
 }

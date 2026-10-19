@@ -1,0 +1,5 @@
+---
+source: crates/cox-tui/src/status.rs
+expression: line
+---
+sonnet-5 · ctx ▱▱▱▱▱ 0% · $0.00/5 · workspace-write · 0 tasks · cache 0% · goal 1/12 tests pass · [default]

@@ -1,3 +1,31 @@
+#### T67.5 `/goal` in the TUI and stream-json
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: T67.4 · Size: ~230 (landed larger; see Not done) · Priority: P2 · Complexity: 2
+
+Goal: the TUI status line shows the goal and its turn count, and each `GoalVerdict` prints one line; stream-json writes one `goal_verdict` record per verdict. The judge's cost is already a `usage` row (T67.4).
+
+What landed:
+- A `goal: …` notice fills `State.goal`. `goal cleared` and `no goal` clear it. A trailing `(used/max)` is the turn count; anything else is the condition with the count at zero.
+- `Event::GoalVerdict` updates that count and appends one transcript notice, `goal {verdict}: {reason}`, after `sanitize`.
+- The status row gains a droppable `goal {used}/{max} {condition}` segment (condition clipped to 40 columns) just before the `/loop` countdown, so a narrow row still drops the countdown first.
+- Headless `drive` no longer treats the first idle `TurnDone` as the end of the run. `pursue_goal` emits `GoalVerdict` after the session is idle and before `submit` returns, so the loop also waits until that task has finished. A prompt whose first line is a slash command runs that command before the rest of the text, which is how the e2e sets `/goal` with no new flag.
+
+Not done: the card names the TUI files and `run.rs`. The stream-json e2e lives in `crates/cox/tests/it/run_cli.rs`, and the insta snapshot is generated. Together with `state.rs` and `status.rs` that is more than three files, and the diff is about 230 lines. `mise` is not installed here; the checks ran as `cargo +1.99.0`. Three pre-existing `plugins_jev` e2e failures (`/dev/null` denied inside landlock) and `plugin_docs_translations_match_the_english_page` (Russian heading levels) fail on the parent commit as well.
+
+Check:
+```
+cargo +1.99.0 nextest run --locked -p cox-tui -E 'test(goal_status_line)'
+  PASS cox-tui status::tests::goal_status_line
+cargo +1.99.0 nextest run --locked -p cox -E 'test(stream_json_writes_a_goal_verdict_when_met)'
+  PASS cox::it run_cli::stream_json_writes_a_goal_verdict_when_met
+cargo +1.99.0 nextest run --locked -p cox-tui -p cox --no-fail-fast
+  557 passed; 3 failed, all plugins_jev git-push e2e, same /dev/null denial on the parent commit
+cargo +1.99.0 clippy --locked -p cox -p cox-tui --all-targets -- -D warnings
+  clean
+cargo +1.99.0 fmt --check -p cox -p cox-tui
+  clean
+```
+
 #### T67.4 `/goal`: a judged stop condition
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~190 (landed larger; see Not done) · Priority: P1 · Complexity: 3

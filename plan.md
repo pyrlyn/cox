@@ -1910,25 +1910,6 @@ mise exec -- cargo fmt --check
 
 Done when one test per event proves it fires once at its point (`post_tool_batch_fires_after_last_result`, and so on) and the doc test lists all events.
 
-#### T67.5 `/goal` in the TUI and stream-json
-
-Model: grok-4.7 · Status: open · Depends: T67.4 · Size: ~100 · Priority: P2 · Complexity: 2
-
-Goal: the TUI status line shows the goal and its turn count, and each `GoalVerdict` prints one line; stream-json writes one `goal_verdict` record per verdict. The judge's cost is already a `usage` row (T67.4).
-
-Files:
-- the TUI status line and transcript files in `crates/cox-tui/src/`
-- `crates/cox/src/run.rs` (stream-json)
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-tui -p cox
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when the `goal_status_line` insta snapshot and a stream-json e2e test with a scripted `Met` verdict pass.
-
 #### T67.6 Path-scoped rules, loaded on demand
 
 Model: grok-4.7 · Status: open · Depends: — · Size: ~190 · Priority: P2 · Complexity: 3
