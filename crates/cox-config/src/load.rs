@@ -917,6 +917,18 @@ fn adjoined(lower: &JsonValue, upper: &JsonValue) -> Option<JsonValue> {
     }
 }
 
+/// `[tiers]` of the embedded `default.toml` (T33.40.13). A legacy tier
+/// whose provider moved to a plugin falls back to these provider and model
+/// names. `None` when that file does not parse, so the fallback can fail
+/// open instead of refusing to open the session.
+pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
+    Layers::new()
+        .toml_text("default", DEFAULT_CONFIG_TOML)
+        .extract::<Config>()
+        .ok()
+        .map(|cfg| cfg.tiers)
+}
+
 /// The `COX_*` variables, resolved against the embedded defaults' key tree
 /// so a key with `_` in its name (`TUI_SHOW_THINKING`) needs no separator.
 fn env_layer() -> Result<EnvLayer, CoreError> {
@@ -1121,6 +1133,14 @@ mod tests {
         assert_eq!(cfg.tiers.code.model, "claude-sonnet-5");
         assert!(cfg.providers.custom.contains_key("deepseek"));
         assert!(!cfg.providers.anthropic.models.is_empty());
+    }
+
+    /// T33.40.13: the legacy-tier fallback reads the same embedded `[tiers]`.
+    #[test]
+    fn default_tiers_reads_the_embedded_code_tier() {
+        let tiers = default_tiers().expect("embedded default.toml");
+        assert_eq!(tiers.code.provider, "anthropic");
+        assert_eq!(tiers.code.model, "claude-sonnet-5");
     }
 
     #[test]
