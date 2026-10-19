@@ -162,7 +162,7 @@ digest-a6292c17cd707f01 = { package = "digest", version = "0.11", features = ["a
 enumflags2 = { version = "0.7", default-features = false, features = ["serde"] }
 event-listener = { version = "5" }
 event-listener-strategy = { version = "0.5" }
-getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2", default-features = false, features = ["std"] }
+getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.4", default-features = false, features = ["std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["full"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "ring", "tls12", "webpki-tokio"] }
@@ -185,7 +185,7 @@ rustix = { version = "1", features = ["event", "fs", "mm", "net", "param", "pipe
 
 [target.aarch64-apple-darwin.dependencies]
 errno = { version = "0.3" }
-getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2", default-features = false, features = ["std"] }
+getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.4", default-features = false, features = ["std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["full"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "ring", "tls12", "webpki-tokio"] }
@@ -203,7 +203,7 @@ getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-f
 rustix = { version = "1", features = ["event", "fs", "mm", "net", "param", "pipe", "process", "termios", "time"] }
 
 [target.x86_64-pc-windows-msvc.dependencies]
-getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2", default-features = false, features = ["std"] }
+getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.4", default-features = false, features = ["std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hyper = { version = "1", features = ["full"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "ring", "tls12", "webpki-tokio"] }
