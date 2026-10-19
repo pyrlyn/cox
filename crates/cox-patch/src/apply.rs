@@ -166,10 +166,25 @@ fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, ToolError> {
             })
             .collect();
 
-        let from = seek_context(&lines, &hunk.context, cursor);
-        let at = locate(&lines, &old, from, hunk.eof).map_err(|why| ToolError::Denied {
-            why: format!("hunk {} {why}", n + 1),
-        })?;
+        let at = if old.is_empty() && !hunk.eof {
+            // A pure insertion has no lines of its own to search for: every
+            // position would match. The `@@` header is its only anchor, so
+            // the lines go right after it, and a header the file lacks fails
+            // rather than dropping the lines somewhere else.
+            anchor_after_context(&lines, &hunk.context, cursor).ok_or_else(|| {
+                ToolError::Denied {
+                    why: format!(
+                        "hunk {} only adds lines, so its `@@` header must name a line in the file",
+                        n + 1
+                    ),
+                }
+            })?
+        } else {
+            let from = seek_context(&lines, &hunk.context, cursor);
+            locate(&lines, &old, from, hunk.eof).map_err(|why| ToolError::Denied {
+                why: format!("hunk {} {why}", n + 1),
+            })?
+        };
         lines.splice(at..at + old.len(), new.iter().cloned());
         cursor = at + new.len();
     }
@@ -187,6 +202,18 @@ fn seek_context(lines: &[String], context: &[String], start: usize) -> usize {
         }
     }
     at
+}
+
+/// Like [`seek_context`], but every non-empty header must be found, and
+/// there must be at least one.
+fn anchor_after_context(lines: &[String], context: &[String], start: usize) -> Option<usize> {
+    let mut at = start;
+    let mut any = false;
+    for c in context.iter().filter(|c| !c.trim().is_empty()) {
+        at += lines[at..].iter().position(|l| l.trim() == c.trim())? + 1;
+        any = true;
+    }
+    any.then_some(at)
 }
 
 /// The three normalisers, tried in order (T3.5 step 2): exact, then
@@ -338,6 +365,25 @@ mod tests {
             matches!(&err, ToolError::Denied { why } if why.starts_with("hunk 1 does not match")),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn v4a_pure_insertion_goes_right_after_its_context_header() {
+        let out = after(
+            &[("a.txt", "one\ntwo\nthree\n")],
+            "*** Begin Patch\n*** Update File: a.txt\n@@ one\n+inserted\n*** End Patch",
+        );
+        assert_eq!(out, "one\ninserted\ntwo\nthree\n");
+
+        for src in [
+            "*** Begin Patch\n*** Update File: a.txt\n@@ missing\n+inserted\n*** End Patch",
+            "*** Begin Patch\n*** Update File: a.txt\n@@\n+inserted\n*** End Patch",
+        ] {
+            match staged(&[("a.txt", "one\ntwo\n")], src) {
+                Err(ToolError::Denied { why }) => assert!(why.contains("only adds lines"), "{why}"),
+                other => panic!("expected Denied for {src:?}, got {other:?}"),
+            }
+        }
     }
 
     #[test]
