@@ -219,19 +219,12 @@ pub fn spawn(
                 }
                 () = until(due) => {
                     due = None;
-                    // `start` is called from both arms and is not `Copy`.
-                    #[allow(clippy::needless_borrows_for_generic_args)]
-                    {
-                        running = last.as_ref().map(&start);
-                    }
+                    running = last.as_ref().map(start);
                 }
                 () = until(next_refresh) => {
                     next_refresh = refresh.map(|period| Instant::now() + period);
                     if running.is_none() && due.is_none() {
-                        #[allow(clippy::needless_borrows_for_generic_args)]
-                        {
-                            running = last.as_ref().map(&start);
-                        }
+                        running = last.as_ref().map(start);
                     }
                 }
                 result = finish(&mut running) => {
