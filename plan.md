@@ -578,7 +578,7 @@ The engine is pure: `decide(&self, call, mode, policy, grants) -> Decision`. Rul
  │ system[1]  cox system prompt (versioned string, no date, no cwd)           │  cache breakpoint 1 (after system[2])
  │ system[2]  instruction files: AGENTS.md/CLAUDE.md chain, skills index,     ┘
  │            repo map last (A74, off by default)
- │ system[3]  volatile: date, cwd, git branch, memory index, permission mode      no cache (changes daily / per turn)
+ │ system[3]  volatile: date, cwd, git branch, memory index, permission mode, output style   no cache (changes daily / per turn)
  │ messages   [Summary item if compacted]
  │            history … (older tool results microcompacted to pointers)         cache breakpoint 2 = end of previous turn
  │            this turn's user message + tool results                           cache breakpoint 3 = last message (moves every call)
@@ -636,7 +636,7 @@ cox [PROMPT] [--continue | --resume <id>]           interactive TUI; PROMPT is t
 cox run -p <prompt> [--output-format text|json|stream-json] [--max-turns N] [--allowed-tools a,b]
         [--permission-mode default|plan|auto|bypass] [--approve never|on-request] [--answer <text>]
         [--continue | --resume <id>] [--deep]        headless; exit 0 ok · 1 error · 2 denied · 3 budget · 4 interrupted
-cox sessions [--grep <q>] [--json] [--limit N]       list / search rollouts
+cox sessions [--grep <q>] [--json] [--limit N] [--archived]  list / search rollouts; --archived is the swept list
 cox expand <archive-id> [--lines a-b]                print archived tool output
 cox stats [--session <id> | --day | --month] [--cache] [--json | --csv]
 cox config show [--sources] | get <key> | set <key> <value> | path
@@ -667,7 +667,7 @@ Every flag maps to a config key (T0.3 test); `--permission-mode bypass` and `--s
 | `PageUp/PageDown`, mouse wheel | scroll transcript | `Ctrl+L` | redraw |
 | `Ctrl+G` | diff view: the working tree against `HEAD`, per-file blocks; `PageUp/PageDown` scroll, `Esc` closes (T15.3) | `Ctrl+B` | move the running `bash`/`agent` call to the background; the turn goes on (T27.1) |
 
-Slash commands (parsed in the surface, executed as `Submission::Command`): `/model [tier] [model]`, `/effort [low|high|xhigh]` (session-wide, clamped per model, T16.4), `/think <prompt>` (confirm dialog with price), `/compact [focus]`, `/cost`, `/permissions`, `/sandbox <mode>`, `/resume`, `/sessions`, `/expand <id>`, `/agents` (live sessions in this workspace, T16.3), `/skills`, `/hooks`, `/mcp`, `/doctor`, `/clear` (new session, same cwd), `/vim`, `/help`, `/quit`. Markdown files in `.claude/commands` and `.cox/commands` appear in the same palette (T7.3).
+Slash commands (parsed in the surface, executed as `Submission::Command`): `/model [tier] [model]`, `/effort [low|high|xhigh]` (session-wide, clamped per model, T16.4), `/think <prompt>` (confirm dialog with price), `/compact [focus]`, `/cost`, `/permissions`, `/sandbox <mode>`, `/resume`, `/sessions`, `/expand <id>`, `/agents` (live sessions in this workspace, T16.3), `/skills`, `/hooks`, `/mcp`, `/doctor`, `/clear` (new session, same cwd), `/vim`, `/style [name]`, `/help`, `/quit`. Markdown files in `.claude/commands` and `.cox/commands` appear in the same palette (T7.3).
 
 Status line (one row): `sonnet-5 · ctx 41% · $0.83 · workspace-write · 2 tasks · [plan]`.
 
@@ -1820,7 +1820,7 @@ Rationale in §6 A142. T65.1 is in `done.md`.
 
 Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) at `afe8d14` (v0.9.8). It is MIT, but no code is copied, so no notice is needed. Each card cites prime-agent files for the idea only, and the implementation is written from the card. If a later card ever copies a substantial part, that file and `THIRD-PARTY-NOTICES` carry prime-agent's full MIT text, both copyright lines and the repository URL, and that notice is never replaced by cox's header.
 
-**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it. A161 adds the first three, T66.16 → T66.17 → T66.18. A162 adds T66.19 → T66.20; T66.21 follows T66.18 and T66.19. A165 adds T66.22 → T66.23 → T66.24.
+**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.14 is in `done.md` (the serve cards landed, and the design says it can go earlier). T66.13 still waits for its files and steps. A161 adds the first three, T66.16 → T66.17 → T66.18. A162 adds T66.19 → T66.20; T66.21 follows T66.18 and T66.19. A165 adds T66.22 → T66.23 → T66.24.
 
 **Already in cox, so no card:**
 - `ContextTooLong` already compacts once per user turn and then surfaces the error (`session.rs:1846-1867`, `retried_after_too_long`). That is the contract of prime-agent's `OverflowRecovery` (`pa-daemon/src/overflow_compaction.rs`).
@@ -1838,12 +1838,6 @@ Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeI
 Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 3
 
 Goal: a resident session can receive a recurring prompt (idea: `pa-core/src/cron/store/heartbeat.rs`, a recurring job with a non-empty prompt, one per session). `cox-ext/src/presence.rs` stays a presence record and is not extended into a scheduler. The card's files and steps are written when T66.12's cards are approved.
-
-#### T66.14 Archive old sessions without deleting them
-
-Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 2
-
-Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
 
 ### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
 
@@ -1976,18 +1970,6 @@ Files: `crates/cox-mcp/src/*` (at most two files), `crates/cox-tools/src/tool_se
 Check: `mise exec -- cargo nextest run -p cox-mcp -p cox-tools`, then clippy and fmt as above.
 
 Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
-
-#### T67.12 Output styles
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P3 · Complexity: 2
-
-Goal: `.cox/output-styles/*.md` and `~/.cox/output-styles/*.md` (and `.claude/output-styles/*.md`) define styles; `/style <name>` picks one and `/style` lists them. The style text goes after the last cache breakpoint (A148), so the cached prefix stays byte-stable.
-
-Files: `crates/cox-ext/src/styles.rs` (new), `crates/cox-protocol/src/commands.rs`, `crates/cox-core/src/context.rs`
-
-Check: `mise exec -- cargo nextest run -p cox-ext -p cox-core`, then clippy and fmt as above.
-
-Done when `style_text_after_cache_breakpoint` and `system_prefix_unchanged_by_style` pass.
 
 #### T67.13 Design: a GitHub Action and scheduled runs
 
