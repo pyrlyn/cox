@@ -229,6 +229,32 @@ pub fn assemble_with_skills(
     }
 }
 
+/// The volatile block for one output style (T67.12). The session stores
+/// this and appends it to `system[3]`, after the prefix breakpoint.
+pub(crate) fn output_style_block(name: &str, body: &str) -> String {
+    format!(
+        "<output_style name=\"{name}\">\n{}\n</output_style>\n",
+        body.trim_end()
+    )
+}
+
+/// Appends `style` to volatile `system[3]` (T67.12). That slot sits after
+/// the prefix breakpoint (index 2) and is not cached, so `system[0..=2]`
+/// and the breakpoint list stay byte-identical. Empty text changes nothing.
+pub(crate) fn append_output_style(req: &mut Request, style: &str) {
+    if style.is_empty() {
+        return;
+    }
+    let slot = &mut req.system[3].text;
+    if !slot.is_empty() && !slot.ends_with('\n') {
+        slot.push('\n');
+    }
+    slot.push_str(style);
+    if !slot.ends_with('\n') {
+        slot.push('\n');
+    }
+}
+
 fn breakpoints(system_len: usize, n_messages: usize) -> Vec<usize> {
     let mut bps = vec![2];
     if n_messages >= 2 {
@@ -1088,6 +1114,54 @@ mod tests {
         let req = with_map(&minimal, &[], MAP);
         assert!(!req.system[2].text.contains("repo_map"), "{req:?}");
         assert!(req.system[2].text.contains("Be terse."), "files stay");
+    }
+
+    /// T67.12: the style text lands in `system[3]`, after the prefix
+    /// breakpoint, and that slot stays uncached.
+    #[test]
+    fn style_text_after_cache_breakpoint() {
+        let config = cox_protocol::Config::default();
+        let mut req = assemble(&[], &config, &[], Path::new("/w"), "d");
+        let before = req.cache_breakpoints.clone();
+        append_output_style(&mut req, &output_style_block("terse", "Be brief."));
+        assert_eq!(req.cache_breakpoints, before);
+        assert_eq!(req.cache_breakpoints.first().copied(), Some(2));
+        assert!(!req.system[3].cache);
+        assert!(
+            req.system[3].text.contains("Be brief."),
+            "{}",
+            req.system[3].text
+        );
+        assert!(
+            req.system[3].text.contains("<output_style name=\"terse\">"),
+            "{}",
+            req.system[3].text
+        );
+        for block in &req.system[0..=2] {
+            assert!(!block.text.contains("Be brief."));
+        }
+    }
+
+    /// T67.12: two assemblies that differ only by a style keep the cached
+    /// prefix byte-for-byte, breakpoints included.
+    #[test]
+    fn system_prefix_unchanged_by_style() {
+        let config = cox_protocol::Config::default();
+        let history: Vec<Message> = serde_json::from_value(serde_json::json!([
+            {"role": "user", "content": [{"type": "text", "text": "one"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+        ]))
+        .expect("history");
+        let plain = assemble(&history, &config, &[], Path::new("/w"), "d");
+        let mut styled = plain.clone();
+        append_output_style(&mut styled, &output_style_block("terse", "Be brief."));
+        assert_eq!(
+            serde_json::to_vec(&plain.system[0..=2]).expect("plain"),
+            serde_json::to_vec(&styled.system[0..=2]).expect("styled"),
+        );
+        assert_eq!(plain.cache_breakpoints, styled.cache_breakpoints);
+        assert!(!styled.system[3].text.is_empty());
+        assert!(!plain.system[3].text.contains("Be brief."));
     }
 
     /// The map is byte-stable between turns like the rest of the prefix.

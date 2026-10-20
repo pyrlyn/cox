@@ -1146,6 +1146,17 @@ mod tests {
         assert!(!cfg.providers.anthropic.models.is_empty());
     }
 
+    /// T33.40.13: the fallback a legacy `typesafe` tier copies is the
+    /// embedded table, not `TiersConfig::default()`'s neutral values.
+    #[test]
+    fn default_tiers_reads_the_embedded_code_tier() {
+        let tiers = default_tiers().expect("embedded defaults");
+        assert_eq!(tiers.code.provider, "anthropic");
+        assert_eq!(tiers.code.model, "claude-sonnet-5");
+        assert_eq!(tiers.cheap.model, "claude-haiku-4-5");
+        assert!(tiers.think.confirm);
+    }
+
     #[test]
     fn default_tiers_are_the_embedded_code_tier() {
         let tiers = default_tiers().expect("embedded tiers");
