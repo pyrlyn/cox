@@ -150,9 +150,9 @@ TinyGo — не gc: він обчислює `return n, json.Unmarshal(raw, &n)`,
 
 ## Kotlin
 
-`plugins/sdk-kotlin` — власний PDK cox поверх сирих імпортів extism `extism:host/env` і `cox:host/v1`, бо підтримуваного extism PDK для Kotlin немає. Його не опубліковано: плагін бере його через складену збірку Gradle (`includeBuild`) з каталогу `plugins/sdk-kotlin` у копії cox. Java, Gradle і Kotlin беруться з `plugins/mise.toml`. Плагін на Kotlin — це модуль Kotlin/Wasm `wasmWasi`, а стандартна бібліотека Kotlin імпортує WASI `random_get`, тому в його `plugin.toml` задано `wasi = true`.
+`plugins/sdk-kotlin` — власний PDK cox поверх сирих імпортів extism `extism:host/env` і `cox:host/v1`, бо підтримуваного Kotlin PDK для extism немає. Він не публікується: плагін підключає його складеною збіркою Gradle (`includeBuild`) каталогу `plugins/sdk-kotlin` з копії cox. Java, Gradle і Kotlin беруться з `plugins/mise.toml`. Плагін на Kotlin — це модуль Kotlin/Wasm `wasmWasi`, а стандартна бібліотека Kotlin імпортує WASI `random_get`, тому в його `plugin.toml` задано `wasi = true`.
 
-Кожен експорт — це функція `@WasmExport`, усе тіло якої — `Cox.export { input -> … }`: обробник приймає вхід експорту як `JsonElement` і повертає вихід як один, з формами з `docs/plugin-abi.schema.json`. `cox_init` обов'язковий; решту cox шукає за іменем. Хост-функції: `Cox.log`, `notify`, `kvGet`, `kvPut`, `kvDelete`, `context`, `invokeTool`, `modelCall`, `http`, `output`, `cancelled` і `redraw`. Відмова кидає `HostException`, чий `error` дорівнює `AbiError`.
+Кожен експорт — це функція `@WasmExport`, усе тіло якої — `Cox.export { input -> … }`: обробник приймає вхід експорту як `JsonElement` і повертає вихід як одне значення, форми — у `docs/plugin-abi.schema.json`. `cox_init` обов'язковий; решту cox шукає за іменем. Хост-функції: `Cox.log`, `notify`, `kvGet`, `kvPut`, `kvDelete`, `context`, `invokeTool`, `modelCall`, `http`, `output`, `cancelled` і `redraw`. Відмова кидає `HostException`, чий `error` дорівнює `AbiError`.
 
 ```kotlin
 @WasmExport
@@ -161,7 +161,7 @@ fun cox_init(): Int = Cox.export {
 }
 ```
 
-Повна версія — `plugins/examples/kotlin`; `gradle pluginPackage` складає `plugin.toml` і модуль у `build/plugin` — це те, що приймає `cox plugin install`, бо він копіює цілу теку. `cox plugin new <name> --lang kotlin` створює заготовку пакета з `justfile`, чий рецепт `smoke` встановлює його в окремий `COX_HOME`. `just plugin-examples kotlin` збирає приклад і запускає його наскрізні тести.
+Повна версія — `plugins/examples/kotlin`; `gradle pluginPackage` розкладає `plugin.toml` і модуль у `build/plugin` — саме цю теку приймає `cox plugin install`, бо копіює теку цілком. `cox plugin new <name> --lang kotlin` створює заготовку пакета з `justfile`, чий рецепт `smoke` встановлює її в окремий `COX_HOME`. `just plugin-examples kotlin` збирає приклад і запускає його наскрізні тести.
 
 ## Спільна частина
 

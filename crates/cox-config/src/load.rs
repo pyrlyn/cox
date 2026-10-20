@@ -69,6 +69,17 @@ pub fn project_config_path(cwd: &Path) -> Option<PathBuf> {
     find_git_root(cwd).map(|root| project_config_in(&root))
 }
 
+/// The `[tiers]` block of the embedded `default.toml` (T33.40.13). `None`
+/// when that file no longer deserializes, so a legacy tier is left for
+/// `assemble` to fail closed rather than replaced with a guess.
+pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
+    Layers::new()
+        .toml_text("default", DEFAULT_CONFIG_TOML)
+        .extract::<Config>()
+        .ok()
+        .map(|config| config.tiers)
+}
+
 /// `<git root>/.cox/config.toml` for a known git root.
 fn project_config_in(git_root: &Path) -> PathBuf {
     git_root.join(".cox").join("config.toml")
@@ -983,19 +994,6 @@ fn core_error(err: config_schema::Error) -> CoreError {
     }
 }
 
-/// The `[tiers]` table of the embedded `default.toml` (T33.40.13).
-///
-/// Session open uses this when a tier still names the retired `typesafe`
-/// client and no plugin serves it. `None` only if that file no longer
-/// deserializes, which `config_defaults_parse` rules out.
-pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
-    Layers::new()
-        .toml_text("default", DEFAULT_CONFIG_TOML)
-        .extract::<Config>()
-        .ok()
-        .map(|config| config.tiers)
-}
-
 /// Loads and layers config (plan.md §1.6/D13), applies the project guard
 /// list, and returns the effective config plus provenance.
 ///
@@ -1145,6 +1143,13 @@ mod tests {
         assert_eq!(tiers.code.model, "claude-sonnet-5");
         assert_eq!(tiers.cheap.model, "claude-haiku-4-5");
         assert!(tiers.think.confirm);
+    }
+
+    #[test]
+    fn default_tiers_are_the_embedded_code_tier() {
+        let tiers = default_tiers().expect("embedded tiers");
+        assert_eq!(tiers.code.model, "claude-sonnet-5");
+        assert_ne!(tiers.code.provider, "typesafe");
     }
 
     #[test]

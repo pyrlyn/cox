@@ -24,6 +24,74 @@ $ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
 
 Not done: `just windows-check` (cargo-xwin's clang-cl shim has no version in this environment, same as T57.4). The Windows job object path is `cfg(windows)` and was not executed.
 
+#### T67.8 Design: an Auto-mode risk judge
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~150 (doc) · Priority: P2 · Complexity: 3
+
+Goal: `docs/design/auto-judge.md` describes a judge that can turn an `Ask` into an `Allow` in Auto mode and nothing else. It covers the order (deny rules and hard bans first, then the sandbox, then the judge), what the judge sees (the call and a bounded context, never raw tool output as instructions), timeouts and errors (they ask the user), cost and ledger rows, and the injection threats with a test for each. No code. The creator reviews its security before T67.9 starts.
+
+What landed: `docs/design/auto-judge.md`. The judge runs only after `Engine::decide` returns `Ask(Why::Risk { Exec })` in `Auto`. Deny rules, ask rules, `untrusted`, `Destructive`, `cloud_agent`, plan mode and a sandbox denial never reach it. The prompt is the command subject and the current user turn, clipped, and carries no tool output. An error, a 15s timeout or an unparseable answer stays an ask. The call is a `Job::Hook` usage row. Each threat in the doc names the T67.9 test that locks it, including `deny_rule_beats_classifier`, `classifier_error_asks`, `classifier_timeout_asks` and `injected_tool_output_cannot_widen`.
+
+Not done: no code, on purpose. T67.9 waits for the creator's review. The doc names two files the card did not (`side.rs` for the deadline, `DecidedBy::Classifier` in `cox-protocol`).
+
+Check: the page is the whole deliverable. No cargo test applies.
+
+#### T67.3 Five more hook events
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~150 (landed 471 insertions across 4 files; see Result) · Priority: P1 · Complexity: 2
+
+Goal: `HookEvent` gains `PostToolBatch` (after every tool call of one assistant message has a result), `PermissionDenied` (the engine or the user denied a call), `InstructionsLoaded` (instruction files were read at session open), `CwdChanged` and `StopFailure` (a turn ended in an error). Each fires at the existing point in the session, is observe-only, and has a Claude Code name in `HookEvent::name()`.
+
+Files:
+- `crates/cox-protocol/src/types.rs`
+- `crates/cox-core/src/session.rs`
+- `docs/config.md` (the hook event list and its doc test)
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-core -p cox-protocol
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when one test per event proves it fires once at its point (`post_tool_batch_fires_after_last_result`, and so on) and the doc test lists all events.
+
+Result:
+- Five variants on `HookEvent`, each `name()` the PascalCase Claude Code string: `PostToolBatch`, `PermissionDenied`, `InstructionsLoaded`, `CwdChanged`, `StopFailure`. `config_reference_lists_every_hook_event` lists all 18 variants and fails if a name is missing from `docs/config.md`.
+- Dispatch is `hooks::fire_configured`, so a hook that did not list the event is not called. Existing integration snapshots that record every `run()` stay on the four events they already list. The verdict is ignored (`StopFailure` test returns `Block` and the turn still finishes).
+- `PostToolBatch` fires once after `run_signed_tools` returns and the cancel check passes. Payload is `{ tool_calls: [{ call_id, ok }] }`, never raw tool output. A cancelled batch does not fire.
+- `PermissionDenied` fires from `Session::emit` on `ApprovalDecided { decision: Deny }`, which covers an engine deny and a user deny. Payload is `call_id`, `tool_name` (from the history `ToolUse`, via `try_lock` so a caller holding `inner` does not deadlock), `reason`, and `by` (`user`/`rule`/`session`/`policy`/`hook`).
+- `InstructionsLoaded` fires in the once-per-session startup slot, after `SessionStart`, only when the instruction block is non-empty. Payload is `{ bytes }`. The text stays out.
+- `CwdChanged` is stored in `spawn_child` when the child's cwd differs, and fires on that child's first submit (the hook runner is installed after `Session::new`, so it cannot fire inside the sync spawn). Payload is `{ old_cwd, cwd }`. The child's own hooks config must list the event. Same cwd does not fire.
+- `StopFailure` fires in `finish` when `StopReason::Error`. `Stop` still fires only on `EndTurn`.
+- `docs/config.md` is generated from `crates/cox-protocol/default.toml`, so both files change. That is the fourth file past the card's three.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo nextest run -p cox-core -p cox-protocol
+     Summary [   2.658s] 602 tests run: 602 passed, 1 skipped
+     (includes post_tool_batch_fires_after_last_result,
+      permission_denied_fires_when_the_engine_or_the_user_denies,
+      instructions_loaded_fires_once_at_open,
+      cwd_changed_fires_when_a_child_cwd_differs,
+      stop_failure_fires_when_the_turn_errors,
+      broken_hook_is_skipped_not_fatal,
+      config_docs_config_md_matches_default_toml,
+      config_reference_lists_every_hook_event)
+$ mise exec -- cargo fmt --check
+     clean
+$ mise exec -- cargo clippy --workspace --all-targets --exclude cox-voice -- -D warnings
+     clean (reconfirmed on this commit; see below)
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     exit 1. API keys: ANTHROPIC_API_KEY is not set and keyring entry
+     'cox/anthropic' not found. Cargo sets COX_KEYRING=off, so no key was
+     configured and none was read. Every other row passed (toolchain 1.99.0,
+     COX_HOME, db, landlock, git, terminal, prices, catalog, prefix,
+     keybindings, mcp sandbox, rust-analyzer, voice not built, plugin cache).
+```
+
+`cargo clippy --workspace --all-targets` including `cox-voice` was not finished on this machine: `whisper-rs-sys` links with clang `--target=x86_64-unknown-linux-gnu` and `ld` cannot find `-lstdc++`. The voice feature is off by default; CI's rust job installs the voice toolchain and runs the full clippy.
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4
