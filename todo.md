@@ -66,8 +66,6 @@
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
 - T66.13. Heartbeat re-entry for a resident session
-- T66.14. Archive old sessions without deleting them
-- T67.3. Five more hook events
 - T67.6. Path-scoped rules, loaded on demand
 - T67.7. Leaving Plan mode needs approval
 - T67.9. Auto-mode risk judge
