@@ -56,6 +56,7 @@ transcript · Ctrl+E expand · Ctrl+G diff · Alt+V voice · Ctrl+K plugin leade
        /tasks                                                   list running background tasks
        /vim                                                     toggle vim keys
        /theme [name]                                            pick a colour theme, previewed live
+       /style [name]                                            list output styles, or apply one
        /help                                                    this list
        /quit                                                    exit
 
