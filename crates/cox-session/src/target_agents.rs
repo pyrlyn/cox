@@ -144,9 +144,7 @@ impl TargetAgent {
             agent: self.name.clone(),
             message: cox_sanitize::sanitize(&message),
         };
-        if let Err(message) = self.approve(mode) {
-            return Err(fail(message));
-        }
+        self.approve(mode).map_err(fail)?;
         let Resolved {
             target,
             launcher,

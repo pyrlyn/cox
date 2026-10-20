@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
+// T61.4 cache probe 1: Swift-only, so a later commit can show the XCFramework cache hit.
+
 // The global hotkeys (T51.15, DT§4.6): "Show cox menu" and "New session", unbound until the
 // person records one in Settings › General. KeyboardShortcuts owns the recorder, the
 // registration and the storage (its own UserDefaults keys: UI state, not config), so nothing
