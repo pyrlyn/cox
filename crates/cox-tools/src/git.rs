@@ -80,8 +80,24 @@ pub async fn branches(dir: &Path) -> Vec<String> {
 /// `--show-prefix` of `dir` is stripped and anything outside `dir` dropped.
 /// Empty outside a repository — the map then falls back to path order.
 pub async fn recent_changes(dir: &Path, commits: usize) -> Vec<String> {
+    change_set(dir, commits).await.recent
+}
+
+/// The repo map's git inputs from one `git log` (T59.4): [`recent_changes`]'s
+/// order, plus co-change pairs from those same commits.
+#[derive(Debug, Default)]
+pub struct ChangeSet {
+    pub recent: Vec<String>,
+    /// Undirected pairs (`left` < `right`) that share a commit at least twice.
+    pub co_change: Vec<(String, String, u32)>,
+}
+
+/// `recent` and [`ChangeSet::co_change`] from one status read and one log.
+/// A commit that names more than 20 files is left out of the pairs (a merge
+/// or a formatting pass is not a relationship). Empty outside a repository.
+pub async fn change_set(dir: &Path, commits: usize) -> ChangeSet {
     let Some(prefix) = git(dir, &["rev-parse", "--show-prefix"]).await else {
-        return Vec::new();
+        return ChangeSet::default();
     };
     let prefix = prefix.trim_end_matches('\n');
     let status = git(
@@ -91,16 +107,71 @@ pub async fn recent_changes(dir: &Path, commits: usize) -> Vec<String> {
     .await
     .unwrap_or_default();
     let n = commits.to_string();
-    let log = git(dir, &["log", "-z", "-n", &n, "--name-only", "--format="])
-        .await
-        .unwrap_or_default();
+    // `%x1e` splits commits. `-z` would not: it uses NUL for paths and commits alike.
+    let log = git(
+        dir,
+        &["log", "-n", &n, "--name-only", "--pretty=format:%x1e"],
+    )
+    .await
+    .unwrap_or_default();
+    let commits = grouped_commits(&log, prefix);
     let mut seen = std::collections::HashSet::new();
-    porcelain_paths(&status)
+    let mut recent = Vec::new();
+    for path in porcelain_paths(&status)
         .into_iter()
-        .chain(log.split(['\0', '\n']).filter(|p| !p.is_empty()))
-        .filter_map(|p| p.strip_prefix(prefix))
-        .filter(|p| seen.insert(*p))
+        .filter_map(|path| path.strip_prefix(prefix))
         .map(str::to_string)
+        .chain(commits.iter().flatten().cloned())
+    {
+        if seen.insert(path.clone()) {
+            recent.push(path);
+        }
+    }
+    ChangeSet {
+        recent,
+        co_change: co_change_pairs(&commits),
+    }
+}
+
+/// Commits in `log` (`--pretty=format:%x1e --name-only`), newest first, paths
+/// stripped of `prefix` and commits with no remaining path dropped.
+fn grouped_commits(log: &str, prefix: &str) -> Vec<Vec<String>> {
+    log.split('\u{1e}')
+        .filter_map(|chunk| {
+            let files: Vec<String> = chunk
+                .lines()
+                .filter(|line| !line.is_empty())
+                .filter_map(|path| path.strip_prefix(prefix))
+                .map(str::to_string)
+                .collect();
+            (!files.is_empty()).then_some(files)
+        })
+        .collect()
+}
+
+/// Pairs that co-occur at least twice. A commit with more than 20 distinct
+/// paths, or fewer than two, contributes nothing.
+fn co_change_pairs(commits: &[Vec<String>]) -> Vec<(String, String, u32)> {
+    let mut counts = std::collections::BTreeMap::<(String, String), u32>::new();
+    for files in commits {
+        let mut uniq: Vec<&str> = files.iter().map(String::as_str).collect();
+        uniq.sort_unstable();
+        uniq.dedup();
+        if !(2..=20).contains(&uniq.len()) {
+            continue;
+        }
+        for i in 0..uniq.len() {
+            for j in (i + 1)..uniq.len() {
+                *counts
+                    .entry((uniq[i].to_string(), uniq[j].to_string()))
+                    .or_insert(0) += 1;
+            }
+        }
+    }
+    counts
+        .into_iter()
+        .filter(|(_, count)| *count >= 2)
+        .map(|((left, right), count)| (left, right, count))
         .collect()
 }
 
@@ -663,6 +734,34 @@ mod tests {
             (13, 1)
         );
         assert_eq!(numstat(""), (0, 0));
+    }
+
+    #[test]
+    fn co_change_needs_two_commits_and_skips_a_wide_one() {
+        let wide: Vec<String> = (0..21).map(|i| format!("w{i}.rs")).collect();
+        let commits = vec![
+            vec!["a.rs".to_string(), "b.rs".to_string()],
+            vec!["b.rs".to_string(), "a.rs".to_string()],
+            wide.clone(),
+            wide,
+            vec!["only.rs".to_string()],
+        ];
+        assert_eq!(
+            co_change_pairs(&commits),
+            vec![("a.rs".to_string(), "b.rs".to_string(), 2)]
+        );
+    }
+
+    #[test]
+    fn grouped_commits_split_on_the_record_separator_and_the_prefix() {
+        let log = "\u{1e}\nsub/b.rs\nsub/a.rs\n\n\u{1e}\nother.rs\n\n\u{1e}\nsub/a.rs\n";
+        assert_eq!(
+            grouped_commits(log, "sub/"),
+            vec![
+                vec!["b.rs".to_string(), "a.rs".to_string()],
+                vec!["a.rs".to_string()],
+            ]
+        );
     }
 
     #[test]
