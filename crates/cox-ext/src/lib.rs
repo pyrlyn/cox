@@ -3,7 +3,8 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 //! Instruction files (`AGENTS.md`/`CLAUDE.md` hierarchy), skills
-//! (`SKILL.md`), slash commands, subagent definitions, and hook config.
+//! (`SKILL.md`), slash commands, output styles, subagent definitions, and
+//! hook config.
 //! Separate because these are user- and repo-supplied extension points, not
 //! core agent logic.
 
@@ -22,3 +23,4 @@ pub mod memory;
 pub mod presence;
 pub mod rules;
 pub mod skills;
+pub mod styles;
