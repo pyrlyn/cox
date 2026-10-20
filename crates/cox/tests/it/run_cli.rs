@@ -604,7 +604,7 @@ fn json_schema_exits_nonzero_after_two_failures() {
     json_schema("[[turn]]\ntext = 'not-json'\n[[turn]]\ntext = '{\"ok\":\"no\"}'\n")
         .failure()
         .stderr(predicates_str_contains(
-            "the answer does not match the JSON schema",
+            "answer does not match --json-schema",
         ))
-        .stderr(predicates_str_contains("$.ok:"));
+        .stderr(predicates_str_contains("boolean"));
 }

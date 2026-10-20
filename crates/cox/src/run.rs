@@ -72,6 +72,9 @@ struct Outcome {
     files_changed: bool,
     // Why an `--autonomous` run ended; `None` for every other run.
     autonomous: Option<AutonomousStop>,
+    // T67.11: the final answer failed `--json-schema` twice. `None` when
+    // the flag is off or the answer matched.
+    schema_errors: Option<String>,
 }
 
 impl Outcome {
@@ -82,6 +85,9 @@ impl Outcome {
             // finish its job however calmly its last turn ended; only a
             // passing gate (or the turn's own stop) keeps the turn's code.
             _ if self.gave_up() => EXIT_ERROR,
+            // A finished turn whose text still fails the schema did not
+            // produce the answer the flag asked for.
+            _ if self.schema_errors.is_some() => EXIT_ERROR,
             None | Some(StopReason::Error) => EXIT_ERROR,
             Some(StopReason::Refusal { .. }) => EXIT_DENIED,
             Some(StopReason::Budget) => EXIT_BUDGET,
@@ -208,23 +214,24 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
     } else {
         args.prompt.clone()
     };
-    let Some(prompt) = prompt else {
-        if args.json_schema.is_some() {
-            anyhow::bail!("--json-schema requires --prompt or --prompt-stdin");
-        }
-        resume::run(cli, args)?;
-        return Ok(EXIT_OK);
-    };
-    // T67.11: a missing or unreadable schema fails before a session opens.
+    if args.json_schema.is_some() && prompt.is_none() {
+        eprintln!("cox: --json-schema requires --prompt");
+        return Ok(EXIT_ERROR);
+    }
+    // T67.11: a missing or unusable schema fails before a session opens.
     let schema = match args.json_schema.as_deref() {
-        Some(path) => match read_json_schema(path) {
-            Ok(schema) => Some(schema),
+        Some(path) => match load_schema(path) {
+            Ok(validator) => Some(validator),
             Err(e) => {
                 eprintln!("cox: {e}");
                 return Ok(EXIT_ERROR);
             }
         },
         None => None,
+    };
+    let Some(prompt) = prompt else {
+        resume::run(cli, args)?;
+        return Ok(EXIT_OK);
     };
     let format = match args.output_format.as_deref().unwrap_or("text") {
         "text" => Format::Text,
@@ -343,8 +350,8 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
                 })
                 .await?;
         }
-        let outcome = match (&autonomous, loop_spec) {
-            (Some(auto), _) => {
+        let outcome = match (&autonomous, loop_spec, schema.as_ref()) {
+            (Some(auto), _, _) => {
                 let prompt = (prompt, attachments);
                 run_autonomous(
                     &session,
@@ -356,7 +363,7 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
                 )
                 .await
             }
-            (None, Some(loop_spec)) => {
+            (None, Some(loop_spec), _) => {
                 run_loop(
                     &session,
                     &mut rx,
@@ -368,18 +375,21 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
                 )
                 .await
             }
-            (None, None) => {
-                let prompt = (prompt, attachments);
-                drive_checked(
+            (None, None, Some(validator)) => {
+                run_with_schema(
                     &session,
                     &mut rx,
-                    prompt,
+                    (prompt, attachments),
                     format,
                     approvals,
                     confirm_think,
-                    schema.as_ref(),
+                    validator,
                 )
                 .await
+            }
+            (None, None, None) => {
+                let prompt = (prompt, attachments);
+                drive(&session, &mut rx, prompt, format, approvals, confirm_think).await
             }
         };
         // T34.9 follow-up: `drive`/`run_loop` above already awaited
@@ -400,6 +410,9 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
     })?;
     if let Some(stop) = &outcome.autonomous {
         eprintln!("cox: autonomous run stopped: {}", describe(stop));
+    }
+    if let Some(errors) = &outcome.schema_errors {
+        eprintln!("cox: answer does not match --json-schema:\n{errors}");
     }
     if unconfirmed_architect && matches!(outcome.stop, Some(StopReason::Refusal { .. })) {
         eprintln!(
@@ -455,6 +468,99 @@ fn read_images(paths: &[PathBuf]) -> Result<Vec<Attachment>, String> {
             image::attachment(name, &data).map_err(|e| why(&e))
         })
         .collect()
+}
+
+/// A local JSON Schema, compiled once. Remote `$ref` resolution is off
+/// (the crate's default features), so a schema cannot fetch anything.
+const SCHEMA_MAX_BYTES: u64 = 256 * 1024;
+
+fn load_schema(path: &Path) -> anyhow::Result<jsonschema::Validator> {
+    let meta = std::fs::metadata(path)
+        .map_err(|e| anyhow::anyhow!("--json-schema {}: {e}", path.display()))?;
+    if meta.len() > SCHEMA_MAX_BYTES {
+        anyhow::bail!(
+            "--json-schema {}: file exceeds {SCHEMA_MAX_BYTES} bytes",
+            path.display()
+        );
+    }
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("--json-schema {}: {e}", path.display()))?;
+    let value: Value = serde_json::from_str(&text).map_err(|e| {
+        anyhow::anyhow!("--json-schema {}: not a JSON schema ({e})", path.display())
+    })?;
+    jsonschema::validator_for(&value)
+        .map_err(|e| anyhow::anyhow!("--json-schema {}: {e}", path.display()))
+}
+
+/// `None` when `answer` is JSON that satisfies `validator`. Otherwise the
+/// errors, capped, for the one retry turn and for stderr.
+fn schema_mismatch(validator: &jsonschema::Validator, answer: &str) -> Option<String> {
+    let value: Value = match serde_json::from_str(answer.trim()) {
+        Ok(value) => value,
+        Err(e) => return Some(format!("answer is not JSON: {e}")),
+    };
+    let mut lines = Vec::new();
+    for error in validator.iter_errors(&value) {
+        if lines.len() == 20 {
+            lines.push("…".to_string());
+            break;
+        }
+        lines.push(error.to_string());
+    }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn schema_retry(errors: &str) -> String {
+    format!(
+        "The previous answer did not match the JSON schema. Reply with only a JSON value that satisfies it.\nValidation errors:\n{errors}"
+    )
+}
+
+/// `cox run -p --json-schema` (T67.11): one turn, then at most one retry
+/// whose prompt is the validation errors. A second mismatch keeps the last
+/// answer and records the errors so the process exits non-zero.
+async fn run_with_schema(
+    session: &Session,
+    rx: &mut mpsc::Receiver<Event>,
+    prompt: (String, Vec<Attachment>),
+    format: Format,
+    approvals: Option<Duration>,
+    confirm_think: bool,
+    validator: &jsonschema::Validator,
+) -> anyhow::Result<Outcome> {
+    let (mut text, mut attachments) = prompt;
+    let mut total = Outcome::default();
+    for attempt in 0..2 {
+        let turn = drive(
+            session,
+            rx,
+            (text, std::mem::take(&mut attachments)),
+            format,
+            approvals,
+            confirm_think,
+        )
+        .await?;
+        let answer = turn.result.clone();
+        let stop = turn.stop.clone();
+        let failed = turn.failed;
+        total.merge(turn);
+        if failed || !matches!(stop, Some(StopReason::EndTurn | StopReason::MaxTurns)) {
+            return Ok(total);
+        }
+        match schema_mismatch(validator, &answer) {
+            None => return Ok(total),
+            Some(errors) if attempt == 0 => text = schema_retry(&errors),
+            Some(errors) => {
+                total.schema_errors = Some(errors);
+                return Ok(total);
+            }
+        }
+    }
+    Ok(total)
 }
 
 /// Runs one turn to completion on an already-open `session`, reading its
@@ -773,286 +879,6 @@ fn spawn_stdin() -> mpsc::Receiver<(CallId, Decision)> {
     rx
 }
 
-/// One plain run, then at most one retry when `--json-schema` is set
-/// (T67.11). The tool never sees the schema check: a failure is a new
-/// user turn carrying the errors, and a second failure is an exit.
-async fn drive_checked(
-    session: &Session,
-    rx: &mut mpsc::Receiver<Event>,
-    prompt: (String, Vec<Attachment>),
-    format: Format,
-    approvals: Option<Duration>,
-    confirm_think: bool,
-    schema: Option<&Value>,
-) -> anyhow::Result<Outcome> {
-    let mut outcome = drive(session, rx, prompt, format, approvals, confirm_think).await?;
-    let Some(schema) = schema else {
-        return Ok(outcome);
-    };
-    if let Some(errors) = schema_mismatch(&outcome.result, schema) {
-        let retry = (schema_retry(&errors), Vec::new());
-        outcome = drive(session, rx, retry, format, approvals, confirm_think).await?;
-        if let Some(errors) = schema_mismatch(&outcome.result, schema) {
-            eprintln!("cox: the answer does not match the JSON schema:\n{errors}");
-            outcome.failed = true;
-        }
-    }
-    Ok(outcome)
-}
-
-/// The schema file, read before a session exists. A boolean schema is
-/// valid JSON Schema; anything else must be an object.
-fn read_json_schema(path: &Path) -> Result<Value, String> {
-    let why = |e: &dyn std::fmt::Display| format!("--json-schema {}: {e}", path.display());
-    let text = std::fs::read_to_string(path).map_err(|e| why(&e))?;
-    let value: Value = serde_json::from_str(&text).map_err(|e| why(&e))?;
-    if value.is_object() || value.is_boolean() {
-        Ok(value)
-    } else {
-        Err(why(&"schema must be a JSON object or boolean"))
-    }
-}
-
-fn schema_retry(errors: &str) -> String {
-    format!(
-        "The answer did not match the JSON schema. Reply with only JSON that matches it.\n{errors}"
-    )
-}
-
-/// `None` when `text` matches `schema`. Otherwise the errors, one per line,
-/// for the retry turn and for stderr.
-fn schema_mismatch(text: &str, schema: &Value) -> Option<String> {
-    let instance = match serde_json::from_str::<Value>(text.trim()) {
-        Ok(value) => value,
-        Err(e) => return Some(format!("$: the answer is not JSON ({e})")),
-    };
-    let mut errors = Vec::new();
-    check_schema(&instance, schema, "$", &mut errors);
-    if errors.is_empty() {
-        None
-    } else {
-        Some(errors.join("\n"))
-    }
-}
-
-/// Keywords this check enforces. Anything else that would change the
-/// result (a `$ref`, a combinator) is reported, so an unsupported schema
-/// cannot pass by being ignored.
-const SCHEMA_KEYWORDS: &[&str] = &[
-    "type",
-    "const",
-    "enum",
-    "properties",
-    "required",
-    "additionalProperties",
-    "items",
-    "minLength",
-    "maxLength",
-    "minimum",
-    "maximum",
-    "minItems",
-    "maxItems",
-];
-
-const SCHEMA_ANNOTATIONS: &[&str] = &[
-    "$schema",
-    "$id",
-    "$comment",
-    "$defs",
-    "definitions",
-    "title",
-    "description",
-    "default",
-    "examples",
-    "deprecated",
-];
-
-fn check_schema(instance: &Value, schema: &Value, path: &str, errors: &mut Vec<String>) {
-    match schema {
-        Value::Bool(true) => {}
-        Value::Bool(false) => errors.push(format!("{path}: rejected by schema")),
-        Value::Object(spec) => {
-            for key in spec.keys() {
-                if !SCHEMA_KEYWORDS.contains(&key.as_str())
-                    && !SCHEMA_ANNOTATIONS.contains(&key.as_str())
-                {
-                    errors.push(format!("{path}: unsupported schema keyword {key}"));
-                }
-            }
-            if let Some(types) = spec.get("type")
-                && !type_matches(instance, types)
-            {
-                errors.push(format!(
-                    "{path}: expected {}, got {}",
-                    types,
-                    json_type(instance)
-                ));
-                return;
-            }
-            if let Some(expected) = spec.get("const")
-                && instance != expected
-            {
-                errors.push(format!("{path}: expected {expected}"));
-            }
-            if let Some(allowed) = spec.get("enum").and_then(Value::as_array)
-                && !allowed.contains(instance)
-            {
-                errors.push(format!("{path}: not one of the allowed values"));
-            }
-            check_string(instance, spec, path, errors);
-            check_number(instance, spec, path, errors);
-            check_array(instance, spec, path, errors);
-            check_object(instance, spec, path, errors);
-        }
-        _ => errors.push(format!("{path}: schema is not an object")),
-    }
-}
-
-fn type_matches(instance: &Value, types: &Value) -> bool {
-    let one = |name: &str| match name {
-        "null" => instance.is_null(),
-        "boolean" => instance.is_boolean(),
-        "object" => instance.is_object(),
-        "array" => instance.is_array(),
-        "string" => instance.is_string(),
-        "number" => instance.is_number(),
-        "integer" => instance
-            .as_number()
-            .is_some_and(|n| n.is_i64() || n.is_u64()),
-        _ => false,
-    };
-    match types {
-        Value::String(name) => one(name),
-        Value::Array(names) => names.iter().filter_map(Value::as_str).any(one),
-        _ => false,
-    }
-}
-
-fn json_type(instance: &Value) -> &'static str {
-    match instance {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(n) if n.is_i64() || n.is_u64() => "integer",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
-}
-
-fn check_string(
-    instance: &Value,
-    spec: &serde_json::Map<String, Value>,
-    path: &str,
-    errors: &mut Vec<String>,
-) {
-    let Some(text) = instance.as_str() else {
-        return;
-    };
-    let len = text.chars().count();
-    if let Some(min) = spec.get("minLength").and_then(Value::as_u64)
-        && len < min as usize
-    {
-        errors.push(format!("{path}: shorter than {min} characters"));
-    }
-    if let Some(max) = spec.get("maxLength").and_then(Value::as_u64)
-        && len > max as usize
-    {
-        errors.push(format!("{path}: longer than {max} characters"));
-    }
-}
-
-fn check_number(
-    instance: &Value,
-    spec: &serde_json::Map<String, Value>,
-    path: &str,
-    errors: &mut Vec<String>,
-) {
-    let Some(number) = instance.as_f64() else {
-        return;
-    };
-    if let Some(min) = spec.get("minimum").and_then(Value::as_f64)
-        && number < min
-    {
-        errors.push(format!("{path}: below minimum {min}"));
-    }
-    if let Some(max) = spec.get("maximum").and_then(Value::as_f64)
-        && number > max
-    {
-        errors.push(format!("{path}: above maximum {max}"));
-    }
-}
-
-fn check_array(
-    instance: &Value,
-    spec: &serde_json::Map<String, Value>,
-    path: &str,
-    errors: &mut Vec<String>,
-) {
-    let Some(items) = instance.as_array() else {
-        return;
-    };
-    if let Some(min) = spec.get("minItems").and_then(Value::as_u64)
-        && items.len() < min as usize
-    {
-        errors.push(format!("{path}: fewer than {min} items"));
-    }
-    if let Some(max) = spec.get("maxItems").and_then(Value::as_u64)
-        && items.len() > max as usize
-    {
-        errors.push(format!("{path}: more than {max} items"));
-    }
-    if let Some(item_schema) = spec.get("items") {
-        for (i, item) in items.iter().enumerate() {
-            check_schema(item, item_schema, &format!("{path}[{i}]"), errors);
-        }
-    }
-}
-
-fn check_object(
-    instance: &Value,
-    spec: &serde_json::Map<String, Value>,
-    path: &str,
-    errors: &mut Vec<String>,
-) {
-    let Some(object) = instance.as_object() else {
-        return;
-    };
-    if let Some(required) = spec.get("required").and_then(Value::as_array) {
-        for key in required.iter().filter_map(Value::as_str) {
-            if !object.contains_key(key) {
-                errors.push(format!("{path}: missing required property {key}"));
-            }
-        }
-    }
-    let properties = spec.get("properties").and_then(Value::as_object);
-    if let Some(properties) = properties {
-        for (key, sub) in properties {
-            if let Some(value) = object.get(key) {
-                check_schema(value, sub, &format!("{path}.{key}"), errors);
-            }
-        }
-    }
-    if let Some(additional) = spec.get("additionalProperties") {
-        for key in object.keys() {
-            if properties.is_some_and(|props| props.contains_key(key)) {
-                continue;
-            }
-            match additional {
-                Value::Bool(false) => {
-                    errors.push(format!("{path}: unexpected property {key}"));
-                }
-                Value::Bool(true) => {}
-                sub => {
-                    if let Some(value) = object.get(key) {
-                        check_schema(value, sub, &format!("{path}.{key}"), errors);
-                    }
-                }
-            }
-        }
-    }
-}
-
 /// Pends forever without a driver so `select!` never spins on a closed side.
 async fn recv_or_pend<T>(rx: &mut Option<mpsc::Receiver<T>>) -> Option<T> {
     match rx {
@@ -1151,31 +977,5 @@ mod tests {
             let mut input = std::io::Cursor::new(bad.as_bytes().to_vec());
             assert!(read_prompt_line(&mut input).is_err(), "{bad:?}");
         }
-    }
-
-    /// T67.11: a matching object passes, and a miss names the property.
-    #[test]
-    fn schema_mismatch_accepts_only_a_matching_object() {
-        let schema = json!({
-            "type": "object",
-            "required": ["ok"],
-            "properties": { "ok": { "type": "boolean" } },
-            "additionalProperties": false
-        });
-        assert!(schema_mismatch("{\"ok\":true}", &schema).is_none());
-        let missing = schema_mismatch("{}", &schema).expect("missing ok");
-        assert!(
-            missing.contains("missing required property ok"),
-            "{missing}"
-        );
-        let extra = schema_mismatch("{\"ok\":true,\"x\":1}", &schema).expect("extra");
-        assert!(extra.contains("unexpected property x"), "{extra}");
-        let text = schema_mismatch("nope", &schema).expect("not json");
-        assert!(text.contains("not JSON"), "{text}");
-        let unsupported = schema_mismatch("{}", &json!({"$ref": "#/defs/A"})).expect("ref");
-        assert!(
-            unsupported.contains("unsupported schema keyword $ref"),
-            "{unsupported}"
-        );
     }
 }
