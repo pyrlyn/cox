@@ -150,9 +150,9 @@ TinyGo — не gc: он вычисляет `return n, json.Unmarshal(raw, &n)`,
 
 ## Kotlin
 
-`plugins/sdk-kotlin` — собственный PDK cox поверх сырых импортов extism `extism:host/env` и `cox:host/v1`, потому что поддерживаемого extism PDK для Kotlin нет. Он не опубликован: плагин берёт его через составную сборку Gradle (`includeBuild`) из каталога `plugins/sdk-kotlin` в копии cox. Java, Gradle и Kotlin берутся из `plugins/mise.toml`. Плагин на Kotlin — это модуль Kotlin/Wasm `wasmWasi`, а стандартная библиотека Kotlin импортирует WASI `random_get`, поэтому в его `plugin.toml` задано `wasi = true`.
+`plugins/sdk-kotlin` — собственный PDK cox поверх сырых импортов extism `extism:host/env` и `cox:host/v1`, потому что поддерживаемого Kotlin PDK для extism нет. Он не публикуется: плагин подключает его составной сборкой Gradle (`includeBuild`) каталога `plugins/sdk-kotlin` из копии cox. Java, Gradle и Kotlin берутся из `plugins/mise.toml`. Плагин на Kotlin — это модуль Kotlin/Wasm `wasmWasi`, а стандартная библиотека Kotlin импортирует WASI `random_get`, поэтому в его `plugin.toml` задано `wasi = true`.
 
-Каждый экспорт — это функция `@WasmExport`, всё тело которой — `Cox.export { input -> … }`: обработчик принимает вход экспорта как `JsonElement` и возвращает выход как один, с формами из `docs/plugin-abi.schema.json`. `cox_init` обязателен; остальное cox ищет по имени. Хост-функции: `Cox.log`, `notify`, `kvGet`, `kvPut`, `kvDelete`, `context`, `invokeTool`, `modelCall`, `http`, `output`, `cancelled` и `redraw`. Отказ бросает `HostException`, чей `error` равен `AbiError`.
+Каждый экспорт — это функция `@WasmExport`, всё тело которой — `Cox.export { input -> … }`: обработчик принимает вход экспорта как `JsonElement` и возвращает выход как одно значение, формы — в `docs/plugin-abi.schema.json`. `cox_init` обязателен; остальное cox ищет по имени. Хост-функции: `Cox.log`, `notify`, `kvGet`, `kvPut`, `kvDelete`, `context`, `invokeTool`, `modelCall`, `http`, `output`, `cancelled` и `redraw`. Отказ бросает `HostException`, чей `error` равен `AbiError`.
 
 ```kotlin
 @WasmExport
@@ -161,7 +161,7 @@ fun cox_init(): Int = Cox.export {
 }
 ```
 
-Полная версия — `plugins/examples/kotlin`; `gradle pluginPackage` складывает `plugin.toml` и модуль в `build/plugin` — это то, что принимает `cox plugin install`, потому что он копирует целый каталог. `cox plugin new <name> --lang kotlin` создаёт заготовку пакета с `justfile`, чей рецепт `smoke` устанавливает его в отдельный `COX_HOME`. `just plugin-examples kotlin` собирает пример и запускает его сквозные тесты.
+Полная версия — `plugins/examples/kotlin`; `gradle pluginPackage` раскладывает `plugin.toml` и модуль в `build/plugin` — именно этот каталог принимает `cox plugin install`, потому что копирует каталог целиком. `cox plugin new <name> --lang kotlin` создаёт заготовку пакета с `justfile`, чей рецепт `smoke` устанавливает её в отдельный `COX_HOME`. `just plugin-examples kotlin` собирает пример и запускает его сквозные тесты.
 
 ## Общая часть
 

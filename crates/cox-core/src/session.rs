@@ -18,9 +18,9 @@ use cox_protocol::traits::{
     HunkReverter, Provider, RepoMapper, Store, Tool, Worktrees,
 };
 use cox_protocol::types::{
-    ArchiveRef, Attachment, Content, ContextBreakdown, Decision, Event, HookEvent, HookOutcome,
-    ItemKind, Job, Level, Message, Mode, ModelId, PermissionMode, ProviderId, Request, Role,
-    SandboxMode, StopReason, Submission, Tier, ToolCall, ToolResult,
+    ArchiveRef, Attachment, Content, ContextBreakdown, DecidedBy, Decision, Event, HookEvent,
+    HookOutcome, ItemKind, Job, Level, Message, Mode, ModelId, PermissionMode, ProviderId, Request,
+    Role, SandboxMode, StopReason, Submission, Tier, ToolCall, ToolResult,
 };
 use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -151,6 +151,10 @@ pub(crate) struct Inner {
     /// Where that map's text is archived; on resume, set from the rollout
     /// before the text is read back on the first submit.
     pub(crate) repomap_archive: Option<ArchiveId>,
+    /// The parent's cwd when this child was spawned somewhere else (T67.3).
+    /// Taken on the first submit, which is the first moment a hook runner
+    /// is installed; `None` for a session that did not move.
+    cwd_from: Option<PathBuf>,
 }
 
 /// The mode and effort as they stand after a change, for every surface to
@@ -418,13 +422,17 @@ impl Session {
         agent: String,
         preset: String,
     ) -> Result<Self, CoreError> {
+        let child_cwd = cwd.unwrap_or_else(|| self.cwd.clone());
+        // Announced on the child's first submit: `build` cannot await, and
+        // the hook runner is the parent's, copied just below.
+        let cwd_from = (child_cwd != self.cwd).then(|| self.cwd.clone());
         let mut child = Self::build(
             config,
             self.provider.clone(),
             tools,
             self.store.clone(),
             self.archive.clone(),
-            cwd.unwrap_or_else(|| self.cwd.clone()),
+            child_cwd,
             resume,
             SessionId::new(),
             Some(self.id),
@@ -451,6 +459,11 @@ impl Session {
         // `build` starts an empty map; a child reaches the same ABI
         // providers the parent loaded (T33.18).
         child.plugin_providers = Arc::clone(&self.plugin_providers);
+        if let Some(old) = cwd_from
+            && let Ok(mut inner) = child.inner.try_lock()
+        {
+            inner.cwd_from = Some(old);
+        }
         Ok(child)
     }
 
@@ -634,6 +647,7 @@ impl Session {
                 startup_context: String::new(),
                 repomap: None,
                 repomap_archive,
+                cwd_from: None,
             })),
         };
         let started = Event::SessionStarted {
@@ -762,6 +776,30 @@ impl Session {
         // before `TurnDone` (§1.15 rule 7).
         if let Some(extra) = hooks::notification_payload(&ev) {
             let _ = hooks::fire_configured(self, HookEvent::Notification, extra).await;
+        }
+        // T67.3: both the engine and the user deny through this event, so
+        // one observe-only dispatch covers both. The verdict is ignored.
+        if let Event::ApprovalDecided {
+            call_id,
+            decision: Decision::Deny { reason },
+            by,
+        } = &ev
+        {
+            let call_id = *call_id;
+            let reason = reason.clone();
+            let by = decided_by_name(*by);
+            let tool_name = self.denied_tool_name(call_id);
+            let _ = hooks::fire_configured(
+                self,
+                HookEvent::PermissionDenied,
+                serde_json::json!({
+                    "call_id": call_id.to_string(),
+                    "tool_name": tool_name,
+                    "reason": reason,
+                    "by": by,
+                }),
+            )
+            .await;
         }
         // T28.4: the rollout is what leaves the session, so the copy written
         // here is scrubbed; `ev` — the in-memory history and every surface —
@@ -1005,6 +1043,20 @@ impl Session {
         // `additionalContext` rides in `system[3]` from here on.
         // A `let` first: an `if let` scrutinee's guard would live through the
         // block and deadlock `start_repomap`'s own lock.
+        // T67.3: a child spawned in another directory announces it once,
+        // on the first submit, when the copied hook runner can run.
+        let cwd_from = self.inner.lock().await.cwd_from.take();
+        if let Some(old) = cwd_from {
+            let _ = hooks::fire_configured(
+                self,
+                HookEvent::CwdChanged,
+                serde_json::json!({
+                    "old_cwd": old,
+                    "cwd": self.cwd,
+                }),
+            )
+            .await;
+        }
         let startup = self.inner.lock().await.startup.take();
         if let Some(source) = startup {
             let outcome = hooks::fire_configured(
@@ -1016,6 +1068,17 @@ impl Session {
             if let HookOutcome::Modify { input } = outcome {
                 let (_, context) = hooks::prompt_rewrite(String::new(), input);
                 self.inner.lock().await.startup_context = context.unwrap_or_default();
+            }
+            // T67.3: the surface read instruction files before `set_hook`,
+            // so this once-per-session slot is the first moment a hook can
+            // see them. The text stays out of the payload.
+            if let Some(block) = self.instructions.get().filter(|block| !block.is_empty()) {
+                let _ = hooks::fire_configured(
+                    self,
+                    HookEvent::InstructionsLoaded,
+                    serde_json::json!({ "bytes": block.len() }),
+                )
+                .await;
             }
             // P43: the same once-per-session slot, before the first request.
             self.start_repomap().await?;
@@ -2167,6 +2230,24 @@ impl Session {
             self.finish(turn, StopReason::Interrupted).await?;
             return Ok(Step::Done);
         }
+        // T67.3: one observe-only dispatch after the whole assistant message,
+        // not after each call. A cancelled batch has not finished, so it
+        // does not fire.
+        let tool_calls: Vec<serde_json::Value> = results
+            .iter()
+            .map(|(id, result)| {
+                serde_json::json!({
+                    "call_id": id.to_string(),
+                    "ok": result.ok,
+                })
+            })
+            .collect();
+        let _ = hooks::fire_configured(
+            self,
+            HookEvent::PostToolBatch,
+            serde_json::json!({ "tool_calls": tool_calls }),
+        )
+        .await;
         let order: Vec<CallId> = results.iter().map(|(id, _)| *id).collect();
         let mut msg = results_message(results);
         // T40.5: images follow every `ToolResult` (Anthropic wants the
@@ -2413,6 +2494,10 @@ impl Session {
         if stop == StopReason::EndTurn {
             // §1.8 step 4: `Stop` is informational; its verdict is not applied.
             let _ = hooks::fire(self, HookEvent::Stop, serde_json::json!({})).await;
+        } else if stop == StopReason::Error {
+            // T67.3: the error turn's twin of `Stop`. Observe-only.
+            let _ =
+                hooks::fire_configured(self, HookEvent::StopFailure, serde_json::json!({})).await;
         }
         self.emit(Event::TurnDone {
             turn,
@@ -2459,6 +2544,38 @@ pub(crate) fn record_content(field: &'static str, value: &serde_json::Value) {
 
 pub(crate) fn captured_json(value: &serde_json::Value) -> Option<String> {
     capture_message_content().then(|| value.to_string())
+}
+
+/// Claude Code's `by` string for a denial (`PermissionDenied`, T67.3).
+fn decided_by_name(by: DecidedBy) -> &'static str {
+    match by {
+        DecidedBy::User => "user",
+        DecidedBy::Rule => "rule",
+        DecidedBy::Session => "session",
+        DecidedBy::Policy => "policy",
+        DecidedBy::Hook => "hook",
+    }
+}
+
+impl Session {
+    /// The tool name of `id` if that call is already in history. `try_lock`
+    /// so a caller that emits while holding `inner` still records the denial.
+    fn denied_tool_name(&self, id: CallId) -> String {
+        let Ok(inner) = self.inner.try_lock() else {
+            return String::new();
+        };
+        inner
+            .history
+            .iter()
+            .rev()
+            .find_map(|message| {
+                message.content.iter().find_map(|block| match block {
+                    Content::ToolUse { id: call, name, .. } if *call == id => Some(name.clone()),
+                    _ => None,
+                })
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// The `snake_case` name of a stop reason, matching its serde tag. The
@@ -2850,6 +2967,298 @@ mod tests {
         assert_eq!(payload["title"], "Turn done");
         assert_eq!(payload["message"], "end_turn");
         assert_eq!(payload["hook_event_name"], "Notification");
+    }
+
+    /// A named stub tool. `ReadOnly` runs; `Write` asks in the default mode.
+    struct Named {
+        name: &'static str,
+        risk: cox_protocol::types::Risk,
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for Named {
+        fn spec(&self) -> cox_protocol::types::ToolSpec {
+            cox_protocol::types::ToolSpec {
+                name: self.name.into(),
+                description: self.name.into(),
+                input_schema: serde_json::json!({ "type": "object" }),
+                deferred: false,
+                risk: self.risk,
+                concurrency: cox_protocol::types::Concurrency::Parallel,
+            }
+        }
+
+        fn subject(&self, input: &Value) -> String {
+            input
+                .get("text")
+                .or_else(|| input.get("path"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .into()
+        }
+
+        async fn call(
+            &self,
+            input: Value,
+            _cx: &cox_protocol::traits::ToolCx,
+        ) -> Result<cox_protocol::types::ToolOutput, ToolError> {
+            Ok(cox_protocol::types::ToolOutput {
+                text: self.subject(&input),
+                is_error: false,
+                diff: None,
+                structured: None,
+            })
+        }
+    }
+
+    fn hooked(
+        configured: &[&str],
+        tools: Vec<Arc<dyn Tool>>,
+        scenario: &str,
+        deny: &[&str],
+    ) -> (Session, Arc<Probe>) {
+        let mut config = cox_protocol::Config::default();
+        for name in configured {
+            config.hooks.events.insert(
+                (*name).to_string(),
+                vec![HookConfig {
+                    command: "true".into(),
+                    ..HookConfig::default()
+                }],
+            );
+        }
+        config.permissions.deny = deny.iter().map(|rule| (*rule).to_string()).collect();
+        let store = Arc::new(MemoryStore::new());
+        let session = Session::new(
+            config,
+            Arc::new(Scripted::from_toml(scenario, "").expect("scenario")),
+            tools,
+            store.clone(),
+            store,
+            PathBuf::from("/tmp/cox-turn"),
+        )
+        .expect("session");
+        let probe = Arc::new(Probe::default());
+        session.set_hook(probe.clone());
+        (session, probe)
+    }
+
+    async fn say(session: &Session, text: &str) {
+        session
+            .submit(Submission::UserTurn {
+                text: text.into(),
+                attachments: vec![],
+                confirm_think: false,
+            })
+            .await
+            .expect("turn");
+    }
+
+    fn payloads(probe: &Probe, event: HookEvent) -> Vec<Value> {
+        probe
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|(seen, _)| *seen == event)
+            .map(|(_, payload)| payload.clone())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn post_tool_batch_fires_after_last_result() {
+        let (session, probe) = hooked(
+            &["PostToolBatch"],
+            vec![Arc::new(Named {
+                name: "echo",
+                risk: cox_protocol::types::Risk::ReadOnly,
+            })],
+            "[[turn]]\ntool_calls = [{ name = \"echo\", input = { text = \"a\" } }, { name = \"echo\", input = { text = \"b\" } }]\n\n[[turn]]\ntext = \"done\"\n",
+            &[],
+        );
+        say(&session, "go").await;
+        let seen = probe.0.lock().unwrap_or_else(|e| e.into_inner());
+        let batch_at = seen
+            .iter()
+            .position(|(event, _)| *event == HookEvent::PostToolBatch)
+            .expect("PostToolBatch");
+        let last_post = seen
+            .iter()
+            .rposition(|(event, _)| *event == HookEvent::PostToolUse)
+            .expect("both calls posted");
+        assert!(batch_at > last_post, "the batch waits for the last result");
+        assert_eq!(
+            seen.iter()
+                .filter(|(event, _)| *event == HookEvent::PostToolBatch)
+                .count(),
+            1
+        );
+        let calls = seen[batch_at].1["tool_calls"].as_array().expect("calls");
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|call| call["ok"] == true));
+        assert_eq!(seen[batch_at].1["hook_event_name"], "PostToolBatch");
+    }
+
+    #[tokio::test]
+    async fn permission_denied_fires_when_the_engine_or_the_user_denies() {
+        let (session, probe) = hooked(
+            &["PermissionDenied"],
+            vec![Arc::new(Named {
+                name: "echo",
+                risk: cox_protocol::types::Risk::ReadOnly,
+            })],
+            "[[turn]]\ntool_calls = [{ name = \"echo\", input = { text = \"a\" } }]\n\n[[turn]]\ntext = \"done\"\n",
+            &["echo"],
+        );
+        say(&session, "go").await;
+        let denied = payloads(&probe, HookEvent::PermissionDenied);
+        assert_eq!(denied.len(), 1, "one denial, one dispatch");
+        assert_eq!(denied[0]["tool_name"], "echo");
+        assert_eq!(denied[0]["by"], "rule");
+        assert_eq!(denied[0]["hook_event_name"], "PermissionDenied");
+
+        let (session, probe) = hooked(
+            &["PermissionDenied"],
+            vec![Arc::new(Named {
+                name: "touch",
+                risk: cox_protocol::types::Risk::Write,
+            })],
+            "[[turn]]\ntool_calls = [{ name = \"touch\", input = { path = \"a\" } }]\n\n[[turn]]\ntext = \"done\"\n",
+            &[],
+        );
+        let mut rx = session.events().expect("event stream");
+        let worker = session.clone();
+        let running = tokio::spawn(async move { say(&worker, "write").await });
+        let call_id = loop {
+            match rx.recv().await.expect("event") {
+                Event::ApprovalRequired { call, .. } => break call.id,
+                Event::TurnDone { .. } => panic!("the write was not asked"),
+                _ => {}
+            }
+        };
+        // The rest of the turn still emits; nobody reading `rx` would fill
+        // the channel and stall `finish`.
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        session
+            .submit(Submission::Approve {
+                call_id,
+                decision: Decision::Deny {
+                    reason: "no".into(),
+                },
+            })
+            .await
+            .expect("deny");
+        running.await.expect("join");
+        let denied = payloads(&probe, HookEvent::PermissionDenied);
+        assert_eq!(denied.len(), 1);
+        assert_eq!(denied[0]["tool_name"], "touch");
+        assert_eq!(denied[0]["by"], "user");
+        assert_eq!(denied[0]["reason"], "no");
+    }
+
+    #[tokio::test]
+    async fn instructions_loaded_fires_once_at_open() {
+        let (session, probe) = open(&["InstructionsLoaded"]);
+        let block = "# Instructions\nBe terse.\n";
+        session.set_instructions(block.to_string(), String::new());
+        for _ in 0..2 {
+            session
+                .submit(Submission::SetEffort { effort: None })
+                .await
+                .expect("submit");
+        }
+        let loaded = payloads(&probe, HookEvent::InstructionsLoaded);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0]["bytes"].as_u64(), Some(block.len() as u64));
+        assert_eq!(loaded[0]["hook_event_name"], "InstructionsLoaded");
+        assert!(loaded[0].get("text").is_none());
+    }
+
+    #[tokio::test]
+    async fn cwd_changed_fires_when_a_child_cwd_differs() {
+        let (session, probe) = open(&[]);
+        let mut config = cox_protocol::Config::default();
+        config.hooks.events.insert(
+            "CwdChanged".into(),
+            vec![HookConfig {
+                command: "true".into(),
+                ..HookConfig::default()
+            }],
+        );
+        let child = session
+            .spawn_child(
+                config,
+                vec![],
+                session.job.clone(),
+                session.tier,
+                Some(PathBuf::from("/tmp/cox-child")),
+                None,
+                "child".into(),
+                "explore".into(),
+            )
+            .expect("child");
+        for _ in 0..2 {
+            child
+                .submit(Submission::SetEffort { effort: None })
+                .await
+                .expect("submit");
+        }
+        let changed = payloads(&probe, HookEvent::CwdChanged);
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0]["old_cwd"], "/tmp/cox-turn");
+        assert_eq!(changed[0]["cwd"], "/tmp/cox-child");
+        assert_eq!(changed[0]["hook_event_name"], "CwdChanged");
+    }
+
+    /// Returns `Block` for `StopFailure` and continues everywhere else, so a
+    /// block on the prompt cannot hide whether the error verdict is ignored.
+    struct BlockStop(StdMutex<u8>);
+
+    #[async_trait::async_trait]
+    impl Hook for BlockStop {
+        async fn run(&self, event: HookEvent, _payload: Value, _timeout: Duration) -> HookOutcome {
+            if event == HookEvent::StopFailure {
+                *self.0.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+                return HookOutcome::Block {
+                    reason: "stay".into(),
+                };
+            }
+            HookOutcome::Continue
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_failure_fires_when_the_turn_errors() {
+        let mut config = cox_protocol::Config::default();
+        config.hooks.events.insert(
+            "StopFailure".into(),
+            vec![HookConfig {
+                command: "true".into(),
+                ..HookConfig::default()
+            }],
+        );
+        let store = Arc::new(MemoryStore::new());
+        let session = Session::new(
+            config,
+            Arc::new(Scripted::from_toml("[[turn]]\nerror = \"boom\"\n", "").expect("scenario")),
+            vec![],
+            store.clone(),
+            store.clone(),
+            PathBuf::from("/tmp/cox-turn"),
+        )
+        .expect("session");
+        let hook = Arc::new(BlockStop(StdMutex::new(0)));
+        session.set_hook(hook.clone());
+        say(&session, "go").await;
+        assert_eq!(*hook.0.lock().unwrap_or_else(|e| e.into_inner()), 1);
+        let events = store.rollout_read(&session.id()).expect("rollout");
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::TurnDone {
+                stop: StopReason::Error,
+                ..
+            }
+        )));
     }
 
     /// The script, plus every request it was sent (P42's prefix claim is
