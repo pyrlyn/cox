@@ -2032,12 +2032,6 @@ Check: `mise exec -- cargo nextest run -p cox-ext -p cox-core`, then clippy and 
 
 Done when `style_text_after_cache_breakpoint` and `system_prefix_unchanged_by_style` pass.
 
-#### T67.13 Design: a GitHub Action and scheduled runs
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 (doc) · Priority: P3 · Complexity: 2
-
-Goal: `docs/design/github-action.md` and `docs/design/schedule.md`: how `cox run -p` runs in a GitHub workflow (inputs, key handling, sandbox, cost cap, what it may push) and on a schedule (where the schedule lives, locking, the ledger). No code until the creator approves; implementation cards come in a later amendment.
-
 ### P68 — Run targets (goal: a whole cox session runs on another machine, in a Docker container, in a Lima instance or in the Colima VM, driven from the desktop app, the TUI, `cox run -p` or the `agent` tool, with the remote on Linux, macOS or Windows and the client on any of them)
 
 Rationale in §6 A158. Today only the desktop app reaches a remote session, only over ssh and only from macOS (`cox-app/src/remote.rs`, T52.19–T52.21). P68 generalises that link: a **target** is one string, `ssh:<host>`, `docker:<container>`, `lima:<instance>` or `colima:<profile>`, and every surface runs the remote `cox` through the target's launcher. The model, the tools, the sandbox and the keys stay on the target, as with `cox app-server` today.
