@@ -70,7 +70,6 @@
 - T67.5. `/goal` in the TUI and stream-json
 - T67.6. Path-scoped rules, loaded on demand
 - T67.7. Leaving Plan mode needs approval
-- T67.8. Design: an Auto-mode risk judge
 - T67.9. Auto-mode risk judge
 - T67.10. MCP resources and prompts
 - T67.11. `cox run -p --json-schema`
