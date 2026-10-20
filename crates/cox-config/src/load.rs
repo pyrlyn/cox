@@ -1068,17 +1068,6 @@ pub fn check_user_toml(contents: &str) -> Result<(), CoreError> {
         .map_err(core_error)
 }
 
-/// The `[tiers]` table of the embedded `default.toml`. A tier still naming a
-/// provider that moved to a plugin falls back to these models (T33.40.13)
-/// without reading the user's file, which may itself name the old provider.
-pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
-    Layers::new()
-        .toml_text("default", DEFAULT_CONFIG_TOML)
-        .extract::<Config>()
-        .ok()
-        .map(|cfg| cfg.tiers)
-}
-
 /// Serializes every test in this crate that mutates process-wide env vars
 /// (`COX_HOME`, `COX_*`) — `cargo test` runs a binary's tests concurrently
 /// by default, and env vars are global process state, so without this lock
