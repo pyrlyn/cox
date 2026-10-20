@@ -163,16 +163,54 @@ impl Store {
             .ok_or(StoreError::NotFound)
     }
 
-    /// Every session, most recently written first.
+    /// Every session still listed, most recently written first. Runs the
+    /// archive sweep first so a long history drops off this list (T66.14).
     pub fn list_sessions(&self, limit: i64) -> Result<Vec<SessionInfo>, StoreError> {
+        self.archive_stale_sessions()?;
+        self.list_sessions_filtered(limit, Some(false))
+    }
+
+    /// Sessions the sweep has archived, newest first ( `cox sessions --archived` ).
+    pub fn list_archived_sessions(&self, limit: i64) -> Result<Vec<SessionInfo>, StoreError> {
+        self.archive_stale_sessions()?;
+        self.list_sessions_filtered(limit, Some(true))
+    }
+
+    /// Live and archived sessions, for `--grep`, which should still find text
+    /// the default list no longer shows.
+    pub fn list_sessions_including_archived(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<SessionInfo>, StoreError> {
+        self.list_sessions_filtered(limit, None)
+    }
+
+    fn list_sessions_filtered(
+        &self,
+        limit: i64,
+        archived: Option<bool>,
+    ) -> Result<Vec<SessionInfo>, StoreError> {
+        let sql = match archived {
+            Some(true) => {
+                "SELECT id, title, cwd, created_at, updated_at, turns, cost_usd \
+                 FROM sessions WHERE archived_at IS NOT NULL \
+                 ORDER BY updated_at DESC, id DESC LIMIT ?"
+            }
+            Some(false) => {
+                "SELECT id, title, cwd, created_at, updated_at, turns, cost_usd \
+                 FROM sessions WHERE archived_at IS NULL \
+                 ORDER BY updated_at DESC, id DESC LIMIT ?"
+            }
+            None => {
+                "SELECT id, title, cwd, created_at, updated_at, turns, cost_usd \
+                 FROM sessions ORDER BY updated_at DESC, id DESC LIMIT ?"
+            }
+        };
         let mut conn = self.conn.lock().map_err(|_| StoreError::Io)?;
-        let rows: Vec<SessionRowLite> = diesel::sql_query(
-            "SELECT id, title, cwd, created_at, updated_at, turns, cost_usd \
-             FROM sessions ORDER BY updated_at DESC, id DESC LIMIT ?",
-        )
-        .bind::<BigInt, _>(limit)
-        .load(&mut *conn)
-        .map_err(|_| StoreError::Sqlite)?;
+        let rows: Vec<SessionRowLite> = diesel::sql_query(sql)
+            .bind::<BigInt, _>(limit)
+            .load(&mut *conn)
+            .map_err(|_| StoreError::Sqlite)?;
         Ok(rows.into_iter().map(into_info).collect())
     }
 }

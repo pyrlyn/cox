@@ -40,6 +40,66 @@ $ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
 ```
 
 `low_risk_answer_leaves_the_call_allowed` failed in this environment after the call was allowed: confined `git` could not open `/dev/null`, and that sandbox denial asked for approval. It is not a change in the risk verdict. `cargo clippy --workspace` including `cox-voice` was not run here: `whisper-rs-sys` cannot link `libstdc++` with the local clang.
+#### T66.14 Archive old sessions without deleting them
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T66.12 and its approved cards · Size: ~340 (landed larger; see Not done) · Priority: P3 · Complexity: 2
+
+Goal: `cox sessions` stays short once there are hundreds of sessions. A sweep marks a session archived (`sessions.archived_at`) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones.
+
+What landed:
+- Migration `00000000000011_session_archived` adds nullable `archived_at`. The sweep sets it and never deletes a row, a rollout or an archive row, and a second sweep leaves the stamp as it was.
+- Newest-first is `updated_at` then id, the same order as the list. Age is a strict `>` of 30 days. An unparseable timestamp stays listed. A lock held by this process or another is resident (`lock::resident`); `session_holder` alone would miss a lock this process holds.
+- No scheduled-job table exists until T66.13. The predicate is on the pure function and tested; the sweep passes `scheduled: false`.
+- `cox sessions` and the store lists that back the TUI and the desktop run the sweep. The default list and `sessions_tree` hide archived rows. `--grep` still finds them. `--archived` lists only them. `cox sessions <id>` and `archive_get` still work.
+
+Not done: the card names no files. A column, the schema snapshot, the list filters and the CLI flag cannot land in three files. The new module is about 340 lines with tests. `mise` is not on this machine; the checks ran as `cargo +1.99.0`. `cox doctor` on a scratch `COX_HOME` reports the database valid and `ANTHROPIC_API_KEY` missing, which is expected with `COX_KEYRING=off`.
+
+Check:
+```
+cargo +1.99.0 nextest run --locked -p cox-store
+  59 passed, 2 skipped
+cargo +1.99.0 clippy --locked -p cox-store -p cox --all-targets -- -D warnings
+  clean
+cargo +1.99.0 fmt --check -p cox-store -p cox
+  clean
+COX_HOME=/tmp/cox-scratch-t6614 cargo +1.99.0 run --locked --quiet -- sessions
+  No sessions found
+COX_HOME=/tmp/cox-scratch-t6614 cargo +1.99.0 run --locked --quiet -- sessions --archived
+  No sessions found
+```
+
+=======
+#### T67.12 Output styles
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~430 (landed larger) · Priority: P3 · Complexity: 2
+
+Goal: `.cox/output-styles/*.md` and `~/.cox/output-styles/*.md` (and `.claude/output-styles/*.md`) define styles; `/style <name>` picks one and `/style` lists them. The style text goes after the last cache breakpoint (A148), so the cached prefix stays byte-stable.
+
+Files: `crates/cox-ext/src/styles.rs` (new), `crates/cox-ext/src/lib.rs`, `crates/cox-protocol/src/commands.rs`, `crates/cox-core/src/context.rs`, `crates/cox-core/src/session.rs`, `crates/cox-session/src/lib.rs` (plus the help snapshot and `docs/screenshots/help_overlay.svg`)
+
+Plan: discovery stays in `cox-ext` because `cox-core` reads no files. Later directories win: home, then `.claude`, then project `.cox`. A file with no frontmatter is a body named by its stem; a broken header or an empty body is a notice and the rest still load. `/style` lists the catalog and the active name; `/style <name>` (words joined with a space) selects one for later requests and an unknown name warns without changing the current style. Nothing is selected at open. The body is stored as `<output_style name="…">` and appended to volatile `system[3]`, which sits after breakpoint index 2 and is not cached.
+
+Landed larger than the card's three files: the command has to live on the session, and the session crate is what opens the files. Also restored `cox_config::load::default_tiers` (the embedded `[tiers]` table). #364 added the callers and not the function, so `cargo clippy --workspace` has not compiled `cox-session` since. Clippy 1.99's `needless_borrows_for_generic_args` is cleared in `target_agents.rs` (pass the closure by value; it is `Copy`) and allowed on the two `status_line.rs` calls that reuse a non-`Copy` closure. `workspace-hack` is regenerated so the lock resolves; the same regeneration is #408.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo nextest run --locked -p cox-ext -p cox-core
+     Summary [   2.660s] 553 tests run: 553 passed, 1 skipped
+     (includes style_text_after_cache_breakpoint, system_prefix_unchanged_by_style, style_command_puts_the_body_after_the_prefix_breakpoint, project_cox_style_replaces_claude_and_home, broken_header_is_skipped_with_a_notice)
+$ mise exec -- cargo nextest run --locked -p cox-config -p cox-session -E 'test(/default_tiers_reads_the_embedded_code_tier|legacy_typesafe|open_moves_a_legacy/)'
+     Summary 4 tests run: 4 passed
+$ INSTA_UPDATE=1 COX_SCREENSHOTS=docs/screenshots mise exec -- cargo test --locked -p cox-tui --test screenshots screen_help_overlay
+     test screen_help_overlay ... ok
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     toolchain, db, sandbox (landlock), git, prefix ok; API keys row fails because ANTHROPIC_API_KEY is unset in this environment (exit 1)
+$ mise exec -- cargo fmt --check
+     clean
+$ mise exec -- cargo clippy --locked --workspace --all-targets --exclude cox-voice -- -D warnings
+     Finished clean (exit 0)
+```
+
+`--all-features` was not run here: `whisper-rs-sys` fails to link under this environment's cmake. CI installs the voice packages and runs that clippy.
+
 #### T33.45 Design the plugin API: shared, terminal-only and desktop-only
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: split across T33.45.1–T33.45.10 · Priority: P2 · Complexity: 4
