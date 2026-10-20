@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 #### T67.4 `/goal`: a judged stop condition
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~190 (landed larger; see Not done) · Priority: P1 · Complexity: 3
@@ -34,6 +33,34 @@ exit 1: ANTHROPIC_API_KEY is not set (expected; keyring is off). toolchain, COX_
 ```
 
 `mise` is not installed in this environment. The commands above use the `1.99.0` toolchain pinned in `mise.toml`, without changing the default toolchain.
+
+#### T66.14 Archive old sessions without deleting them
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T66.12 and its approved cards · Size: ~340 (landed larger; see Not done) · Priority: P3 · Complexity: 2
+
+Goal: `cox sessions` stays short once there are hundreds of sessions. A sweep marks a session archived (`sessions.archived_at`) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones.
+
+What landed:
+- Migration `00000000000011_session_archived` adds nullable `archived_at`. The sweep sets it and never deletes a row, a rollout or an archive row, and a second sweep leaves the stamp as it was.
+- Newest-first is `updated_at` then id, the same order as the list. Age is a strict `>` of 30 days. An unparseable timestamp stays listed. A lock held by this process or another is resident (`lock::resident`); `session_holder` alone would miss a lock this process holds.
+- No scheduled-job table exists until T66.13. The predicate is on the pure function and tested; the sweep passes `scheduled: false`.
+- `cox sessions` and the store lists that back the TUI and the desktop run the sweep. The default list and `sessions_tree` hide archived rows. `--grep` still finds them. `--archived` lists only them. `cox sessions <id>` and `archive_get` still work.
+
+Not done: the card names no files. A column, the schema snapshot, the list filters and the CLI flag cannot land in three files. The new module is about 340 lines with tests. `mise` is not on this machine; the checks ran as `cargo +1.99.0`. `cox doctor` on a scratch `COX_HOME` reports the database valid and `ANTHROPIC_API_KEY` missing, which is expected with `COX_KEYRING=off`.
+
+Check:
+```
+cargo +1.99.0 nextest run --locked -p cox-store
+  59 passed, 2 skipped
+cargo +1.99.0 clippy --locked -p cox-store -p cox --all-targets -- -D warnings
+  clean
+cargo +1.99.0 fmt --check -p cox-store -p cox
+  clean
+COX_HOME=/tmp/cox-scratch-t6614 cargo +1.99.0 run --locked --quiet -- sessions
+  No sessions found
+COX_HOME=/tmp/cox-scratch-t6614 cargo +1.99.0 run --locked --quiet -- sessions --archived
+  No sessions found
+```
 
 #### T67.12 Output styles
 

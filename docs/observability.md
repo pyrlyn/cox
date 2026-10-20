@@ -179,8 +179,9 @@ finished turn:
 Reading them back:
 
 ```bash
-cox sessions                 # every session: id, title, cwd, age, turns, cost
-cox sessions <id>            # one session: start, end, duration, turns, cost,
+cox sessions                 # every live session: id, title, cwd, age, turns, cost
+cox sessions --archived      # sessions swept off that list; nothing is deleted
+cox sessions <id>            # one session, live or archived: start, end, duration, turns, cost,
                              # then tokens per provider/model/effort
 cox sessions <id> --json     # the same record, machine-readable
 cox stats --session <id>     # per-call rows, then tier/job totals and top tools
