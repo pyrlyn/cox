@@ -148,6 +148,21 @@ TinyGo — не gc: він обчислює `return n, json.Unmarshal(raw, &n)`,
 
 Повна версія — `plugins/examples/go`; `cox plugin new <name> --lang go` створює заготовку пакета з `justfile` і димовим тестом. `just plugin-examples go` збирає приклад і запускає його наскрізні тести.
 
+## Kotlin
+
+`plugins/sdk-kotlin` — власний PDK cox поверх сирих імпортів extism `extism:host/env` і `cox:host/v1`, бо підтримуваного extism PDK для Kotlin немає. Його не опубліковано: плагін бере його через складену збірку Gradle (`includeBuild`) з каталогу `plugins/sdk-kotlin` у копії cox. Java, Gradle і Kotlin беруться з `plugins/mise.toml`. Плагін на Kotlin — це модуль Kotlin/Wasm `wasmWasi`, а стандартна бібліотека Kotlin імпортує WASI `random_get`, тому в його `plugin.toml` задано `wasi = true`.
+
+Кожен експорт — це функція `@WasmExport`, усе тіло якої — `Cox.export { input -> … }`: обробник приймає вхід експорту як `JsonElement` і повертає вихід як один, з формами з `docs/plugin-abi.schema.json`. `cox_init` обов'язковий; решту cox шукає за іменем. Хост-функції: `Cox.log`, `notify`, `kvGet`, `kvPut`, `kvDelete`, `context`, `invokeTool`, `modelCall`, `http`, `output`, `cancelled` і `redraw`. Відмова кидає `HostException`, чий `error` дорівнює `AbiError`.
+
+```kotlin
+@WasmExport
+fun cox_init(): Int = Cox.export {
+    buildJsonObject { putJsonArray("subscribe") { add("turn_started") } }
+}
+```
+
+Повна версія — `plugins/examples/kotlin`; `gradle pluginPackage` складає `plugin.toml` і модуль у `build/plugin` — це те, що приймає `cox plugin install`, бо він копіює цілу теку. `cox plugin new <name> --lang kotlin` створює заготовку пакета з `justfile`, чий рецепт `smoke` встановлює його в окремий `COX_HOME`. `just plugin-examples kotlin` збирає приклад і запускає його наскрізні тести.
+
 ## Спільна частина
 
 Ідентичність пакета в маніфесті, ліміти ресурсів, провайдери, моделі, агенти, сервери MCP і спільні можливості діють скрізь, де завантажується плагін. Необов'язковий `surfaces` звужує завантаження до `terminal`, `desktop`, `headless` або `acp`; якщо його немає, дозволено всі чотири. `InitIn.surface` повідомляє гостю, яка з них відкрила сесію. Цю частину використовують `cox:host/v1`, експорти вище, крім `cox_key`, команди, рендерери та слоти `status.left`, `status.right`, `panel` і `overlay`. Сесії headless і ACP не мають інтерфейсу, тому вони пропускають видачі для UI. Записи `[[skills]]` (`name`, `dir`) постачають Agent Skills: `dir` — тека пакета, названа за іменем навички, з `SKILL.md` у форматі `.cox/skills`. Навички виданого плагіна входять в індекс навичок сесії, а навичка користувача чи проєкту з тим самим іменем має пріоритет. Пакету лише з `[[mcp]]`, `[[agents]]` і `[[skills]]` `wasm` не потрібен. `Span.link` приймає URL HTTPS або шлях відносно робочої області й відкривається лише за кліком людини; непідтримувані посилання лишаються текстом.
