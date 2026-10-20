@@ -10,7 +10,10 @@
 //!
 //! The text is a pure function of the file bytes, the git order and the
 //! budget — no timestamps, no mtimes, ties in path order — because it sits in
-//! the byte-stable system[2] and a resumed session replays it.
+//! the byte-stable system[2] and a resumed session replays it. `MapRank::Graph`
+//! (T59.4) reorders that same input by PageRank; `build` stays on recency
+//! until a config key selects the graph (`repomap.rank` is not wired here:
+//! the key would land in `cox-protocol`, past this card's three files).
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -18,6 +21,9 @@ use std::path::Path;
 use crate::path::confine;
 use crate::read::{BINARY_SNIFF_BYTES, VISIBLE_CAP_BYTES};
 use crate::{git, outline};
+
+#[path = "rank.rs"]
+mod rank;
 
 /// How many commits back `git log` ranks files; older history adds little
 /// over path order and costs a longer log on a big repository.
@@ -27,6 +33,15 @@ pub const RECENT_COMMITS: usize = 50;
 /// path alone instead.
 const NO_OUTLINE: &str = "(no outline entries found)";
 
+/// How the map orders files. `Recent` is what `build` uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapRank {
+    /// Newest git changes first, then the rest in path order (P43).
+    Recent,
+    /// PageRank over outline names, seeded by those changes (T59.4).
+    Graph,
+}
+
 /// The map for the workspace at `root`: one `path\n` line per file followed
 /// by its outline indented two spaces, until the next file would pass
 /// `budget_bytes`; then one `… N more files` line (outside the budget).
@@ -34,21 +49,100 @@ const NO_OUTLINE: &str = "(no outline entries found)";
 /// `read` would name it, so relative and absolute permission rules both
 /// match — and only after `confine` accepted it; a file it rejects is
 /// neither shown nor counted. Binaries and files over `read`'s visible cap
-/// are skipped. A zero budget is the empty map.
+/// are skipped. A zero budget is the empty map. Order is [`MapRank::Recent`].
 pub async fn build(
     root: &Path,
     budget_bytes: usize,
     admit: &(dyn Fn(&Path) -> bool + Send + Sync),
 ) -> String {
+    build_ranked(root, budget_bytes, admit, MapRank::Recent).await
+}
+
+/// [`build`] with an explicit order. `Graph` reads the same files `render`
+/// would and does not consult a prompt, so two builds of one tree match.
+pub async fn build_ranked(
+    root: &Path,
+    budget_bytes: usize,
+    admit: &(dyn Fn(&Path) -> bool + Send + Sync),
+    rank: MapRank,
+) -> String {
     if budget_bytes == 0 {
         return String::new();
     }
-    let recent = git::recent_changes(root, RECENT_COMMITS).await;
+    let history = git::change_set(root, RECENT_COMMITS).await;
     let walk = root.to_path_buf();
     let files = tokio::task::spawn_blocking(move || cox_search::glob::workspace_files(&walk))
         .await
         .unwrap_or_default();
-    render(root, &order(&recent, &files), budget_bytes, admit)
+    let ordered = match rank {
+        MapRank::Recent => order(&history.recent, &files),
+        MapRank::Graph => graph_order(root, &files, &history),
+    };
+    render(root, &ordered, budget_bytes, admit)
+}
+
+/// Rank every walked path. A file that cannot be read still takes a slot, so
+/// the order stays a permutation of `files`.
+fn graph_order(root: &Path, files: &[String], history: &git::ChangeSet) -> Vec<String> {
+    let roots = [root.to_path_buf()];
+    let facts = files
+        .iter()
+        .map(|rel| {
+            let (defined, mentioned) = confine(&roots, root, rel)
+                .ok()
+                .and_then(|abs| {
+                    text_of(&abs).map(|text| (defined_names(&abs, &text), identifiers(&text)))
+                })
+                .unwrap_or_default();
+            rank::FileFacts {
+                path: rel.clone(),
+                defined,
+                mentioned,
+            }
+        })
+        .collect::<Vec<_>>();
+    rank::order_files(&facts, &history.recent, &history.co_change)
+}
+
+fn defined_names(abs: &Path, text: &str) -> Vec<String> {
+    let Some(defs) = outline::definitions(abs, text) else {
+        return Vec::new();
+    };
+    let mut seen = HashSet::new();
+    defs.into_iter()
+        .filter_map(|def| {
+            let name = def.name.rsplit("::").next().unwrap_or("").to_string();
+            (!name.is_empty() && seen.insert(name.clone())).then_some(name)
+        })
+        .collect()
+}
+
+fn identifiers(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let mut cur = String::new();
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            if cur.is_empty() && c.is_ascii_digit() {
+                continue;
+            }
+            cur.push(c);
+        } else if !cur.is_empty() {
+            push_ident(&mut cur, &mut seen, &mut out);
+        }
+    }
+    if !cur.is_empty() {
+        push_ident(&mut cur, &mut seen, &mut out);
+    }
+    out
+}
+
+fn push_ident(cur: &mut String, seen: &mut HashSet<String>, out: &mut Vec<String>) {
+    if seen.insert(cur.clone()) {
+        out.push(std::mem::take(cur));
+    } else {
+        cur.clear();
+    }
 }
 
 /// `recent` ∩ `files` in `recent`'s order, then the rest of `files` (already
@@ -91,8 +185,8 @@ fn render(
     out
 }
 
-/// One file's entry, or `None` for a binary, an oversized or unreadable file.
-fn block(rel: &str, abs: &Path) -> Option<String> {
+/// File text, or `None` for a binary, an oversized or unreadable file.
+fn text_of(abs: &Path) -> Option<String> {
     let meta = std::fs::metadata(abs).ok()?;
     if !meta.is_file() || meta.len() > VISIBLE_CAP_BYTES as u64 {
         return None;
@@ -101,7 +195,12 @@ fn block(rel: &str, abs: &Path) -> Option<String> {
     if bytes.iter().take(BINARY_SNIFF_BYTES).any(|&b| b == 0) {
         return None;
     }
-    let content = String::from_utf8_lossy(&bytes);
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// One file's entry, or `None` when [`text_of`] declines it.
+fn block(rel: &str, abs: &Path) -> Option<String> {
+    let content = text_of(abs)?;
     let mut out = format!("{rel}\n");
     let outline = outline::outline(abs, &content);
     if outline != NO_OUTLINE {
@@ -252,6 +351,44 @@ mod tests {
         let map = build(dir.path(), 10_000, &deny_secret).await;
         assert!(map.contains("open.rs"), "{map}");
         assert!(!map.contains("secret"), "{map}");
+    }
+
+    /// 40 files so a name shared by two of them is not over the 5% cap.
+    /// `use.rs` is the newest commit and calls `anchor`, defined only in
+    /// `def.rs`, so the graph leads with the definer and recency does not.
+    #[tokio::test]
+    async fn graph_rank_leads_with_the_definer_recency_does_not() {
+        let Some(dir) = graph_repo() else {
+            return;
+        };
+        let graph = build_ranked(dir.path(), 100_000, &allow_all, MapRank::Graph).await;
+        let recent = build(dir.path(), 100_000, &allow_all).await;
+        assert_eq!(graph.lines().next(), Some("def.rs"), "{graph}");
+        assert!(position(&recent, "def.rs") > 0, "{recent}");
+        let again = build_ranked(dir.path(), 100_000, &allow_all, MapRank::Graph).await;
+        assert_eq!(graph, again);
+    }
+
+    fn graph_repo() -> Option<tempfile::TempDir> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = dir.path();
+        if !git(p, &["init", "-q", "--initial-branch=trunk"]) {
+            return None;
+        }
+        write(p, "def.rs", "pub fn anchor() {}\n");
+        write(p, "use.rs", "pub fn caller() { anchor(); }\n");
+        for i in 0..38 {
+            write(
+                p,
+                &format!("f{i:02}.rs"),
+                &format!("pub fn only{i}() {{}}\n"),
+            );
+        }
+        git(p, &["add", "."]).then_some(())?;
+        git(p, &["commit", "-q", "-m", "base"]).then_some(())?;
+        write(p, "use.rs", "pub fn caller() { anchor(); }\n// again\n");
+        git(p, &["commit", "-q", "-am", "touch use"]).then_some(())?;
+        Some(dir)
     }
 
     #[tokio::test]

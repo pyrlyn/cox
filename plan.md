@@ -104,7 +104,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.28 | todo | P2 | 3 | 0% | |
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
-| T59.4 | todo | P2 | 4 | 0% | |
 | T61.4 | in progress | P1 | 2 | 0% | Claude Code / claude-sonnet-5-5 |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
@@ -578,7 +577,7 @@ The engine is pure: `decide(&self, call, mode, policy, grants) -> Decision`. Rul
  │ system[1]  cox system prompt (versioned string, no date, no cwd)           │  cache breakpoint 1 (after system[2])
  │ system[2]  instruction files: AGENTS.md/CLAUDE.md chain, skills index,     ┘
  │            repo map last (A74, off by default)
- │ system[3]  volatile: date, cwd, git branch, memory index, permission mode      no cache (changes daily / per turn)
+ │ system[3]  volatile: date, cwd, git branch, memory index, permission mode, output style   no cache (changes daily / per turn)
  │ messages   [Summary item if compacted]
  │            history … (older tool results microcompacted to pointers)         cache breakpoint 2 = end of previous turn
  │            this turn's user message + tool results                           cache breakpoint 3 = last message (moves every call)
@@ -636,7 +635,7 @@ cox [PROMPT] [--continue | --resume <id>]           interactive TUI; PROMPT is t
 cox run -p <prompt> [--output-format text|json|stream-json] [--max-turns N] [--allowed-tools a,b]
         [--permission-mode default|plan|auto|bypass] [--approve never|on-request] [--answer <text>]
         [--continue | --resume <id>] [--deep]        headless; exit 0 ok · 1 error · 2 denied · 3 budget · 4 interrupted
-cox sessions [--grep <q>] [--json] [--limit N]       list / search rollouts
+cox sessions [--grep <q>] [--json] [--limit N] [--archived]  list / search rollouts; --archived is the swept list
 cox expand <archive-id> [--lines a-b]                print archived tool output
 cox stats [--session <id> | --day | --month] [--cache] [--json | --csv]
 cox config show [--sources] | get <key> | set <key> <value> | path
@@ -667,7 +666,7 @@ Every flag maps to a config key (T0.3 test); `--permission-mode bypass` and `--s
 | `PageUp/PageDown`, mouse wheel | scroll transcript | `Ctrl+L` | redraw |
 | `Ctrl+G` | diff view: the working tree against `HEAD`, per-file blocks; `PageUp/PageDown` scroll, `Esc` closes (T15.3) | `Ctrl+B` | move the running `bash`/`agent` call to the background; the turn goes on (T27.1) |
 
-Slash commands (parsed in the surface, executed as `Submission::Command`): `/model [tier] [model]`, `/effort [low|high|xhigh]` (session-wide, clamped per model, T16.4), `/think <prompt>` (confirm dialog with price), `/compact [focus]`, `/cost`, `/permissions`, `/sandbox <mode>`, `/resume`, `/sessions`, `/expand <id>`, `/agents` (live sessions in this workspace, T16.3), `/skills`, `/hooks`, `/mcp`, `/doctor`, `/clear` (new session, same cwd), `/vim`, `/help`, `/quit`. Markdown files in `.claude/commands` and `.cox/commands` appear in the same palette (T7.3).
+Slash commands (parsed in the surface, executed as `Submission::Command`): `/model [tier] [model]`, `/effort [low|high|xhigh]` (session-wide, clamped per model, T16.4), `/think <prompt>` (confirm dialog with price), `/compact [focus]`, `/cost`, `/permissions`, `/sandbox <mode>`, `/resume`, `/sessions`, `/expand <id>`, `/agents` (live sessions in this workspace, T16.3), `/skills`, `/hooks`, `/mcp`, `/doctor`, `/clear` (new session, same cwd), `/vim`, `/style [name]`, `/help`, `/quit`. Markdown files in `.claude/commands` and `.cox/commands` appear in the same palette (T7.3).
 
 Status line (one row): `sonnet-5 · ctx 41% · $0.83 · workspace-write · 2 tasks · [plan]`.
 
@@ -1676,34 +1675,6 @@ Where each of the 14 portable ideas from the study lands in cox:
 13. Edit robustness — already there: `edit` has the whitespace-insensitive line-window fallback (`crates/cox-tools/src/edit.rs:162-227`); no card.
 14. Shell compress / tee — T59.2 (fold repeated lines); the "tee" half is the existing archive (`cx.archive`).
 
-#### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
-
-Model: sonnet · Status: open · Depends: T43.6 · Size: ~200 · Priority: P2 · Complexity: 4
-
-Goal: under the same byte budget, the map shows the files the next commit touches more often than the recency-only order, by at least 15 pp on a 200-commit backtest, and stays a pure function of file bytes, git order and budget (P43's byte-stable rule).
-
-Files:
-- `crates/cox-tools/src/repomap.rs`
-- `crates/cox-tools/src/rank.rs` (new)
-- `crates/cox-tools/src/git.rs`
-
-Steps:
-1. `rank.rs`: build a file graph from the outline tags already extracted for `render` (`repomap.rs:64`; `cox-syntax` `outline.rs:68`): edge A → B when A mentions a name defined in B, weight `ln(N/df)` of the name (names in more than 5 % of files are dropped). PageRank, damping 0.85, 20 iterations, ties in path order (Empryo idea: `repo-map.ts`, `repo-map-utils.ts`).
-2. Seed the personalization vector from `recent_changes` (`git.rs:78`) and add co-change edges from the same `git log` call (commits touching > 20 files are skipped, pairs with count ≥ 2). No prompt input: the map stays built once per session.
-3. `order` (`repomap.rs:53`) sorts by rank when `repomap.rank = "graph"`; default stays `"recent"` until the backtest row is in `research.md`.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
-
-Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
-
 ### P60 — Provider readiness, composer controls and glare (goal: the desktop app never starts a turn or a Best of candidate on a provider it cannot use, shows which provider runs, picks model, provider and mode in the composer, and lets the user set the glass glare; every rule lives in `cox-app` and the shared docs, so the Windows and any later Linux client repeat it without the Swift code, A139)
 
 Every card in this phase:
@@ -1820,7 +1791,7 @@ Rationale in §6 A142. T65.1 is in `done.md`.
 
 Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) at `afe8d14` (v0.9.8). It is MIT, but no code is copied, so no notice is needed. Each card cites prime-agent files for the idea only, and the implementation is written from the card. If a later card ever copies a substantial part, that file and `THIRD-PARTY-NOTICES` carry prime-agent's full MIT text, both copyright lines and the repository URL, and that notice is never replaced by cox's header.
 
-**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.13 and T66.14 wait for the implementation cards a later amendment adds after it. A161 adds the first three, T66.16 → T66.17 → T66.18. A162 adds T66.19 → T66.20; T66.21 follows T66.18 and T66.19. A165 adds T66.22 → T66.23 → T66.24.
+**Order.** Start T66.1.1 and T66.2 in parallel; T66.1 follows T66.1.1 and T66.3 follows T66.2. Refine runs T66.4 → T66.5 → T66.6 → T66.7 → T66.8. Autonomous runs T66.9 → T66.10 → T66.11. T66.12 is a design gate. T66.14 is in `done.md` (the serve cards landed, and the design says it can go earlier). T66.13 still waits for its files and steps. A161 adds the first three, T66.16 → T66.17 → T66.18. A162 adds T66.19 → T66.20; T66.21 follows T66.18 and T66.19. A165 adds T66.22 → T66.23 → T66.24.
 
 **Already in cox, so no card:**
 - `ContextTooLong` already compacts once per user turn and then surfaces the error (`session.rs:1846-1867`, `retried_after_too_long`). That is the contract of prime-agent's `OverflowRecovery` (`pa-daemon/src/overflow_compaction.rs`).
@@ -1838,12 +1809,6 @@ Rationale in §6 A147. Idea-only, clean-room: the source is the study of [PrimeI
 Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 3
 
 Goal: a resident session can receive a recurring prompt (idea: `pa-core/src/cron/store/heartbeat.rs`, a recurring job with a non-empty prompt, one per session). `cox-ext/src/presence.rs` stays a presence record and is not extended into a scheduler. The card's files and steps are written when T66.12's cards are approved.
-
-#### T66.14 Archive old sessions without deleting them
-
-Model: sonnet · Status: open · Depends: T66.12 and its approved cards · Size: ~150 · Priority: P3 · Complexity: 2
-
-Goal: `cox sessions` stays short once there are hundreds of sessions. cox-store has no pruning today; its only deletes are of `memory_files`, `plugin_grants`, `plugin_kv` and `mcp_trust`. A sweep marks a session archived (new `sessions.archived_at` column) when it is older than 30 days or outside the newest 200. Rows, rollouts and archive rows are never deleted, so `cox expand` keeps working. Resident sessions and sessions with a scheduled job are never archived. `cox sessions --archived` lists the archived ones (idea: `pa-core/src/settings/manager.rs` defaults; `pa-daemon/src/session_archive.rs`).
 
 ### P67 — Claude Code parity (goal: hooks of type `prompt` and `http` run instead of vanishing on import, and five more hook events fire; `/goal` keeps a session going until a judged condition holds; path-scoped rules reach the model when it touches matching files; leaving Plan mode needs the user's approval; an Auto-mode judge can only turn a question into an allow; MCP resources and prompts are readable; `cox run -p --json-schema` checks the final answer; output styles change tone without touching the cached prefix)
 
@@ -1968,18 +1933,6 @@ Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`
 Check: `mise exec -- cargo nextest run -p cox json_schema`, then clippy and fmt as above.
 
 Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
-
-#### T67.12 Output styles
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P3 · Complexity: 2
-
-Goal: `.cox/output-styles/*.md` and `~/.cox/output-styles/*.md` (and `.claude/output-styles/*.md`) define styles; `/style <name>` picks one and `/style` lists them. The style text goes after the last cache breakpoint (A148), so the cached prefix stays byte-stable.
-
-Files: `crates/cox-ext/src/styles.rs` (new), `crates/cox-protocol/src/commands.rs`, `crates/cox-core/src/context.rs`
-
-Check: `mise exec -- cargo nextest run -p cox-ext -p cox-core`, then clippy and fmt as above.
-
-Done when `style_text_after_cache_breakpoint` and `system_prefix_unchanged_by_style` pass.
 
 #### T67.13 Design: a GitHub Action and scheduled runs
 
