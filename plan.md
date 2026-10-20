@@ -48,7 +48,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
-| T33.45 | todo | P2 | 4 | 10% | |
+| T33.45 | done | P2 | 4 | 100% | grok-4.7 |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T35.10 | todo | P3 | 2 | 0% | |
@@ -939,37 +939,6 @@ Goal: replace the hand-built fixtures, which follow the documented shapes, with 
 - It runs only with `TYPESAFE_API_KEY` set by the creator. It never reads the keychain.
 Check: the offline pytest (body construction, redaction, no key means a clear exit) is green. With recorded fixtures, T33.40.4 and T33.40.6 stay green unchanged.
 
-#### T33.45 Design the plugin API: shared, terminal-only and desktop-only
-
-Depends: — · Size: split at claim time (design doc first, then one card per API part, the docs and the examples) · Priority: P2 · Complexity: 4 · Files: `docs/design/plugins.md`, `crates/cox-plugin-api/src/{manifest,abi}.rs`, `crates/cox-plugin/src/{grant,hostfn}.rs`, `plugins/sdk/`, `plugins/examples/`, `docs/plugins.md` (+ `docs/ru/`, `docs/uk/`)
-
-Context: plugins were built for cox in the terminal (P33, PL§1–§13). The desktop app already draws the PL§8 widget slots through `cox-app` (`plugin_ui.rs`: `panel`, `status.left`/`status.right`, `overlay`, `/<id>:<name>` commands, T52.17; `tool:`/`item:` renderers, T52.23), but nothing in the API says which surface a feature belongs to: a plugin cannot declare where it runs, `[capabilities.ui]` mixes terminal-only parts (leader keys) with shared ones, and there is no desktop-only API at all. Plugins must work both in the terminal (CLI/TUI) and in the desktop app.
-
-Goal: one plugin API in three parts — a **shared API** for what both surfaces offer, a **terminal-only API** and a **desktop-only API** — with a defined behaviour when a plugin asks for a part the current surface does not have, then its documentation and a Rust example that uses all three.
-
-API requirements:
-- A shared API for desktop and terminal (features available in both).
-- A separate API only for terminal-only features.
-- A separate API only for desktop-only features.
-
-Steps:
-1. **Spell out the API structure** in a new PL§ (from the existing system, `cox-plugin-api` `manifest.rs`/`abi.rs`/`ui.rs` and `cox-plugin` `grant.rs`/`hostfn.rs`), concretely:
-   - *Shared API* (both surfaces; today's `api = 1` minus the terminal-only parts): exports `cox_init`, `cox_on_event`, `cox_hook`, `cox_decide`/`cox_decide_resume`, `cox_tool_*`, `cox_provider_stream`, `cox_command`, `cox_render`, `cox_render_item`, `cox_shutdown`; manifest `[capabilities]` `events`, `hooks`, `tools`, `invoke`, `context`, `kv`, `model`, `net`, `fs`, `decide`, `[[provider]]`, `[[models]]`, `[[mcp]]`, `[[external_agents]]`, `[[agents]]`; host functions in `cox:host/v1` (`cox_log`, `cox_notify`, `cox_kv_*`, `cox_context`, `cox_invoke_tool`, `cox_model_call`, `cox_http`, `cox_output`/`cox_cancelled`, `cox_redraw`); the closed `Widget` tree with `StyleToken` roles and the `panel`, `status.left`/`status.right` and `overlay` slots and `ui.render` targets, which both surfaces draw (sized in cells: the TUI's grid, the app's `monoCode` cells).
-   - *Terminal-only API*: what only a terminal has — `ui.keys`/`KeyDecl`/`cox_key` under `plugin.leader`, the status row's 24-column segment budget and narrow-terminal drop order, anything that depends on the inline viewport (D10); proposed additions are listed as such.
-   - *Desktop-only API*: what only the app has — proposed, each with its native control and the DS§ catalogue row it maps to: e.g. an inspector tab slot, a toolbar item, a sidebar section, actionable notifications, palette actions with an SF Symbol, links and images in widgets; the app draws them natively from the declarative tree, never plugin-supplied UI code.
-   - *Declaring surfaces*: a manifest field (proposed `surfaces = ["terminal", "desktop"]`, default both) plus surface tables (`[capabilities.terminal]`, `[capabilities.desktop]`) beside the shared `[capabilities]`; `InitIn` gains `surface` (`terminal`, `desktop`, `headless`, `acp`) so a plugin adapts at run time; the grant line (T33.6) names the surface parts it asks for.
-   - *Calls to an unavailable surface*: a plugin whose `surfaces` excludes the current one is not loaded, with a notice (fail open, never fatal); a surface-only capability on the other surface is left out of `granted` and its `InitOut` entries are dropped with a notice, as an ungranted one is today; a surface-only host function returns a new `AbiError::NotOnThisSurface`, like `NotInThisContext`, never a trap; headless and ACP still call no UI export.
-   - *Versioning*: the parts are additive, so they stay `api = 1` under PL§4's minor rule (unknown fields ignored both ways); surface host functions get their own namespaces (`cox:tui/v1`, `cox:desktop/v1`) so a surface part can grow without touching `cox:host/v1`; a breaking change to any part raises the ABI major; `cox plugin list` shows each plugin's surfaces.
-   Record the decisions as a §6 amendment before code; split the build into cards (manifest + grant, ABI + host functions per part, TUI wiring, app wiring through `cox-app`/`cox-ffi`), each with its own Check.
-2. **Once the API is built, generate the plugin API documentation**: the shared, terminal-only and desktop-only references in `docs/plugins.md` (or `docs/plugins/api.md`), generated from `docs/plugin.schema.json` and `docs/plugin-abi.schema.json` where possible, in English with `docs/ru/` and `docs/uk/` translations.
-3. **Examples**: a small Rust plugin in `plugins/examples/` on `cox-plugin-sdk` that uses the shared API (a command and a status segment), the terminal-only API (a leader key) and the desktop-only API (one desktop-only contribution), and loads on both surfaces, each part showing only where it exists; built by `cox-plugin-fixtures` like `plugins/examples/rust`.
-
-Check: the API structure section is in `docs/design/plugins.md` with its §6 amendment; manifest and ABI drift tests (`docs/plugin.schema.json`, `docs/plugin-abi.schema.json`) pass with the new fields; a `cox-plugin` test loads the example in a terminal and a desktop session and finds each surface-only part present on its own surface and dropped with a notice (or `NotOnThisSurface`) on the other; `docs/plugins.md`, `docs/ru/` and `docs/uk/` cover all three parts; `just test` green.
-
-Progress (2026-10-03): step 1 is done — §15 of `docs/design/plugins.md` and amendment A134, approved by the creator; the build is T33.45.1–T33.45.10 below. This card closes when they are done.
-
-
-Plan (Claude Code / opus-5.5): (1) `plugin_ui.rs`: `PluginSlots` tracks the selected inspector tab and its area in cells; `Slot::DesktopInspector` is visible only while its plugin's tab is selected, so it renders only then; `select_tab` and `open_inspector` (for `CommandOut::OpenInspector`). `PluginUi::declare` takes `InitOut.desktop` in place of the keys: the tab and actions are sanitized, a symbol outside `is_symbol_name` becomes `puzzlepiece.extension`, the toolbar is capped at `MAX_TOOLBAR_ACTIONS`, and an action whose command is not among the plugin's granted commands is dropped with a notice; `action(id)` asks `cox_command` for `plugin:<id>:<command>`. The keys, `PluginKey` and `key` go. (2) `palette.rs`: `PaletteItem.symbol` (optional, serde and UniFFI default, so existing callers keep compiling). (3) `live.rs`: `plugin_tabs`, `plugin_toolbar`, `select_plugin_tab`, `plugin_action`; plugin palette actions join `palette`; `OpenInspector` selects the tab; declare notices are emitted once the session is open; `plugin_keys`/`plugin_key` removed (and their `cox-ffi` forwards, which no Swift view calls). Verify with `cargo nextest run -p cox-app -p cox-ffi`, clippy and fmt.
 #### T33.47 Plugin canvas: a desktop pane of plugin-drawn pages
 
 Depends: T33.45.7 · Design: `docs/design/plugin-canvas.md`, A156
@@ -1890,26 +1859,6 @@ Rationale in §6 A148. Idea-only: the source is the public Claude Code documenta
 
 **Not taken yet:** hooks of type `agent` (a later amendment, after T67.2), and `/security-review` (no card until the creator asks for one).
 
-#### T67.3 Five more hook events
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P1 · Complexity: 2
-
-Goal: `HookEvent` gains `PostToolBatch` (after every tool call of one assistant message has a result), `PermissionDenied` (the engine or the user denied a call), `InstructionsLoaded` (instruction files were read at session open), `CwdChanged` and `StopFailure` (a turn ended in an error). Each fires at the existing point in the session, is observe-only, and has a Claude Code name in `HookEvent::name()`.
-
-Files:
-- `crates/cox-protocol/src/types.rs`
-- `crates/cox-core/src/session.rs`
-- `docs/config.md` (the hook event list and its doc test)
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core -p cox-protocol
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when one test per event proves it fires once at its point (`post_tool_batch_fires_after_last_result`, and so on) and the doc test lists all events.
-
 #### T67.4 `/goal`: a judged stop condition
 
 Model: grok-4.7 · Status: open · Depends: — · Size: ~190 · Priority: P1 · Complexity: 3
@@ -1995,12 +1944,6 @@ mise exec -- cargo fmt --check
 ```
 
 Done when `exit_plan_requires_approval`, `headless_declines_exit_plan` and the `exit_plan_modal` insta snapshot pass.
-
-#### T67.8 Design: an Auto-mode risk judge
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 (doc) · Priority: P2 · Complexity: 3
-
-Goal: `docs/design/auto-judge.md` describes a `RiskJudge` that can turn an `Ask` into an `Allow` in Auto mode and nothing else. It covers the order (deny rules and hard bans first, then the sandbox, then the judge), what the judge sees (the call and a bounded context, never raw tool output as instructions), timeouts and errors (they ask the user), cost and ledger rows, and the injection threats with a test for each. No code. The creator reviews its security before T67.9 starts.
 
 #### T67.9 Auto-mode risk judge
 
