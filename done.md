@@ -1,3 +1,21 @@
+#### T67.11 `cox run -p --json-schema`
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: — · Size: ~120 (landed larger; see Not done) · Priority: P3 · Complexity: 2 · Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`, `crates/cox/src/config_load.rs`, `crates/cox/src/on_target.rs`, `crates/cox/tests/json_schema.rs`, `crates/cox/Cargo.toml`
+
+Goal: `--json-schema <file>` validates the final answer against the schema. On failure cox sends one retry turn with the validation errors; a second failure exits non-zero and prints the errors.
+
+What landed: `cox run -p --json-schema <file>` compiles the file as a local JSON Schema (`jsonschema` 0.59, default features off, so a `$ref` cannot be fetched) before a session opens. The final assistant text must be JSON that satisfies it. A mismatch submits one more user turn whose text is the validation errors (at most 20, plus a truncation mark). A second mismatch prints the errors on stderr and exits 1. The flag conflicts with `--loop` and `--autonomous`, requires `--prompt`, and `--on` refuses to forward it. The cached prefix is untouched: the check runs on the answer after the turn.
+
+Not done: the card names two source files. The flag-to-key map, the `--on` refusal, the e2e test and the dependency row are the extra files. Workspace clippy was not re-run after merging current `main`. `cargo hakari generate` was not run locally (`cargo-hakari` is not installed); CI's hakari job is the check.
+
+Check:
+```text
+$ cargo +1.99.0 nextest run -p cox json_schema
+3 passed: json_schema_accepts_a_valid_answer_on_the_first_turn, json_schema_retries_once_and_accepts_the_second_answer, json_schema_exits_nonzero_after_two_failures
+$ cargo +1.99.0 nextest run -p cox config_every_flag flags_outside_the_allow_list
+2 passed
+```
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4

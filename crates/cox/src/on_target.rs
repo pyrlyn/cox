@@ -56,6 +56,7 @@ fn dropped(cli: &Cli, run: Option<&RunArgs>) -> Vec<&'static str> {
             ("--loop", run.r#loop.is_some()),
             ("--max-iterations", run.max_iterations.is_some()),
             ("--image", !run.images.is_empty()),
+            ("--json-schema", run.json_schema.is_some()),
             ("--resume", cli.resume.is_some()),
             ("--continue", cli.r#continue),
         ]),

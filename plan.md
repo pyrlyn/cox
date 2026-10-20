@@ -162,7 +162,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 
 | Crate | Owns | Key deps (pinned in T0.1; versions verified in R§4.5) |
 |-------|------|------|
-| `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15 |
+| `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15, jsonschema 0.59 (T67.11: `--json-schema` validates the final answer; default features off so a schema cannot fetch a remote `$ref`) |
 | `cox-config` | the one config owner (T32.16; split out of `cox`): layering (default/user/project/env/flag) through the shared `config-schema` crate (T32.17), validation, `cox config set` editing and the `docs/config.jsonschema` drift test. Errors are a `thiserror` enum | config-schema 0.1 (figment and toml_edit inside it), schemars, thiserror |
 | `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents, cloud agent drivers (T56.6); login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell), cox-cursor-cloud and futures (T56.6: the cloud agent driver and its run stream; both already in the tree), similar 3.2 (T66.8: the unified diff a refine review shows; already a workspace dependency) |
 | `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
@@ -2033,18 +2033,6 @@ Files: `crates/cox-mcp/src/*` (at most two files), `crates/cox-tools/src/tool_se
 Check: `mise exec -- cargo nextest run -p cox-mcp -p cox-tools`, then clippy and fmt as above.
 
 Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
-
-#### T67.11 `cox run -p --json-schema`
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
-
-Goal: `--json-schema <file>` validates the final answer against the schema. On failure cox sends one retry turn with the validation errors; a second failure exits non-zero and prints the errors.
-
-Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`
-
-Check: `mise exec -- cargo nextest run -p cox json_schema`, then clippy and fmt as above.
-
-Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
 
 #### T67.12 Output styles
 
