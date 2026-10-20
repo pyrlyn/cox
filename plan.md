@@ -1890,26 +1890,6 @@ Rationale in §6 A148. Idea-only: the source is the public Claude Code documenta
 
 **Not taken yet:** hooks of type `agent` (a later amendment, after T67.2), and `/security-review` (no card until the creator asks for one).
 
-#### T67.3 Five more hook events
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P1 · Complexity: 2
-
-Goal: `HookEvent` gains `PostToolBatch` (after every tool call of one assistant message has a result), `PermissionDenied` (the engine or the user denied a call), `InstructionsLoaded` (instruction files were read at session open), `CwdChanged` and `StopFailure` (a turn ended in an error). Each fires at the existing point in the session, is observe-only, and has a Claude Code name in `HookEvent::name()`.
-
-Files:
-- `crates/cox-protocol/src/types.rs`
-- `crates/cox-core/src/session.rs`
-- `docs/config.md` (the hook event list and its doc test)
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core -p cox-protocol
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when one test per event proves it fires once at its point (`post_tool_batch_fires_after_last_result`, and so on) and the doc test lists all events.
-
 #### T67.5 `/goal` in the TUI and stream-json
 
 Model: grok-4.7 · Status: open · Depends: T67.4 · Size: ~100 · Priority: P2 · Complexity: 2
