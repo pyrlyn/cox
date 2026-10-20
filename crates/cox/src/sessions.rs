@@ -229,9 +229,12 @@ pub(crate) fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// `cox sessions` dispatch over `--grep`/`--json`/`--limit` (§1.12).
+/// `cox sessions` dispatch over `--grep`/`--json`/`--limit`/`--archived` (§1.12).
 pub fn run(home: &Path, args: &SessionsArgs) -> anyhow::Result<()> {
     let store = Store::open(home)?;
+    // Listing, search and a single id all maintain the sweep, so an old
+    // session leaves the default list the next time anyone asks.
+    store.archive_stale_sessions()?;
     let limit = args.limit.unwrap_or(20).max(1) as i64;
     if let Some(id) = args.id.as_deref() {
         let session = id.parse()?;
@@ -250,11 +253,31 @@ pub fn run(home: &Path, args: &SessionsArgs) -> anyhow::Result<()> {
                 .filter(|id| seen.insert(id.clone()))
                 .collect()
         };
-        let mut infos = store.list_sessions(1000)?;
+        let mut infos = if args.archived {
+            store.list_archived_sessions(1000)?
+        } else {
+            // Search still finds a session the default list has swept away.
+            store.list_sessions_including_archived(1000)?
+        };
         infos.retain(|info| ids.contains(&info.id));
         infos.truncate(limit as usize);
         let rows = list_rows(infos.iter().map(|info| (info, 0)), now_secs());
+        let mut hits = hits;
+        if args.archived {
+            let keep: std::collections::HashSet<&str> =
+                infos.iter().map(|info| info.id.as_str()).collect();
+            hits.retain(|hit| keep.contains(hit.session_id.as_str()));
+        }
         return print_sessions(&rows, Some(&hits), args.json);
+    }
+    if args.archived {
+        let infos = store.list_archived_sessions(limit)?;
+        if infos.is_empty() {
+            println!("No sessions found");
+            return Ok(());
+        }
+        let rows = list_rows(infos.iter().map(|info| (info, 0)), now_secs());
+        return print_sessions(&rows, None, args.json);
     }
     let tree = store.sessions_tree(limit)?;
     if tree.is_empty() {
