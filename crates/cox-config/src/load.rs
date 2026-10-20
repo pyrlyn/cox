@@ -69,6 +69,17 @@ pub fn project_config_path(cwd: &Path) -> Option<PathBuf> {
     find_git_root(cwd).map(|root| project_config_in(&root))
 }
 
+/// The `[tiers]` block of the embedded `default.toml` (T33.40.13). `None`
+/// when that file no longer deserializes, so a legacy tier is left for
+/// `assemble` to fail closed rather than replaced with a guess.
+pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
+    Layers::new()
+        .toml_text("default", DEFAULT_CONFIG_TOML)
+        .extract::<Config>()
+        .ok()
+        .map(|config| config.tiers)
+}
+
 /// `<git root>/.cox/config.toml` for a known git root.
 fn project_config_in(git_root: &Path) -> PathBuf {
     git_root.join(".cox").join("config.toml")
@@ -1121,6 +1132,13 @@ mod tests {
         assert_eq!(cfg.tiers.code.model, "claude-sonnet-5");
         assert!(cfg.providers.custom.contains_key("deepseek"));
         assert!(!cfg.providers.anthropic.models.is_empty());
+    }
+
+    #[test]
+    fn default_tiers_are_the_embedded_code_tier() {
+        let tiers = default_tiers().expect("embedded tiers");
+        assert_eq!(tiers.code.model, "claude-sonnet-5");
+        assert_ne!(tiers.code.provider, "typesafe");
     }
 
     #[test]
