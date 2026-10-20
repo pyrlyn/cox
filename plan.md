@@ -104,7 +104,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T58.28 | todo | P2 | 3 | 0% | |
 | T58.29 | todo | P2 | 3 | 0% | |
 | T58.30 | todo | P3 | 3 | 0% | |
-| T59.4 | todo | P2 | 4 | 0% | |
 | T61.4 | in progress | P1 | 2 | 0% | Claude Code / claude-sonnet-5-5 |
 | T61.9 | todo | P2 | 3 | 0% | |
 | T61.10 | todo | P3 | 2 | 0% | |
@@ -1656,34 +1655,6 @@ Where each of the 14 portable ideas from the study lands in cox:
 12. Memory RRF / file affinity — T59.10.
 13. Edit robustness — already there: `edit` has the whitespace-insensitive line-window fallback (`crates/cox-tools/src/edit.rs:162-227`); no card.
 14. Shell compress / tee — T59.2 (fold repeated lines); the "tee" half is the existing archive (`cx.archive`).
-
-#### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
-
-Model: sonnet · Status: open · Depends: T43.6 · Size: ~200 · Priority: P2 · Complexity: 4
-
-Goal: under the same byte budget, the map shows the files the next commit touches more often than the recency-only order, by at least 15 pp on a 200-commit backtest, and stays a pure function of file bytes, git order and budget (P43's byte-stable rule).
-
-Files:
-- `crates/cox-tools/src/repomap.rs`
-- `crates/cox-tools/src/rank.rs` (new)
-- `crates/cox-tools/src/git.rs`
-
-Steps:
-1. `rank.rs`: build a file graph from the outline tags already extracted for `render` (`repomap.rs:64`; `cox-syntax` `outline.rs:68`): edge A → B when A mentions a name defined in B, weight `ln(N/df)` of the name (names in more than 5 % of files are dropped). PageRank, damping 0.85, 20 iterations, ties in path order (Empryo idea: `repo-map.ts`, `repo-map-utils.ts`).
-2. Seed the personalization vector from `recent_changes` (`git.rs:78`) and add co-change edges from the same `git log` call (commits touching > 20 files are skipped, pairs with count ≥ 2). No prompt input: the map stays built once per session.
-3. `order` (`repomap.rs:53`) sorts by rank when `repomap.rank = "graph"`; default stays `"recent"` until the backtest row is in `research.md`.
-
-Check:
-```bash
-just bench
-mise exec -- cargo nextest run --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when: a PageRank unit test on a 4-node graph gives the known vector; two builds of the same tree are byte-identical; the backtest and T43.6-style bench rows are in `research.md`.
-
-Out of scope: a persisted index, cross-session caching, rtok's tree-sitter version (cox is on 0.27, rtok on 0.25; no shared crate until they match).
 
 ### P60 — Provider readiness, composer controls and glare (goal: the desktop app never starts a turn or a Best of candidate on a provider it cannot use, shows which provider runs, picks model, provider and mode in the composer, and lets the user set the glass glare; every rule lives in `cox-app` and the shared docs, so the Windows and any later Linux client repeat it without the Swift code, A139)
 
