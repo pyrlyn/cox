@@ -1541,22 +1541,20 @@ impl Session {
         self.inner.lock().await.permission_mode
     }
 
-    /// T67.7: an approved `exit_plan` result leaves Plan mode. Any other
-    /// result, and any mode that is not Plan, is left alone. The tool
-    /// itself cannot reach this.
-    pub(crate) async fn note_exit_plan(&self, output: &cox_protocol::ToolOutput) {
-        if !output.exit_plan_approved() {
-            return;
-        }
+    /// T67.7: an approved `exit_plan` leaves Plan mode. The tool reports the
+    /// decision and does not touch the mode; this is the only place that
+    /// applies it. Anything other than Plan is left as it is, so an approval
+    /// outside Plan mode cannot drop Auto or Bypass down to Default.
+    pub(crate) async fn leave_plan_mode(&self) -> Result<(), CoreError> {
         let changed = {
             let mut inner = self.inner.lock().await;
             if inner.permission_mode != PermissionMode::Plan {
-                return;
+                return Ok(());
             }
             inner.permission_mode = PermissionMode::Default;
             state_changed(&inner)
         };
-        let _ = self.emit(changed).await;
+        self.emit(changed).await
     }
 
     /// What this session has spent so far, in USD.
@@ -3448,35 +3446,6 @@ mod tests {
             })
             .await
             .expect("turn");
-    }
-
-    /// T67.7: feedback leaves Plan mode in place; only an approved result
-    /// switches it to Default, and the tool is not what does the switch.
-    #[tokio::test]
-    async fn exit_plan_requires_approval() {
-        let (session, _, _) = recorded(cox_protocol::Config::default(), 0);
-        session
-            .submit(Submission::SetPermissionMode {
-                mode: PermissionMode::Plan,
-            })
-            .await
-            .expect("plan");
-        let feedback = cox_protocol::ToolOutput {
-            text: "Still planning.".into(),
-            is_error: false,
-            diff: None,
-            structured: Some(serde_json::json!({"approved": false})),
-        };
-        session.note_exit_plan(&feedback).await;
-        assert_eq!(session.permission_mode().await, PermissionMode::Plan);
-        let approved = cox_protocol::ToolOutput {
-            text: "Approved.".into(),
-            is_error: false,
-            diff: None,
-            structured: Some(serde_json::json!({"approved": true})),
-        };
-        session.note_exit_plan(&approved).await;
-        assert_eq!(session.permission_mode().await, PermissionMode::Default);
     }
 
     #[tokio::test]

@@ -429,6 +429,18 @@ impl PermissionMode {
     }
 }
 
+/// The option that leaves Plan mode (T67.7). `exit_plan` and the modal
+/// share it, so a digit pick and a typed answer are the same decision.
+pub const EXIT_PLAN_APPROVE: &str = "Approve";
+
+/// The option that keeps Plan mode. Any other reply is feedback, not approval.
+pub const EXIT_PLAN_KEEP: &str = "Keep planning";
+
+/// Whether `options` are the `exit_plan` pair, in that order.
+pub fn exit_plan_options(options: &[String]) -> bool {
+    options.len() == 2 && options[0] == EXIT_PLAN_APPROVE && options[1] == EXIT_PLAN_KEEP
+}
+
 /// `core.mode` / `--mode` / `/mode` (P42, A73): a named preset over the
 /// permission mode and the main tier only. It never filters tools, so the
 /// cache prefix stays byte-stable, and it only narrows `permissions.mode`.
@@ -1799,16 +1811,6 @@ pub struct Caps {
     pub max_context: u32,
 }
 
-/// `exit_plan`'s registered name (T67.7). The tool asks; the session is what
-/// switches the permission mode, so both sides share this string.
-pub const EXIT_PLAN_TOOL: &str = "exit_plan";
-
-/// The answer that leaves Plan mode. Anything else is feedback and stays in Plan.
-pub const EXIT_PLAN_APPROVE: &str = "Approve";
-
-/// The other `exit_plan` option: stay in Plan mode.
-pub const EXIT_PLAN_KEEP: &str = "Keep planning";
-
 /// A tool's advertised shape (plan.md §1.2/§1.11).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolSpec {
@@ -1837,18 +1839,6 @@ pub struct ToolOutput {
     pub diff: Option<Diff>,
     /// Machine-readable payload alongside `text`, for surfaces that want structure.
     pub structured: Option<Value>,
-}
-
-impl ToolOutput {
-    /// Whether an `exit_plan` result is the person's approval (T67.7).
-    /// The session is the only reader that may switch the permission mode.
-    pub fn exit_plan_approved(&self) -> bool {
-        self.structured
-            .as_ref()
-            .and_then(|value| value.get("approved"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-    }
 }
 
 /// The digest a hunk revert carries (T51.19): Review takes it of the bytes

@@ -1,30 +1,27 @@
 #### T67.7 Leaving Plan mode needs approval
 
-Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~320 (landed larger) · Priority: P2 · Complexity: 3
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
 
 Goal: in Plan mode the model calls `exit_plan { plan }` (`Risk::ReadOnly`). It asks the user through the `ask_user` modal: approve, or keep planning with feedback. Approval switches the mode to Default through the session, never from inside the tool. Headless runs and ACP without a client prompt decline it by construction.
 
-Files: `crates/cox-protocol/src/types.rs`, `crates/cox-tools/src/plan.rs` (new), `crates/cox-tools/src/lib.rs`, `crates/cox-tui/src/modal.rs`, `crates/cox-core/src/session.rs`, `crates/cox-core/src/turn.rs`, `crates/cox-session/src/tools.rs`
+Files:
+- `crates/cox-protocol/src/types.rs`: `EXIT_PLAN_APPROVE`, `EXIT_PLAN_KEEP`, `exit_plan_options`
+- `crates/cox-tools/src/plan.rs` (new): `ExitPlanTool`. `headless()` declines without asking; `surface()` asks through `Relay::ask`. `structured.approved` is true only for the approve option.
+- `crates/cox-tui/src/modal.rs`: the question modal renders an `exit_plan` header and the plan when the options are that pair.
+- `crates/cox-session/src/tools.rs`: the built-in list carries the headless tool; `with_question_surface` swaps in the asking one (TUI and the desktop app). ACP leaves `questions` false, so it keeps the declining tool.
+- `crates/cox-core`: `Session::leave_plan_mode` sets `PermissionMode::Default` only when the live mode is Plan. `turn` calls it after a successful `exit_plan` whose structured payload says approved. The tool never writes the mode.
 
-Plan: `exit_plan` is read-only, so Plan mode's engine allows it, and `Concurrency::Exclusive` because it waits on the person. The declining tool is what headless and ACP without `questions` get; `with_question_surface` swaps in the asking one, same as `ask_user`. The question offers `Approve` and `Keep planning`. Only `Approve` sets `structured.approved`. `Session::note_exit_plan` is the only place that switches `PermissionMode::Plan` to `Default`, and only then. Feedback and a dismissed question leave the mode alone.
-
-Landed larger than the card's three files: the tool has to be registered, and the mode change has to live in the session (`cox-core` does not depend on `cox-tools` outside tests, so `ToolOutput::exit_plan_approved` is the shared flag).
-
-Check output (2026-10-19):
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-tools -p cox-core -p cox-tui
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
 ```
-$ mise exec -- cargo nextest run --locked -p cox-tools -p cox-core -p cox-tui
-     Summary [   5.484s] 1053 tests run: 1053 passed, 2 skipped
-     (includes exit_plan_requires_approval, headless_declines_exit_plan, exit_plan_modal, only_the_approve_answer_reports_approval)
-$ mise exec -- cargo clippy --locked -p cox-protocol -p cox-tools -p cox-core -p cox-tui -p cox-session --all-targets -- -D warnings
-     Finished clean
-$ mise exec -- cargo fmt --check
-     clean
-$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
-     toolchain, db, sandbox (bwrap), git, prefix ok; API keys row fails because ANTHROPIC_API_KEY is unset (exit 1)
-```
+1283 tests passed across `cox-tools`, `cox-core`, `cox-tui`, `cox-session` and `cox-protocol` (the check's three crates plus the two this change also touches), 2 skipped. `exit_plan_requires_approval`, `headless_declines_exit_plan`, `exit_plan_is_headless_until_a_question_surface` and the `exit_plan_modal` snapshot pass. Clippy and fmt clean.
 
-Workspace `--all-features` clippy was not re-run: `whisper-rs-sys` does not link in this environment.
+`COX_HOME=/tmp/cox-scratch cargo run -- doctor`: sandbox, db, git and prefix pass. The API-key row fails because `ANTHROPIC_API_KEY` is unset in this environment.
 
+Done when `exit_plan_requires_approval`, `headless_declines_exit_plan` and the `exit_plan_modal` insta snapshot pass.
 #### T66.14 Archive old sessions without deleting them
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T66.12 and its approved cards · Size: ~340 (landed larger; see Not done) · Priority: P3 · Complexity: 2
