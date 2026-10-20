@@ -219,20 +219,12 @@ pub fn spawn(
                 }
                 () = until(due) => {
                     due = None;
-                    // `start` is reused on the refresh arm, so it cannot be
-                    // moved into `Option::map`.
-                    running = match last.as_ref() {
-                        Some(input) => Some(start(input)),
-                        None => None,
-                    };
+                    running = last.as_ref().map(start);
                 }
                 () = until(next_refresh) => {
                     next_refresh = refresh.map(|period| Instant::now() + period);
                     if running.is_none() && due.is_none() {
-                        running = match last.as_ref() {
-                            Some(input) => Some(start(input)),
-                            None => None,
-                        };
+                        running = last.as_ref().map(start);
                     }
                 }
                 result = finish(&mut running) => {

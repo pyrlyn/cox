@@ -144,11 +144,7 @@ impl TargetAgent {
             agent: self.name.clone(),
             message: cox_sanitize::sanitize(&message),
         };
-        // `&fail` keeps the closure for the later `map_err`s. Passing it by
-        // value is what `needless_borrows_for_generic_args` wants, and a
-        // forwarding closure is what `redundant_closure` rejects.
-        #[allow(clippy::needless_borrows_for_generic_args)]
-        self.approve(mode).map_err(&fail)?;
+        self.approve(mode).map_err(fail)?;
         let Resolved {
             target,
             launcher,
