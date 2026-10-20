@@ -256,9 +256,11 @@ impl Store {
     /// (newest first at each level). A child whose parent is not in the
     /// page is shown as a root, so a limit never hides a session.
     pub fn sessions_tree(&self, limit: i64) -> Result<Vec<TreeRow>, StoreError> {
+        self.archive_stale_sessions()?;
         let rows: Vec<SessionCols> = {
             let mut conn = self.conn.lock().map_err(|_| StoreError::Io)?;
             sessions::table
+                .filter(sessions::archived_at.is_null())
                 .select((
                     sessions::id,
                     sessions::title,
