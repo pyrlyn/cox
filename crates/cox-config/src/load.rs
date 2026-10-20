@@ -1050,19 +1050,6 @@ fn core_error(err: config_schema::Error) -> CoreError {
     }
 }
 
-/// The `[tiers]` table of the embedded `default.toml` (T33.40.13).
-///
-/// Session open uses this when a tier still names the retired `typesafe`
-/// client and no plugin serves it. `None` only if that file no longer
-/// deserializes, which `config_defaults_parse` rules out.
-pub fn default_tiers() -> Option<cox_protocol::config::TiersConfig> {
-    Layers::new()
-        .toml_text("default", DEFAULT_CONFIG_TOML)
-        .extract::<Config>()
-        .ok()
-        .map(|config| config.tiers)
-}
-
 /// Loads and layers config (plan.md §1.6/D13), applies the project guard
 /// list, and returns the effective config plus provenance.
 ///
