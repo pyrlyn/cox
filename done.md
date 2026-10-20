@@ -1,3 +1,15 @@
+#### T67.8 Design: an Auto-mode risk judge
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~150 (doc) · Priority: P2 · Complexity: 3
+
+Goal: `docs/design/auto-judge.md` describes a judge that can turn an `Ask` into an `Allow` in Auto mode and nothing else. It covers the order (deny rules and hard bans first, then the sandbox, then the judge), what the judge sees (the call and a bounded context, never raw tool output as instructions), timeouts and errors (they ask the user), cost and ledger rows, and the injection threats with a test for each. No code. The creator reviews its security before T67.9 starts.
+
+What landed: `docs/design/auto-judge.md`. The judge runs only after `Engine::decide` returns `Ask(Why::Risk { Exec })` in `Auto`. Deny rules, ask rules, `untrusted`, `Destructive`, `cloud_agent`, plan mode and a sandbox denial never reach it. The prompt is the command subject and the current user turn, clipped, and carries no tool output. An error, a 15s timeout or an unparseable answer stays an ask. The call is a `Job::Hook` usage row. Each threat in the doc names the T67.9 test that locks it, including `deny_rule_beats_classifier`, `classifier_error_asks`, `classifier_timeout_asks` and `injected_tool_output_cannot_widen`.
+
+Not done: no code, on purpose. T67.9 waits for the creator's review. The doc names two files the card did not (`side.rs` for the deadline, `DecidedBy::Classifier` in `cox-protocol`).
+
+Check: the page is the whole deliverable. No cargo test applies.
+
 #### T67.3 Five more hook events
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~150 (landed 471 insertions across 4 files; see Result) · Priority: P1 · Complexity: 2
