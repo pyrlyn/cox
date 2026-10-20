@@ -1,3 +1,22 @@
+#### T67.11 `cox run -p --json-schema`
+
+Model: grok-4.7 · Status: done 2026-10-20 · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
+
+Goal: `--json-schema <file>` validates the final answer against the schema. On failure cox sends one retry turn with the validation errors; a second failure exits non-zero and prints the errors.
+
+Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs` (also `config_load.rs` for the flag map, `on_target.rs` so `--on` refuses a local schema path, and `tests/it/run_cli.rs`).
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox json_schema
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+
+Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
+
+Check output (2026-10-20): `cargo +1.99.0 nextest run -p cox -E 'test(schema_mismatch) or test(json_schema)'` — 4 passed (`schema_mismatch_accepts_only_a_matching_object`, `json_schema_accepts_a_matching_answer`, `json_schema_accepts_after_one_retry`, `json_schema_exits_nonzero_after_two_failures`). `cargo fmt --check` clean. `cargo clippy -p cox --all-targets -- -D warnings` did not finish: it stops in `cox-session` on a pre-existing `needless_borrows_for_generic_args` in `target_agents.rs`, which this change does not touch. Workspace clippy was not re-run. `cox doctor` was not run.
+
 #### T66.22 `cox-serve`: the router and the `attach --stdio` bridge
 
 Model: Claude Code / opus · Status: done 2026-10-17 · Depends: T66.18, T66.20, T66.21 · Size: ~190 · Priority: P2 · Complexity: 4

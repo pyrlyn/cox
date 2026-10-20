@@ -320,6 +320,10 @@ pub struct RunArgs {
     /// Needs `autonomous.gates` in your own config.
     #[arg(long, requires = "prompt", conflicts_with = "loop")]
     pub autonomous: bool,
+    /// Validate the final answer against this JSON Schema file. One failure
+    /// is sent back as a retry turn; a second failure exits non-zero (T67.11).
+    #[arg(long = "json-schema", value_name = "FILE", conflicts_with_all = ["loop", "autonomous"])]
+    pub json_schema: Option<PathBuf>,
 }
 
 /// `cox stats` (plan.md §1.12/T1.7). Print usage and cost statistics.

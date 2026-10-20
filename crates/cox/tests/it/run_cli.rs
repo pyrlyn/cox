@@ -569,3 +569,42 @@ fn image_flag_refuses_a_text_file_before_any_request() {
             "--image notes.txt: not a PNG, JPEG, GIF or WebP image",
         ));
 }
+
+const ANSWER_SCHEMA: &str = r#"{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}},"additionalProperties":false}"#;
+
+fn json_schema(scenario: &str) -> assert_cmd::assert::Assert {
+    let (work, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let scenario_path = work.path().join("scenario.toml");
+    std::fs::write(&scenario_path, scenario).unwrap();
+    std::fs::write(work.path().join("schema.json"), ANSWER_SCHEMA).unwrap();
+    cox(work.path(), home.path(), scenario_path.to_str().unwrap())
+        .args(["--json-schema", "schema.json"])
+        .assert()
+}
+
+/// T67.11: a first answer that matches the schema is the run's result.
+#[test]
+fn json_schema_accepts_a_matching_answer() {
+    json_schema("[[turn]]\ntext = '{\"ok\":true}'\n")
+        .success()
+        .stdout("{\"ok\":true}\n");
+}
+
+/// T67.11: one mismatch is retried; the second, matching, answer is kept.
+#[test]
+fn json_schema_accepts_after_one_retry() {
+    json_schema("[[turn]]\ntext = 'not-json'\n[[turn]]\ntext = '{\"ok\":true}'\n")
+        .success()
+        .stdout("{\"ok\":true}\n");
+}
+
+/// T67.11: a second mismatch exits non-zero and prints the errors.
+#[test]
+fn json_schema_exits_nonzero_after_two_failures() {
+    json_schema("[[turn]]\ntext = 'not-json'\n[[turn]]\ntext = '{\"ok\":\"no\"}'\n")
+        .failure()
+        .stderr(predicates_str_contains(
+            "the answer does not match the JSON schema",
+        ))
+        .stderr(predicates_str_contains("$.ok:"));
+}

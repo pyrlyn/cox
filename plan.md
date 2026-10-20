@@ -633,7 +633,7 @@ Every tool's `subject()` is what rules match on: the confined path, the command 
 
 ```
 cox [PROMPT] [--continue | --resume <id>]           interactive TUI; PROMPT is the first turn
-cox run -p <prompt> [--output-format text|json|stream-json] [--max-turns N] [--allowed-tools a,b]
+cox run -p <prompt> [--output-format text|json|stream-json] [--json-schema <file>] [--max-turns N] [--allowed-tools a,b]
         [--permission-mode default|plan|auto|bypass] [--approve never|on-request] [--answer <text>]
         [--continue | --resume <id>] [--deep]        headless; exit 0 ok · 1 error · 2 denied · 3 budget · 4 interrupted
 cox sessions [--grep <q>] [--json] [--limit N]       list / search rollouts
@@ -2033,18 +2033,6 @@ Files: `crates/cox-mcp/src/*` (at most two files), `crates/cox-tools/src/tool_se
 Check: `mise exec -- cargo nextest run -p cox-mcp -p cox-tools`, then clippy and fmt as above.
 
 Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
-
-#### T67.11 `cox run -p --json-schema`
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
-
-Goal: `--json-schema <file>` validates the final answer against the schema. On failure cox sends one retry turn with the validation errors; a second failure exits non-zero and prints the errors.
-
-Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`
-
-Check: `mise exec -- cargo nextest run -p cox json_schema`, then clippy and fmt as above.
-
-Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
 
 #### T67.12 Output styles
 
