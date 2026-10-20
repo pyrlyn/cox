@@ -162,7 +162,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 
 | Crate | Owns | Key deps (pinned in T0.1; versions verified in R§4.5) |
 |-------|------|------|
-| `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15, jsonschema 0.59 (T67.11: `--json-schema` validates the final answer; default features off so a schema cannot fetch a remote `$ref`) |
+| `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15, jsonschema 0.59 (T67.11: `--json-schema` validates the final answer; default features off so a schema cannot fetch a remote `$ref`; transitive `borrow-or-share` is MIT-0, allowed in `deny.toml`) |
 | `cox-config` | the one config owner (T32.16; split out of `cox`): layering (default/user/project/env/flag) through the shared `config-schema` crate (T32.17), validation, `cox config set` editing and the `docs/config.jsonschema` drift test. Errors are a `thiserror` enum | config-schema 0.1 (figment and toml_edit inside it), schemars, thiserror |
 | `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents, cloud agent drivers (T56.6); login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell), cox-cursor-cloud and futures (T56.6: the cloud agent driver and its run stream; both already in the tree), similar 3.2 (T66.8: the unified diff a refine review shows; already a workspace dependency) |
 | `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
@@ -1890,26 +1890,6 @@ Rationale in §6 A148. Idea-only: the source is the public Claude Code documenta
 
 **Not taken yet:** hooks of type `agent` (a later amendment, after T67.2), and `/security-review` (no card until the creator asks for one).
 
-#### T67.3 Five more hook events
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P1 · Complexity: 2
-
-Goal: `HookEvent` gains `PostToolBatch` (after every tool call of one assistant message has a result), `PermissionDenied` (the engine or the user denied a call), `InstructionsLoaded` (instruction files were read at session open), `CwdChanged` and `StopFailure` (a turn ended in an error). Each fires at the existing point in the session, is observe-only, and has a Claude Code name in `HookEvent::name()`.
-
-Files:
-- `crates/cox-protocol/src/types.rs`
-- `crates/cox-core/src/session.rs`
-- `docs/config.md` (the hook event list and its doc test)
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core -p cox-protocol
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when one test per event proves it fires once at its point (`post_tool_batch_fires_after_last_result`, and so on) and the doc test lists all events.
-
 #### T67.4 `/goal`: a judged stop condition
 
 Model: grok-4.7 · Status: open · Depends: — · Size: ~190 · Priority: P1 · Complexity: 3
@@ -1995,12 +1975,6 @@ mise exec -- cargo fmt --check
 ```
 
 Done when `exit_plan_requires_approval`, `headless_declines_exit_plan` and the `exit_plan_modal` insta snapshot pass.
-
-#### T67.8 Design: an Auto-mode risk judge
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 (doc) · Priority: P2 · Complexity: 3
-
-Goal: `docs/design/auto-judge.md` describes a `RiskJudge` that can turn an `Ask` into an `Allow` in Auto mode and nothing else. It covers the order (deny rules and hard bans first, then the sandbox, then the judge), what the judge sees (the call and a bounded context, never raw tool output as instructions), timeouts and errors (they ask the user), cost and ledger rows, and the injection threats with a test for each. No code. The creator reviews its security before T67.9 starts.
 
 #### T67.9 Auto-mode risk judge
 
