@@ -1956,12 +1956,6 @@ mise exec -- cargo fmt --check
 
 Done when `rule_matches_only_its_globs`, `rule_injected_once` and `system_prefix_unchanged_by_rules` (byte-equal prefix with and without rules) pass.
 
-#### T67.8 Design: an Auto-mode risk judge
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 (doc) · Priority: P2 · Complexity: 3
-
-Goal: `docs/design/auto-judge.md` describes a `RiskJudge` that can turn an `Ask` into an `Allow` in Auto mode and nothing else. It covers the order (deny rules and hard bans first, then the sandbox, then the judge), what the judge sees (the call and a bounded context, never raw tool output as instructions), timeouts and errors (they ask the user), cost and ledger rows, and the injection threats with a test for each. No code. The creator reviews its security before T67.9 starts.
-
 #### T67.9 Auto-mode risk judge
 
 Model: grok-4.7 · Status: open · Depends: T67.8 approved by the creator · Size: ~190 · Priority: P2 · Complexity: 4
