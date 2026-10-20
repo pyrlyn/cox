@@ -131,6 +131,22 @@ pub fn claim_path(path: &Path, surface: &str) -> Result<Result<SessionLock, Hold
     }
 }
 
+/// Whether any process, including this one, holds session `id`'s lock.
+/// `holder` answers "someone else" for a desktop row; the archive sweep
+/// (T66.14) must also spare a session this process itself is driving.
+/// A missing lock file is free. The shared probe is dropped immediately.
+pub fn resident(sessions: &Path, id: &SessionId) -> Result<bool, StoreError> {
+    let path = sessions.join(format!("{id}.lock"));
+    let Ok(file) = File::open(&path) else {
+        return Ok(false);
+    };
+    match file.try_lock_shared() {
+        Ok(()) => Ok(false),
+        Err(TryLockError::WouldBlock) => Ok(true),
+        Err(TryLockError::Error(_)) => Err(StoreError::Io),
+    }
+}
+
 /// Who drives session `id` from another process, without claiming it
 /// (T37.10: the desktop's "busy elsewhere" row). A shared probe, released
 /// at once, so it neither writes the holder file nor keeps a lock; a
