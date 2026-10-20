@@ -1,3 +1,26 @@
+#### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T43.6 · Size: ~530 (landed larger; see Not done) · Priority: P2 · Complexity: 4
+
+Goal: under the same byte budget, the map shows the files the next commit touches more often than the recency-only order, by at least 15 pp on a 200-commit backtest, and stays a pure function of file bytes, git order and budget.
+
+What landed:
+- `rank.rs`: edge A → B when A mentions a name defined in B, weight `ln(N/df)`, names in more than 5% of files dropped. PageRank, damping 0.85, 20 iterations, ties in path order. Personalization is the recent-file list with geometric decay plus a unit floor. Co-change adds an edge both ways at `ln(count)`.
+- `git::change_set` is one `git log` (`--pretty=format:%x1e`). `recent_changes` is that list. Pairs need two commits; a commit with more than 20 files is ignored.
+- `repomap::build` stays recency order. `build_ranked(..., MapRank::Graph)` is the graph order. Two graph builds of one tree match.
+
+Not done: `repomap.rank = "graph"` is not a config key. Wiring it touches `cox-protocol`, `default.toml` and the schema docs, past the three files. `build` therefore stays recent, so a session that turns the map on is unchanged and T43.6's budget comparison is not disturbed. The T43.6 token rows (`repomap-off` / `repomap-2k`) were not run: those presets call a local model (`prism-ml/bonsai-27b`) or a paid key, and this environment has neither. `just bench` is the token-economy example; it does not compare the map. `mise` is not on this machine; the checks used `cargo +1.99.0`.
+
+Check:
+```
+cargo +1.99.0 nextest run --locked -p cox-tools
+  279 passed, 1 skipped
+cargo +1.99.0 clippy --locked -p cox-tools --all-targets -- -D warnings
+  clean
+cargo +1.99.0 fmt --check -p cox-tools
+  clean
+```
+
 #### T57.5 One kill path for process trees: hooks and the session environment
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: T57.1 · Size: ~220 (landed larger) · Priority: P1 · Complexity: 4
@@ -52,7 +75,6 @@ COX_HOME=/tmp/cox-scratch-t6614 cargo +1.99.0 run --locked --quiet -- sessions -
   No sessions found
 ```
 
-=======
 #### T67.12 Output styles
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~430 (landed larger) · Priority: P3 · Complexity: 2
