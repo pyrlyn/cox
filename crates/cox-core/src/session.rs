@@ -262,6 +262,13 @@ pub struct Session {
     /// undo), which is safe only because `system[3]` sits after the last
     /// cache breakpoint. Shared with children, like the memory index.
     harness_notes: Arc<std::sync::Mutex<String>>,
+    /// Output styles the surface discovered (T67.12): name, description,
+    /// and the volatile block. Set once at open, like the skills index,
+    /// because this crate reads no files. Shared with children.
+    output_styles: Arc<OnceLock<Vec<(String, String, String)>>>,
+    /// The style `/style` selected, as `(name, volatile block)`. Empty
+    /// until then. Shared with children so a subagent keeps the tone.
+    output_style: Arc<StdMutex<Option<(String, String)>>>,
     /// The task id `send_message`'s `Relay` impl stamps a child's own
     /// message with (T34.6, SM§4), set once by `subagent::spawn` right
     /// after the child session exists; unset for the session the user is
@@ -454,6 +461,8 @@ impl Session {
         child.instructions = self.instructions.clone();
         child.memory_index = self.memory_index.clone();
         child.harness_notes = self.harness_notes.clone();
+        child.output_styles = self.output_styles.clone();
+        child.output_style = self.output_style.clone();
         child.checkpoint_warned = self.checkpoint_warned.clone();
         // T34.9: share this session's name→TaskId registry so the child can
         // resolve a sibling by name itself (`resolve_name_or_id`).
@@ -598,6 +607,8 @@ impl Session {
             skills_index: Arc::new(OnceLock::new()),
             memory_index: Arc::new(OnceLock::new()),
             harness_notes: Arc::new(std::sync::Mutex::new(String::new())),
+            output_styles: Arc::new(OnceLock::new()),
+            output_style: Arc::new(StdMutex::new(None)),
             self_task: Arc::new(OnceLock::new()),
             external_agents: Arc::new(OnceLock::new()),
             event_tap: Arc::new(OnceLock::new()),
@@ -999,6 +1010,21 @@ impl Session {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = notes;
     }
 
+    /// Installs the output styles the surface discovered (T67.12). A second
+    /// call is ignored, like `set_instructions`: the list is fixed at open
+    /// so `/style` only chooses among it. An empty body is dropped.
+    pub fn set_output_styles(&self, styles: Vec<(String, String, String)>) {
+        let rendered = styles
+            .into_iter()
+            .filter(|(_, _, body)| !body.trim().is_empty())
+            .map(|(name, description, body)| {
+                let text = crate::context::output_style_block(&name, &body);
+                (name, description, text)
+            })
+            .collect();
+        let _ = self.output_styles.set(rendered);
+    }
+
     /// Installs the granted external-agent drivers (T35.5); the surface
     /// leaves out an entry whose CLI or key is missing (EA§7). A second
     /// call is ignored like `set_agent_defs`, keeping `agent`'s schema
@@ -1191,6 +1217,12 @@ impl Session {
                 self.switch_mode(command.args.first().map(String::as_str))
                     .await
             }
+            // T67.12: `/style` lists the styles discovered at open; `/style
+            // <name>` selects one. The body joins `system[3]` on the next
+            // request, never the cached prefix.
+            Submission::Command { command } if command.name == "style" => {
+                self.style_command(&command.args).await
+            }
             Submission::Command { command } if command.name == "init" => {
                 let force = command.args.iter().any(|a| a == "--force" || a == "force");
                 self.run_init(force).await
@@ -1261,6 +1293,69 @@ impl Session {
             overrides.main_tier = routed;
         }
         Router::pick(&self.config, job, self.tier, &overrides, confirm_think)
+    }
+
+    /// `/style` lists the catalog; `/style <name>` selects one for later
+    /// requests (T67.12). Unknown names warn and leave the current style.
+    async fn style_command(&self, args: &[String]) -> Result<(), CoreError> {
+        let styles = self.output_styles.get().cloned().unwrap_or_default();
+        if args.is_empty() {
+            let active = self
+                .output_style
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let active_name = active
+                .as_ref()
+                .map(|(name, _)| name.as_str())
+                .unwrap_or("none");
+            let lines = if styles.is_empty() {
+                "(none)".to_string()
+            } else {
+                styles
+                    .iter()
+                    .map(|(name, description, _)| {
+                        if description.is_empty() {
+                            name.clone()
+                        } else {
+                            format!("{name} — {description}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            return self
+                .emit(Event::Notice {
+                    level: Level::Info,
+                    text: format!("output styles:\n{lines}\nactive: {active_name}"),
+                })
+                .await;
+        }
+        let name = args.join(" ");
+        match styles
+            .into_iter()
+            .find(|(style_name, _, _)| style_name == &name)
+        {
+            Some((name, _, text)) => {
+                *self
+                    .output_style
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some((name.clone(), text));
+                self.emit(Event::Notice {
+                    level: Level::Info,
+                    text: format!("output style set to {name}"),
+                })
+                .await
+            }
+            None => {
+                self.emit(Event::Notice {
+                    level: Level::Warn,
+                    text: format!("unknown output style `{name}`"),
+                })
+                .await
+            }
+        }
     }
 
     /// `/model <tier> [model]` (T9.1 step 3): main turns run on `tier` with
@@ -1935,6 +2030,16 @@ impl Session {
             if !notes.is_empty() {
                 req.system[3].text.push('\n');
                 req.system[3].text.push_str(&notes);
+            }
+            // T67.12: the selected output style rides in the same volatile
+            // block, after the prefix breakpoint.
+            let style = self
+                .output_style
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some((_, text)) = style {
+                crate::context::append_output_style(&mut req, &text);
             }
             req
         };
@@ -3747,6 +3852,39 @@ mod tests {
             "{}",
             b.system[3].text
         );
+    }
+
+    /// T67.12: `/style <name>` puts that style's body in `system[3]` after
+    /// the prefix breakpoint and leaves `system[0..=2]` alone.
+    #[tokio::test]
+    async fn style_command_puts_the_body_after_the_prefix_breakpoint() {
+        let (session, _, provider) = recorded(cox_protocol::Config::default(), 1);
+        session.set_output_styles(vec![(
+            "terse".into(),
+            "short answers".into(),
+            "Be brief.".into(),
+        )]);
+        session
+            .submit(Submission::Command {
+                command: cox_protocol::types::SlashCommand {
+                    name: "style".into(),
+                    args: vec!["terse".into()],
+                },
+            })
+            .await
+            .expect("/style");
+        turn(&session, false).await;
+        let seen = provider.seen();
+        assert_eq!(seen.len(), 1);
+        let req = &seen[0];
+        assert_eq!(req.cache_breakpoints.first().copied(), Some(2));
+        assert!(!req.system[3].cache);
+        assert!(
+            req.system[3].text.contains("Be brief."),
+            "{}",
+            req.system[3].text
+        );
+        assert!(!req.system[2].text.contains("Be brief."));
     }
 
     /// Refined prompt notes are volatile like the memory index: they reach

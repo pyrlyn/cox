@@ -62,6 +62,37 @@ exit 1: ANTHROPIC_API_KEY is not set (expected; keyring is off). toolchain, COX_
 
 `mise` is not installed in this environment. The commands above use the `1.99.0` toolchain pinned in `mise.toml`, without changing the default toolchain.
 
+#### T67.12 Output styles
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~430 (landed larger) · Priority: P3 · Complexity: 2
+
+Goal: `.cox/output-styles/*.md` and `~/.cox/output-styles/*.md` (and `.claude/output-styles/*.md`) define styles; `/style <name>` picks one and `/style` lists them. The style text goes after the last cache breakpoint (A148), so the cached prefix stays byte-stable.
+
+Files: `crates/cox-ext/src/styles.rs` (new), `crates/cox-ext/src/lib.rs`, `crates/cox-protocol/src/commands.rs`, `crates/cox-core/src/context.rs`, `crates/cox-core/src/session.rs`, `crates/cox-session/src/lib.rs` (plus the help snapshot and `docs/screenshots/help_overlay.svg`)
+
+Plan: discovery stays in `cox-ext` because `cox-core` reads no files. Later directories win: home, then `.claude`, then project `.cox`. A file with no frontmatter is a body named by its stem; a broken header or an empty body is a notice and the rest still load. `/style` lists the catalog and the active name; `/style <name>` (words joined with a space) selects one for later requests and an unknown name warns without changing the current style. Nothing is selected at open. The body is stored as `<output_style name="…">` and appended to volatile `system[3]`, which sits after breakpoint index 2 and is not cached.
+
+Landed larger than the card's three files: the command has to live on the session, and the session crate is what opens the files. Also restored `cox_config::load::default_tiers` (the embedded `[tiers]` table). #364 added the callers and not the function, so `cargo clippy --workspace` has not compiled `cox-session` since. Clippy 1.99's `needless_borrows_for_generic_args` is cleared in `target_agents.rs` (pass the closure by value; it is `Copy`) and allowed on the two `status_line.rs` calls that reuse a non-`Copy` closure. `workspace-hack` is regenerated so the lock resolves; the same regeneration is #408.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo nextest run --locked -p cox-ext -p cox-core
+     Summary [   2.660s] 553 tests run: 553 passed, 1 skipped
+     (includes style_text_after_cache_breakpoint, system_prefix_unchanged_by_style, style_command_puts_the_body_after_the_prefix_breakpoint, project_cox_style_replaces_claude_and_home, broken_header_is_skipped_with_a_notice)
+$ mise exec -- cargo nextest run --locked -p cox-config -p cox-session -E 'test(/default_tiers_reads_the_embedded_code_tier|legacy_typesafe|open_moves_a_legacy/)'
+     Summary 4 tests run: 4 passed
+$ INSTA_UPDATE=1 COX_SCREENSHOTS=docs/screenshots mise exec -- cargo test --locked -p cox-tui --test screenshots screen_help_overlay
+     test screen_help_overlay ... ok
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     toolchain, db, sandbox (landlock), git, prefix ok; API keys row fails because ANTHROPIC_API_KEY is unset in this environment (exit 1)
+$ mise exec -- cargo fmt --check
+     clean
+$ mise exec -- cargo clippy --locked --workspace --all-targets --exclude cox-voice -- -D warnings
+     Finished clean (exit 0)
+```
+
+`--all-features` was not run here: `whisper-rs-sys` fails to link under this environment's cmake. CI installs the voice packages and runs that clippy.
+
 #### T33.45 Design the plugin API: shared, terminal-only and desktop-only
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: split across T33.45.1–T33.45.10 · Priority: P2 · Complexity: 4

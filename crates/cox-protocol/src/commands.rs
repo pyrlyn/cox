@@ -117,6 +117,7 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "/theme [name]",
         "pick a colour theme, previewed live",
     ),
+    ("style", "/style [name]", "list output styles, or apply one"),
     ("help", "/help", "this list"),
     ("quit", "/quit", "exit"),
 ];
