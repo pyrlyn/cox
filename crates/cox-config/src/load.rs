@@ -25,7 +25,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use config_schema::{EnvLayer, Layers};
-use cox_protocol::config::{DEFAULT_CONFIG_TOML, TiersConfig};
+use cox_protocol::config::DEFAULT_CONFIG_TOML;
 use cox_protocol::{Config, CoreError, SandboxMode};
 use serde_json::Value as JsonValue;
 
@@ -1052,17 +1052,6 @@ pub fn load_in(
         full,
         pre_project,
     })
-}
-
-/// The `[tiers]` block of the embedded `default.toml` (T33.40.13).
-/// `None` when that file no longer deserializes, so a leftover `typesafe`
-/// tier is left alone instead of failing the session open.
-pub fn default_tiers() -> Option<TiersConfig> {
-    Layers::new()
-        .toml_text("default", DEFAULT_CONFIG_TOML)
-        .extract::<Config>()
-        .ok()
-        .map(|cfg| cfg.tiers)
 }
 
 /// Whether `contents`, as the user `config.toml`, deserializes over the
