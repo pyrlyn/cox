@@ -26,6 +26,37 @@ COX_HOME=/tmp/cox-scratch-t6614 cargo +1.99.0 run --locked --quiet -- sessions -
   No sessions found
 ```
 
+=======
+#### T33.45 Design the plugin API: shared, terminal-only and desktop-only
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: split across T33.45.1–T33.45.10 · Priority: P2 · Complexity: 4
+
+Goal: one plugin API in three parts — shared, terminal-only and desktop-only — with a defined behaviour when a plugin asks for a part the current surface does not have, then its documentation and a Rust example that uses all three.
+
+The build cards are already in this file: T33.45.1 (manifest and grant), T33.45.2 (ABI payloads), T33.45.3 and T33.45.3.1–T33.45.3.5 (host, session and ACP), T33.45.4 (TUI), T33.45.5 (inspector, toolbar, palette), T33.45.6 (notifications, links, images), T33.45.7 (FFI and Swift), T33.45.8 (SDK and the surfaces example), T33.45.9 (English API reference) and T33.45.10 (Russian and Ukrainian). This parent stayed open after they landed.
+
+Where it lives:
+- `docs/design/plugins.md` §15 and amendment A134
+- `docs/plugins.md`, `docs/ru/plugins.md`, `docs/uk/plugins.md` (shared, terminal-only, desktop-only)
+- `plugins/examples/surfaces` loaded by `crates/cox-plugin/src/surfaces_example.rs`
+
+Check output (2026-10-19), on current `main` with the workspace-hack lock from #408 borrowed only for the run (that lock is not in this change; `main` does not resolve `crypto-common` until #408 merges):
+```
+$ mise exec -- cargo nextest run -p cox-plugin -E 'test(/^surfaces_example::/)'
+    PASS surfaces_example::tests::terminal_session_keeps_the_key_and_drops_the_desktop_parts
+    PASS surfaces_example::tests::desktop_session_keeps_the_desktop_parts_and_drops_the_key
+    PASS surfaces_example::tests::the_command_falls_back_to_a_notice_on_the_terminal
+    PASS surfaces_example::tests::each_surface_renders_its_slots_with_the_live_count
+    PASS surfaces_example::tests::the_command_opens_the_inspector_on_the_desktop
+    Summary: 5 passed, 130 skipped
+$ mise exec -- cargo nextest run -p cox-plugin-api -E 'test(/schema_matches_committed_file/)'
+    PASS tests::plugin_schema_matches_committed_file
+    PASS tests::abi_schema_matches_committed_file
+    Summary: 2 passed, 65 skipped
+```
+
+Not re-run: `just test` for the whole workspace. It needs the same lockfile fix, and the sub-cards already recorded their own checks.
+
 #### T67.8 Design: an Auto-mode risk judge
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~150 (doc) · Priority: P2 · Complexity: 3
