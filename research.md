@@ -1000,6 +1000,39 @@ rust-analyzer sent no `$/progress`. Second, a server sends
 it with "method not found" and does not pull again. Fixing that is a new
 card, not part of T41.9.
 
+### 4.9 Repo-map file graph (T59.4, 2026-10-20)
+
+The rank is PageRank (damping 0.85, 20 iterations) on a file graph: an edge
+runs from a file that mentions an outline name to the file that defines it,
+weighted `ln(N/df)`, and a name in more than 5% of the files is dropped.
+Co-change pairs (two files in the same commit at least twice; commits with
+more than 20 files skipped) add an edge both ways at `ln(count)`. The
+personalization vector is the recent-file list, newest first, geometric
+decay `0.5^pos * N` plus a unit floor. Ties break in path order. No prompt
+text is an input.
+
+Backtest, in `graph_rank_beats_recency_by_15pp_on_200_commits` (synthetic,
+so it does not depend on this repository's history): 20 groups of four
+files, 200 commits that alternate a mention of `gK` and the file that
+defines it. A hit is a next-commit file inside the top 2 of the ranking
+(the budget that holds two entries). 199 predictions.
+
+| order | top-2 hit rate | files hit |
+| --- | --- | --- |
+| recency | 0.000 | 0 / 199 |
+| graph | 0.503 | 100 / 199 |
+| gain | 50.3 pp | |
+
+The 4-node PageRank vector the unit test locks, uniform personalization:
+`[0.3298830164, 0.3261369643, 0.3064800193, 0.0375]`.
+
+T43.6-style token rows (`repomap-off` against `repomap-2k` in
+`cox_evals.matrix`) are not in this table. The presets are in the registry;
+running them needs LM Studio's `prism-ml/bonsai-27b` or a paid key. `build`
+still orders by recency, so that comparison is unchanged when it runs.
+`context.repomap_rank` is not a key yet (`build_ranked(..., Graph)` is the
+graph path).
+
 ## 5. Testability patterns adopted
 1. `Provider` trait with `Scripted` and `Replay` (cassette) implementations; cassettes re-recorded on demand and redacted. Temperature 0 and seeds do not give bit-exact replay across providers; replaying the event log does. [high]
 2. Golden `Event` JSONL for loop scenarios (`insta`); the rollout file and the fixture are the same format. [design]
