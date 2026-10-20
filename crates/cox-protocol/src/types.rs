@@ -554,6 +554,18 @@ pub enum HookEvent {
     SubagentStop,
     /// A notice was shown.
     Notification,
+    /// After every tool call of one assistant message has a result.
+    /// Observe-only: the verdict is not applied (T67.3).
+    PostToolBatch,
+    /// The engine or the user denied a call. Observe-only (T67.3).
+    PermissionDenied,
+    /// Instruction files were read at session open. Observe-only (T67.3).
+    InstructionsLoaded,
+    /// A child session's working directory differs from its parent's.
+    /// Observe-only (T67.3).
+    CwdChanged,
+    /// A turn ended in an error. Observe-only (T67.3).
+    StopFailure,
 }
 
 impl HookEvent {
@@ -573,6 +585,11 @@ impl HookEvent {
             Self::SubagentStart => "SubagentStart",
             Self::SubagentStop => "SubagentStop",
             Self::Notification => "Notification",
+            Self::PostToolBatch => "PostToolBatch",
+            Self::PermissionDenied => "PermissionDenied",
+            Self::InstructionsLoaded => "InstructionsLoaded",
+            Self::CwdChanged => "CwdChanged",
+            Self::StopFailure => "StopFailure",
         }
     }
 }
@@ -1829,6 +1846,45 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
+
+    /// Every trigger the session can fire, so a new variant fails this list
+    /// and the config reference together (T67.3).
+    fn every_hook_event() -> [HookEvent; 18] {
+        [
+            HookEvent::UserPromptSubmit,
+            HookEvent::PreToolUse,
+            HookEvent::PostToolUse,
+            HookEvent::PostToolUseFailure,
+            HookEvent::Stop,
+            HookEvent::PreCompact,
+            HookEvent::PostCompact,
+            HookEvent::SessionStart,
+            HookEvent::SessionEnd,
+            HookEvent::PermissionRequest,
+            HookEvent::SubagentStart,
+            HookEvent::SubagentStop,
+            HookEvent::Notification,
+            HookEvent::PostToolBatch,
+            HookEvent::PermissionDenied,
+            HookEvent::InstructionsLoaded,
+            HookEvent::CwdChanged,
+            HookEvent::StopFailure,
+        ]
+    }
+
+    #[test]
+    fn config_reference_lists_every_hook_event() {
+        let docs = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/config.md"));
+        let missing: Vec<_> = every_hook_event()
+            .into_iter()
+            .map(|event| event.name())
+            .filter(|name| !docs.contains(name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "docs/config.md omits hook events {missing:?}"
+        );
+    }
 
     /// T33.40.13: a ledger row written by the retired built-in Jev client
     /// still reads, as the plugin section that replaced it.
