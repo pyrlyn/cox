@@ -36,6 +36,8 @@ diesel::table! {
         title_source -> Nullable<Text>,
         agent -> Nullable<Text>,
         agent_session -> Nullable<Text>,
+        // T66.14: NULL while the session is still listed. The row is never removed.
+        archived_at -> Nullable<Text>,
     }
 }
 

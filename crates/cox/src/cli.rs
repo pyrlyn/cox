@@ -352,8 +352,9 @@ pub struct StatsArgs {
     pub csv: bool,
 }
 
-/// `cox sessions [ID] [--grep <q>] [--json] [--limit N]` (plan.md §1.12/T10.3,
-/// A13). A bare id prints that one session's record instead of the list.
+/// `cox sessions [ID] [--grep <q>] [--json] [--limit N] [--archived]`
+/// (plan.md §1.12/T10.3, A13, T66.14). A bare id prints that one session's
+/// record instead of the list.
 #[derive(Args, Debug, Clone)]
 pub struct SessionsArgs {
     /// Print one session's record (times, provider, model, effort, tokens).
@@ -368,6 +369,10 @@ pub struct SessionsArgs {
     /// Max sessions listed (default 20).
     #[arg(long, value_name = "N")]
     pub limit: Option<usize>,
+    /// List sessions the sweep has archived instead of the live ones.
+    /// Rows, rollouts and archived tool output are not deleted.
+    #[arg(long, conflicts_with = "id")]
+    pub archived: bool,
 }
 
 /// `cox mcp [--allow-write] [--tools a,b]` (plan.md T6.2): read-only tools
