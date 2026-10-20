@@ -509,6 +509,18 @@ pub async fn open_reporting(
     if !memory_index.is_empty() {
         session.set_memory_index(memory_index);
     }
+    // T67.12: styles are discovered here, once, because the core reads no
+    // files. A broken file is a warning; `/style` chooses among the rest.
+    let styles =
+        cox_ext::styles::discover(&cox_ext::styles::style_dirs(Some(&home), Some(&project)));
+    warnings.extend(styles.notices.into_iter().map(Warning::Instruction));
+    session.set_output_styles(
+        styles
+            .styles
+            .into_iter()
+            .map(|style| (style.name, style.description, style.body))
+            .collect(),
+    );
     // T66.7: prompt notes from earlier refines (global ones, and a resumed
     // session's own) join the volatile `system[3]`, never the cached prefix.
     // A note that cannot be read is skipped with a warning, like any extension.

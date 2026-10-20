@@ -578,7 +578,7 @@ The engine is pure: `decide(&self, call, mode, policy, grants) -> Decision`. Rul
  │ system[1]  cox system prompt (versioned string, no date, no cwd)           │  cache breakpoint 1 (after system[2])
  │ system[2]  instruction files: AGENTS.md/CLAUDE.md chain, skills index,     ┘
  │            repo map last (A74, off by default)
- │ system[3]  volatile: date, cwd, git branch, memory index, permission mode      no cache (changes daily / per turn)
+ │ system[3]  volatile: date, cwd, git branch, memory index, permission mode, output style   no cache (changes daily / per turn)
  │ messages   [Summary item if compacted]
  │            history … (older tool results microcompacted to pointers)         cache breakpoint 2 = end of previous turn
  │            this turn's user message + tool results                           cache breakpoint 3 = last message (moves every call)
@@ -667,7 +667,7 @@ Every flag maps to a config key (T0.3 test); `--permission-mode bypass` and `--s
 | `PageUp/PageDown`, mouse wheel | scroll transcript | `Ctrl+L` | redraw |
 | `Ctrl+G` | diff view: the working tree against `HEAD`, per-file blocks; `PageUp/PageDown` scroll, `Esc` closes (T15.3) | `Ctrl+B` | move the running `bash`/`agent` call to the background; the turn goes on (T27.1) |
 
-Slash commands (parsed in the surface, executed as `Submission::Command`): `/model [tier] [model]`, `/effort [low|high|xhigh]` (session-wide, clamped per model, T16.4), `/think <prompt>` (confirm dialog with price), `/compact [focus]`, `/cost`, `/permissions`, `/sandbox <mode>`, `/resume`, `/sessions`, `/expand <id>`, `/agents` (live sessions in this workspace, T16.3), `/skills`, `/hooks`, `/mcp`, `/doctor`, `/clear` (new session, same cwd), `/vim`, `/help`, `/quit`. Markdown files in `.claude/commands` and `.cox/commands` appear in the same palette (T7.3).
+Slash commands (parsed in the surface, executed as `Submission::Command`): `/model [tier] [model]`, `/effort [low|high|xhigh]` (session-wide, clamped per model, T16.4), `/think <prompt>` (confirm dialog with price), `/compact [focus]`, `/cost`, `/permissions`, `/sandbox <mode>`, `/resume`, `/sessions`, `/expand <id>`, `/agents` (live sessions in this workspace, T16.3), `/skills`, `/hooks`, `/mcp`, `/doctor`, `/clear` (new session, same cwd), `/vim`, `/style [name]`, `/help`, `/quit`. Markdown files in `.claude/commands` and `.cox/commands` appear in the same palette (T7.3).
 
 Status line (one row): `sonnet-5 · ctx 41% · $0.83 · workspace-write · 2 tasks · [plan]`.
 
@@ -1982,18 +1982,6 @@ Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`
 Check: `mise exec -- cargo nextest run -p cox json_schema`, then clippy and fmt as above.
 
 Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
-
-#### T67.12 Output styles
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 · Priority: P3 · Complexity: 2
-
-Goal: `.cox/output-styles/*.md` and `~/.cox/output-styles/*.md` (and `.claude/output-styles/*.md`) define styles; `/style <name>` picks one and `/style` lists them. The style text goes after the last cache breakpoint (A148), so the cached prefix stays byte-stable.
-
-Files: `crates/cox-ext/src/styles.rs` (new), `crates/cox-protocol/src/commands.rs`, `crates/cox-core/src/context.rs`
-
-Check: `mise exec -- cargo nextest run -p cox-ext -p cox-core`, then clippy and fmt as above.
-
-Done when `style_text_after_cache_breakpoint` and `system_prefix_unchanged_by_style` pass.
 
 #### T67.13 Design: a GitHub Action and scheduled runs
 
