@@ -2795,6 +2795,9 @@ fn think_consent_answered(state: &mut State, answer: QuestionAnswer) -> Vec<Cmd>
 }
 
 #[cfg(test)]
+mod testkit;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::theme;
@@ -2803,34 +2806,7 @@ mod tests {
     use cox_protocol::types::{Content, Message, PermissionMode, Role, SandboxMode};
     use crossterm::event::{KeyCode, KeyEvent};
 
-    /// Types `text` into the composer and submits it with a plain `Enter`,
-    /// the way a user queues or sends a message.
-    fn type_line(state: &mut State, text: &str) {
-        for c in text.chars() {
-            update(state, Msg::Key(KeyEvent::from(KeyCode::Char(c))));
-        }
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Enter)));
-    }
-
-    /// Types a slash command and submits it. `/` at column 0 opens the
-    /// palette (`Edit::OpenCommands`) but already left the `/` itself in the
-    /// composer, so — as `clear_command_emits_cmd_clear` established — `Esc`
-    /// closes the palette without losing it, then the rest types normally.
-    fn type_command(state: &mut State, line: &str) -> Vec<Cmd> {
-        type_after_sigil(state, '/', line)
-    }
-
-    /// `line` after the picker its leading `sigil` opens was closed with
-    /// `Esc`, which keeps the sigil in the composer; then `Enter`.
-    fn type_after_sigil(state: &mut State, sigil: char, line: &str) -> Vec<Cmd> {
-        let rest = line.strip_prefix(sigil).unwrap_or(line);
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Char(sigil))));
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Esc)));
-        for c in rest.chars() {
-            update(state, Msg::Key(KeyEvent::from(KeyCode::Char(c))));
-        }
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Enter)))
-    }
+    use super::testkit::*;
 
     /// The status context size is `Usage::context_tokens`, the rule the
     /// ledger and `cox-app` share, so huge counts saturate instead of
