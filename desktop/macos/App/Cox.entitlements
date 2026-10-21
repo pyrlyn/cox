@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Empty on purpose (DT-6, DT§7): no App Sandbox, because a sandboxed host cannot nest the
-  agent's own sandbox-exec or read arbitrary repositories. A plugin runtime's JIT entitlement
-  is added only if the first signed build shows it is needed (DT§11 Q5, T37.32.2).
+  No App Sandbox (DT-6, DT§7): a sandboxed host cannot nest the agent's own sandbox-exec or read
+  arbitrary repositories. The one entitlement is for the plugin host the app links through
+  cox-ffi (DT§11 Q5, T37.32.2): wasmtime 49 maps compiled plugin code without MAP_JIT, so under
+  the Release build's Hardened Runtime the kernel kills the app on a plugin's first call unless
+  unsigned executable memory is allowed; `allow-jit` alone is not enough (both tried on
+  cox-plugin's host tests, signed ad-hoc with the runtime flag). The bundled CLI is signed with
+  the same key from scripts/cox.entitlements.
 -->
 <plist version="1.0">
-<dict/>
+<dict>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
 </plist>
