@@ -4,8 +4,9 @@
 //!
 //! - shared: a status segment and `/glance:glance`;
 //! - terminal only: the leader key `g`;
-//! - desktop only: an inspector tab, a toolbar item, a palette action and an
-//!   actionable notification.
+//! - desktop only: an inspector tab, a toolbar item, a palette action, an
+//!   actionable notification and a canvas of two pages whose parts a click
+//!   hands to the composer (`docs/design/plugin-canvas.md`).
 //!
 //! The plugin declares all of it unconditionally. Branching on the surface in
 //! `cox_init` would work too (`surface_of`), but then the host's filter, the
@@ -19,12 +20,16 @@
 
 use cox_plugin_sdk::ui::Span;
 use cox_plugin_sdk::{
-    ActionDecl, CommandDecl, DesktopNotice, DesktopOut, InitOut, KeyDecl, NoticeAction,
-    NoticeLevel, Slot, StyleToken, TabDecl, Widget,
+    ActionDecl, CanvasAttach, CanvasDecl, CanvasOut, CanvasSelect, CommandDecl, DesktopNotice,
+    DesktopOut, Frame, InitOut, KeyDecl, NoticeAction, NoticeLevel, Slot, StyleToken, TabDecl,
+    Widget,
 };
 
 /// The one command every contribution runs.
 pub const COMMAND: &str = "glance";
+
+/// The attribute the canvas pages mark their selectable parts with.
+pub const SELECT_ATTR: &str = "data-glance";
 
 /// What `cox_init` declares: every part of every surface.
 pub fn declarations() -> InitOut {
@@ -51,7 +56,11 @@ pub fn declarations() -> InitOut {
             }),
             toolbar: vec![action.clone()],
             palette: vec![action],
-            canvas: None,
+            canvas: Some(CanvasDecl {
+                title: "Glance".into(),
+                symbol: "eye".into(),
+                select_attr: SELECT_ATTR.into(),
+            }),
         },
         ..InitOut::default()
     }
@@ -114,13 +123,76 @@ pub fn draw(slot: Slot, glances: u64) -> Widget {
     }
 }
 
+/// The style both pages share. `prefers-color-scheme` because the pane
+/// follows the window's appearance and passes no field for it (design §3).
+const PAGE_STYLE: &str = "<style>\
+body{font:14px -apple-system,sans-serif;margin:16px;color:#1d1d1f;background:#fff}\
+@media (prefers-color-scheme:dark){body{color:#f5f5f7;background:#1d1d1f}}\
+[data-glance]{padding:8px 12px;margin:8px 0;border:1px solid #8884;border-radius:8px}\
+h1{font-size:28px;margin:0}\
+</style>";
+
+fn page(body: &str) -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\">{PAGE_STYLE}</head><body>{body}</body></html>"
+    )
+}
+
+/// What `cox_canvas` draws: the count and the parts a person can point at,
+/// side by side as two frames of different widths. Static HTML only: the
+/// app runs no page script, so the pages need none.
+pub fn frames(glances: u64) -> CanvasOut {
+    let count = page(&format!(
+        "<div data-glance=\"count\"><h1>{glances}</h1>glances so far</div>\
+         <div data-glance=\"hint\">Run /glance:glance to count one more.</div>"
+    ));
+    let parts = page(
+        "<div data-glance=\"status\">Status segment: <b>status.right</b></div>\
+         <div data-glance=\"inspector\">Inspector tab: <b>Glance</b></div>\
+         <div data-glance=\"toolbar\">Toolbar item and palette action</div>\
+         <div data-glance=\"notification\">Notification with an <b>Again</b> button</div>",
+    );
+    CanvasOut {
+        frames: vec![
+            Frame {
+                id: "count".into(),
+                title: "Count".into(),
+                width_pt: 320,
+                html: count,
+            },
+            Frame {
+                id: "parts".into(),
+                title: "Desktop parts".into(),
+                width_pt: 480,
+                html: parts,
+            },
+        ],
+    }
+}
+
+/// What a click on a canvas part adds to the composer, or nothing for a
+/// frame this plugin did not draw. The value is the page's own attribute,
+/// already checked by the host, so it is quoted rather than trusted.
+pub fn attach(select: &CanvasSelect) -> Option<CanvasAttach> {
+    if !frames(0).frames.iter().any(|f| f.id == select.frame) {
+        return None;
+    }
+    Some(CanvasAttach {
+        name: format!("Glance: {}", select.value),
+        text: format!(
+            "The person pointed at the {:?} part of the Glance canvas's {:?} page.",
+            select.value, select.frame
+        ),
+    })
+}
+
 #[cfg(target_arch = "wasm32")]
 mod guest {
     use core::sync::atomic::{AtomicU64, Ordering};
 
     use cox_plugin_sdk::{
-        AbiError, CommandIn, CommandOut, InitIn, InitOut, NoticeLevel, PluginNotice, RenderIn,
-        SdkError, Widget, desktop_notify, redraw,
+        AbiError, CanvasAttach, CanvasIn, CanvasOut, CanvasSelect, CommandIn, CommandOut, InitIn,
+        InitOut, NoticeLevel, PluginNotice, RenderIn, SdkError, Widget, desktop_notify, redraw,
     };
 
     // In memory only: `cox_render` may not touch kv, and the count is not
@@ -163,8 +235,23 @@ mod guest {
         Ok(super::draw(r.slot, GLANCES.load(Ordering::Relaxed)))
     }
 
+    fn canvas(_: CanvasIn) -> Result<CanvasOut, SdkError> {
+        Ok(super::frames(GLANCES.load(Ordering::Relaxed)))
+    }
+
+    fn canvas_select(s: CanvasSelect) -> Result<Option<CanvasAttach>, SdkError> {
+        Ok(super::attach(&s))
+    }
+
     // `key` is the terminal's leader entry and takes the same input.
-    cox_plugin_sdk::register!(init => init, command => command, key => command, render => render);
+    cox_plugin_sdk::register!(
+        init => init,
+        command => command,
+        key => command,
+        render => render,
+        canvas => canvas,
+        canvas_select => canvas_select,
+    );
 }
 
 #[cfg(test)]
@@ -180,6 +267,35 @@ mod tests {
         assert!(out.desktop.inspector.is_some());
         assert_eq!(out.desktop.toolbar.len(), 1);
         assert_eq!(out.desktop.palette.len(), 1);
+        let canvas = out.desktop.canvas.expect("a canvas");
+        assert_eq!(canvas.check(), Ok(()));
+        assert_eq!(canvas.select_attr, SELECT_ATTR);
+    }
+
+    #[test]
+    fn canvas_draws_two_frames_the_host_keeps_whole() {
+        let out = frames(7);
+        let (kept, dropped) = out.clone().capped();
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(kept, out, "nothing cut or clamped");
+        assert_eq!(kept.frames.len(), 2);
+        assert!(kept.frames[0].html.contains("<h1>7</h1>"));
+        for frame in &kept.frames {
+            assert!(frame.html.contains(SELECT_ATTR), "{}", frame.id);
+            assert!(!frame.html.contains("<script"), "{}", frame.id);
+        }
+    }
+
+    #[test]
+    fn a_click_on_a_drawn_frame_becomes_a_capped_attachment() {
+        let click = |frame: &str| CanvasSelect {
+            frame: frame.into(),
+            value: "count".into(),
+        };
+        let attach = attach(&click("count")).expect("an attachment");
+        assert_eq!(attach.name, "Glance: count");
+        assert_eq!(attach.clone().capped(), Ok(attach));
+        assert_eq!(super::attach(&click("other")), None);
     }
 
     #[test]
