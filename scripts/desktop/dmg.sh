@@ -11,7 +11,9 @@
 #
 # Release (T37.32.2), for an app app.sh built the same way: every signature carries the Hardened
 # Runtime notarization requires, the bundled CLI must be there, and the DMG drops `-debug`.
-# notarize.sh then notarizes and staples it.
+# notarize.sh then notarizes and staples it. An ad-hoc Release does not launch: under the runtime,
+# library validation wants Sparkle.framework to share the app's Team ID, which only a real
+# identity has.
 #
 # The app is re-signed here rather than by xcodebuild: Xcode's identity lookup wants a team and
 # its own certificate setup, while codesign takes the identity as given. --preserve-metadata

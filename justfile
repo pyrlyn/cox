@@ -203,6 +203,7 @@ desktop-dmg: desktop-app
 # The shipped app (T37.32.2): the macOS `cox` CLI, then a Release Cox.app with Hardened Runtime and
 # that CLI in Contents/Helpers, packed by dmg.sh into desktop/macos/build/Cox-<version>-<build>-arm64.dmg.
 # Notarize it with scripts/desktop/notarize.sh; write its appcast with scripts/desktop/appcast.sh.
+# Without COX_SIGN_IDENTITY it is ad-hoc and does not launch (library validation needs a Team ID).
 desktop-release: desktop-xcframework
     MACOSX_DEPLOYMENT_TARGET=26.0 mise exec -- cargo build -p cox --profile dist --locked --target aarch64-apple-darwin
     COX_CONFIGURATION=Release COX_CLI="$(mise exec -- cargo metadata --format-version 1 --no-deps | tr ',' '\n' | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)/aarch64-apple-darwin/dist/cox" mise exec -- bash scripts/desktop/app.sh

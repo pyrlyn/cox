@@ -1,3 +1,33 @@
+#### T37.32.2 Developer ID signing, notarization, Sparkle, bundled CLI, Homebrew cask
+
+Model: Claude Code / claude-opus-5-5 · Status: done 2026-10-21 · Depends: T37.32.1 · Size: ~330 code, ~200 tests · Priority: P1 · Complexity: 3
+
+Goal: the rest of T37.32 (A106): a Developer ID-signed, notarized app with Sparkle 2 updates and the `cox` CLI inside the bundle (DT§7), and a Homebrew cask. The release workflow wiring moved to T37.32.4 (A167), because this run could not edit `.github/workflows/`.
+
+What landed:
+- `scripts/desktop/app.sh`: `COX_CONFIGURATION=Release` builds Release (Hardened Runtime) and copies `COX_CLI` to `Cox.app/Contents/Helpers/cox`; Release refuses to build without it. `project.yml` sets `ARCHS = arm64`, since Release otherwise builds x86_64 too and fails to link CoxFFI.
+- `scripts/desktop/dmg.sh`: in Release, every signature gets `--options runtime`, and the runtime flag is checked on the app and the CLI. The DMG is `Cox-<version>-<build>-arm64.dmg`. Bare Mach-O executables are signed too: the CLI as `cox`, the identifier of the archive's binary, and Sparkle's `Autoupdate`.
+- `scripts/desktop/notarize.sh`: `notarytool submit --wait`, Apple's log on rejection, then `stapler staple`/`validate`; `spctl` must report `Notarized Developer ID`.
+- `scripts/desktop/appcast.sh`: Sparkle's `generate_appcast` with the key on stdin, then checks the feed signature, the DMG signature and the enclosure URL.
+- `scripts/cask.sh --app <version> <build> <sha256>`: the `cox-app` cask. `just desktop-release` chains the CLI, the app and the DMG.
+- Sparkle 2.10.0 in `CoxPlatform` (`Updates.swift`): `AppUpdater` starts only with an https feed and an EdDSA public key in Info.plist (`COX_APPCAST_URL`, `COX_SPARKLE_PUBLIC_KEY`), so Debug builds never check. Downloads are automatic and install on quit. A relaunch asks first while sessions run. `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` are on.
+- `CommandLineTool.swift` and the app menu's Install Command-Line Tool…: links `~/.local/bin/cox` to the bundled CLI, repoints an old link, never replaces a real file.
+
+Check (2026-10-21, this Mac, no secrets):
+- `swift test` CoxPlatform: 54 tests passed, among them the 9 new updater and CLI-link tests. CoxModel: 196 passed (1 known issue, as on main).
+- `python3 -I -m unittest discover -s scripts/desktop -p test_release.py`: 8 tests, 7 OK. The appcast test is skipped without Sparkle's tools. With `SPARKLE_BIN` pointed at the resolved package, a scratch DMG and a throwaway openssl Ed25519 key gave a feed `sign_update --verify` accepts and rejects once tampered.
+- shellcheck 0.11.0 on `cask.sh`, `app.sh`, `dmg.sh`, `notarize.sh` and `appcast.sh`: no finding. swift-format `--strict` and SwiftLint `--strict` on the changed Swift: clean.
+- Real build: `xcframework.sh`, the dist `cox` CLI, then `COX_CONFIGURATION=Release COX_CLI=… app.sh` and `COX_CONFIGURATION=Release dmg.sh` wrote `Cox-0.1.2-1-arm64.dmg` (129 MB). Its app passes `codesign --verify --deep --strict`. Every nested piece is `flags=0x10002(adhoc,runtime)`: the app, `Helpers/cox` (identifier `cox`), Sparkle.framework, Autoupdate, Updater.app and Downloader.xpc. `hdiutil verify` passes. The bundled `cox --version` prints `cox 0.1.2` under the runtime.
+- The ad-hoc Release app aborts at launch: dyld refuses Sparkle.framework ("different Team IDs"), because an ad-hoc signature has no Team ID. A copy re-signed with library validation off ran on the `edit.json` fixture for 8 s and was then quit. A Developer ID signature gives the app and the framework one Team ID.
+
+Not done:
+- `spctl --assess` on a notarized DMG, a real appcast upload and `brew install --cask cox-app`: these need the creator's App Store Connect key, Sparkle EdDSA key and the release workflow (T37.32.4).
+- DT§11 Q5 (does wasmtime need `allow-jit`?) stays open until a plugin runs in a notarized build (T37.32.4).
+- `test_release.py` is not in ci.yml yet (T37.32.4).
+- `cargo nextest run --workspace` (with and without `cox-voice`) was started twice. Both runs were stopped by a disk guard at 2 GB free; parallel agents filled the shared disk. No Rust changed, so CI's Rust jobs cover it.
+- `swift test` for CoxUI hit ENOSPC while building. CoxTranscript, CoxTranscriptText and CoxCore were skipped for lack of disk; none of them changed.
+- `cargo clippy` was not run.
+
 #### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T43.6 · Size: ~530 (landed larger; see Not done) · Priority: P2 · Complexity: 4

@@ -1118,19 +1118,45 @@ generates it from `project.yml`, so only that spec is in git (T37.32.1).
 - **Dev loop.** An Xcode "Run Script" phase calls the script only when a Rust
   input changed; CI builds from scratch. Rust never compiles inside every
   Swift build.
-- **Bundled CLI.** The same build puts the `cox` binary in
-  `Cox.app/Contents/Helpers/cox`; the app offers "Install command-line tool"
-  (a symlink in `/usr/local/bin` or `~/.local/bin`), so app and CLI never
-  drift in version or database schema.
+- **Bundled CLI.** The Release build (`COX_CONFIGURATION=Release
+  COX_CLI=<cox> scripts/desktop/app.sh`, T37.32.2) puts the `cox` binary in
+  `Cox.app/Contents/Helpers/cox`; Debug leaves it out. The app menu's
+  Install Command-Line Tool… links `~/.local/bin/cox` (install.sh's
+  directory, no administrator) to it, repoints an older link and never
+  replaces a real file, so app and CLI never drift in version or database
+  schema. `dmg.sh` signs it with the identifier `cox`, the one the CLI
+  archive's binary has.
 - **Signing.** Developer ID Application, Hardened Runtime, notarized with
   `notarytool`, stapled. No App Sandbox (DT-6). Entitlements: none beyond the
   defaults unless a plugin runtime needs JIT (wasmtime: `allow-jit` — to be
-  confirmed by the first signed build, DT§11 Q5).
+  confirmed by the first signed build, DT§11 Q5). As built (T37.32.2):
+  `dmg.sh` with `COX_CONFIGURATION=Release` signs every nested piece
+  inside-out with `--options runtime` and checks the flag;
+  `scripts/desktop/notarize.sh` submits the DMG, staples it and requires
+  `spctl` to say `Notarized Developer ID`. An ad-hoc Release does not
+  launch: library validation refuses Sparkle.framework, because an ad-hoc
+  signature has no Team ID to share (seen 2026-10-21; a copy re-signed with
+  library validation off launched on a fixture). So a local Release only
+  checks the signing path; one that runs needs `COX_SIGN_IDENTITY`. Q5
+  stays open until a plugin runs in the notarized build (T37.32.4).
 - **Updates.** Sparkle 2 (R9.3.17) with an EdDSA-signed appcast on GitHub
   Releases; updates never kill running turns: "Install on quit", or after
   asking when sessions are running (the Codex SIGKILL-on-update complaint,
-  R9.2).
-- **Other channels.** A Homebrew cask pointing at the same notarized DMG.
+  R9.2). As built (T37.32.2): the feed is
+  `releases/latest/download/appcast.xml` (a test release is never latest),
+  Info.plist takes it and the EdDSA public key from the build settings
+  `COX_APPCAST_URL` and `COX_SPARKLE_PUBLIC_KEY`, and `CoxPlatform`'s
+  `AppUpdater` starts only when both are set, so Debug and local builds
+  never check. Checks are automatic, downloads silent, the feed itself is
+  signed (`SURequireSignedFeed`) and the DMG verified before extraction;
+  the delegate's relaunch hook asks while the sidebar lists running
+  sessions, and Later leaves the update to install on quit.
+  `scripts/desktop/appcast.sh` runs Sparkle's `generate_appcast` with the
+  private key on stdin and verifies the feed and DMG signatures.
+- **Other channels.** A Homebrew cask pointing at the same notarized DMG:
+  `scripts/cask.sh --app <version> <build> <sha256>` prints `cox-app`
+  (`auto_updates`, Sparkle livecheck, arm64, macOS 26). It links no
+  binary; the CLI comes from the app menu or the `cox` cask.
 - **CI.** A macOS job: build the XCFramework, `swift test` for the packages,
   UI tests on the scripted scenarios, a notarization dry run on tags.
 
