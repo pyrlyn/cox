@@ -6,7 +6,6 @@
 - T33.40.10. Eval E2: route downgrade against the static pick
 - T33.40.11. User guide: the Jev plugin
 - T33.40.17. Optional: record live fixtures (needs the creator's key)
-- T33.45. Design the plugin API: shared, terminal-only and desktop-only
 - T33.47. Plugin canvas: a desktop pane of plugin-drawn pages
 - T33.47.8. The pane, the shortcut and the composer chip
 - T35.10. Optional: live check against a real Cursor account (needs the creator's key)
