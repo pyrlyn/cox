@@ -49,8 +49,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.11 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | done | P2 | 4 | 100% | grok-4.7 |
-| T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
-| T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
+| T33.47 | todo | P2 | 4 | 97% | |
+| T33.47.8 | todo | P2 | 4 | 97% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
@@ -956,7 +956,9 @@ Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a sel
 
 Split by A157 into T33.47.8.1–T33.47.8.10, one layer each; this card closes when they are done.
 
-Remaining (all ten sub-cards are done): the hand check — ⌘⇧D and the palette row toggle the pane, two frames show, a click adds a chip and a second replaces it — and the falsifier 3 measurement in Instruments. Both need a person at the app: the agent that built the cards cannot drive a native window, and no fixture plugin declares a canvas.
+Remaining (all ten sub-cards are done): the hand check — ⌘⇧D and the palette row toggle the pane, two frames show, a click adds a chip and a second replaces it — and the falsifier 3 measurement in Instruments. Both need a person at the app: an agent here cannot drive a native window.
+
+Fixture for the hand check (Claude Code / claude-opus-5-5, 2026-10-21): the surfaces example (`plugins/examples/surfaces`, Glance) now declares a canvas — two frames, `count` (320 pt, the live glance count) and `parts` (480 pt, its desktop parts), each part marked `data-glance`, and a click returns a `Glance: <part>` attachment. `crates/cox-plugin/src/surfaces_example.rs` runs both exports from the compiled guest. The real binary was driven over `cox app-server --stdio` in a scratch `COX_HOME` with the scripted provider (`cox plugin install --yes` on the fixture package, then `open`, `canvases`, `show_canvas`, `canvas_select`): `canvases` listed Glance with `data-glance`, `show_canvas` streamed one `plugin_canvas` with `order` `["count", "parts"]` and both frames, a click on `parts`/`toolbar` answered `Glance: toolbar`, and a click on an unknown frame answered `null`. To do the hand check: `cox plugin install --yes <target>/debug/build/cox-plugin-fixtures-*/out/surfaces`, open a session in the app, press ⌘⇧D. The Glance canvas redraws only on show, resize and `/glance:glance`, so falsifier 3's "redraws twice a second" still needs a plugin that redraws on a timer or on streamed events.
 
 ### P34 — Subagents (goal: a subagent can be a custom named definition, capped in number, able to ask the user, and able to exchange follow-up messages with its parent and its siblings — all through the parent's own `Submission`/`Event` stream)
 
