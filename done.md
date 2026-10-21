@@ -1,3 +1,38 @@
+#### T67.4 `/goal`: a judged stop condition
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~190 (landed larger; see Not done) · Priority: P1 · Complexity: 3
+
+Goal: `/goal <condition>` sets a goal, `/goal` shows it and `/goal clear` drops it. After every `TurnDone` while a goal is set, the cheap tier judges the condition through `Session::side_call`. `Met` stops; `NotMet` submits a continue turn; `Impossible` stops with the reason. The loop also stops at the autonomous turn and token caps (T66.9 has landed, so those replace a separate default of 20) or when `budget::decide` says so.
+
+What landed:
+- `/goal` is a built-in command. Setting it emits a notice and does not start a turn. `/goal` prints the condition and the turns used; `/goal clear` drops it.
+- `Event::GoalVerdict { verdict, reason, turns_used }` follows `TurnDone`. `verdict` is `met`, `not_met`, `impossible`, `max_turns`, `max_tokens`, `budget`, `interrupted`, `error` or `refusal`. `docs/protocol.jsonschema` gained that variant.
+- The judge is `Job::Summarize` (already the cheap tier) through `side_call`, which sends no tools and inserts a usage row. The prompt is the condition plus the last assistant text, clipped. `MET` / `NOT_MET` / `IMPOSSIBLE`, or JSON `{"verdict","reason"}`, parse; anything else is `NotMet`, never `Met`.
+- A `NotMet` answer submits one continue turn and judges again. `Met` and `Impossible` stop. A turn that already stopped for `Budget`, `Interrupted`, `Error` or `Refusal` is not judged. The autonomous `max_turns` and `max_tokens` stop the loop after the judge says it is not met yet. The goal stays set, so a later user turn is judged again.
+- The TUI matches `GoalVerdict` and draws nothing; T67.5 prints it. `/help` lists the command.
+
+Not done: the card names three files and ~190 lines. The event lives in `cox-protocol` (not `commands.rs`), the TUI match is required, and the schema and `/help` snapshot follow. So the tree also builds: `cargo hakari generate` after the renovate bumps that pointed `workspace-hack` at features those crate versions do not have; `load::default_tiers()`, which T33.40.13 calls and never defined; and two `clippy::needless_borrows_for_generic_args` fixes under rustc 1.99 (`target_agents.rs`, `status_line.rs`). Headless stream-json still returns on the first `TurnDone`, so a verdict after it is T67.5. `cox-voice` was not clippy'd here (`libstdc++` / whisper).
+
+Check:
+```text
+$ cargo +1.99.0 nextest run --locked -p cox-core -p cox-protocol
+cox-core 481 passed, 1 skipped; cox-protocol 125 passed
+(includes goal_stops_when_met, goal_unparseable_verdict_continues, goal_respects_budget_cap, goal_stops_at_max_turns, goal_command_shows_and_clears, protocol_jsonschema_matches_committed_file, event_json_roundtrip)
+$ cargo +1.99.0 nextest run --locked -p cox-tui -E 'test(screen_help_overlay)'
+1 passed
+$ cargo +1.99.0 nextest run --locked -p cox-config -p cox-session -E 'test(default_tiers_reads_the_embedded_code_tier) or test(/legacy_typesafe/) or test(open_moves_a_legacy_typesafe)'
+5 passed
+$ cargo +1.99.0 clippy --locked --workspace --all-targets --exclude cox-voice -- -D warnings
+clean (cox-voice left out: whisper's C++ build is not linked here)
+$ cargo +1.99.0 fmt --check -p cox-core -p cox-protocol -p cox-tui -p cox-config -p cox-session
+clean
+$ cargo +1.99.0 hakari generate --diff && cargo +1.99.0 hakari verify
+clean; workspace-hack works correctly
+$ COX_HOME=/tmp/cox-scratch cargo +1.99.0 run -q -p cox -- doctor
+exit 1: ANTHROPIC_API_KEY is not set (expected; keyring is off). toolchain, COX_HOME, db, sandbox, git, prices and plugin cache passed.
+```
+
+`mise` is not installed in this environment. The commands above use the `1.99.0` toolchain pinned in `mise.toml`, without changing the default toolchain.
 #### T67.10 MCP resources and prompts
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3

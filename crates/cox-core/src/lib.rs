@@ -16,6 +16,7 @@ mod compact;
 mod context;
 mod dedup;
 pub mod external_agent;
+mod goal;
 mod hooks;
 pub mod init;
 mod json_tree;
