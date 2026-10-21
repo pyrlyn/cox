@@ -47,7 +47,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.9 | todo | P2 | 4 | 0% | |
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
-| T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | done | P2 | 4 | 100% | grok-4.7 |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
@@ -895,6 +894,7 @@ Check:
   - a fixture choosing `cheap` at 0.9 gives a main-turn `usage` row on tier `cheap` and `Advised { applied: true }`;
   - at 0.7 the turn runs on `code`;
   - a fixture naming `think` is ignored, and the static pick runs.
+- `plugins/jev/tests/fixtures.rs` gains a few fixed `route` states, so `requests.json` holds their bodies and `cox-vendor jev-fixtures` records them with the `risk` ones (T33.40.17).
 
 #### T33.40.10 Eval E2: route downgrade against the static pick
 
@@ -928,15 +928,6 @@ Goal: one page for users. It covers:
 - the E1/E2 results and the defaults they justify;
 - the migration from `[providers.typesafe]` (J§7).
 Check: `doc_examples` parses every `toml` block on the page against `Config` or the plugin manifest schema and fails on drift.
-
-#### T33.40.17 Optional: record live fixtures (needs the creator's key)
-
-Depends: T33.40.6, T33.40.9 · Size: ~150 · Files: `scripts/vendor/src/cox_vendor/jev_fixtures.py`, `scripts/vendor/tests/test_jev_fixtures.py`, `tests/fixtures/jev/*.json` (data)
-Goal: replace the hand-built fixtures, which follow the documented shapes, with recorded ones.
-- The script sends the plugin's own `risk` and `route` question sets for a handful of fixed states.
-- It redacts with the rollout scrubber, writes the bodies and records the model version and the date.
-- It runs only with `TYPESAFE_API_KEY` set by the creator. It never reads the keychain.
-Check: the offline pytest (body construction, redaction, no key means a clear exit) is green. With recorded fixtures, T33.40.4 and T33.40.6 stay green unchanged.
 
 #### T33.47 Plugin canvas: a desktop pane of plugin-drawn pages
 
