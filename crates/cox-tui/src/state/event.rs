@@ -14,7 +14,8 @@ use cox_protocol::types::{
     Submission,
 };
 
-use super::{Cell, Cmd, Modal, Notify, State, TurnRow, notice, user_turn};
+use super::submit::user_turn;
+use super::{Cell, Cmd, Modal, Notify, State, TurnRow, notice};
 use crate::banner::Banner;
 use crate::item_render::{CellRef, ItemRender};
 use crate::modal::{Approval, Question, QuestionAnswer};
