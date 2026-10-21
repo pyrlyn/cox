@@ -1,3 +1,62 @@
+#### T33.40.9 `route` advisor: downgrade only
+
+Model: Claude Code / claude-opus-5-5 · Status: done 2026-10-21 · Priority: P2 · Complexity: 4 · Depends: T33.40.8, T33.40.1, T33.40.4 · Size: ~170 · Files: `plugins/jev/src/route.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/it/plugins_jev.rs` (also touched: `plugins/jev/src/decide.rs`, `plugins/jev/plugin.toml`, `crates/cox-core/src/advise.rs`, `crates/cox-core/src/session.rs`, `crates/cox-core/src/compact.rs`, `docs/design/plugins.md`, `docs/design/v0.2-jev.md`)
+Goal: J§5.2, plugin side.
+- The state is the prompt, the todo list, a summary of the last turn and the number of files touched.
+- The questions are the `tier` Choice over the offered tiers (with the plugin's descriptions and `other` → `code`) and the `wants_depth` Noul.
+- The advice is `cheap` only when:
+  - the choice is `cheap`;
+  - confidence ≥ 0.8;
+  - `wants_depth` < 0.3;
+  - the last turn did not error.
+- `capabilities.decide` gains `route`.
+Check:
+- guest tests `route_needs_high_confidence`, `route_keeps_code_after_error_turn` and `route_other_means_code`;
+- e2e over two scripted turns:
+  - a fixture choosing `cheap` at 0.9 gives a main-turn `usage` row on tier `cheap` and `Advised { applied: true }`;
+  - at 0.7 the turn runs on `code`;
+  - a fixture naming `think` is ignored, and the static pick runs.
+
+Result: `plugins/jev/src/route.rs` owns J§5.2 on the guest side.
+- The request carries only `prompt`, `todo`, `last_turn` and `files_touched_count` from the core's state. This is an allowlist, so a field the core adds later never leaks.
+- `tier` is a Choice over the offered tiers plus `other` ("anything else; treated as code"). The descriptions are J§5.2's. `wants_depth` is a Noul.
+- The advice is `Answer::Choice` naming `cheap`, with the reply's own confidence, only when the choice is `cheap` at ≥ 0.8, `wants_depth` < 0.3 and `last_turn.errored` is `false`. Anything else is silence, so the static pick stands. A missing `errored` or `wants_depth` counts against a downgrade.
+- `decide.rs` dispatches the call-out and the resume on the point. A `route` question that does not offer `cheap` gets no request. `plugin.toml` declares `decide = ["risk", "route"]`.
+
+The core change the card's state needed: the core's `route` question carried only `static` and `prompt`, so the guest could not see the todo list, the last turn or the files touched. `cox-core/src/advise.rs` now builds them from `history` before the turn's message joins it. Tool output never goes in:
+- `todo` is the last successful `todo` call's list (scrubbed, at most 20 rows of 200 characters).
+- `last_turn` holds the tool names that pass the summary's `is_label` check, the count of failed results, and `errored`. `errored` is true when the turn stopped on `StopReason::Error` (the new `Inner::last_turn_failed`, set in `finish`) or its last tool result failed.
+- `files_touched_count` comes from `compact::working_state`.
+
+Decisions:
+- When the gate fails the guest gives no advice, not an explicit `code`, which mirrors `risk`'s raise-or-nothing.
+- No advice note: the core drops a `route` note before the rollout, so J§5.2's probabilities are not recorded. Changing that is a core decision, not taken here.
+- The gate values are J§5.2's constants, not a `[plugins.jev.route]` table. The card asks for none, and E2 (T33.40.10) decides whether they move.
+
+Deviations: about 230 lines of non-test code (the guest ~150, the core ~75) against ~170, across 7 source files rather than 3, because the core state above was missing.
+
+Not done: E2 (T33.40.10) has not run, so `route` stays opt-in.
+
+Check output:
+```
+$ (cd plugins && mise exec -- cargo test -p cox-plugin-jev --locked)
+     test result: ok. 31 passed (route_needs_high_confidence, route_keeps_code_after_error_turn, route_other_means_code, route_state_carries_only_the_turn_summary, route_without_cheap_on_offer_is_not_asked, route_question_calls_out_and_resumes_to_cheap, manifest_validates, ...)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox --test it plugins_jev
+     Summary 19 tests run: 19 passed (confident_cheap_answer_runs_the_turn_on_cheap, unsure_cheap_answer_keeps_the_turn_on_code, think_answer_is_ignored_and_the_static_pick_runs)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox-core advise
+     Summary 10 tests run: 10 passed (route_question_carries_todo_last_turn_and_files_touched, route_question_reports_a_turn_that_stopped_on_an_error)
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo --config build.incremental=false --config profile.dev.debug=0 --config profile.test.debug=0 nextest run --no-fail-fast --workspace --all-features
+     Summary 2816 tests run: 2816 passed, 17 skipped
+$ mise exec -- cargo test --manifest-path plugins/Cargo.toml --workspace: all ok
+$ mise exec -- cargo clippy --workspace --all-targets -- -D warnings: clean
+$ (cd plugins && cargo clippy -p cox-plugin-jev --all-targets, and --target wasm32-unknown-unknown, -D warnings): clean
+$ mise exec -- cargo fmt --all --check (both workspaces): clean
+$ mise exec just -- just desktop-test
+     every package passed except two, both environment-bound and outside this change (no Swift or FFI file changed):
+     CoxCore: thisRepositoryReadsAsARustWorkspaceWithItsInstructions reads the real ~/.claude/CLAUDE.md on this Mac (CI has none)
+     CoxTranscriptText: tenThousandBlocksBuiltPatchByPatchFitTheLaunchBudget (firstFrame <= 400 ms) at load average 104; the package does not link the Rust core
+```
+
 #### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T43.6 · Size: ~530 (landed larger; see Not done) · Priority: P2 · Complexity: 4
