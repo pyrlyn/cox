@@ -3,8 +3,8 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 // The DT§9 benchmark gate (T37.23): a 2 000-block transcript through `TranscriptView`, with
-// `cross_block_selection` on and a live selection across blocks, holds DT§1's budgets —
-// scrolling 1 500 frames × 40 pt within 1 % hitch time, and a reply streamed at 200 tok/s at the
+// `cross_block_selection` on and a live selection across blocks, holds DT§1's budgets — its
+// first frame within the 400 ms launch budget (T37.33), scrolling 1 500 frames × 40 pt within 1 % hitch time, and a reply streamed at 200 tok/s at the
 // bottom within 25 % main-thread busy time and no frame over 16 ms. A frame is main-thread
 // layout, draw and commit, as spike T37.37 timed it (research.md §9.5.13); the render server's
 // GPU time is not in it. Timed on the dev machine the suite runs on, not the M1 Air DT§1 names,
@@ -151,6 +151,23 @@ private let size = NSSize(width: 760, height: 800)
 @MainActor
 @Suite(.serialized)
 struct TranscriptBenchmarkTests {
+  /// T37.33: opening a session of 2 000 blocks draws its first frame within DT§1's launch
+  /// budget. `Host` lays out and draws once before it returns, so its making is the first frame.
+  @Test func twoThousandBlocksDrawTheirFirstFrameWithinTheLaunchBudget() throws {
+    let blocks = transcript(2_000)
+    let start = CACurrentMediaTime()
+    let host = Host(blocks, size: size)
+    let firstFrame = (CACurrentMediaTime() - start) * 1_000
+    defer { host.close() }
+
+    print(String(format: "MEASURE first frame 2000 blocks: %.1fms load=%@", firstFrame, load))
+    _ = try #require(host.text.range(of: "b1999"), "the last block is in the text")
+    withinBudget {
+      #expect(
+        firstFrame <= 400, "DT§1: an interactive window in 400 ms, took \(Int(firstFrame)) ms")
+    }
+  }
+
   @Test func scrollingTwoThousandBlocksKeepsHitchTimeUnderOnePercent() throws {
     let host = Host(transcript(2_000), size: size)
     defer { host.close() }

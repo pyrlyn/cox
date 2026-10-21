@@ -200,6 +200,13 @@ desktop-open: desktop-xcframework
 desktop-dmg: desktop-app
     bash scripts/desktop/dmg.sh
 
+# DT§1's performance budgets on this Mac (T37.33): the transcript's first frame, scrolling and
+# streaming at 2 000 blocks in process, then the built app's launch to a window and idle memory
+# on a 2 000-block fixture. Prints one row per budget; research.md §9.5.14 keeps the numbers.
+# Run it on an idle machine: a loaded one misses budgets the app holds.
+desktop-bench runs="5": desktop-app
+    bash scripts/desktop/bench.sh {{runs}}
+
 # The Windows app (T58.3). Visual Studio is the Xcode counterpart: `just desktop-windows-open`
 # opens desktop/windows/Cox.sln. Build and test run from that directory so global.json pins
 # SDK 10 and the Microsoft.Testing.Platform runner. `just desktop-windows-run` builds Debug
