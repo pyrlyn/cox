@@ -1285,6 +1285,7 @@ dependencies = [
  "cox-protocol",
  "cox-sanitize",
  "cox-web",
+ "globset",
  "insta",
  "nix 0.31.3",
  "pathdiff",
