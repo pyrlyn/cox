@@ -908,6 +908,19 @@ pub struct ContextBreakdown {
     pub cached: u32,
 }
 
+impl ContextBreakdown {
+    /// The context in use (A98): the last call's reported context, else
+    /// this estimate of the request about to go out, before any call
+    /// reported. The TUI's `ctx N%` and the desktop meter both read it.
+    pub fn used(&self, last_context: u32) -> u32 {
+        if last_context > 0 {
+            last_context
+        } else {
+            self.total
+        }
+    }
+}
+
 /// A parsed `.claude/commands/*.md`-style slash command the surface could
 /// not resolve to a built-in `Submission` variant, forwarded to `cox-ext`
 /// for execution.
@@ -1919,6 +1932,16 @@ mod tests {
             assert_eq!(serde_json::to_value(e).ok(), Some(e.name().into()));
         }
         assert_eq!(Effort::Medium.name(), "medium");
+    }
+
+    #[test]
+    fn context_in_use_is_the_reported_context_else_the_estimate() {
+        let breakdown = ContextBreakdown {
+            total: 50_000,
+            ..ContextBreakdown::default()
+        };
+        assert_eq!(breakdown.used(0), 50_000);
+        assert_eq!(breakdown.used(12_345), 12_345);
     }
 
     #[test]
