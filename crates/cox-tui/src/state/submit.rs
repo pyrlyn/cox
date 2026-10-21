@@ -11,8 +11,9 @@
 use cox_protocol::types::{Level, Mode as SessionMode, PermissionMode, Submission, Tier};
 use crossterm::event::KeyEvent;
 
+use super::act::{act, notice};
 use super::plugin::{file_command, plugin_command};
-use super::{Cmd, Modal, State, act, notice};
+use super::{Cmd, Modal, State};
 use crate::commands;
 use crate::composer::Edit;
 use crate::picker::{self, Kind, Picker};

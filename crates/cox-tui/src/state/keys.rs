@@ -11,13 +11,13 @@
 use cox_protocol::types::{Level, Submission};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use super::act::{notice, open_rewind};
 use super::cell::cell_text;
 use super::event::think_consent_answered;
 use super::submit::{compose, set_mode};
 use super::theme::{apply_theme_choice, open_theme_editor, preview_theme, restore_theme};
 use super::{
-    Ask, Cell, Cmd, GrantDecision, Modal, PluginMgmtRequest, PluginNewRequest, PluginRequest,
-    State, notice, open_rewind,
+    Ask, Cell, Cmd, GrantDecision, Modal, PluginMgmtRequest, PluginNewRequest, PluginRequest, State,
 };
 use crate::commands::{self, Context};
 use crate::keymap;

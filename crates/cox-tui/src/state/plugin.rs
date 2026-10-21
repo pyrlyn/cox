@@ -11,8 +11,9 @@
 use cox_protocol::plugin::{CommandDecl, CommandOut, NoticeLevel};
 use cox_protocol::types::{Level, SlashCommand, Submission};
 
+use super::act::notice;
 use super::submit::user_turn;
-use super::{Cmd, Modal, State, notice};
+use super::{Cmd, Modal, State};
 use crate::commands::{Action, COMMANDS};
 
 /// T22.2: a `/name args` line naming a file command — something
