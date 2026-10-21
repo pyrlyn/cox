@@ -96,6 +96,8 @@ pub fn flag_key_map() -> HashMap<&'static str, &'static str> {
         // T66.11: `cox run --autonomous` only turns the driver on; its gates and
         // limits are the user-only `[autonomous]` table, never a flag.
         ("autonomous", "runtime.autonomous"),
+        // T67.11: `--json-schema` is this run's check, not persisted config.
+        ("json-schema", "runtime.json_schema"),
         // `cox stats --project` (T28.2): a read-only scope flag, not config.
         ("project", "runtime.project"),
     ])

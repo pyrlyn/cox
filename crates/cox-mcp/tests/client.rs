@@ -36,9 +36,10 @@ use cox_protocol::types::{
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ClientResult,
-    ContentBlock, ElicitRequest, ElicitRequestParams, ListToolsResult, MetaObject,
-    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
-    ResourceContents, ServerCapabilities, ServerConfig, ServerRequest,
+    ContentBlock, ElicitRequest, ElicitRequestParams, ListPromptsResult, ListResourcesResult,
+    ListToolsResult, MetaObject, PaginatedRequestParams, Prompt, ReadResourceRequestParams,
+    ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
+    ServerConfig, ServerRequest,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData, ServerHandler};
@@ -765,6 +766,179 @@ async fn untrusted_description_and_read_only_hint_do_not_reach_the_model() {
         Some(approved.as_str())
     );
 
+    client.close().await;
+    task.abort();
+}
+
+/// One resource and one prompt. The resource body is over the visible cap
+/// and hides an escape in the middle, so the test can see that the archive
+/// row exists before the shortened text and that the escape never leaves
+/// the tool.
+struct Catalog {
+    body: String,
+}
+
+impl ServerHandler for Catalog {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_resources()
+                .enable_prompts()
+                .build(),
+        )
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let mut note = Resource::new("file://note", "note");
+        note.description = Some("hello\u{1b}[2J".into());
+        Ok(ListResourcesResult::with_all_items(vec![note]))
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Ok(ListPromptsResult::with_all_items(vec![Prompt::new(
+            "review",
+            Some("Review the diff".to_string()),
+            None,
+        )]))
+    }
+
+    async fn read_resource(
+        &self,
+        _request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(&self.body, "file://note")]).into())
+    }
+}
+
+struct Recording {
+    puts: Mutex<Vec<(ArchiveId, Vec<u8>)>>,
+}
+
+#[async_trait]
+impl Archive for Recording {
+    async fn put(&self, put: ArchivePut) -> Result<ArchiveId, StoreError> {
+        let id = ArchiveId::new();
+        self.puts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((id, put.bytes));
+        Ok(id)
+    }
+    async fn get(&self, _id: &ArchiveId) -> Result<Vec<u8>, StoreError> {
+        Ok(Vec::new())
+    }
+}
+
+fn cx_recording(archive: Arc<Recording>) -> ToolCx {
+    let mut cx = cx();
+    cx.archive = archive;
+    cx
+}
+
+/// The session passes `cox_sanitize::sanitize`. This crate cannot depend on
+/// that guard (`deps.rs`), so the test supplies the same shape of function
+/// and checks the tool runs it before the archive row is written.
+fn strip_escapes(text: &str) -> String {
+    text.replace("\u{1b}[31m", "").replace("\u{1b}[2J", "")
+}
+
+#[tokio::test]
+async fn mcp_resources_lists_reads_and_archives_over_cap_first() {
+    let marker = "UNIQUE_MIDDLE_TOKEN";
+    let mut body = "a".repeat(10_000);
+    body.push_str(marker);
+    body.push_str("\u{1b}[31m");
+    body.push_str(&"b".repeat(10_000));
+    let server = Catalog { body };
+    let (client_io, server_io) = tokio::io::duplex(256 * 1024);
+    let task = tokio::spawn(async move {
+        use rmcp::ServiceExt;
+        let running = server
+            .serve(tokio::io::split(server_io))
+            .await
+            .expect("server handshake");
+        let _ = running.waiting().await;
+    });
+    let client = McpClient::from_transport(
+        "docs",
+        tokio::io::split(client_io),
+        Duration::from_secs(2),
+        None,
+    )
+    .await
+    .expect("client handshake");
+    let tool = cox_mcp::client::resources_tool(vec![client.clone()], strip_escapes);
+    let spec = tool.spec();
+    assert_eq!(spec.name, "mcp_resources");
+    assert!(spec.deferred);
+    assert_eq!(spec.risk, Risk::ReadOnly);
+    let search = cox_tools::tool_search::ToolSearchTool::new([spec]);
+    assert_eq!(search.search("read mcp resource")[0].name, "mcp_resources");
+    assert_eq!(search.search("prompts")[0].name, "mcp_resources");
+
+    let archive = Arc::new(Recording {
+        puts: Mutex::new(Vec::new()),
+    });
+    let cx = cx_recording(archive.clone());
+    let listed = tool
+        .call(json!({"action": "resources"}), &cx)
+        .await
+        .expect("list resources");
+    assert!(!listed.is_error, "{}", listed.text);
+    assert!(listed.text.contains("file://note"), "{}", listed.text);
+    assert!(listed.text.contains("hello"), "{}", listed.text);
+    assert!(!listed.text.contains('\u{1b}'), "{}", listed.text);
+    let prompts = tool
+        .call(json!({"action": "prompts"}), &cx)
+        .await
+        .expect("list prompts");
+    assert!(!prompts.is_error, "{}", prompts.text);
+    assert!(prompts.text.contains("review"), "{}", prompts.text);
+    assert!(prompts.text.contains("Review the diff"), "{}", prompts.text);
+    assert!(
+        archive
+            .puts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty(),
+        "a short list is not an archive row"
+    );
+
+    let read = tool
+        .call(json!({"action": "read", "uri": "file://note"}), &cx)
+        .await
+        .expect("read");
+    assert!(!read.is_error, "{}", read.text);
+    {
+        let puts = archive
+            .puts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(puts.len(), 1, "the over-cap body is archived once");
+        let (id, bytes) = &puts[0];
+        let archived = String::from_utf8(bytes.clone()).expect("utf8");
+        assert!(archived.contains(marker), "the row holds the full body");
+        assert!(!archived.contains('\u{1b}'), "the row is sanitized");
+        assert!(
+            read.text.contains(&id.to_string()),
+            "the shortened text names the row that already exists: {}",
+            read.text
+        );
+        assert!(
+            !read.text.contains(marker),
+            "the middle is not in the visible text: {}",
+            read.text
+        );
+    }
     client.close().await;
     task.abort();
 }

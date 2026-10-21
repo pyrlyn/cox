@@ -80,6 +80,72 @@ $ mise exec -- cargo clippy --locked --workspace --all-targets --exclude cox-voi
 
 `--all-features` was not run here: `whisper-rs-sys` fails to link under this environment's cmake. CI installs the voice packages and runs that clippy.
 
+#### T67.11 `cox run -p --json-schema`
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
+
+Goal: `--json-schema <file>` validates the final answer against the schema. On failure cox sends one retry turn with the validation errors; a second failure exits non-zero and prints the errors.
+
+Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`, `crates/cox/src/config_load.rs`, `crates/cox/src/on_target.rs`, `crates/cox/tests/it/run_cli.rs`
+
+Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
+
+Result:
+- `--json-schema <file>` compiles one local JSON Schema (`jsonschema` 0.59, default features off: no remote `$ref` fetch) before a session opens. A bad file exits before any provider call.
+- The final assistant text is parsed as JSON and checked. A failure submits one more user turn whose text includes the errors and the marker `JSON schema validation`. A second failure prints the errors on stderr and exits 1. A turn that already failed for another reason is not retried.
+- The flag is `runtime.json_schema` in the flag map, and `--on` refuses it: the schema file is on this machine.
+- `deny.toml` allows `MIT-0` for `borrow-or-share`, which jsonschema 0.59 uses.
+
+Check output (2026-10-19):
+```
+mise exec -- cargo nextest run --locked -p cox json_schema
+  6 passed (json_schema_accepts_a_matching_answer_the_first_time,
+  json_schema_accepts_the_retry_after_one_failure,
+  json_schema_exits_nonzero_after_two_failures,
+  json_schema_mismatch_names_a_bad_answer_and_accepts_a_good_one,
+  json_schema_is_not_forwarded_to_a_target,
+  plus config_every_flag_has_a_config_key in the same run)
+mise exec -- cargo clippy --locked -p cox --all-targets -- -D warnings
+  clean
+mise exec -- cargo fmt --check
+  clean
+mise exec -- cargo hakari verify
+  workspace-hack works correctly
+```
+
+#### T67.10 MCP resources and prompts
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Goal: the MCP client lists and reads resources (`resources/list`, `resources/read`) and lists prompts (`prompts/list`). The model reaches them through one deferred read-only tool found by `tool_search`. Their output is untrusted: sanitized, and archived when over the cap.
+
+Files: `crates/cox-mcp/src/client.rs`, `crates/cox-mcp/tests/client.rs`, `crates/cox-tools/src/tool_search.rs`, `crates/cox-session/src/mcp.rs`
+
+Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
+
+Result:
+- `McpClient::list_resources`, `list_prompts` and `read_resource` follow rmcp's paginated list helpers and `resources/read`. A blob is named (`[binary … N bytes]`), not inlined. An MRTR `InputRequired` result is an error the model can read.
+- One deferred read-only tool, `mcp_resources` (`action` `resources` | `read` | `prompts`, optional `server`, `uri` for `read`). `tool_search`'s description names it. The session registers it only when at least one MCP server connected.
+- Server text is passed through the caller's sanitizer (the session passes `cox_sanitize::sanitize`; this crate does not depend on that guard) before it is archived or returned. Over `VISIBLE_BYTES` (8192), the archive row is written first and the model sees the head, the tail and `expand #id`. A failed archive returns no pointer.
+
+Check output (2026-10-19):
+```
+mise exec -- cargo nextest run --locked -p cox-mcp -p cox-tools
+  Summary: 319 tests run: 319 passed, 1 skipped
+  includes mcp_resources_lists_reads_and_archives_over_cap_first
+mise exec -- cargo clippy --locked -p cox-mcp -p cox-tools -p cox-session -p cox-config --all-targets -- -D warnings
+  clean
+mise exec -- cargo fmt --check
+  clean
+mise exec -- cargo hakari generate --diff
+  empty
+mise exec -- cargo hakari verify
+  workspace-hack works correctly
+mise exec -- cargo nextest run --locked -p cox-session -p cox-config -E 'test(/legacy_typesafe|open_moves_a_legacy|config_defaults_parse/)'
+  Summary: 5 tests run: 5 passed
+```
+
+Also on this branch, so the Check could run: restored `workspace-hack` to the last `cargo hakari generate` (renovate had bumped pins onto features those versions do not have); added the missing `cox_config::load::default_tiers` the jev fallback already calls; dropped a needless borrow clippy 1.99 rejects in `target_agents`.
 #### T33.45 Design the plugin API: shared, terminal-only and desktop-only
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: split across T33.45.1–T33.45.10 · Priority: P2 · Complexity: 4
