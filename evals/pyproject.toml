@@ -11,6 +11,7 @@ dependencies = [
 [project.scripts]
 cox-evals = "cox_evals.harness:main"
 cox-bench = "cox_evals.matrix:main"
+cox-jev-risk = "cox_evals.jev_risk:main"
 
 [project.optional-dependencies]
 tbench = [

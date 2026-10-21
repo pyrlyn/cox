@@ -43,7 +43,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
 | T32.17 | in progress | P2 | 3 | 80% | Claude / opus-5.5 |
-| T33.40.7 | todo | P2 | 3 | 0% | |
+| T33.40.7 | todo | P2 | 3 | 80% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
@@ -876,6 +876,7 @@ Plan:
 5. Record the table in R§5 with the Jev model version (`jev-1.13.0`, pinned), the date and the reproduce command.
 Falsifier: if the false-raise rate exceeds 10 %, or the p95 late-fallback rate exceeds 20 %, `risk` is not recommended by default, and the user guide says so.
 Check: `just test-evals` is green offline (corpus schema, metric maths, budget stop, command line). R§5 has the E1 table.
+Progress (Claude Code / opus-5.5): steps 1–4 landed — `cox_evals.jev_risk` (`cox-jev-risk`, arms `baseline`, `jev-200`, `jev-500`), the 300-command corpus and `evals/tests/test_jev_risk.py`; `just test-evals` is green. R§5 has the E1 section with the method, the falsifier, the reproduce commands and an empty table. Left (step 5): the live run needs `TYPESAFE_API_KEY` from the creator, and the baseline-only dry run needs a built `cox` (the disk was too full to build one); then fill the R§5 table and close the card.
 
 #### T33.40.9 `route` advisor: downgrade only
 
