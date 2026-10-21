@@ -92,12 +92,10 @@ pub struct Status {
 impl Status {
     /// The context `ctx N%` and `/context` count (A98): the last call's
     /// reported context, else the core's estimate for the request about to
-    /// go out — the same rule as the desktop meter's share.
+    /// go out — `ContextBreakdown::used`, the desktop meter's rule too.
     pub fn context_used(&self) -> u32 {
-        match (self.context_tokens, self.context) {
-            (0, Some(b)) => b.total,
-            (n, _) => n,
-        }
+        self.context
+            .map_or(self.context_tokens, |b| b.used(self.context_tokens))
     }
 }
 
