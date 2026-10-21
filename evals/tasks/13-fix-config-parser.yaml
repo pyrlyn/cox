@@ -1,0 +1,77 @@
+name: fix-config-parser
+prompt: |
+  The tests in test_config.py fail. Fix config.py so the parser does what
+  its docstring says, without changing the tests, then run
+  `python3 -m unittest` and show that it passes.
+setup: |
+  cat > config.py <<'EOF'
+  def parse(text):
+      """`key = value` lines into a dict. Blank lines are skipped, `#`
+      starts a comment except inside double quotes, a value may contain
+      `=`, and a double-quoted value loses its quotes."""
+      out = {}
+      for line in text.splitlines():
+          if not line.strip():
+              continue
+          key, value = line.split("=")
+          out[key.strip()] = value.strip()
+      return out
+  EOF
+  cat > test_config.py <<'EOF'
+  import unittest
+
+  from config import parse
+
+
+  class ParseTest(unittest.TestCase):
+      def test_skips_blank_and_comment_lines(self):
+          self.assertEqual(parse("\n# note\nname = cox\n"), {"name": "cox"})
+
+      def test_strips_a_trailing_comment(self):
+          self.assertEqual(parse("port = 80  # http"), {"port": "80"})
+
+      def test_keeps_equals_in_a_value(self):
+          self.assertEqual(parse("url = a=b"), {"url": "a=b"})
+
+      def test_unquotes_and_keeps_a_hash_inside_quotes(self):
+          self.assertEqual(parse('tag = "#1" # first'), {"tag": "#1"})
+  EOF
+  cksum test_config.py > .test.sum
+check: |
+  python3 -m unittest -q &&
+  cksum test_config.py | cmp -s - .test.sum
+timeout_s: 300
+dry_run:
+  turns:
+  - text: comments, the first `=` and quotes
+    calls:
+    - tool: write
+      input:
+        path: config.py
+        content: |
+          def parse(text):
+              """`key = value` lines into a dict. Blank lines are skipped, `#`
+              starts a comment except inside double quotes, a value may contain
+              `=`, and a double-quoted value loses its quotes."""
+              out = {}
+              for line in text.splitlines():
+                  line = strip_comment(line).strip()
+                  if not line:
+                      continue
+                  key, value = line.split("=", 1)
+                  value = value.strip()
+                  if len(value) >= 2 and value[0] == value[-1] == '"':
+                      value = value[1:-1]
+                  out[key.strip()] = value
+              return out
+
+
+          def strip_comment(line):
+              quoted = False
+              for i, ch in enumerate(line):
+                  if ch == '"':
+                      quoted = not quoted
+                  elif ch == "#" and not quoted:
+                      return line[:i]
+              return line
+    final: the parser now follows its docstring

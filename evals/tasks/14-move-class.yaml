@@ -1,0 +1,75 @@
+name: move-class
+prompt: |
+  Move the `Money` class out of app.py into a new module money.py, and have
+  app.py import it from there. test_app.py already expects this; do not
+  change it. Run `python3 -m unittest` and show that it passes.
+setup: |
+  cat > app.py <<'EOF'
+  class Money:
+      def __init__(self, cents):
+          self.cents = cents
+
+      def __add__(self, other):
+          return Money(self.cents + other.cents)
+
+      def __str__(self):
+          return f"${self.cents // 100}.{self.cents % 100:02d}"
+
+
+  def total(prices):
+      result = Money(0)
+      for price in prices:
+          result = result + price
+      return result
+  EOF
+  cat > test_app.py <<'EOF'
+  import unittest
+
+  from app import total
+  from money import Money
+
+
+  class AppTest(unittest.TestCase):
+      def test_total_adds_cents(self):
+          self.assertEqual(str(total([Money(150), Money(275)])), "$4.25")
+
+      def test_str_pads_cents(self):
+          self.assertEqual(str(Money(5)), "$0.05")
+  EOF
+  cksum test_app.py > .test.sum
+check: |
+  python3 -m unittest -q &&
+  grep -q '^class Money' money.py &&
+  ! grep -q '^class Money' app.py &&
+  cksum test_app.py | cmp -s - .test.sum
+timeout_s: 300
+dry_run:
+  turns:
+  - text: moving Money into its own module
+    calls:
+    - tool: write
+      input:
+        path: money.py
+        content: |
+          class Money:
+              def __init__(self, cents):
+                  self.cents = cents
+
+              def __add__(self, other):
+                  return Money(self.cents + other.cents)
+
+              def __str__(self):
+                  return f"${self.cents // 100}.{self.cents % 100:02d}"
+    - tool: write
+      input:
+        path: app.py
+        content: |
+          from money import Money
+
+
+          def total(prices):
+              result = Money(0)
+              for price in prices:
+                  result = result + price
+              return result
+    final: Money now lives in money.py
