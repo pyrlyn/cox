@@ -14,10 +14,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use super::cell::cell_text;
 use super::event::think_consent_answered;
 use super::submit::{compose, set_mode};
+use super::theme::{apply_theme_choice, open_theme_editor, preview_theme, restore_theme};
 use super::{
     Ask, Cell, Cmd, GrantDecision, Modal, PluginMgmtRequest, PluginNewRequest, PluginRequest,
-    State, apply_theme_choice, notice, open_rewind, open_theme_editor, preview_theme,
-    restore_theme,
+    State, notice, open_rewind,
 };
 use crate::commands::{self, Context};
 use crate::keymap;
