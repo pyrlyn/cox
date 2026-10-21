@@ -169,10 +169,52 @@ fn agent_result(events: &[Value]) -> &str {
 /// assistant text is what the parent's `agent` call returns.
 #[test]
 fn fake_agent_stream_json_reaches_a_cox_event_stream_unchanged() {
-    let args = ["-p", "--output-format", "stream-json"];
-    let rig = Rig::new("stream-json", "stream_json.json", &args, &["Agent"]);
+    assert_stream_json_replays("stream_json.json");
+}
+
+/// T35.10 Check: fixtures recorded from a real CLI run (`cox-vendor
+/// cursor-live-fixtures`, opt-in, the creator's key) replay through the
+/// same mapper and ACP client unchanged. A live file is checked once it has
+/// been recorded; the documented `acp.json` always runs, so the ACP check
+/// itself never goes untested.
+#[test]
+fn recorded_fixtures_replay_like_the_documented_ones() {
+    if fixture("live_stream_json.json").is_file() {
+        assert_stream_json_replays("live_stream_json.json");
+    }
+    for name in ["acp.json", "live_acp.json"] {
+        if fixture(name).is_file() {
+            assert_acp_text_replays(name);
+        }
+    }
+}
+
+/// Every agent message chunk of the fixture's prompt turn reaches the
+/// parent's `agent` result in order, the run finishing warning-free; the
+/// fake's reports of what cox answered each request sit between them.
+fn assert_acp_text_replays(name: &str) {
+    let fx = read_fixture(name);
+    let rig = Rig::new("acp", name, &["acp"], &["Agent"]);
     let events = rig.run();
-    let fx = read_fixture("stream_json.json");
+    let mut rest = agent_result(&events);
+    let turn = fx["prompt_turn"].as_array().expect("prompt_turn");
+    let chunks = turn
+        .iter()
+        .filter(|m| m["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
+        .filter_map(|m| m["params"]["update"]["content"]["text"].as_str());
+    for chunk in chunks {
+        let at = rest
+            .find(chunk)
+            .unwrap_or_else(|| panic!("{chunk:?} in {rest:?}"));
+        rest = &rest[at + chunk.len()..];
+    }
+}
+
+fn assert_stream_json_replays(name: &str) {
+    let args = ["-p", "--output-format", "stream-json"];
+    let rig = Rig::new("stream-json", name, &args, &["Agent"]);
+    let events = rig.run();
+    let fx = read_fixture(name);
     let lines: Vec<Value> = fx["lines"]
         .as_array()
         .expect("lines")

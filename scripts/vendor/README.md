@@ -18,6 +18,13 @@ uv run --project scripts/vendor cox-vendor model-names      # only the models' d
 uv run --project scripts/vendor cox-vendor whisper-models   # the pinned ggml table cox voice may download
 ```
 
+`cursor-live-fixtures` (T35.10) is the one command here that calls a paid
+service: it records one real `agent -p --output-format stream-json` run and
+one `agent acp` session into `crates/cox/tests/fixtures/cursor/live_*.json`,
+and refuses unless `COX_LIVE_CURSOR=1` and `CURSOR_API_KEY` are both set
+(`docs/plugins/cursor.md`). Its tests stub the CLI, so `just vendor-test`
+never reaches Cursor.
+
 `whisper-models` (T54.1) writes `crates/cox-voice/data/whisper-models.json`
 from the Hugging Face API for `ggerganov/whisper.cpp`: one row per offered
 model with a URL pinned to the repository commit, the size and the SHA-256

@@ -65,3 +65,25 @@ external agent cursor: ⚠ agent not found on PATH; key_env CURSOR_API_KEY not s
 
 A missing CLI or unset key is always a warning, never a hard failure — the
 preset is left out of `agent`'s names until both are in place (EA§7).
+
+## Checking a real CLI release (T35.10)
+
+cox's own tests drive a fake `agent` that replays Cursor's documented
+messages. To check that a real CLI release still sends those shapes, the
+creator records one live run of each mode with their own key:
+
+```bash
+COX_LIVE_CURSOR=1 CURSOR_API_KEY="<your key>" just vendor cursor-live-fixtures
+mise exec -- cargo nextest run -p cox -E 'test(/external_agents_cursor/)'
+```
+
+The recorder refuses to start without `COX_LIVE_CURSOR=1`, reads the key
+from the environment only (no keychain) and runs `agent` with a scratch
+`HOME` in a scratch git repository, so neither `agent login` state nor the
+desktop session is used. It refuses every permission request, redacts the
+key, the session and request ids and the scratch paths, and writes
+`crates/cox/tests/fixtures/cursor/live_stream_json.json` and
+`live_acp.json`. An event type the docs do not list stops it before
+anything is written — that is the drift this check exists to catch. The
+e2e then replays those files through the same mapper and ACP client as the
+documented ones. Nothing runs this in CI.

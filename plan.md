@@ -51,7 +51,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.45 | done | P2 | 4 | 100% | grok-4.7 |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
-| T35.10 | todo | P3 | 2 | 0% | |
+| T35.10 | todo | P3 | 2 | 80% | |
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
 | T37.32.3 | in progress | P1 | 2 | 90% | Claude Code / opus-5.5 |
@@ -989,6 +989,7 @@ Every card in this phase:
 Depends: T35.7 · Size: ~130 · Files: `scripts/vendor/src/cox_vendor/cursor_live_fixtures.py` (+ its tests), `tests/fixtures/cursor/*.json` (data, recorded from one real run)
 Goal: with the creator's own `CURSOR_API_KEY` and the installed CLI, one real `agent -p --output-format stream-json` and one real `agent acp` run against a scratch repo, recorded into the same fixture shape T35.7 already consumes — confirms the documented event shapes still match a real CLI release; never runs in CI, matches T33.40.17's shape.
 Check: the recorded fixture round-trips through T35.7's mapper unchanged; the script's own test asserts it never touches a real key by default (opt-in env var required).
+Progress: the tooling is in (`cox-vendor cursor-live-fixtures`, its offline tests, and the e2e test `recorded_fixtures_replay_like_the_documented_ones`, which replays `live_stream_json.json` and `live_acp.json` once they exist; usage in `docs/plugins/cursor.md`). The live files go beside the documented ones rather than over them, because each vendored file has one writer (A48). Left: the creator runs `COX_LIVE_CURSOR=1 CURSOR_API_KEY=… just vendor cursor-live-fixtures`, then the e2e, and commits the two files with the CLI version and date the script stamps into `sources`. A refused event type or a failing replay comes back to the creator as a new card.
 
 ### P36 — Compound shell commands (goal: a `Bash(<prefix>:*)` rule or a session grant covers exactly the commands it names, never a command chained after them)
 
