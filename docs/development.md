@@ -27,4 +27,6 @@ mise exec -- cargo test --workspace
 | `crates/cox-tui` | Terminal UI |
 | `crates/cox-acp` / `crates/cox-mcp` | Editor and MCP integrations |
 
+Cutting a release, and recovering from a failed one: [`release.md`](release.md).
+
 For design decisions, milestones, and task checks, see [`plan.md`](../plan.md). For evidence behind the design, see [`research.md`](../research.md).

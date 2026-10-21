@@ -180,6 +180,13 @@ fn mode_changed(inner: &Inner) -> Event {
     }
 }
 
+/// Loads path-scoped rules for paths a tool just touched (T67.6). The
+/// surface implements it; this crate does not read the rule files.
+pub trait PathRules: Send + Sync {
+    /// Framed rule bodies whose globs match `touched`, as `(source, text)`.
+    fn matching(&self, touched: &[String]) -> Vec<(String, String)>;
+}
+
 /// One conversation: a provider, tools, a store, and an event stream.
 #[derive(Clone)]
 pub struct Session {
@@ -262,6 +269,12 @@ pub struct Session {
     /// undo), which is safe only because `system[3]` sits after the last
     /// cache breakpoint. Shared with children, like the memory index.
     harness_notes: Arc<std::sync::Mutex<String>>,
+    /// Path-scoped rules the surface re-reads (T67.6). Empty until set.
+    /// Shared with children so a subagent's read injects the same rule once.
+    path_rules: Arc<OnceLock<Arc<dyn PathRules>>>,
+    /// Rule text already sent this session. Grows when a new path matches;
+    /// a later request appends the same text instead of a second copy.
+    path_rule_text: Arc<StdMutex<String>>,
     /// Output styles the surface discovered (T67.12): name, description,
     /// and the volatile block. Set once at open, like the skills index,
     /// because this crate reads no files. Shared with children.
@@ -461,6 +474,8 @@ impl Session {
         child.instructions = self.instructions.clone();
         child.memory_index = self.memory_index.clone();
         child.harness_notes = self.harness_notes.clone();
+        child.path_rules = self.path_rules.clone();
+        child.path_rule_text = self.path_rule_text.clone();
         child.output_styles = self.output_styles.clone();
         child.output_style = self.output_style.clone();
         child.checkpoint_warned = self.checkpoint_warned.clone();
@@ -607,6 +622,8 @@ impl Session {
             skills_index: Arc::new(OnceLock::new()),
             memory_index: Arc::new(OnceLock::new()),
             harness_notes: Arc::new(std::sync::Mutex::new(String::new())),
+            path_rules: Arc::new(OnceLock::new()),
+            path_rule_text: Arc::new(StdMutex::new(String::new())),
             output_styles: Arc::new(OnceLock::new()),
             output_style: Arc::new(StdMutex::new(None)),
             self_task: Arc::new(OnceLock::new()),
@@ -997,6 +1014,12 @@ impl Session {
     /// surface passes nothing when the directory yields only the header.
     pub fn set_memory_index(&self, index: String) {
         let _ = self.memory_index.set(index);
+    }
+
+    /// Installs the path-rule loader (T67.6). A second call is ignored, like
+    /// `set_instructions`: the files are re-read by the loader itself.
+    pub fn set_path_rules(&self, rules: Arc<dyn PathRules>) {
+        let _ = self.path_rules.set(rules);
     }
 
     /// Replaces the refined prompt notes `system[3]` carries (T66.7). The
@@ -2031,6 +2054,22 @@ impl Session {
                 req.system[3].text.push('\n');
                 req.system[3].text.push_str(&notes);
             }
+            // T67.6: path rules follow a successful read/edit/write. They
+            // join system[3], after the prefix breakpoint, and a rule's
+            // text is kept so the next request does not append it again.
+            let touched = crate::context::touched_paths(history);
+            let rules = {
+                let mut acc = self
+                    .path_rule_text
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(loader) = self.path_rules.get() {
+                    let blocks = loader.matching(&touched);
+                    *acc = crate::context::merge_new_rules(&acc, &blocks);
+                }
+                acc.clone()
+            };
+            crate::context::append_rule_text(&mut req, &rules);
             // T67.12: the selected output style rides in the same volatile
             // block, after the prefix breakpoint.
             let style = self
