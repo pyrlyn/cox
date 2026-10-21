@@ -2561,8 +2561,7 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
         }
         Event::Usage { usage, .. } => {
             state.status.cost_usd += usage.cost_usd;
-            state.status.context_tokens =
-                usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
+            state.status.context_tokens = usage.context_tokens();
             state.status.cache_ratio = cox_core::cache_diag::ratio_of(&usage);
         }
         Event::ModelSwitched { tier, to, .. } => {
@@ -2673,7 +2672,9 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
         Event::SessionStarted { .. }
         | Event::Compacted { .. }
         | Event::GrantRevoked { .. }
-        | Event::RepoMapBuilt { .. } => {}
+        | Event::RepoMapBuilt { .. }
+        // T67.5 draws the goal; until then the verdict is recorded and not shown.
+        | Event::GoalVerdict { .. } => {}
     }
     cmds
 }
@@ -2806,6 +2807,31 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent};
 
     use super::testkit::*;
+
+    /// The status context size is `Usage::context_tokens`, the rule the
+    /// ledger and `cox-app` share, so huge counts saturate instead of
+    /// overflowing the hand-written sum this replaced.
+    #[test]
+    fn usage_context_tokens_saturate_like_the_protocol_rule() {
+        let mut state = State::new(PermissionMode::Default, SandboxMode::WorkspaceWrite);
+        let usage = cox_protocol::types::Usage {
+            input_tokens: u32::MAX,
+            output_tokens: 1,
+            cache_read_tokens: 7,
+            cache_write_tokens: 9,
+            estimated: false,
+            cost_usd: 0.0,
+            latency_ms: 0,
+        };
+        update(
+            &mut state,
+            Msg::Event(Event::Usage {
+                turn: TurnId::new(),
+                usage,
+            }),
+        );
+        assert_eq!(state.status.context_tokens, u32::MAX);
+    }
 
     /// T45.6: `@<agent> task` at line start runs that agent directly.
     #[test]
