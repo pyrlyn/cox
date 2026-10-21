@@ -116,7 +116,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T57.7 | todo | P1 | 2 | 90% | |
 | T57.8 | todo | P1 | 5 | 0% | |
 | T57.9 | todo | P1 | 2 | 0% | |
-| T57.10 | todo | P2 | 2 | 0% | |
 | T57.11 | todo | P2 | 3 | 0% | |
 | T57.12 | todo | P3 | 2 | 0% | |
 | T57.13 | todo | P2 | 3 | 0% | |
@@ -1494,12 +1493,6 @@ Check: in the Windows job, `cargo nextest run -p cox-tools windows_bash_runs_and
 Depends: T57.5 · Size: ~100 · Files: `crates/cox-app/src/terminal.rs`, `crates/cox-app/Cargo.toml`, `crates/cox/src/self_update.rs`
 Goal: `cox-app`'s terminal kill path uses T57.5's helper and nix moves to `cfg(unix)`; `self_update`'s `PermissionsExt` becomes `cfg(unix)`; the Unix-only tests (symlinks, file modes; R10.1.10) are marked `cfg(unix)` in the same change or in a sub-card when they exceed the 3 files. `cox-app` and `cox` join `just windows-check`.
 Check: T57.1's job passes with `cox-app` and `cox` in the list; `mise exec -- cargo nextest run -p cox-app -p cox` on macOS is unchanged.
-
-#### T57.10 Home, config and keys on Windows
-
-Depends: T57.9 · Size: ~80 · Files: `crates/cox-config/src/load.rs`, `crates/cox-session/src/doctor.rs`
-Goal: `cox_home()` resolves to `%USERPROFILE%\.cox` when `HOME` is unset (it falls back to `.` if both are, R10.1.8; that fallback becomes an error on Windows). keyring 4.2.0 already stores keys in the Windows Credential Manager (R10.4.5), so no dependency changes. `cox doctor` names the key store as "Windows Credential Manager" and the sandbox as "none (D7): every command asks". No test touches the Credential Manager (A49).
-Check: `mise exec -- cargo nextest run -p cox-config -p cox-session cox_home_uses_userprofile_without_home doctor_names_credential_manager_on_windows doctor_reports_no_sandbox_under_d7` (the lookups injected, so they run on every host).
 
 #### T57.11 Full workspace on Windows: check, clippy and nextest
 

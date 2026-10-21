@@ -89,6 +89,31 @@ cargo +1.99.0 fmt --check -p cox-tools
   clean
 ```
 
+#### T57.10 Home, config and keys on Windows
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: T57.9 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: `cox_home()` resolves to `%USERPROFILE%\.cox` when `HOME` is unset. Both `HOME` and `USERPROFILE` unset is an error on Windows. `cox doctor` names the key store as "Windows Credential Manager" and the sandbox as "none (D7): every command asks". No test touches the Credential Manager.
+
+Files: `crates/cox-config/src/load.rs`, `crates/cox-session/src/doctor.rs`
+
+`cox_home_from` and `resolve_home` take the two variables and a `windows` flag, so the Windows miss runs on Linux. `HOME` wins over `USERPROFILE`. `COX_HOME` still wins over both. `cox_home()` and `home_dir()` keep returning `PathBuf`: `unwrap_or_else(cox_home)` is the call shape in the binary and the app, so `HomeUnset` maps back to `.` there. A Windows logon sets `USERPROFILE`. Doctor's missing-key text and the no-backend sandbox row take an injected OS; other hosts keep the macOS key hint and the "unconfined" sandbox row.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo nextest run --locked -p cox-config -p cox-session -E 'test(/cox_home_uses_userprofile_without_home|doctor_names_credential_manager_on_windows|doctor_reports_no_sandbox_under_d7/)'
+     Summary [   0.043s] 5 tests run: 5 passed, 169 skipped
+     (the filter also matched doctor_warns_not_fails_when_a_keyless_section_has_no_key and the_app_finds_the_provider_key_in_its_own_store)
+$ mise exec -- cargo clippy --locked -p cox-config -p cox-session --all-targets -- -D warnings
+     Finished clean
+$ mise exec -- cargo fmt --check
+     clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     toolchain, db, sandbox (bwrap), git, prefix ok; API keys fail because ANTHROPIC_API_KEY is unset (exit 1)
+```
+
+Not run: `just windows-check`. The Windows job-object and Credential Manager stores are not executed here. The doctor rows are the injected wording, not a live Credential Manager read.
+
 #### T33.40.11 User guide: the Jev plugin
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: T33.40.6, T33.40.9 · Size: ~150

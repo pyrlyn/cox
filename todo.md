@@ -33,7 +33,6 @@
 - T57.7. `cox-tools` compiles on Windows
 - T57.8. `bash` on Windows: ConPTY inside a job object
 - T57.9. `cox-app` and `crates/cox` compile on Windows
-- T57.10. Home, config and keys on Windows
 - T57.11. Full workspace on Windows: check, clippy and nextest
 - T57.12. Windows release target in cargo-dist
 - T57.13. End to end: the real binary on Windows
