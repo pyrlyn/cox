@@ -4,8 +4,11 @@
 //! into advice. The host gates, ledgers and retries the call, so the guest
 //! never reaches the paid endpoint itself. Pure, so it tests on the host.
 //!
-//! What is asked and how the answers read are `risk`'s (T33.40.6, J§5.1);
-//! this module only moves the request out and the reply back.
+//! What is asked and how the answers read are `risk`'s (T33.40.6, J§5.1)
+//! and `route`'s (T33.40.9, J§5.2); this module only moves the request out
+//! and the reply back.
+
+use std::collections::BTreeMap;
 
 use cox_plugin_sdk::{
     Advice, CallTarget, DecideOut, DecidePoint, DecideResume, ModelCall, OwnProvider,
@@ -14,28 +17,36 @@ use cox_plugin_sdk::{
 use serde_json::json;
 
 use crate::risk::{self, Thresholds};
-use crate::wire::{self, SystemOneRequest};
+use crate::route;
+use crate::wire::{self, Question, SystemOneRequest};
 
 /// The `[[provider]]` section a call-out names (`plugin.toml`).
 pub const SECTION: &str = "typesafe";
 /// The stable model a call-out asks for (J5).
 pub const MODEL: &str = "jev-1.13.0";
 
-/// `cox_decide`: a call-out for a `risk` question about at least one call,
-/// silence for anything else. The core asks `risk` once per tool batch
-/// (T33.40.6.1), so a question with no items has nothing to judge.
+/// `cox_decide`: a call-out for a `risk` batch or a `route` question that
+/// offers `cheap`, silence for anything else. The core asks `risk` once per
+/// tool batch (T33.40.6.1), so a question with no items has nothing to judge.
 pub fn decide(asked: &Asked) -> DecideOut {
-    if asked.point != DecidePoint::Risk || asked.items.is_empty() {
-        return DecideOut::Advice(None);
-    }
-    let body = SystemOneRequest::new(
-        risk::state(asked),
-        MODEL,
-        risk::questions(asked.items.len()),
-    );
-    // The host overwrites tier, job and model (PL§7d); the rest is a
-    // `cox_protocol::types::Request` whose one user message is the body
-    // `provider::stream` sends verbatim.
+    let (state, questions) = match asked.point {
+        DecidePoint::Risk if !asked.items.is_empty() => {
+            (risk::state(asked), risk::questions(asked.items.len()))
+        }
+        DecidePoint::Route => match route::questions(&asked.options) {
+            Some(questions) => (route::state(asked), questions),
+            None => return DecideOut::Advice(None),
+        },
+        _ => return DecideOut::Advice(None),
+    };
+    call_out(state, questions)
+}
+
+/// The host overwrites tier, job and model (PL§7d); the rest is a
+/// `cox_protocol::types::Request` whose one user message is the body
+/// `provider::stream` sends verbatim.
+fn call_out(state: Value, questions: BTreeMap<String, Question>) -> DecideOut {
+    let body = SystemOneRequest::new(state, MODEL, questions);
     let request = json!({
         "tier": "cheap",
         "job": "main",
@@ -75,7 +86,11 @@ pub fn resume(resumed: &DecideResume, thresholds: &Thresholds) -> Option<Advice>
         .filter_map(|e| e.get("text").and_then(Value::as_str))
         .collect();
     let answers = wire::parse(&body).ok()?;
-    risk::verdict(&answers, resumed.question.items.len(), thresholds)
+    match resumed.question.point {
+        DecidePoint::Route => route::verdict(&answers, &resumed.question),
+        DecidePoint::Risk => risk::verdict(&answers, resumed.question.items.len(), thresholds),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -130,10 +145,37 @@ mod tests {
 
     #[test]
     fn other_points_and_empty_batches_are_silent() {
+        let mut rank = batch(&["ls"]);
+        rank.point = DecidePoint::Rank;
+        assert_eq!(decide(&rank), DecideOut::Advice(None));
         let mut route = batch(&["ls"]);
         route.point = DecidePoint::Route;
+        route.options = vec!["code".into()];
         assert_eq!(decide(&route), DecideOut::Advice(None));
         assert_eq!(decide(&batch(&[])), DecideOut::Advice(None));
+    }
+
+    #[test]
+    fn route_question_asks_tier_and_depth() {
+        let mut question = batch(&[]);
+        question.point = DecidePoint::Route;
+        question.state = json!({
+            "prompt": "rename foo",
+            "static": "code",
+            "tool_output": "must stay out",
+        });
+        question.options = vec!["cheap".into(), "code".into()];
+        let body = body(decide(&question));
+        assert_eq!(body["state"]["prompt"], "rename foo");
+        assert_eq!(body["state"].get("tool_output"), None);
+        assert_eq!(body["questions"]["tier"]["type"], "choice");
+        assert_eq!(body["questions"]["wants_depth"]["type"], "noul");
+        assert!(
+            body["questions"]["tier"]["criteria"]["cheap"]
+                .as_str()
+                .unwrap()
+                .starts_with("mechanical:")
+        );
     }
 
     #[test]
