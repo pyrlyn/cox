@@ -1,14 +1,19 @@
 # The surfaces example (PL§15, T33.45.8): one plugin with a part for each
 # kind of surface. `surfaces` is left out, so it loads everywhere; the host
 # keeps the shared parts, the terminal-only key and the desktop-only
-# inspector tab, toolbar item, palette action and notification on the surface
-# that has them, and drops the rest with one notice.
+# inspector tab, toolbar item, palette action, notification and canvas on the
+# surface that has them, and drops the rest with one notice.
 api = 1
 id = "glance"
 version = "0.1.0"
 name = "Glance"
-description = "A status segment and /glance:glance everywhere, a leader key in the terminal, an inspector tab, toolbar item, palette action and notification on the desktop"
+description = "A status segment and /glance:glance everywhere, a leader key in the terminal, an inspector tab, toolbar item, palette action, notification and a two-frame canvas on the desktop"
 wasm = "surfaces.wasm"
+
+# The canvas's redraw source (T33.47.8): streamed text chunks, counted on
+# the "Count" frame, so a long reply redraws it a few times a second.
+[capabilities]
+events = ["text_delta"]
 
 # Shared: drawn by the terminal and the desktop alike.
 [capabilities.ui]
@@ -25,3 +30,4 @@ inspector = true
 toolbar = true
 palette = true
 notify = true
+canvas = true
