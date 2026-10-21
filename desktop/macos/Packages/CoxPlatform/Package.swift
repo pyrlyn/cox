@@ -7,7 +7,8 @@
 // keys in the Keychain over the Security framework, no wrapper package
 // (research.md 9.5.8) — and notifications with Allow, Deny and Answer
 // actions (T37.27); the terminal pane over SwiftTerm (T51.5); the agent's browser page
-// over WebKit's `WebPage` (T51.9, no dependency); later Sparkle and the OAuth handoff.
+// over WebKit's `WebPage` (T51.9, no dependency); Sparkle 2 updates and the bundled CLI's
+// link (T37.32.2); later the OAuth handoff.
 // Depends on CoxClient only, for the `SecretStore` seam, so it builds and
 // tests without the Rust XCFramework; and on swift-dependencies, to give that seam's
 // dependency key its live value (DT§4.6).
@@ -29,6 +30,8 @@ let package = Package(
     .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.17.1"),
     // T51.5: the terminal pane's emulator and renderer (research.md §9.5.2, MIT).
     .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.20.0"),
+    // T37.32.2: updates outside the App Store with an EdDSA-signed appcast (research.md 9.5.1, MIT).
+    .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0"),
     .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", exact: "0.65.1"),
   ],
   targets: [
@@ -38,6 +41,7 @@ let package = Package(
         .product(name: "CoxClient", package: "CoxModel"),
         .product(name: "Dependencies", package: "swift-dependencies"),
         .product(name: "SwiftTerm", package: "SwiftTerm"),
+        .product(name: "Sparkle", package: "Sparkle"),
       ],
       linkerSettings: [.linkedFramework("Security")],
       plugins: [swiftLint]

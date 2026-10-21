@@ -4,9 +4,10 @@
 # and every other line of Swift lives in the local packages, so the project stays a few lines
 # of spec and never merge-conflicts.
 #
-# Debug is ad-hoc signed (`-`): no signing identity, no team, no Keychain. The downloadable
-# Debug DMG is re-signed with Developer ID by scripts/desktop/dmg.sh (T37.32.3); Hardened
-# Runtime for a shipped build, notarization and Sparkle are T37.32.2.
+# Both configurations are ad-hoc signed (`-`): no signing identity, no team, no Keychain. The
+# DMGs are re-signed with Developer ID by scripts/desktop/dmg.sh (T37.32.3); Release has the
+# Hardened Runtime notarization needs (T37.32.2). Sparkle checks only when the build passes
+# COX_SPARKLE_PUBLIC_KEY, which the release does; with it empty the updater stays off.
 name: Cox
 options:
   deploymentTarget:
@@ -15,6 +16,9 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    # Apple Silicon only (DT§11 Q2): Debug builds the active arch alone anyway, but Release
+    # would otherwise build x86_64 too, which CoxFFI.xcframework does not have.
+    ARCHS: arm64
     MARKETING_VERSION: "0.1.2"
     CURRENT_PROJECT_VERSION: "1"
 packages:
@@ -37,6 +41,11 @@ packages:
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     exactVersion: 3.1.0
+  # T37.32.2: CoxPlatform's updater; the same requirement as its Package.swift, so one version.
+  # Named here so the app embeds Sparkle.framework, which a package's dynamic binary needs.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.10.0
 targets:
   Cox:
     type: application
@@ -51,6 +60,7 @@ targets:
       - package: CoxTranscript
       - package: CoxUI
       - package: KeyboardShortcuts
+      - package: Sparkle
       - package: swift-dependencies
         product: Dependencies
     settings:
@@ -67,6 +77,10 @@ targets:
         DEVELOPMENT_TEAM: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: NO
+        # Sparkle's feed (DT§7): the newest release's asset, and a test release is never the
+        # newest. Info.plist reads both; the key is the EdDSA public half, not a secret.
+        COX_APPCAST_URL: https://github.com/pyrlyn/cox/releases/latest/download/appcast.xml
+        COX_SPARKLE_PUBLIC_KEY: ""
       configs:
         Release:
           ENABLE_HARDENED_RUNTIME: YES
