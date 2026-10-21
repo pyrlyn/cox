@@ -908,6 +908,20 @@ pub struct ContextBreakdown {
     pub cached: u32,
 }
 
+impl ContextBreakdown {
+    /// The context in use: the last call's reported context, else this
+    /// estimate before any call reported. Lives here so the TUI's `ctx N%`
+    /// and the desktop meter cannot drift; `cox-tui` may not depend on
+    /// `cox-app`, and both already depend on this crate.
+    pub fn used(&self, last_context: u32) -> u32 {
+        if last_context > 0 {
+            last_context
+        } else {
+            self.total
+        }
+    }
+}
+
 /// A parsed `.claude/commands/*.md`-style slash command the surface could
 /// not resolve to a built-in `Submission` variant, forwarded to `cox-ext`
 /// for execution.
@@ -1925,6 +1939,16 @@ mod tests {
     fn usage_sums_cache_fields() {
         let usage = sample_usage();
         assert_eq!(usage.context_tokens(), 100 + 30 + 5);
+    }
+
+    #[test]
+    fn context_used_is_the_reported_context_else_the_estimate() {
+        let b = ContextBreakdown {
+            total: 50_000,
+            ..ContextBreakdown::default()
+        };
+        assert_eq!(b.used(0), 50_000, "estimate before any call reported");
+        assert_eq!(b.used(12_345), 12_345, "a reported context wins");
     }
 
     /// Every fieldless `Job` still serializes as its bare tag (unchanged by
