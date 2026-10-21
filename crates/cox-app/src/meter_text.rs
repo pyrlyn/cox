@@ -212,20 +212,10 @@ fn hit(t: &Tally, span: &str) -> Option<String> {
     })
 }
 
-/// The context the split is scaled to: the last call's reported context
-/// (the `Context` figure), or the core's estimate before any call reported.
-fn used(b: &ContextBreakdown, last_context: u32) -> u32 {
-    if last_context > 0 {
-        last_context
-    } else {
-        b.total
-    }
-}
-
 /// `7.6%` or `42%`; `None` when the window is unknown.
 fn percent(b: &ContextBreakdown, last_context: u32) -> Option<String> {
     let window = b.window.filter(|w| *w > 0)?;
-    let pct = f64::from(used(b, last_context)) / f64::from(window) * 100.0;
+    let pct = f64::from(b.used(last_context)) / f64::from(window) * 100.0;
     Some(if pct < 10.0 {
         format!("{pct:.1}%")
     } else {
@@ -251,13 +241,13 @@ fn cost(usd: f64) -> String {
 /// The window less `used`; `None` when the window is unknown.
 fn free(b: &ContextBreakdown, last_context: u32) -> Option<String> {
     let window = b.window.filter(|w| *w > 0)?;
-    Some(tokens(window.saturating_sub(used(b, last_context))))
+    Some(tokens(window.saturating_sub(b.used(last_context))))
 }
 
 /// The core's split scaled to `used`, so the legend sums to the `Context`
 /// figure beside it and the bar's filled length is the share.
 fn parts(b: &ContextBreakdown, last_context: u32) -> Vec<ContextPart> {
-    let used = f64::from(used(b, last_context));
+    let used = f64::from(b.used(last_context));
     let scale = used / f64::from(b.total.max(1));
     let whole = b.window.filter(|w| *w > 0).map_or(used, f64::from).max(1.0);
     [
