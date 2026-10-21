@@ -1,6 +1,5 @@
 # Todo
 
-- T32.17. `cox-config` loads through the shared `config-schema` crate
 - T33.40.7. Eval E1: risk escalation against the classifier alone
 - T33.40.9. `route` advisor: downgrade only
 - T33.40.10. Eval E2: route downgrade against the static pick

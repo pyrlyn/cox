@@ -1,3 +1,30 @@
+#### T32.17 `cox-config` loads through the shared `config-schema` crate
+
+Model: Claude / opus-5.5 · Status: done 2026-10-21 · Depends: — · Size: ~200 (plus tests) · Priority: P2 · Complexity: 3 · Files: `crates/cox-config/src/{load,cmd,lib}.rs`, `crates/cox-config/Cargo.toml`, `Cargo.toml`, `Cargo.lock`, `workspace-hack/Cargo.toml`, `toolchain.md`
+Goal: `config-schema` 0.1 (crates.io, `pyrlyn/crates-packages`) was extracted from this crate, rtok's `config/layers.rs` and ketch's `toml_file.rs`; `cox-config` consumes it instead of keeping its own copy (A160, the creator's approval for Mailune X1). Not a `git mv` card like the rest of P32: it deletes code the shared crate now owns. Behaviour stays the same: the layer order, `source_of`, `COX_*` handling, the A138 check in `cox config set` and the `ConfigError`/`CoreError::Config` variants; the existing `cox-config` and `crates/cox` config tests pass unchanged.
+
+Plan:
+1. `load.rs`: the layers go through `config_schema::Layers` (`toml_text` default, `file` user and project, `env` with an `EnvLayer` over `default.toml`'s key tree and the same ignore list, `overrides` for `COX_HOME` and the flags). Delete `Named`, `env_key`, `default_key_tree` and `to_core_error`; `find_git_root` keeps its canonical path over `config_schema::git_root`. `Layers` merges only, so the imported Claude layers keep figment's `adjoin` reading in a small JSON step (lists add, the lower layers win elsewhere), and `source_of` reports the lower layer for a key they only extended, as `adjoin` did. Array keys keep reading a `COX_*` value as TOML, not as a comma list.
+2. `cmd.rs`: `set` and `set_json_in` plan the edit with `config_schema::plan_edit_foreign`, check the result with `check_user_toml` (A138), then `Edit::apply`; delete the private `parse_value`, `toml_from_json` and the table walk.
+3. `lib.rs`: `ConfigError` keeps its variants; `InvalidToml` carries the parser's message as text, and `config_schema::Error` maps onto the existing variants.
+4. Manifests: `config-schema = "0.1"` in the workspace, `cox-config` drops its direct `figment` and `toml_edit`; `cargo hakari generate`; `toolchain.md` and §1.1. The workspace `rust.md` row is the creator's to add.
+
+Out of scope: `docs/config.jsonschema` keeps `schemars::schema_for!` (`config_schema::schema_text` drops `null` from `Option` types, which would change the committed schema and the desktop Settings screen's input).
+
+What landed:
+- Steps 1–4 in #287 (`cfd13ee5`): the layering, the `COX_*` env layer, the git-root walk and the comment-keeping `config set` edit go through `config_schema`; the private copies are gone and `cox-config` no longer depends on `figment`. `Cargo.lock` resolves `config-schema 0.1.0` from crates.io (checksummed) and `workspace-hack` is current.
+- This closing change: the gates rerun against the published crate, the card moved here, and the §1.1 row names the direct `toml_edit` dependency.
+
+Deviations:
+- `cox-config` keeps a direct `toml_edit`: `cmd::append_allow_rule_in` (T69.2, landed after #287) appends one rule to `permissions.allow` keeping each element's layout and comments, under a lock with a temp-file rename. `config-schema` 0.1 has no append edit; `plan_edit_foreign` replaces the whole array, which would drop the user's per-element comments.
+
+Check (2026-10-21, macOS arm64, `--config build.incremental=false --config profile.dev.debug=0 --config profile.test.debug=0` to fit the disk):
+- `cargo nextest run --workspace --locked`: 2804 passed, 17 skipped (covers `-p cox-config -p cox -p cox-app`).
+- `cargo fmt --check`: clean. `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo hakari verify`: "workspace-hack works correctly".
+- `cargo deny --locked check`: bans, licenses and sources ok; advisories fail on RUSTSEC-2026-0378/0379 (wasmtime 49.0.3), RUSTSEC-2026-0381 (webpki-roots) and RUSTSEC-2026-0382 (rustls-webpki 0.103.15), all already on main and outside this card; the bumps need the creator's permission.
+- Real binary against a scratch `COX_HOME`: `cox config set tiers.code.model claude-opus-5` kept both comments; `config show --sources` printed `tiers.code.model = "claude-opus-5"  # user`, `tiers.cheap.model = "env-model"  # env` (from `COX_TIERS_CHEAP_MODEL`) and `# default` for the rest; `config set no.such.key 5` and `config set tiers.code.model 5` were refused with the loader's error and left the file unchanged; `config get tiers.code.model` printed `claude-opus-5`.
+
 #### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T43.6 · Size: ~530 (landed larger; see Not done) · Priority: P2 · Complexity: 4
