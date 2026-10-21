@@ -45,7 +45,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T32.17 | in progress | P2 | 3 | 80% | Claude / opus-5.5 |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
-| T33.40.10 | todo | P3 | 3 | 0% | |
+| T33.40.10 | todo | P3 | 3 | 70% | |
 | T33.40.11 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | done | P2 | 4 | 100% | grok-4.7 |
@@ -913,6 +913,16 @@ Plan:
 5. R§5 gets the table with the model versions and the date.
 Falsifier: if any task that passes in the baseline fails with the plugin, or the median saving per task is below 15 %, `route` stays off by default, and the guide says so.
 Check: `just test-evals` is green offline (preset expansion, cap stop, the paired table). R§5 has the E2 table.
+
+Landed 2026-10-21 (branch `feat/t33.40.10`):
+- the `jev-route` preset in the harness's `PRESETS` registry, with `--budget`, `--max-usd` and `--plugin-dir`;
+- the ledger read through `cox stats --session --csv`;
+- the paired table and the falsifier line;
+- tasks 11–14;
+- the offline tests;
+- the R§5 section with the reproduce command and an empty table.
+
+Left: the live run and its table. It needs T33.40.9, because the Jev manifest has no `route` yet, and the creator's go-ahead (decision 9).
 
 #### T33.40.11 User guide: the Jev plugin
 

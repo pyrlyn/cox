@@ -1038,7 +1038,7 @@ graph path).
 2. Golden `Event` JSONL for loop scenarios (`insta`); the rollout file and the fixture are the same format. [design]
 3. ratatui `TestBackend` + `insta` per widget and per frame; `portable-pty` + `vt100` for the real binary (Codex practice). [high]
 4. Tools in `tempfile` trees; `proptest` on `str_replace` and V4A (`parse(print(p)) == p`, edit-then-reverse identity); fuzz targets for SSE/V4A/frontmatter parsers. [design]
-5. Evals separate from tests: Terminal-Bench 2.0 agent (Harbor) + 10 in-repo tasks, run on demand with the real provider, cost recorded in the ledger. §5.3 holds the recorded runs.
+5. Evals separate from tests: Terminal-Bench 2.0 agent (Harbor) + 14 in-repo tasks, run on demand with the real provider, cost recorded in the ledger. §5.3 holds the recorded runs.
 
 ### 5.3 First eval run (T12.1, 2026-09-04)
 
@@ -1159,6 +1159,71 @@ ANTHROPIC_API_KEY="$(security find-generic-password -s cox -a anthropic -w)" \
 The verify preset (T30.3) was not run on Terminal-Bench: the harness
 system addendum and hook are wired for the in-repo harness only, and all
 three tasks already passed without it.
+
+#### E2: `route` downgrade against the static pick (T33.40.10) — not run yet
+
+Harness: `--preset jev-route` in `evals/src/cox_evals/harness.py`. It
+runs each of the 14 `evals/tasks` twice in a fresh `COX_HOME`. The
+`baseline` arm uses the static pick (`code`). The `jev` arm runs
+`cox plugin install <dir> --yes`, and `[plugins.decide] route = "jev"`
+hands `route` to the plugin. Tasks 11–14 need the code tier: a
+multi-file rename, two debugging fixes and moving a class between
+modules, each checked by its own failing unittest.
+
+Cost is read from the ledger (`cox stats --session <id> --csv`), not
+from the `--output-format json` total, because the plugin's
+`plugin:jev` rows are ledger rows that the JSON summary does not sum
+(`crates/cox-core/src/plugin_model.rs`, checked at `ff0a27a9`).
+
+Caps: each run gets `--budget 0.25`. The run stops once the ledger
+total reaches `--max-usd 3.00`. A killed run (timeout) is charged its
+whole budget, because it never prints the session id that its ledger
+rows need.
+
+Keys: `ANTHROPIC_API_KEY` and `TYPESAFE_API_KEY` come from the env
+only. Every run sets `COX_KEYRING=off` (A49).
+
+Reproduce, after T33.40.9 has landed and with the creator's go-ahead
+(`docs/design/plugins.md` §14, decision 9):
+
+```bash
+cargo build -p cox
+# The jev package is plugin.toml plus jev.wasm (`just plugin jev` once T33.40.11 adds it).
+cargo build --manifest-path plugins/Cargo.toml -p cox-plugin-jev \
+  --target wasm32-unknown-unknown --release
+mkdir -p /tmp/jev && cp plugins/jev/plugin.toml /tmp/jev/ &&
+  cp plugins/target/wasm32-unknown-unknown/release/cox_plugin_jev.wasm /tmp/jev/jev.wasm
+just eval --preset jev-route --plugin-dir /tmp/jev
+```
+
+The harness prints the table below plus one line per arm. Each line
+gives:
+- the pass count;
+- $ by (tier, job);
+- downgrades, as main calls on `cheap` out of all main calls;
+- cache read and write tokens;
+- the `plugin:*` p95 latency;
+- the model ids seen in the ledger.
+
+Last comes the falsifier verdict:
+- any task that passes in `baseline` but fails in `jev`;
+- or a median saving per task below 15 %.
+
+Either one keeps `route` off by default.
+
+| task | baseline | jev | saving | jev downgrades |
+| --- | --- | --- | --- | --- |
+| — | not run | not run | — | — |
+
+Status 2026-10-21: not run, for two reasons:
+- **T33.40.9 is open.** `plugins/jev/plugin.toml` asks only for
+  `decide = ["risk"]`, so the grant has no `route` and the `jev` arm
+  would run the static pick.
+- **E2 needs the creator's go-ahead before each run** (decision 9).
+
+The offline tests pass: `just test-evals` covers preset expansion,
+the plugin install, the ledger parse, the cap stop, the paired table
+and the falsifier.
 
 ## 6. Fact-check ledger
 | # | Claim (report) | Verdict | Correction / source |
