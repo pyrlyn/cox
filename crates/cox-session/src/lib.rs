@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use cox_core::{History, Session};
+use cox_core::{History, PathRules, Session};
 use cox_protocol::Config;
 use cox_protocol::errors::{CoreError, ProviderError};
 use cox_protocol::ids::SessionId;
@@ -506,6 +506,12 @@ pub async fn open_reporting(
     }
     session.set_agent_defs(agents_found.agents);
     session.set_instructions(instructions, skills_index);
+    // T67.6: path rules stay out of system[2]. Notices are reported once at
+    // open; the loader re-reads the files on each request.
+    let rule_roots = rule_roots(cwd);
+    let rules = cox_ext::rules::load_rules(&rule_roots);
+    warnings.extend(rules.notices.into_iter().map(Warning::Instruction));
+    session.set_path_rules(Arc::new(DiskPathRules { roots: rule_roots }));
     if !memory_index.is_empty() {
         session.set_memory_index(memory_index);
     }
@@ -639,6 +645,33 @@ pub async fn open_reporting(
         config: base,
         warnings: Vec::new(),
     })
+}
+
+/// Git root, or `cwd` outside a repository. Rule files live next to the
+/// instruction files, not in the home directory.
+fn rule_roots(cwd: &Path) -> Vec<PathBuf> {
+    match cox_config::load::find_git_root(cwd) {
+        Some(root) => vec![root],
+        None => vec![cwd.to_path_buf()],
+    }
+}
+
+/// Re-reads `.cox/rules` and `.claude/rules` when a tool touches a path.
+struct DiskPathRules {
+    roots: Vec<PathBuf>,
+}
+
+impl PathRules for DiskPathRules {
+    fn matching(&self, touched: &[String]) -> Vec<(String, String)> {
+        if touched.is_empty() {
+            return Vec::new();
+        }
+        let loaded = cox_ext::rules::load_rules(&self.roots);
+        cox_ext::rules::rules_for(touched, &loaded.rules)
+            .into_iter()
+            .map(|rule| (rule.source.clone(), rule.body.clone()))
+            .collect()
+    }
 }
 
 /// Where the `AGENTS.md`/`CLAUDE.md` chain is read from for `cwd`: one

@@ -47,6 +47,20 @@ impl WebFetchTool {
     }
 }
 
+/// The most a model may ask one fetch to download. The body is held in
+/// memory, so an unbounded `max_bytes` let one call pull gigabytes.
+const MAX_BYTES: usize = 10 * 1024 * 1024;
+
+/// The model's `max_bytes`, defaulted and held to `1..=MAX_BYTES`.
+fn max_bytes(input: &Value) -> usize {
+    input
+        .get("max_bytes")
+        .and_then(Value::as_u64)
+        .map_or(cox_web::DEFAULT_MAX_BYTES, |n| {
+            usize::try_from(n).unwrap_or(usize::MAX).clamp(1, MAX_BYTES)
+        })
+}
+
 #[async_trait]
 impl Tool for WebFetchTool {
     fn spec(&self) -> ToolSpec {
@@ -54,14 +68,15 @@ impl Tool for WebFetchTool {
             name: "web_fetch".to_string(),
             description: "Fetch a URL and return its readable text: HTML is reduced to \
                 headings, paragraphs, lists and code blocks; other content types come back \
-                as-is. Pass `max_bytes` to cap what is downloaded (default 100 KiB); the \
-                result says when it was cut. Only http and https URLs; 10 s timeout."
+                as-is. Pass `max_bytes` to cap what is downloaded (default 100 KiB, at \
+                most 10 MiB); the result says when it was cut. Only http and https URLs; 10 s \
+                timeout."
                 .to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "url": {"type": "string"},
-                    "max_bytes": {"type": "integer", "minimum": 1}
+                    "max_bytes": {"type": "integer", "minimum": 1, "maximum": MAX_BYTES}
                 },
                 "required": ["url"]
             }),
@@ -91,10 +106,7 @@ impl Tool for WebFetchTool {
         {
             return Err(ToolError::Denied { why: why.into() });
         }
-        let max_bytes = input
-            .get("max_bytes")
-            .and_then(Value::as_u64)
-            .map_or(cox_web::DEFAULT_MAX_BYTES, |n| n as usize);
+        let max_bytes = max_bytes(&input);
         let fetched = cox_web::fetch(&self.http, &url, max_bytes, &cx.cancel).await?;
         let cut = if fetched.truncated {
             format!("; cut at max_bytes={max_bytes}")
@@ -107,5 +119,18 @@ impl Tool for WebFetchTool {
             diff: None,
             structured: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_bytes_defaults_and_is_held_to_the_cap() {
+        assert_eq!(max_bytes(&json!({})), cox_web::DEFAULT_MAX_BYTES);
+        assert_eq!(max_bytes(&json!({"max_bytes": 4096})), 4096);
+        assert_eq!(max_bytes(&json!({"max_bytes": 0})), 1);
+        assert_eq!(max_bytes(&json!({"max_bytes": u64::MAX})), MAX_BYTES);
     }
 }
