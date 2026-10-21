@@ -1,0 +1,7 @@
+---
+source: crates/cox-tui/src/modal.rs
+expression: render_question(&question)
+---
+ ask_user Approve this plan and leave plan mode? ship the ledger
+ 1) Approve  2) Keep planning
+ > ▏   Enter sends · Esc dismisses

@@ -1890,26 +1890,6 @@ mise exec -- cargo fmt --check
 
 Done when `rule_matches_only_its_globs`, `rule_injected_once` and `system_prefix_unchanged_by_rules` (byte-equal prefix with and without rules) pass.
 
-#### T67.7 Leaving Plan mode needs approval
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
-
-Goal: in Plan mode the model calls `exit_plan { plan }` (`Risk::ReadOnly`). It asks the user through the `ask_user` modal: approve, or keep planning with feedback. Approval switches the mode to Default through the session, never from inside the tool. Headless runs and ACP without a client prompt decline it by construction.
-
-Files:
-- `crates/cox-protocol/src/types.rs`
-- `crates/cox-tools/src/plan.rs` (new)
-- `crates/cox-tui/src/modal.rs`
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-tools -p cox-core -p cox-tui
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `exit_plan_requires_approval`, `headless_declines_exit_plan` and the `exit_plan_modal` insta snapshot pass.
-
 #### T67.9 Auto-mode risk judge
 
 Model: grok-4.7 · Status: open · Depends: T67.8 approved by the creator · Size: ~190 · Priority: P2 · Complexity: 4

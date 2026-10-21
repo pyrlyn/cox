@@ -1,3 +1,33 @@
+#### T67.7 Leaving Plan mode needs approval
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 (landed larger; see Not done) · Priority: P2 · Complexity: 3 · Files: `crates/cox-protocol/src/types.rs`, `crates/cox-tools/src/plan.rs`, `crates/cox-tui/src/modal.rs`
+Goal: in Plan mode the model calls `exit_plan { plan }` (`Risk::ReadOnly`). It asks the user through the `ask_user` modal: approve, or keep planning with feedback. Approval switches the mode to Default through the session, never from inside the tool. Headless runs and ACP without a client prompt decline it by construction.
+What landed:
+- `ExitPlanTool` is `Risk::ReadOnly` and not deferred, so plan mode can call it and the tool list does not change mid-session. `headless()` declines without asking, even when a relay would approve. `surface()` asks through the same question relay as `ask_user`, with options `Approve` and `Keep planning`. Only the exact `Approve` answer sets `structured.exit_plan` to `approve`. Feedback stays in plan mode. A missing plan or a dismissal is denied.
+- The session applies the mode, after the tool result is already recorded. An approval whose call name is `exit_plan` and whose current mode is `Plan` becomes `Default`, emits `StateChanged` and a `Notice` "left plan mode". Architect also returns to editor and restores the saved tier. `Auto` and `Bypass` stay.
+- A question surface (`questions: true`, the TUI, `--plain`, and the desktop session) swaps the headless tool for the one that asks, the same way `ask_user` does. `cox run -p` and ACP stay on the headless tool.
+- The modal snapshot is the existing `Question` widget: the plan's first line and the two answers.
+Not done: the card names three files and ~180 lines. Registering the tool and applying the mode also touch `crates/cox-tools/src/lib.rs`, `crates/cox-session/src/tools.rs`, `crates/cox-core/src/session.rs` and `docs/tools.md`. Two build breaks already on main are fixed in the same branch so the Check can go green: `cox_config::load::default_tiers` (callers since T33.40.13, the function never landed), and clippy 1.99 `needless_borrows_for_generic_args` on a reused closure in `target_agents.rs` and `status_line.rs`. `workspace-hack` is regenerated so `cargo hakari verify` matches the lockfile.
+Check:
+```text
+$ mise exec -- cargo nextest run -p cox-tools -p cox-core -p cox-tui
+1055 tests run: 1055 passed, 2 skipped (including exit_plan_requires_approval, headless_declines_exit_plan, exit_plan_modal, approved_exit_plan_switches_to_default, approved_exit_leaves_architect_and_ignores_other_modes)
+$ mise exec -- cargo nextest run -p cox-tools -p cox-protocol -p cox-session -p cox-core -p cox-tui -p cox-config -E 'test(/exit_plan|approved_exit|default_tiers_reads/)'
+8 passed (exit_plan_requires_approval, headless_declines_exit_plan, exit_plan_spec_is_read_only_and_ignores_the_surface, exit_plan_asks_only_on_a_question_surface, exit_plan_modal, approved_exit_plan_switches_to_default, approved_exit_leaves_architect_and_ignores_other_modes, default_tiers_reads_the_embedded_code_tier)
+$ mise exec -- cargo nextest run -p cox-session -p cox-config -E 'test(/legacy_typesafe|open_moves_a_legacy|default_tiers/)'
+5 passed (including legacy_typesafe_tier_without_plugin_uses_default_tier_with_notice and open_moves_a_legacy_typesafe_tier_to_the_default)
+$ mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+clean
+$ mise exec -- cargo clippy --workspace --all-targets --all-features -- -D warnings
+clean
+$ mise exec -- cargo fmt --check
+clean
+$ mise exec -- cargo hakari verify
+workspace-hack works correctly
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -q -p cox -- doctor
+exit 1: ANTHROPIC_API_KEY is not set (expected here; keyring is off). toolchain, COX_HOME, db, sandbox, git, prices and plugin cache passed.
+```
+
 #### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T43.6 · Size: ~530 (landed larger; see Not done) · Priority: P2 · Complexity: 4
