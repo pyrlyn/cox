@@ -11,15 +11,14 @@ use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
 use std::ops::Range;
 
-use cox_protocol::GrantScope;
 use cox_protocol::ids::{CallId, ItemId, SessionId, TaskId};
-use cox_protocol::plugin::{CommandDecl, CommandOut, KeyDecl, NoticeLevel, RenderIn, Slot, Widget};
+use cox_protocol::plugin::{CommandDecl, CommandOut, NoticeLevel};
 use cox_protocol::types::{
     Content, ContextBreakdown, Effort, Event, ItemKind, Level, Mode as SessionMode, PermissionMode,
     Presence, Role, SandboxMode, SlashCommand, StopReason, Submission, Tier, TodoItem, ToolCall,
     ToolResult,
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::banner::Banner;
 use crate::cells::Look;
@@ -27,7 +26,7 @@ use crate::color::Depth;
 use crate::commands::{self, Action, COMMANDS, Context};
 use crate::composer::{Composer, Edit};
 use crate::glyph::{self, Glyphs};
-use crate::item_render::{CellRef, ItemRender, RenderSource};
+use crate::item_render::{CellRef, ItemRender};
 use crate::keymap::{self, Keymap};
 use crate::markdown;
 use crate::modal::{Approval, PluginGrantDialog, Question, QuestionAnswer, RemoveConfirm};
@@ -40,6 +39,11 @@ use crate::theme_editor::{EditorOutcome, ThemeEditor};
 use crate::vim::Mode;
 
 mod mouse;
+mod msg;
+
+pub use msg::{
+    Ask, Cmd, GrantDecision, Msg, PluginMgmtRequest, PluginNewRequest, PluginRequest, PluginUiMsg,
+};
 
 /// One transcript entry. A finished cell leaves the viewport for the
 /// terminal's own scrollback (`State::take_finished`).
@@ -148,12 +152,10 @@ pub struct Status {
 impl Status {
     /// The context `ctx N%` and `/context` count (A98): the last call's
     /// reported context, else the core's estimate for the request about to
-    /// go out — the same rule as the desktop meter's share.
+    /// go out — `ContextBreakdown::used`, the desktop meter's rule too.
     pub fn context_used(&self) -> u32 {
-        match (self.context_tokens, self.context) {
-            (0, Some(b)) => b.total,
-            (n, _) => n,
-        }
+        self.context
+            .map_or(self.context_tokens, |b| b.used(self.context_tokens))
     }
 }
 
@@ -482,260 +484,6 @@ pub struct TurnRow {
     /// Where the turn's user cell sits in `transcript`, so a conversation
     /// rewind cuts there.
     pub cell_at: usize,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Msg {
-    Key(KeyEvent),
-    Paste(String),
-    Event(Event),
-    Tick,
-    Resize(u16, u16),
-    /// The live sessions of this project, polled by the runtime (T16.3).
-    Agents(Vec<Presence>),
-    /// The working tree's branch and counts (T15.2); `None` outside a repo.
-    Git(Option<GitStatus>),
-    /// The runtime's answer to `Ask::GitDiff` (T15.3); `None` outside a repo.
-    Diff(Option<String>),
-    /// The terminal gained (`true`) or lost focus (T23.5).
-    Focus(bool),
-    /// A wheel tick or click (T22.4); `app.rs` only forwards these once
-    /// `tui.mouse` actually enabled capture, so `update` need not re-check it.
-    Mouse(MouseEvent),
-    /// The runtime's answer to `Ask::Rollout` (T27.5): a sibling session's
-    /// rollout events, replayed into cells for the read-only `Transcript`
-    /// overlay. `crates/cox/src/session.rs` answers this for real with
-    /// `Store::rollout_read`; a test can also send it directly.
-    Rollout(Vec<Event>),
-    /// What the runtime learned about a plugin's UI (T33.23, PL§8).
-    Plugin(PluginUiMsg),
-    /// The runtime's answer to `Cmd::PluginMgmt` (T33.30 `New`; T33.33
-    /// `Update`/`Remove`/`List`): `Ok` is the lines `cox plugin
-    /// new`/`update`/`remove`/`list` would have printed, joined; `Err`
-    /// names why. Shown as a notice, the same as `Event::Notice`.
-    PluginMgmt(Result<String, String>),
-    /// The runtime's answer to `Ask::Refine` (T66.8).
-    Refine(crate::refine::Msg),
-    /// The status command's first line (T46.3), `None` when it failed,
-    /// timed out or printed nothing; answers `Ask::StatusLine`.
-    StatusLine(Option<String>),
-    /// The theme editor's file was written (T46.7): its stem and what it
-    /// parses to, so `/theme` lists and applies it without a restart.
-    ThemeSaved(String, ThemeFile),
-    /// The `Dictation`'s answer to a `Cmd::Voice` (T54.6).
-    Voice(crate::voice::VoiceMsg),
-}
-
-/// The runtime's side of the plugin redraw model (PL§8): `cox-tui` never
-/// holds a plugin, so every render arrives here, cached in `State`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PluginUiMsg {
-    /// A plugin's granted slots, commands and keys after `cox_init`
-    /// (T33.25 adds the latter two). `status.left`/`status.right` render
-    /// once now, since they are always visible; `panel`/`overlay` (T33.24)
-    /// only register here and render later, when `TogglePanel`/
-    /// `OpenOverlay` actually shows them. `crates/cox` re-sends this
-    /// whenever a session re-inits the plugin, so `update` treats it as the
-    /// current, full set, not an addition to the last one.
-    Declare {
-        plugin: String,
-        slots: Vec<Slot>,
-        commands: Vec<CommandDecl>,
-        keys: Vec<KeyDecl>,
-        /// Granted `cox_render_item` targets (T33.26).
-        renderers: Vec<String>,
-    },
-    /// A `cox_render_item` answer (T33.26); `None` keeps the built-in look.
-    ItemRendered {
-        cell: CellRef,
-        widget: Option<Widget>,
-    },
-    /// `Effects.redraw` or `cox_redraw()`: render this plugin's slots again.
-    Redraw { plugin: String },
-    /// A `cox_render` answer that came back inside its deadline.
-    Rendered {
-        plugin: String,
-        slot: Slot,
-        widget: Widget,
-    },
-    /// A `cox_render` that timed out, failed or does not exist; the last
-    /// good render stays and the miss is counted.
-    Missed { plugin: String, slot: Slot },
-    /// A `cox_command`/`cox_key` answer (T33.25, PL§8); `None` is a
-    /// timeout, an error or a missing export, the same fail-open `Missed`
-    /// already gives a render.
-    Command {
-        plugin: String,
-        out: Option<CommandOut>,
-    },
-}
-
-/// What the TUI asks of a plugin; `crates/cox` serves it and answers with
-/// `Msg::Plugin`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PluginRequest {
-    /// Call `plugin`'s `cox_render` with `input`.
-    Render { plugin: String, input: RenderIn },
-    /// `/<id>:<name>` (T33.25, PL§8): call `plugin`'s `cox_command`.
-    Command {
-        plugin: String,
-        name: String,
-        args: String,
-    },
-    /// `<leader> <key>` (T33.25, PL§8): call `plugin`'s `cox_key`.
-    Key { plugin: String, name: String },
-    /// A finished cell (T33.26): call `plugin`'s `cox_render_item`.
-    RenderItem {
-        plugin: String,
-        cell: CellRef,
-        target: String,
-        source: RenderSource,
-        width: u16,
-    },
-    /// `/plugin remove <id>` confirmed (T33.33, PL§1c): `crates/cox` sends
-    /// this after `plugin_cmd::remove_for_tui` succeeds, over the same
-    /// channel `Render`/`Command`/`Key` already reach `plugin_ui::serve` on
-    /// — the one place holding this session's live hosts — so it can flag
-    /// `plugin`'s host stopped without a second channel. No answer rides
-    /// back on the feed; the modal's own notice already told the user.
-    Stop { plugin: String },
-}
-
-/// What the TUI asks the runtime to fetch off-screen; the answer comes back
-/// on the feed channel. Kept apart from `Submission`: the core never sees it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Ask {
-    GitDiff,
-    /// `/agents` (T27.5): a sibling session's rollout, the same read
-    /// `crates/cox/src/resume.rs` does for `--resume` (`Store::rollout_read`);
-    /// `crates/cox/src/session.rs` answers it for real.
-    Rollout(SessionId),
-    /// `[tui.status_line]` (T46.3): the status command's stdin JSON and
-    /// the terminal width, sent only when either changed; the runtime
-    /// debounces and answers `Msg::StatusLine`.
-    StatusLine {
-        input: serde_json::Value,
-        columns: u16,
-    },
-    /// The theme editor's `Enter` (T46.7): write `<themes>/<stem>.toml`
-    /// with each `(token, colour)` set for the `dark` or light half; the
-    /// runtime checks `stem` and answers `Msg::ThemeSaved` or a notice.
-    SaveTheme {
-        stem: String,
-        dark: bool,
-        tokens: Vec<(String, String)>,
-    },
-    /// `/refine` (T66.8): propose, apply the reviewed proposal, list or
-    /// undo; the runtime answers `Msg::Refine`.
-    Refine(crate::refine::Request),
-}
-
-/// `Modal::PluginGrant`'s `y` (T33.8, PL§3): the full requested capability
-/// list to write at `digest` in `scope`. Carried out to `crates/cox` over a
-/// channel, the same shape `persist`'s `(String, String)` carries a
-/// `/theme` choice out to `config_cmd::set` — this crate never touches the
-/// store itself.
-#[derive(Debug, Clone, PartialEq)]
-pub struct GrantDecision {
-    pub plugin_id: String,
-    pub digest: String,
-    pub scope: GrantScope,
-    pub capabilities: Vec<String>,
-}
-
-/// `/plugin new`'s request to the runtime (T33.30, PL§13), carried out to
-/// `crates/cox` over a channel like `GrantDecision` above. `lang` is a
-/// string, not `plugin_new::Lang`, because `cox-tui` cannot depend on
-/// `crates/cox`'s types (plan.md §1.1); `crates/cox`'s `session.rs` maps it
-/// back with `Lang::from_str`, the one place that mapping happens.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginNewRequest {
-    pub name: String,
-    pub lang: String,
-    pub with: Vec<String>,
-}
-
-/// `/plugin`'s management requests to the runtime (T33.30 `New`; T33.33
-/// `Update`/`Remove`/`List`), carried over the one channel `Cmd::PluginMgmt`
-/// reaches (`app.rs`) rather than a second channel per subcommand —
-/// `crates/cox`'s executor matches on this and calls the same
-/// `plugin_new`/`plugin_cmd` functions `cox plugin ...` uses, so there is
-/// only one implementation of each. Its answer rides the feed as
-/// `Msg::PluginMgmt`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PluginMgmtRequest {
-    New(PluginNewRequest),
-    /// `/plugin update [<id>...] [--all] [--check] [--rollback]` (PL§1b):
-    /// always pre-approved — the TUI's raw mode has no stdin to prompt a
-    /// widened capability list on, so `crates/cox` runs it the way `--yes`
-    /// would.
-    Update {
-        ids: Vec<String>,
-        all: bool,
-        check: bool,
-        rollback: bool,
-    },
-    /// `/plugin remove <id> [--keep-data]` (PL§1c): only reached after
-    /// `Modal::PluginRemove` confirmed it, so `crates/cox` never prompts
-    /// either.
-    Remove {
-        id: String,
-        keep_data: bool,
-    },
-    /// `/plugin list [--json]`.
-    List {
-        json: bool,
-    },
-}
-
-/// The only effects `update` may request; the runtime performs them.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Cmd {
-    Submit(Submission),
-    Quit,
-    Clear,
-    /// `/fork [turn]` (T26.3): leave for a child session with the history
-    /// up to `turn` (`None`: all of it); the binary builds it.
-    Fork(Option<u32>),
-    /// `/handoff <objective>` (T26.3): leave for a child session seeded
-    /// with a cheap-tier summary of this one plus the objective.
-    Handoff(String),
-    Copy(String),
-    Ask(Ask),
-    /// `/theme` (T24.2): a picker choice writes `key` in the user config
-    /// with `cox config set` semantics. `cox-tui` has no `toml_edit`-editing
-    /// path of its own (only `crates/cox` owns the config file); the
-    /// runtime carries this to `config_cmd::set`.
-    PersistConfig {
-        key: String,
-        value: String,
-    },
-    /// OSC 9;4 tab progress (T23.6); only sent when `caps.osc9_4`.
-    Progress(Progress),
-    /// OSC 22 pointer shape (T5.9); only sent when `caps.osc22` and the
-    /// shape differs from the last one written.
-    Pointer(Pointer),
-    /// Ring the terminal (T23.5); `app.rs` picks OSC 9/777 by `Caps`.
-    Notify {
-        title: String,
-        body: String,
-    },
-    /// `Modal::PluginGrant`'s `y` (T33.8): `app.rs` forwards this to
-    /// `crates/cox`, which writes it. `n` never reaches here — `on_key`
-    /// alone advances `pending_grants`, since skipping writes nothing.
-    PluginGrant(GrantDecision),
-    /// A plugin call the runtime makes off-screen (T33.23); `app.rs`
-    /// forwards it to `crates/cox`, the only side that holds plugin hosts.
-    Plugin(PluginRequest),
-    /// `/plugin new|update|remove|list`'s request to the runtime (T33.30
-    /// `New`; T33.33 `Update`/`Remove`/`List`): `app.rs` forwards this to
-    /// `crates/cox`, which runs the same `plugin_new`/`plugin_cmd`
-    /// functions `cox plugin ...` calls and answers on the feed as
-    /// `Msg::PluginMgmt`.
-    PluginMgmt(PluginMgmtRequest),
-    /// Push-to-talk (T54.6): `app.rs` hands this to the `Dictation` it
-    /// holds; the answer arrives as `Msg::Voice`.
-    Voice(crate::voice::VoiceCmd),
 }
 
 impl State {
@@ -1138,6 +886,8 @@ fn notify(state: &State, body: String) -> Vec<Cmd> {
     }]
 }
 
+/// A key press: the keys that win everywhere, then the keymap, then the
+/// open modal's handler or, with none open, the composer.
 fn on_key(state: &mut State, key: KeyEvent) -> Vec<Cmd> {
     // T54.6: a recording owns `Esc` and the voice key's release and repeats
     // before anything else sees them.
@@ -1154,415 +904,509 @@ fn on_key(state: &mut State, key: KeyEvent) -> Vec<Cmd> {
     // composer, a modal or another binding, matched or not — `<leader>
     // <key>` is the only way a plugin key fires.
     if state.plugin_leader_armed {
-        state.plugin_leader_armed = false;
-        return match state.keymap.resolve_plugin_key(key) {
-            Some((plugin, name)) => vec![Cmd::Plugin(PluginRequest::Key {
-                plugin: plugin.to_string(),
-                name: name.to_string(),
-            })],
-            None => Vec::new(),
-        };
+        return on_key_plugin_leader(state, key);
     }
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    // `Ctrl+C` interrupts a running turn; when idle it must be pressed twice.
-    if ctrl && key.code == KeyCode::Char('c') {
-        if state.status.busy {
-            return vec![Cmd::Submit(Submission::Interrupt)];
-        }
-        if state.ctrl_c_armed {
-            return vec![Cmd::Quit];
-        }
-        state.ctrl_c_armed = true;
-        return Vec::new();
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return on_ctrl_c(state);
     }
     state.ctrl_c_armed = false;
-    // A `git` line completes on `Tab` (T15.4) before `Tab` means anything else.
-    if key.code == KeyCode::Tab && state.modal.is_none() {
-        let line = state.composer.text();
-        let found = picker::candidates(&line, state);
-        if !found.is_empty() {
-            let picker = Picker::open(Kind::Shell, found).with_query(picker::last_word(&line));
-            state.modal = Some(Modal::Picker(picker));
-            return Vec::new();
-        }
-        // T25.2: `Tab` completes the `@`/`/` token under the cursor with the
-        // picker typing the sigil would have opened, its query pre-filled.
-        if let Some((sigil, query)) = state.composer.take_token() {
-            let picker = match sigil {
-                '@' => Picker::open(
-                    Kind::Files,
-                    picker::at_candidates(&state.agent_names, &state.files),
-                ),
-                _ => Picker::open(
-                    Kind::Commands,
-                    state.commands.iter().map(|(n, ..)| n.clone()).collect(),
-                ),
-            };
-            state.modal = Some(Modal::Picker(picker.with_query(&query)));
-            return Vec::new();
-        }
+    if key.code == KeyCode::Tab && state.modal.is_none() && open_tab_picker(state) {
+        return Vec::new();
     }
-    // T46.7: `Ctrl+E` is `expand` everywhere else, a global the keymap
-    // below would run over the picker; on `/theme` it opens the editor.
-    if key.code == KeyCode::Char('e')
-        && key.modifiers == KeyModifiers::CONTROL
-        && matches!(&state.modal, Some(Modal::Picker(p)) if p.kind == Kind::Themes)
-    {
-        open_theme_editor(state);
+    if open_theme_editor_on_ctrl_e(state, key) {
         return Vec::new();
     }
     // T25.5: every other key the TUI owns goes through the keymap; a key it
     // does not claim falls through to the modal or the composer.
+    if let Some(cmds) = on_key_keymap(state, key) {
+        return cmds;
+    }
+    match state.modal.take() {
+        Some(Modal::Approval(approval)) => on_key_approval(state, approval, key),
+        Some(Modal::Question(question)) => on_key_question(state, question, key),
+        Some(Modal::PluginGrant(grant)) => on_key_plugin_grant(state, grant, key),
+        Some(Modal::PluginRemove(confirm)) => on_key_plugin_remove(state, confirm, key),
+        Some(Modal::ThemeEditor(editor)) => on_key_theme_editor(state, editor, key),
+        Some(Modal::Picker(picker)) if picker.kind == Kind::Themes => {
+            on_key_theme_picker(state, picker, key)
+        }
+        Some(Modal::Picker(picker)) => on_key_picker(state, picker, key),
+        Some(Modal::Refine(review)) => on_key_refine(state, review, key),
+        Some(Modal::Diff { text, scroll }) => on_key_diff(state, text, scroll, key),
+        Some(modal @ (Modal::Help | Modal::Context)) => on_key_info(state, modal, key),
+        Some(Modal::Agents {
+            rows,
+            ids,
+            selected,
+        }) => on_key_agents(state, rows, ids, selected, key),
+        Some(Modal::Transcript { cells, scroll }) => on_key_transcript(state, cells, scroll, key),
+        Some(Modal::Plugin { id }) => on_key_overlay(state, id, key),
+        None => on_key_composer(state, key),
+    }
+}
+
+/// `Ctrl+E` over the `/theme` picker: opens the theme editor, and says
+/// whether it did.
+fn open_theme_editor_on_ctrl_e(state: &mut State, key: KeyEvent) -> bool {
+    // T46.7: `Ctrl+E` is `expand` everywhere else, a global the keymap
+    // would run over the picker; on `/theme` it opens the editor.
+    let open = key.code == KeyCode::Char('e')
+        && key.modifiers == KeyModifiers::CONTROL
+        && matches!(&state.modal, Some(Modal::Picker(p)) if p.kind == Kind::Themes);
+    if open {
+        open_theme_editor(state);
+    }
+    open
+}
+
+/// The keymap's action for `key` in the idle or running context; `None`
+/// when no binding claims it.
+fn on_key_keymap(state: &mut State, key: KeyEvent) -> Option<Vec<Cmd>> {
     let base = if state.status.busy {
         Context::Running
     } else {
         Context::Idle
     };
-    if let Some(action) = state.keymap.resolve(key, base)
-        && let Some(cmds) = run(state, action, key)
-    {
-        return cmds;
+    let action = state.keymap.resolve(key, base)?;
+    run(state, action, key)
+}
+
+/// The key right after `plugin.leader`: a plugin's key binding or nothing.
+fn on_key_plugin_leader(state: &mut State, key: KeyEvent) -> Vec<Cmd> {
+    state.plugin_leader_armed = false;
+    match state.keymap.resolve_plugin_key(key) {
+        Some((plugin, name)) => vec![Cmd::Plugin(PluginRequest::Key {
+            plugin: plugin.to_string(),
+            name: name.to_string(),
+        })],
+        None => Vec::new(),
     }
-    match state.modal.take() {
-        Some(Modal::Approval(mut approval)) => match approval.key(key) {
-            Some(decision) => vec![Cmd::Submit(Submission::Approve {
-                call_id: approval.call.id,
-                decision,
-            })],
-            None => {
-                state.modal = Some(Modal::Approval(approval));
-                Vec::new()
-            }
-        },
-        Some(Modal::Question(mut question)) => match question.key(key) {
-            Some(answer) if state.think_consent == Some(question.call) => {
-                think_consent_answered(state, answer)
-            }
-            // `None` (Esc) dismisses, so the tool call fails instead of
-            // succeeding with empty text.
-            Some(answer) => vec![Cmd::Submit(Submission::Answer {
-                call_id: question.call,
-                text: match answer {
-                    QuestionAnswer::Text(text) => Some(text),
-                    QuestionAnswer::Dismissed => None,
-                },
-            })],
-            None => {
-                state.modal = Some(Modal::Question(question));
-                Vec::new()
-            }
-        },
-        // T33.8, PL§3: `y`/`n` decide one dialog and `pending_grants`
-        // supplies the next, so the queue drains one key at a time without
-        // this crate ever writing the grant itself.
-        Some(Modal::PluginGrant(grant)) => match grant.key(key) {
-            Some(granted) => {
-                let text = if granted {
-                    format!("granted {}; it will load next session", grant.plugin_id)
-                } else {
-                    format!("skipped {} for this session", grant.plugin_id)
-                };
-                state.transcript.push(Cell::Notice {
-                    level: Level::Info,
-                    text,
-                });
-                state.modal = state.pending_grants.pop_front().map(Modal::PluginGrant);
-                if granted {
-                    vec![Cmd::PluginGrant(GrantDecision {
-                        plugin_id: grant.plugin_id,
-                        digest: grant.digest,
-                        scope: grant.scope,
-                        capabilities: grant.capabilities,
-                    })]
-                } else {
-                    Vec::new()
-                }
-            }
-            None => {
-                state.modal = Some(Modal::PluginGrant(grant));
-                Vec::new()
-            }
-        },
-        // T33.33, PL§1c: `y` reaches the runtime only from here — `act()`
-        // just opens the modal, never the request itself, so a stray
-        // `/plugin remove` can never fire without this confirmation.
-        Some(Modal::PluginRemove(confirm)) => match confirm.key(key) {
-            Some(true) => {
-                vec![Cmd::PluginMgmt(PluginMgmtRequest::Remove {
-                    id: confirm.id,
-                    keep_data: confirm.keep_data,
-                })]
-            }
-            Some(false) => {
-                notice(
-                    state,
-                    Level::Info,
-                    format!("cancelled removing {}", confirm.id),
-                );
-                Vec::new()
-            }
-            None => {
-                state.modal = Some(Modal::PluginRemove(confirm));
-                Vec::new()
-            }
-        },
-        // T24.2: every key that changes the selection previews the row
-        // immediately, not only `Enter` — the same live-apply the picker's
-        // other kinds do not need, since none of them redraws the screen
-        // they came from.
-        // T46.7: every accepted keystroke is drawn at once; `Esc` puts
-        // back what was drawn before `/theme` opened, like the picker's.
-        Some(Modal::ThemeEditor(mut editor)) => match editor.key(key) {
-            None => {
-                state.theme = editor.theme();
-                state.modal = Some(Modal::ThemeEditor(editor));
-                Vec::new()
-            }
-            Some(EditorOutcome::Revert) => {
-                restore_theme(state);
-                Vec::new()
-            }
-            Some(EditorOutcome::Save) => {
-                state.theme_prev = None;
-                let stem = if editor.builtin {
-                    format!("{}-custom", editor.name)
-                } else {
-                    editor.name
-                };
-                let tokens = editor
-                    .edits
-                    .iter()
-                    .map(|(t, c)| ((*t).to_string(), crate::theme::format_color(*c)))
-                    .collect();
-                vec![Cmd::Ask(Ask::SaveTheme {
-                    stem,
-                    dark: editor.dark,
-                    tokens,
-                })]
-            }
-        },
-        Some(Modal::Picker(mut picker)) if picker.kind == Kind::Themes => {
-            match picker.key(key) {
-                Pick::Closed => restore_theme(state),
-                Pick::Chosen(row) => {
-                    state.theme_prev = None;
-                    return apply_theme_choice(state, &row);
-                }
-                Pick::Nothing => {
-                    preview_theme(state, &picker);
-                    state.modal = Some(Modal::Picker(picker));
-                }
-            }
+}
+
+/// `Ctrl+C` interrupts a running turn; when idle it must be pressed twice.
+fn on_ctrl_c(state: &mut State) -> Vec<Cmd> {
+    if state.status.busy {
+        return vec![Cmd::Submit(Submission::Interrupt)];
+    }
+    if state.ctrl_c_armed {
+        return vec![Cmd::Quit];
+    }
+    state.ctrl_c_armed = true;
+    Vec::new()
+}
+
+/// `Tab` with no modal open: opens a completion picker for the composer
+/// line, and says whether it did.
+fn open_tab_picker(state: &mut State) -> bool {
+    // A `git` line completes on `Tab` (T15.4) before `Tab` means anything else.
+    let line = state.composer.text();
+    let found = picker::candidates(&line, state);
+    if !found.is_empty() {
+        let picker = Picker::open(Kind::Shell, found).with_query(picker::last_word(&line));
+        state.modal = Some(Modal::Picker(picker));
+        return true;
+    }
+    // T25.2: `Tab` completes the `@`/`/` token under the cursor with the
+    // picker typing the sigil would have opened, its query pre-filled.
+    let Some((sigil, query)) = state.composer.take_token() else {
+        return false;
+    };
+    let picker = match sigil {
+        '@' => Picker::open(
+            Kind::Files,
+            picker::at_candidates(&state.agent_names, &state.files),
+        ),
+        _ => Picker::open(
+            Kind::Commands,
+            state.commands.iter().map(|(n, ..)| n.clone()).collect(),
+        ),
+    };
+    state.modal = Some(Modal::Picker(picker.with_query(&query)));
+    true
+}
+
+/// A key with no modal open: the `Esc` roles of an idle empty composer,
+/// then the composer itself.
+fn on_key_composer(state: &mut State, key: KeyEvent) -> Vec<Cmd> {
+    let esc_idle_empty =
+        key.code == KeyCode::Esc && !state.status.busy && state.composer.is_empty();
+    // `/loop`'s stop key (T27.4): the same idle-empty `Esc`, ahead of
+    // Esc-Esc's rewind-timeline role below, so a running loop is
+    // always one `Esc` away.
+    if esc_idle_empty && state.active_loop.take().is_some() {
+        notice(state, Level::Info, "loop stopped".into());
+        return Vec::new();
+    }
+    // `Esc Esc` on an idle empty composer opens the rewind timeline
+    // (T26.2); a lone Esc still reaches the composer for vim.
+    if esc_idle_empty {
+        let armed = state.esc_armed.take();
+        if armed.is_some_and(|t| state.tick.saturating_sub(t) <= ESC_ESC_TICKS) {
+            return open_rewind(state);
+        }
+        state.esc_armed = Some(state.tick);
+    } else {
+        state.esc_armed = None;
+    }
+    // An `Enter` no binding claims (`send` moved elsewhere) is a
+    // newline rather than the composer's own submit.
+    if key.code == KeyCode::Enter {
+        return compose(state, KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+    }
+    compose(state, key)
+}
+
+/// A key on a tool call waiting for approval; a decision submits it.
+fn on_key_approval(state: &mut State, mut approval: Approval, key: KeyEvent) -> Vec<Cmd> {
+    match approval.key(key) {
+        Some(decision) => vec![Cmd::Submit(Submission::Approve {
+            call_id: approval.call.id,
+            decision,
+        })],
+        None => {
+            state.modal = Some(Modal::Approval(approval));
             Vec::new()
         }
-        Some(Modal::Picker(mut picker)) => {
-            match picker.key(key) {
-                Pick::Nothing => state.modal = Some(Modal::Picker(picker)),
-                // Backspacing out of the picker also removes the `@`/`/`
-                // that opened it, as the user meant.
-                Pick::Closed if key.code == KeyCode::Backspace && picker.kind != Kind::Shell => {
-                    state.composer.key(key, state.status.busy);
-                }
-                // `Esc` gives back what was typed after the sigil, so a
-                // `Tab` that found nothing costs no text (T25.2).
-                Pick::Closed if matches!(picker.kind, Kind::Files | Kind::Commands) => {
-                    state.composer.insert(&picker.query);
-                }
-                Pick::Closed => {}
-                Pick::Chosen(choice) if picker.kind == Kind::Rewind => {
-                    state.rewind_to = picker::turn_of_entry(&choice);
-                    state.modal = Some(Modal::Picker(Picker::open(
-                        Kind::RewindWhat,
-                        picker::REWIND_WHAT.map(String::from).to_vec(),
-                    )));
-                }
-                Pick::Chosen(choice) if picker.kind == Kind::RewindWhat => {
-                    if let Some(to_turn) = state.rewind_to.take() {
-                        let what = choice.split(' ').next().unwrap_or("");
-                        return vec![Cmd::Submit(Submission::Rewind {
-                            to_turn,
-                            code: what != "talk",
-                            conversation: what != "code",
-                        })];
-                    }
-                }
-                // T33.30: the second (and only) step of `/plugin new`
-                // without `--lang` — `name`/`with` were stashed when the
-                // picker opened, the same way `Kind::Rewind` stashes
-                // `rewind_to` for `Kind::RewindWhat` above.
-                Pick::Chosen(choice) if picker.kind == Kind::PluginLang => {
-                    if let Some((name, with)) = state.pending_plugin_new.take() {
-                        return vec![Cmd::PluginMgmt(PluginMgmtRequest::New(PluginNewRequest {
-                            name,
-                            lang: choice,
-                            with,
-                        }))];
-                    }
-                }
-                Pick::Chosen(choice) => match picker.kind {
-                    Kind::Files | Kind::Commands => {
-                        let choice = picker::untag(&choice);
-                        state.composer.insert(&format!("{choice} "));
-                    }
-                    // Resuming in place needs `app::run` to return a request;
-                    // until then the command is the answer (T16.5).
-                    Kind::Sessions => {
-                        let id = state
-                            .sessions
-                            .iter()
-                            .find(|(_, row)| *row == choice)
-                            .map_or(choice.as_str(), |(id, _)| id.as_str());
-                        let text = format!("to resume: cox --resume {id}");
-                        notice(state, Level::Info, text);
-                    }
-                    Kind::History => {
-                        let text = state
-                            .past_prompts
-                            .iter()
-                            .find(|(row, _)| *row == choice)
-                            .map_or(choice.as_str(), |(_, text)| text.as_str())
-                            .to_string();
-                        state.composer.set_text(&text);
-                    }
-                    // `Themes` and `PluginLang` are each intercepted by
-                    // their own guarded arm above and never reach this
-                    // generic one.
-                    Kind::Rewind | Kind::RewindWhat | Kind::Themes | Kind::PluginLang => {}
-                    Kind::Shell => {
-                        let mut line = state.composer.text();
-                        let keep = line.len() - picker::last_word(&line).len();
-                        line.truncate(keep);
-                        line.push_str(&choice);
-                        line.push(' ');
-                        state.composer.set_text(&line);
-                    }
-                },
-            }
+    }
+}
+
+/// A key in an `ask_user` question; an answer or a dismissal submits it.
+fn on_key_question(state: &mut State, mut question: Question, key: KeyEvent) -> Vec<Cmd> {
+    match question.key(key) {
+        Some(answer) if state.think_consent == Some(question.call) => {
+            think_consent_answered(state, answer)
+        }
+        // `None` (Esc) dismisses, so the tool call fails instead of
+        // succeeding with empty text.
+        Some(answer) => vec![Cmd::Submit(Submission::Answer {
+            call_id: question.call,
+            text: match answer {
+                QuestionAnswer::Text(text) => Some(text),
+                QuestionAnswer::Dismissed => None,
+            },
+        })],
+        None => {
+            state.modal = Some(Modal::Question(question));
             Vec::new()
         }
-        Some(Modal::Refine(review)) => {
-            let (review, cmds) = review.key(key);
-            state.modal = review.map(Modal::Refine);
-            cmds
-        }
-        Some(Modal::Diff { text, scroll }) => {
-            let scroll = match key.code {
-                KeyCode::Esc | KeyCode::Char('?') => return Vec::new(),
-                KeyCode::Char('g') if ctrl => return Vec::new(),
-                KeyCode::PageDown => {
-                    (scroll + DIFF_PAGE).min(text.lines().count().saturating_sub(1))
-                }
-                KeyCode::PageUp => scroll.saturating_sub(DIFF_PAGE),
-                _ => scroll,
+    }
+}
+
+/// A key in a plugin's grant dialog at session open; `y`/`n` decide it.
+// T33.8, PL§3: `y`/`n` decide one dialog and `pending_grants`
+// supplies the next, so the queue drains one key at a time without
+// this crate ever writing the grant itself.
+fn on_key_plugin_grant(state: &mut State, grant: PluginGrantDialog, key: KeyEvent) -> Vec<Cmd> {
+    match grant.key(key) {
+        Some(granted) => {
+            let text = if granted {
+                format!("granted {}; it will load next session", grant.plugin_id)
+            } else {
+                format!("skipped {} for this session", grant.plugin_id)
             };
-            state.modal = Some(Modal::Diff { text, scroll });
+            state.transcript.push(Cell::Notice {
+                level: Level::Info,
+                text,
+            });
+            state.modal = state.pending_grants.pop_front().map(Modal::PluginGrant);
+            if granted {
+                vec![Cmd::PluginGrant(GrantDecision {
+                    plugin_id: grant.plugin_id,
+                    digest: grant.digest,
+                    scope: grant.scope,
+                    capabilities: grant.capabilities,
+                })]
+            } else {
+                Vec::new()
+            }
+        }
+        None => {
+            state.modal = Some(Modal::PluginGrant(grant));
             Vec::new()
         }
-        Some(modal @ (Modal::Help | Modal::Context)) => {
-            if !matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
-                state.modal = Some(modal);
-            }
-            Vec::new()
+    }
+}
+
+/// A key in the `/plugin remove` confirmation; `y` removes, `n` cancels.
+// T33.33, PL§1c: `y` reaches the runtime only from here — `act()`
+// just opens the modal, never the request itself, so a stray
+// `/plugin remove` can never fire without this confirmation.
+fn on_key_plugin_remove(state: &mut State, confirm: RemoveConfirm, key: KeyEvent) -> Vec<Cmd> {
+    match confirm.key(key) {
+        Some(true) => {
+            vec![Cmd::PluginMgmt(PluginMgmtRequest::Remove {
+                id: confirm.id,
+                keep_data: confirm.keep_data,
+            })]
         }
-        Some(Modal::Agents {
-            rows,
-            ids,
-            mut selected,
-        }) => {
-            let mut cmds = Vec::new();
-            match key.code {
-                KeyCode::Esc => {}
-                KeyCode::Up => {
-                    selected = selected.saturating_sub(1);
-                    state.modal = Some(Modal::Agents {
-                        rows,
-                        ids,
-                        selected,
-                    });
-                }
-                KeyCode::Down => {
-                    if selected + 1 < rows.len() {
-                        selected += 1;
-                    }
-                    state.modal = Some(Modal::Agents {
-                        rows,
-                        ids,
-                        selected,
-                    });
-                }
-                // A task row's id is `None` (no `SessionId` on the wire
-                // yet, plan.md §3 P27): `Enter` on it just keeps the list.
-                KeyCode::Enter => {
-                    let ask = ids.get(selected).copied().flatten();
-                    state.modal = Some(Modal::Agents {
-                        rows,
-                        ids,
-                        selected,
-                    });
-                    if let Some(id) = ask {
-                        cmds.push(Cmd::Ask(Ask::Rollout(id)));
-                    }
-                }
-                _ => {
-                    state.modal = Some(Modal::Agents {
-                        rows,
-                        ids,
-                        selected,
-                    })
-                }
-            }
-            cmds
-        }
-        Some(Modal::Transcript { cells, scroll }) => {
-            // No upper clamp here (unlike `Diff`'s raw line count): `cells`
-            // wrap at render width, which this pure update has no access
-            // to, and `view.rs` already clamps the offset it actually uses.
-            let scroll = match key.code {
-                KeyCode::Esc | KeyCode::Char('?') => return Vec::new(),
-                KeyCode::PageDown => scroll + DIFF_PAGE,
-                KeyCode::PageUp => scroll.saturating_sub(DIFF_PAGE),
-                _ => scroll,
-            };
-            state.modal = Some(Modal::Transcript { cells, scroll });
-            Vec::new()
-        }
-        // T33.24, PL§8: `overlay`'s only key — full screen, no scroll of
-        // its own, so anything but `Esc` just keeps it open.
-        Some(Modal::Plugin { id }) => {
-            if key.code != KeyCode::Esc {
-                state.modal = Some(Modal::Plugin { id });
-            }
+        Some(false) => {
+            notice(
+                state,
+                Level::Info,
+                format!("cancelled removing {}", confirm.id),
+            );
             Vec::new()
         }
         None => {
-            let esc_idle_empty =
-                key.code == KeyCode::Esc && !state.status.busy && state.composer.is_empty();
-            // `/loop`'s stop key (T27.4): the same idle-empty `Esc`, ahead of
-            // Esc-Esc's rewind-timeline role below, so a running loop is
-            // always one `Esc` away.
-            if esc_idle_empty && state.active_loop.take().is_some() {
-                notice(state, Level::Info, "loop stopped".into());
-                return Vec::new();
-            }
-            // `Esc Esc` on an idle empty composer opens the rewind timeline
-            // (T26.2); a lone Esc still reaches the composer for vim.
-            if esc_idle_empty {
-                let armed = state.esc_armed.take();
-                if armed.is_some_and(|t| state.tick.saturating_sub(t) <= ESC_ESC_TICKS) {
-                    return open_rewind(state);
-                }
-                state.esc_armed = Some(state.tick);
-            } else {
-                state.esc_armed = None;
-            }
-            // An `Enter` no binding claims (`send` moved elsewhere) is a
-            // newline rather than the composer's own submit.
-            if key.code == KeyCode::Enter {
-                return compose(state, KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
-            }
-            compose(state, key)
+            state.modal = Some(Modal::PluginRemove(confirm));
+            Vec::new()
         }
     }
+}
+
+/// A key in the `/theme` editor; every edit is drawn at once.
+// T46.7: every accepted keystroke is drawn at once; `Esc` puts
+// back what was drawn before `/theme` opened, like the picker's.
+fn on_key_theme_editor(state: &mut State, mut editor: ThemeEditor, key: KeyEvent) -> Vec<Cmd> {
+    match editor.key(key) {
+        None => {
+            state.theme = editor.theme();
+            state.modal = Some(Modal::ThemeEditor(editor));
+            Vec::new()
+        }
+        Some(EditorOutcome::Revert) => {
+            restore_theme(state);
+            Vec::new()
+        }
+        Some(EditorOutcome::Save) => {
+            state.theme_prev = None;
+            let stem = if editor.builtin {
+                format!("{}-custom", editor.name)
+            } else {
+                editor.name
+            };
+            let tokens = editor
+                .edits
+                .iter()
+                .map(|(t, c)| ((*t).to_string(), crate::theme::format_color(*c)))
+                .collect();
+            vec![Cmd::Ask(Ask::SaveTheme {
+                stem,
+                dark: editor.dark,
+                tokens,
+            })]
+        }
+    }
+}
+
+/// A key in the `/theme` picker; the selected row is previewed live.
+// T24.2: every key that changes the selection previews the row
+// immediately, not only `Enter` — the same live-apply the picker's
+// other kinds do not need, since none of them redraws the screen
+// they came from.
+fn on_key_theme_picker(state: &mut State, mut picker: Picker, key: KeyEvent) -> Vec<Cmd> {
+    match picker.key(key) {
+        Pick::Closed => restore_theme(state),
+        Pick::Chosen(row) => {
+            state.theme_prev = None;
+            return apply_theme_choice(state, &row);
+        }
+        Pick::Nothing => {
+            preview_theme(state, &picker);
+            state.modal = Some(Modal::Picker(picker));
+        }
+    }
+    Vec::new()
+}
+
+/// A key in every other picker: files, commands, sessions, history,
+/// rewind, plugin language and shell completion.
+fn on_key_picker(state: &mut State, mut picker: Picker, key: KeyEvent) -> Vec<Cmd> {
+    match picker.key(key) {
+        Pick::Nothing => state.modal = Some(Modal::Picker(picker)),
+        // Backspacing out of the picker also removes the `@`/`/`
+        // that opened it, as the user meant.
+        Pick::Closed if key.code == KeyCode::Backspace && picker.kind != Kind::Shell => {
+            state.composer.key(key, state.status.busy);
+        }
+        // `Esc` gives back what was typed after the sigil, so a
+        // `Tab` that found nothing costs no text (T25.2).
+        Pick::Closed if matches!(picker.kind, Kind::Files | Kind::Commands) => {
+            state.composer.insert(&picker.query);
+        }
+        Pick::Closed => {}
+        Pick::Chosen(choice) if picker.kind == Kind::Rewind => {
+            state.rewind_to = picker::turn_of_entry(&choice);
+            state.modal = Some(Modal::Picker(Picker::open(
+                Kind::RewindWhat,
+                picker::REWIND_WHAT.map(String::from).to_vec(),
+            )));
+        }
+        Pick::Chosen(choice) if picker.kind == Kind::RewindWhat => {
+            if let Some(to_turn) = state.rewind_to.take() {
+                let what = choice.split(' ').next().unwrap_or("");
+                return vec![Cmd::Submit(Submission::Rewind {
+                    to_turn,
+                    code: what != "talk",
+                    conversation: what != "code",
+                })];
+            }
+        }
+        // T33.30: the second (and only) step of `/plugin new`
+        // without `--lang` — `name`/`with` were stashed when the
+        // picker opened, the same way `Kind::Rewind` stashes
+        // `rewind_to` for `Kind::RewindWhat` above.
+        Pick::Chosen(choice) if picker.kind == Kind::PluginLang => {
+            if let Some((name, with)) = state.pending_plugin_new.take() {
+                return vec![Cmd::PluginMgmt(PluginMgmtRequest::New(PluginNewRequest {
+                    name,
+                    lang: choice,
+                    with,
+                }))];
+            }
+        }
+        Pick::Chosen(choice) => match picker.kind {
+            Kind::Files | Kind::Commands => {
+                let choice = picker::untag(&choice);
+                state.composer.insert(&format!("{choice} "));
+            }
+            // Resuming in place needs `app::run` to return a request;
+            // until then the command is the answer (T16.5).
+            Kind::Sessions => {
+                let id = state
+                    .sessions
+                    .iter()
+                    .find(|(_, row)| *row == choice)
+                    .map_or(choice.as_str(), |(id, _)| id.as_str());
+                let text = format!("to resume: cox --resume {id}");
+                notice(state, Level::Info, text);
+            }
+            Kind::History => {
+                let text = state
+                    .past_prompts
+                    .iter()
+                    .find(|(row, _)| *row == choice)
+                    .map_or(choice.as_str(), |(_, text)| text.as_str())
+                    .to_string();
+                state.composer.set_text(&text);
+            }
+            // `Themes` and `PluginLang` are each intercepted by
+            // their own guarded arm (`on_key_theme_picker`, the
+            // `PluginLang` arm above) and never reach this generic one.
+            Kind::Rewind | Kind::RewindWhat | Kind::Themes | Kind::PluginLang => {}
+            Kind::Shell => {
+                let mut line = state.composer.text();
+                let keep = line.len() - picker::last_word(&line).len();
+                line.truncate(keep);
+                line.push_str(&choice);
+                line.push(' ');
+                state.composer.set_text(&line);
+            }
+        },
+    }
+    Vec::new()
+}
+
+/// A key in the `/refine` review; the review itself decides what it means.
+fn on_key_refine(state: &mut State, review: crate::refine::Review, key: KeyEvent) -> Vec<Cmd> {
+    let (review, cmds) = review.key(key);
+    state.modal = review.map(Modal::Refine);
+    cmds
+}
+
+/// A key in the `Ctrl+G` diff view: page through it or close it.
+fn on_key_diff(state: &mut State, text: String, scroll: usize, key: KeyEvent) -> Vec<Cmd> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let scroll = match key.code {
+        KeyCode::Esc | KeyCode::Char('?') => return Vec::new(),
+        KeyCode::Char('g') if ctrl => return Vec::new(),
+        KeyCode::PageDown => (scroll + DIFF_PAGE).min(text.lines().count().saturating_sub(1)),
+        KeyCode::PageUp => scroll.saturating_sub(DIFF_PAGE),
+        _ => scroll,
+    };
+    state.modal = Some(Modal::Diff { text, scroll });
+    Vec::new()
+}
+
+/// A key over `Help` or `/context`: `Esc` or `?` closes it.
+fn on_key_info(state: &mut State, modal: Modal, key: KeyEvent) -> Vec<Cmd> {
+    if !matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
+        state.modal = Some(modal);
+    }
+    Vec::new()
+}
+
+/// A key in the `/agents` list: move the selection, open a rollout or close.
+fn on_key_agents(
+    state: &mut State,
+    rows: Vec<String>,
+    ids: Vec<Option<SessionId>>,
+    mut selected: usize,
+    key: KeyEvent,
+) -> Vec<Cmd> {
+    let mut cmds = Vec::new();
+    match key.code {
+        KeyCode::Esc => {}
+        KeyCode::Up => {
+            selected = selected.saturating_sub(1);
+            state.modal = Some(Modal::Agents {
+                rows,
+                ids,
+                selected,
+            });
+        }
+        KeyCode::Down => {
+            if selected + 1 < rows.len() {
+                selected += 1;
+            }
+            state.modal = Some(Modal::Agents {
+                rows,
+                ids,
+                selected,
+            });
+        }
+        // A task row's id is `None` (no `SessionId` on the wire
+        // yet, plan.md §3 P27): `Enter` on it just keeps the list.
+        KeyCode::Enter => {
+            let ask = ids.get(selected).copied().flatten();
+            state.modal = Some(Modal::Agents {
+                rows,
+                ids,
+                selected,
+            });
+            if let Some(id) = ask {
+                cmds.push(Cmd::Ask(Ask::Rollout(id)));
+            }
+        }
+        _ => {
+            state.modal = Some(Modal::Agents {
+                rows,
+                ids,
+                selected,
+            })
+        }
+    }
+    cmds
+}
+
+/// A key in a sibling session's read-only transcript: page through it or close.
+fn on_key_transcript(
+    state: &mut State,
+    cells: Vec<Cell>,
+    scroll: usize,
+    key: KeyEvent,
+) -> Vec<Cmd> {
+    // No upper clamp here (unlike `Diff`'s raw line count): `cells`
+    // wrap at render width, which this pure update has no access
+    // to, and `view.rs` already clamps the offset it actually uses.
+    let scroll = match key.code {
+        KeyCode::Esc | KeyCode::Char('?') => return Vec::new(),
+        KeyCode::PageDown => scroll + DIFF_PAGE,
+        KeyCode::PageUp => scroll.saturating_sub(DIFF_PAGE),
+        _ => scroll,
+    };
+    state.modal = Some(Modal::Transcript { cells, scroll });
+    Vec::new()
+}
+
+/// A key over a plugin's full-screen overlay: `Esc` closes it.
+// T33.24, PL§8: `overlay`'s only key — full screen, no scroll of
+// its own, so anything but `Esc` just keeps it open.
+fn on_key_overlay(state: &mut State, id: String, key: KeyEvent) -> Vec<Cmd> {
+    if key.code != KeyCode::Esc {
+        state.modal = Some(Modal::Plugin { id });
+    }
+    Vec::new()
 }
 
 /// A keymap action (T25.5); `None` leaves the key to the modal or the
@@ -2461,8 +2305,7 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
         }
         Event::Usage { usage, .. } => {
             state.status.cost_usd += usage.cost_usd;
-            state.status.context_tokens =
-                usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
+            state.status.context_tokens = usage.context_tokens();
             state.status.cache_ratio = cox_core::cache_diag::ratio_of(&usage);
         }
         Event::ModelSwitched { tier, to, .. } => {
@@ -2573,7 +2416,9 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
         Event::SessionStarted { .. }
         | Event::Compacted { .. }
         | Event::GrantRevoked { .. }
-        | Event::RepoMapBuilt { .. } => {}
+        | Event::RepoMapBuilt { .. }
+        // T67.5 draws the goal; until then the verdict is recorded and not shown.
+        | Event::GoalVerdict { .. } => {}
     }
     cmds
 }
@@ -2694,41 +2539,43 @@ fn think_consent_answered(state: &mut State, answer: QuestionAnswer) -> Vec<Cmd>
 }
 
 #[cfg(test)]
+mod testkit;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::theme;
     use cox_core::{History, HistoryTurn};
     use cox_protocol::ids::TurnId;
+    use cox_protocol::plugin::KeyDecl;
     use cox_protocol::types::{Content, Message, PermissionMode, Role, SandboxMode};
     use crossterm::event::{KeyCode, KeyEvent};
 
-    /// Types `text` into the composer and submits it with a plain `Enter`,
-    /// the way a user queues or sends a message.
-    fn type_line(state: &mut State, text: &str) {
-        for c in text.chars() {
-            update(state, Msg::Key(KeyEvent::from(KeyCode::Char(c))));
-        }
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Enter)));
-    }
+    use super::testkit::*;
 
-    /// Types a slash command and submits it. `/` at column 0 opens the
-    /// palette (`Edit::OpenCommands`) but already left the `/` itself in the
-    /// composer, so — as `clear_command_emits_cmd_clear` established — `Esc`
-    /// closes the palette without losing it, then the rest types normally.
-    fn type_command(state: &mut State, line: &str) -> Vec<Cmd> {
-        type_after_sigil(state, '/', line)
-    }
-
-    /// `line` after the picker its leading `sigil` opens was closed with
-    /// `Esc`, which keeps the sigil in the composer; then `Enter`.
-    fn type_after_sigil(state: &mut State, sigil: char, line: &str) -> Vec<Cmd> {
-        let rest = line.strip_prefix(sigil).unwrap_or(line);
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Char(sigil))));
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Esc)));
-        for c in rest.chars() {
-            update(state, Msg::Key(KeyEvent::from(KeyCode::Char(c))));
-        }
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Enter)))
+    /// The status context size is `Usage::context_tokens`, the rule the
+    /// ledger and `cox-app` share, so huge counts saturate instead of
+    /// overflowing the hand-written sum this replaced.
+    #[test]
+    fn usage_context_tokens_saturate_like_the_protocol_rule() {
+        let mut state = State::new(PermissionMode::Default, SandboxMode::WorkspaceWrite);
+        let usage = cox_protocol::types::Usage {
+            input_tokens: u32::MAX,
+            output_tokens: 1,
+            cache_read_tokens: 7,
+            cache_write_tokens: 9,
+            estimated: false,
+            cost_usd: 0.0,
+            latency_ms: 0,
+        };
+        update(
+            &mut state,
+            Msg::Event(Event::Usage {
+                turn: TurnId::new(),
+                usage,
+            }),
+        );
+        assert_eq!(state.status.context_tokens, u32::MAX);
     }
 
     /// T45.6: `@<agent> task` at line start runs that agent directly.
