@@ -98,7 +98,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
-| T37.32.3 | in progress | P1 | 2 | 90% | Claude Code / opus-5.5 |
 | T37.33 | todo | P1 | 3 | 0% | |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
@@ -1295,21 +1294,7 @@ Depends: T37.32.1 · Size: ~150 · Files: `.github/workflows/release.yml`, `scri
 Goal: the rest of T37.32 (A106): a Developer ID-signed, notarized app with Sparkle 2 updates and the `cox` CLI inside the bundle (DT§7), and a Homebrew cask. New dependency Sparkle (§1.1 row). Waits for the creator's Developer ID certificate, App Store Connect API key, Sparkle EdDSA key, appcast host and tap repository as GitHub Actions secrets.
 Check: `spctl --assess` accepts the release build; the appcast validates.
 
-The bundle id is `io.github.pyrlyn.cox`, confirmed by the creator (A135, T37.32.3). The Developer ID import (`.github/actions/macos-signing`) and the app's re-signing and DMG (`scripts/desktop/dmg.sh`) exist since T37.32.3; this card adds Hardened Runtime, notarization, Sparkle, the bundled CLI and the cask.
-
-#### T37.32.3 Debug macOS app DMG on CI, every feature, Developer ID-signed
-
-Depends: T37.32.1 · Size: ~200 · Files: `.github/workflows/desktop-build.yml`, `.github/actions/desktop-macos/action.yml`, `.github/actions/macos-signing/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `scripts/desktop/dmg.sh`, `desktop/macos/project.yml`, `justfile`
-Goal: the first build of the macOS app someone can download from CI and run (A135): Debug, not a release build, with every macOS feature the app has; started by hand (Actions -> desktop build) and by every release, which attaches the DMG.
-Plan:
-1. Survey (Explore agent, 2026-10-03): no feature needs an Info.plist usage key or an entitlement (no microphone, Apple Events, URL scheme or sandbox; notifications, Keychain, App Intents, Spotlight, hotkeys, menu-bar extra, WebKit and the PTY need none); the Rust core links with its plugin host on; there is no desktop voice UI and the Swift side never looks for a bundled CLI, so neither is added (the CLI in the bundle stays T37.32.2). The gap was signing: ci.yml builds with `CODE_SIGNING_ALLOWED=NO` and nothing packages the app.
-2. `.github/actions/macos-signing`: release.yml's Developer ID import moved into a composite action (one copy), with `required: false` falling back to ad-hoc for a manual run without the secrets.
-3. `.github/actions/desktop-macos`: Xcode 27, the Metal toolchain, the Rust pin, CoxFFI.xcframework and the arm64 check, shared by ci.yml's `desktop-macos` job and the new workflow.
-4. `scripts/desktop/dmg.sh` (`just desktop-dmg`): re-signs `Cox.app` inside-out with `COX_SIGN_IDENTITY` or ad-hoc, keeping the build's identifier, entitlements and flags; checks it (`codesign --verify --deep --strict`, Developer ID authority when signed); writes `Cox-<version>-<build>-debug-arm64.dmg` with an /Applications link, signed and verified.
-5. `.github/workflows/desktop-build.yml` (`workflow_dispatch` and `workflow_call`): build number = run number; artifact `desktop-macos-dmg`. release.yml's `desktop` job calls it with the tag's commit and `require-signing`, and `publish` uploads the DMG and its checksum with the CLI archives.
-6. Bundle id `io.github.pyrlyn.cox` in project.yml.
-Check: actionlint 1.7.12 on the three workflows and shellcheck 0.11.0 on `dmg.sh` add no finding; `dmg.sh` run ad-hoc on a locally built Debug `Cox.app` signs the nested debug dylibs, keeps `get-task-allow`, and writes a DMG `hdiutil verify` accepts; the PR's `desktop-macos` job passes through the shared action; after the merge, Actions -> desktop build produces a Developer ID-signed DMG whose app opens on another Mac after Open Anyway.
-Out of scope: Hardened Runtime, notarization, Sparkle, the bundled CLI, the app cask (T37.32.2).
+The bundle id is `io.github.pyrlyn.cox`, confirmed by the creator (A135, T37.32.3). The Developer ID import (`pyrlyn/ci`'s `macos-keychain` action, which replaced T37.32.3's `.github/actions/macos-signing`), the app's re-signing and DMG (`scripts/desktop/dmg.sh`) and `desktop-build.yml`, which `release.yml` calls, exist since T37.32.3; this card adds Hardened Runtime, notarization, Sparkle, the bundled CLI and the cask.
 
 #### T37.33 Performance budget suite
 
