@@ -112,4 +112,31 @@ mod tests {
         assert_eq!(manifest.capabilities.decide, ["risk"], "T33.40.6");
         assert_eq!(manifest.validate(), Ok(()));
     }
+
+    /// The user guide (T33.40.11). cox passes `[plugins.jev]` through
+    /// untyped, so only this crate can tell a stale key on the page.
+    const GUIDE: &str = include_str!("../../../docs/plugins/jev.md");
+
+    #[test]
+    fn guide_jev_tables_are_accepted_by_init() {
+        let tables: Vec<cox_plugin_sdk::Value> = GUIDE
+            .split("```toml\n")
+            .skip(1)
+            .filter_map(|rest| rest.split("\n```").next())
+            .filter_map(|block| {
+                Figment::from(Toml::string(block))
+                    .extract_inner("plugins.jev")
+                    .ok()
+            })
+            .collect();
+        assert!(!tables.is_empty(), "the guide shows [plugins.jev.risk]");
+        for table in &tables {
+            let t = crate::risk::thresholds(table).expect("the guide's table loads");
+            assert_eq!(
+                t,
+                crate::risk::Thresholds::default(),
+                "the guide shows the defaults"
+            );
+        }
+    }
 }

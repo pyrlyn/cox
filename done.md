@@ -14193,3 +14193,37 @@ $ mise exec -- cargo fmt --check
 (clean)
 ```
 Not green: `cargo clippy --workspace` stops in `cox-session` (`cox_config::load::default_tiers` missing since #364), the same failure `main` has; nothing in that crate uses the fields this card changed.
+
+#### T33.40.11 User guide: the Jev plugin
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-21 · Priority: P2 · Complexity: 2 · Depends: T33.40.6, T33.40.9 · Size: ~150 · Files: `docs/plugins/jev.md`, `docs/plugins.md` (link), `crates/cox/tests/it/doc_examples.rs` (also touched: `justfile`, `plugins/jev/src/lib.rs`, the `docs/ru` and `docs/uk` copies of `plugins.md`)
+Goal: one page for users. It covers:
+- what Jev is and is not (J13);
+- building it from `plugins/jev` (`just plugin jev`) and `cox plugin install <dir>` (C3);
+- the key through `TYPESAFE_API_KEY` or the keyring entry `cox/typesafe`;
+- enabling points in `[plugins.decide]`;
+- per point, the exact state sent to TypeSafe (J17);
+- costs in `cox stats` as `plugin:jev`;
+- fail-open behaviour and `cox doctor` rows;
+- the E1/E2 results and the defaults they justify;
+- the migration from `[providers.typesafe]` (J§7).
+Check: `doc_examples` parses every `toml` block on the page against `Config` or the plugin manifest schema and fails on drift.
+
+Result:
+- `docs/plugins/jev.md` covers every item above. The `risk` state table lists the eight fields `cox-core` (`monotone.rs`) builds and the guest (`risk.rs`) keeps, with the 2,000-character clip. The quoted install and doctor output is the real binary's.
+- `just plugin <name>` is new: no recipe existed for PL§14 decision 14's `just plugin jev`. It builds `cox-plugin-<name>` for wasm32 and lays out `target/plugins/<name>` (`plugin.toml` plus `<name>.wasm`). The built package installed and loaded in a scratch `COX_HOME` (`plugin jev: ✓ loaded`).
+- `doc_examples`: `jev_doc_toml_blocks_parse_as_config_or_manifest` runs each `toml` block through `cox_config::load::check_user_toml`, then `cox_plugin::discover::load_manifest`, and fails if neither accepts it. A misspelled `risk_mss` failed it, as expected. `jev_doc_commands_match_the_real_binary` installs the repository's manifest with a stub wasm and checks the quoted grant block and three doctor rows: the leftover `[providers.typesafe]` table, `plugin jev` and the missing key.
+- The host treats `[plugins.jev]` as untyped, so a guest test (`guide_jev_tables_are_accepted_by_init`) runs the page's `[plugins.jev.risk]` through `risk::thresholds` and checks that it shows the defaults.
+Not done (the inputs do not exist yet): `route` is described as not in the plugin yet, because T33.40.9 is open. E1 and E2 have not run, so the page states the falsifiers and the conservative defaults, not result tables. T33.40.7, T33.40.9 and T33.40.10 now name the guide updates they own.
+Check output:
+```
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox -E 'test(/doc_examples/) | binary(docs)'
+10 tests run: 10 passed
+$ mise exec github:nextest-rs/nextest@0.9.148 -- cargo nextest run -p cox
+259 tests run: 259 passed, 11 skipped
+$ just plugin-test
+all passed (cox-plugin-jev: 26 passed)
+$ mise exec -- cargo clippy -p cox --all-targets -- -D warnings: clean
+$ mise exec -- cargo clippy --manifest-path plugins/Cargo.toml -p cox-plugin-jev --all-targets -- -D warnings: clean
+$ mise exec -- cargo fmt --check (both workspaces): clean
+```

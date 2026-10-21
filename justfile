@@ -76,6 +76,17 @@ windows-check:
 plugin-test:
     mise exec -- cargo test --manifest-path plugins/Cargo.toml --workspace
 
+# Build a shipped plugin, e.g. `just plugin jev`, into an installable package
+# at target/plugins/<name> for `cox plugin install` (PL§14 decision 14: no
+# prebuilt archive ships). The crate is `cox-plugin-<name>` and the manifest's
+# `wasm` key is `<name>.wasm`.
+plugin name:
+    mise exec -- cargo build --release --manifest-path plugins/Cargo.toml -p cox-plugin-{{name}} --target wasm32-unknown-unknown
+    rm -rf target/plugins/{{name}}
+    mkdir -p target/plugins/{{name}}
+    cp plugins/{{name}}/plugin.toml target/plugins/{{name}}/
+    cp plugins/target/wasm32-unknown-unknown/release/cox_plugin_{{name}}.wasm target/plugins/{{name}}/{{name}}.wasm
+
 # Build a guest-language example (PL§13) with its own toolchain (installed
 # from plugins/mise.toml) and run its ignored e2e test, e.g.
 # `just plugin-examples dart`. The `plugin-examples` CI job runs this for
