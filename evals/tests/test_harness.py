@@ -2,6 +2,7 @@
 `cox run` outcome becomes a pass/fail row with cost and tokens."""
 
 import os
+import shutil
 import subprocess
 import tomllib
 
@@ -366,6 +367,26 @@ def test_the_arm_totals_sum_tiers_jobs_downgrades_and_plugin_latency():
     assert ("jev: 1/1 passed  $0.0300  by tier/job cheap/main $0.0300, cheap/plugin:jev $0.0001"
             "  downgrades 1/2  cache read/write 5/7  plugin p95 300ms  models jev-1.13.0") in report
     assert "baseline: 1/1 passed  $0.1000  by tier/job -  downgrades 0/0" in report
+
+
+JEV_WASM = (harness.EVALS.parent / "plugins" / "target" / "wasm32-unknown-unknown" / "release"
+            / "cox_plugin_jev.wasm")
+
+
+def test_jev_arm_installs_the_built_plugin_against_the_real_binary(real_cox, tmp_path):
+    # Scripted provider and no TypeSafe key: this proves the install, the
+    # config and the ledger read, not Jev's answers.
+    if not JEV_WASM.exists():
+        pytest.skip("no jev.wasm: build plugins/jev for wasm32-unknown-unknown --release first")
+    pkg = tmp_path / "jev"
+    pkg.mkdir()
+    shutil.copy(harness.EVALS.parent / "plugins" / "jev" / "plugin.toml", pkg)
+    shutil.copy(JEV_WASM, pkg / "jev.wasm")
+    t = dict(harness.load_tasks(["create-file"])[0][1])
+    res = harness.run_task(t, cox_bin=real_cox, dry_run=True, provider=None, model=None,
+                           preset="jev-route", arm="jev", budget=0.25, plugin_dir=pkg)
+    assert res["pass"], res["note"]
+    assert res["ledger"]["main_calls"] == {"code": 2}
 
 
 def test_p95_is_nearest_rank():
