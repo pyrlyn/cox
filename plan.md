@@ -1962,29 +1962,6 @@ mise exec -- cargo fmt --check
 
 Done when the `goal_status_line` insta snapshot and a stream-json e2e test with a scripted `Met` verdict pass.
 
-#### T67.6 Path-scoped rules, loaded on demand
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~190 · Priority: P2 · Complexity: 3
-
-Goal: `.cox/rules/*.md` and `.claude/rules/*.md` with a frontmatter `paths:` glob list reach the model only when it reads or edits a matching file, once per rule per session. Instruction files keep loading as today.
-
-Files:
-- `crates/cox-ext/src/rules.rs` (new): `Rule { globs, body, source }`, `load_rules(roots) -> Vec<Rule>` (re-read each time; a broken file is a warning and is skipped), `rules_for(touched, rules) -> Vec<&Rule>` (pure). Reuse `frontmatter.rs` and the `globset` the workspace already links.
-- `crates/cox-core/src/context.rs`: after a `read`/`edit`/`write` result, append the new matching rules as an item after the last cache breakpoint, never in the system prefix.
-- `docs/config.md`
-
-Steps:
-1. A rule body is untrusted repository text: it goes through `cox_sanitize::sanitize` and is framed as a project rule, not as a system instruction.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-ext -p cox-core
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `rule_matches_only_its_globs`, `rule_injected_once` and `system_prefix_unchanged_by_rules` (byte-equal prefix with and without rules) pass.
-
 #### T67.7 Leaving Plan mode needs approval
 
 Model: grok-4.7 · Status: open · Depends: — · Size: ~180 · Priority: P2 · Complexity: 3
