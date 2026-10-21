@@ -83,6 +83,10 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
+| T5.10 | todo | P3 | 2 | 0% | |
+| T5.11 | todo | P3 | 3 | 0% | |
+| T5.12 | todo | P2 | 2 | 0% | |
+| T5.13 | todo | P3 | 1 | 0% | |
 | T32.17 | in progress | P2 | 3 | 80% | Claude / opus-5.5 |
 | T33.40.7 | todo | P2 | 3 | 0% | |
 | T33.40.9 | todo | P2 | 4 | 0% | |
@@ -776,6 +780,56 @@ P22–P30 (A27): P22 first; T22.1–T22.6 may proceed independently, then T22.7 
 ### P4 — Sandbox (goal: `workspace-write` enforced on macOS and Linux)
 
 ### P5 — TUI (goal: a daily-driver terminal UI with snapshots for every state)
+
+T5.10–T5.13 come from A166 (issue #116): the TUI's `Event` fold (`cox-tui` `state.rs` `on_event`, into `Vec<Cell>`) and `cox-app`'s `Timeline::apply` (into `Block`s) stay two folds, and one parity test keeps them from drifting. Order: T5.10, T5.12 and T5.13 in parallel, then T5.11. T5.12 edits `on_event`; if #107 has landed by then, the fold sits in `crates/cox-tui/src/state/event.rs` instead of `state.rs`.
+
+#### T5.10 Share cox-app's scenario runner by path
+
+Model: sonnet · Status: open · Depends: — · Size: ~150 moved, ~10 new · Files: `crates/cox-app/tests/it/scenarios.rs`, new `crates/cox-app/tests/it/scenario_runs.rs`, `crates/cox-app/tests/it/main.rs`
+Goal: the code that turns a scripted scenario into its live and replayed `Event` streams lives in one file that names no `cox_app` item, so T5.11 includes it by `#[path]` from `crates/cox` the same way `cox-app` already includes cox-core's `tests/common` harness.
+Steps:
+1. Move `Act`, `Case`, `core`, `cases`, the `Stub` and `Fake` test tools, `open`, `run`, `scenario` and `through_jsonl` from `scenarios.rs` into `scenario_runs.rs`, `pub(crate)` where `scenarios.rs` uses them. `fold`, `normalize`, the snapshots and the controller and meter tests stay.
+2. `scenario_runs.rs` reaches the harness as `super::common`, so any test binary that declares `mod common` next to it can include it; its scenario paths stay `CARGO_MANIFEST_DIR/../<home>/tests/scenarios`, which resolve the same from `crates/cox`.
+3. `main.rs` declares `mod scenario_runs;`.
+Check: `mise exec -- cargo nextest run -p cox-app -E 'test(/^scenarios::/)'` passes with no snapshot change; `rg -n 'cox_app' crates/cox-app/tests/it/scenario_runs.rs` prints nothing.
+Done when: the scenario tests pass unchanged and the runner file is `cox_app`-free.
+Out of scope: the parity test (T5.11); new scenarios.
+
+#### T5.11 Parity test: the TUI fold and the Timeline agree on every scenario
+
+Model: sonnet · Status: open · Depends: T5.10, T5.12, T5.13 · Size: ~180 (test) · Files: new `crates/cox/tests/it/fold_parity.rs`, `crates/cox/tests/it/main.rs`
+Goal: every case in `scenario_runs::cases()` folds, live and through JSONL, to the same projection in `cox_tui::State` (driven by `update(Msg::Event)`) and in `cox_app::Timeline`, so a change to the shared event semantics in one fold and not the other fails CI.
+Steps:
+1. `fold_parity.rs` includes `../../../cox-app/tests/it/scenario_runs.rs` by `#[path]` and cox-core's `tests/common/mod.rs` as its `common`, behind `#[cfg(feature = "app-server")]` (the feature that links `cox-app`).
+2. A neutral projection, written once in the test: the ordered entries (user text, assistant text, thinking text, tool call name with ok and visible output, notice level and text, error text and fatal, compaction summary text), the plan (`State::todo` vs `Timeline::plan`), and the tasks started and finished with their exit codes. `ToolGroup` blocks flatten to their child `Tool` blocks; `TurnMeta`, `Approval`, `Question` and `Checkpoint` blocks and the TUI's modals and status line stay out, because each fold keeps them in a shape the other has no use for.
+3. One known difference, named in a comment: a `TaskMessage` is a TUI cell and no Timeline block; the projection drops it until the desktop decides where task messages show.
+4. The test never calls `State::take_finished`, so the transcript stays whole.
+Check: `mise exec -- cargo nextest run -p cox -E 'test(/^fold_parity::/)'`; then revert T5.12's change locally and see the rewind case fail.
+Done when: the test passes on `main` with no exception besides `TaskMessage`.
+Out of scope: fixing a drift the test finds beyond T5.12 and T5.13 — each gets its own card by amendment.
+
+#### T5.12 TUI plan falls back with a conversation rewind
+
+Model: sonnet · Status: open · Depends: — · Size: ~40 plus test · Files: `crates/cox-tui/src/state.rs` (or `state/event.rs` after #107)
+Goal: after `Event::Rewound { conversation: true, to_turn }` the TUI's plan is the last successful `todo` list from a turn before `to_turn`, or empty, as the Timeline's already is (`plans.retain(|(turn, _)| turn < to_turn)`). Today `state.todo` keeps the list of the turn that was undone.
+Steps:
+1. Keep each successful `todo` result with its turn `seq` (`state.current_seq`), oldest first; `state.todo` stays the last one, so `view` and `/todo` do not change.
+2. On a conversation rewind drop the entries with `seq >= to_turn` and set `state.todo` to the new last one or empty. Rescanning the transcript would not work: `take_finished` drains finished cells from it.
+3. Test `rewind_restores_the_plan_before_the_cut_turn`: two turns with a `todo` each, rewind to the second, the first turn's list is the plan.
+Check: `mise exec -- cargo nextest run -p cox-tui -p cox`, then the three AGENTS.md commands.
+Done when: the test passes and fails with step 2 reverted.
+Out of scope: the parity test (T5.11).
+
+#### T5.13 Timeline takes a plan only from a successful `todo` result
+
+Model: haiku · Status: open · Depends: — · Size: ~5 plus test · Files: `crates/cox-app/src/timeline.rs`
+Goal: `Timeline::apply` on `ToolCallDone` records a plan only when `result.ok`, as the TUI does, so a failed `todo` call whose result still carries a `structured` list does not replace the plan.
+Steps:
+1. Add `result.ok` to the `call.is_some_and(|c| c.name == "todo")` condition.
+2. Test `failed_todo_keeps_the_previous_plan` in `timeline.rs`'s tests.
+Check: `mise exec -- cargo nextest run -p cox-app`, then the three AGENTS.md commands.
+Done when: the test passes and fails with step 1 reverted.
+Out of scope: the TUI side (already checks `ok`).
 
 ### P6 — Headless and MCP server (goal: scripts and other agents can drive cox)
 
@@ -2281,6 +2335,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A164 §3 P33 (T33.40.6 and T33.40.7 amended), by the creator (2026-10-17): T33.40.6/T33.40.7 e2e use `git push origin main` (classifier: Exec) instead of `git push --force origin main`, which the classifier already rates Destructive so `risk` is never asked.
 - A160 §3 P32 (new T32.17), by the creator (2026-10-13, for Mailune X1; numbered A155 on its branch, renumbered on merge because main's A155 is T33.46): `cox-config` consumes the shared `config-schema` crate (layering with named layers and per-key provenance, the `COX_*` env layer, comment-preserving edits) that was extracted from it, rtok and ketch, and drops its own copy. Why: the workspace rule against duplicated code across projects. Effect: one card; `config-schema` replaces `cox-config`'s direct `figment` and `toml_edit` dependencies. No §0 decision changes.
 - A165 §3 P66 (new T66.22–T66.24), by the creator (2026-10-17): the last three implementation cards from `docs/design/serve.md`, its proposals S7–S9. S7 adds the router and the `--stdio` bridge to `cox-serve` (workspace calls answered by the supervisor's own `App`, session calls routed by id to their worker, an `open` of a live session turned into `attach`, one attached client per session with `ended` for the one displaced); S8 adds the `cox serve` and `cox attach --stdio` commands, the hidden `--worker` flag and the docs section; S9 is the end-to-end test that kills a client, reattaches and checks that the rollout grows only by the turn. Why: they finish the chain T66.16–T66.21 so that a session outlives the client that opened it (D1, D4, D6). T66.22 depends on T66.18, T66.20 and T66.21, because serve.md S7 depends on S2, S5 and S6. No split: each card fits within 500 non-test lines. No new external dependency, so no `plan.md` §1 row is needed (serve.md requires none); `cox-serve` is already added by A162. T66.13 (heartbeat) and T66.14 still wait for their own later amendment. No §0 decision changes.
+- A166 §3 P5 (new T5.10–T5.13), issue #116 — the TUI's `Event` fold (`cox-tui` `state.rs` `on_event`, into `Vec<Cell>`) and `cox-app`'s `Timeline::apply` (into `Block`s) implement the same event semantics twice: the conversation-rewind cut, the plan as the latest `todo` result, task start and finish, `Notice` and `Error` entries, `Checkpoint` file counts, item streaming, and no entry for a signature-only thinking item. The TUI does not mirror `cox-core`'s loop; it only consumes its events. Decision: the issue's option 3 — keep two folds and pin them with one parity test that runs `cox-app`'s scripted scenarios through both. Why not option 2 (`cox-tui` → `cox-app`): it breaks D1's crate rules and `deps.rs` (`cox-tui` may depend only on `cox-core`, `cox-protocol`, `cox-sanitize` and `cox-render` among workspace crates) and would pull `cox-session`, `cox-store` and the plugin host into the terminal UI, which the slim build (`--no-default-features --features otel`) leaves out today. Why not option 1 (a shared fold in `cox-render` or `cox-protocol`): the two folds keep different things — the TUI tick-timed tool cells, `!` shell cells, plugin renders and modals; the Timeline keyed blocks and patches, `ToolGroup`s, `TurnMeta` and a `StyledDoc` parse — so a shared fold would need a hook for each, which is more code than the rules it would share; the one shared rule that is real logic, `ToolResult::todo_list`, already lives in `cox-protocol`. Reading the two folds side by side already finds three drifts: after a conversation rewind the Timeline's plan falls back to the list before `to_turn` while the TUI keeps the undone list; the TUI takes a plan only from a successful `todo` result while the Timeline takes it from any; a `TaskMessage` is a TUI cell and no Timeline block. Effect: four cards. T5.10 moves `cox-app`'s scenario runner into a file `crates/cox` includes by `#[path]`, as `cox-app` already includes cox-core's `tests/common`; T5.12 and T5.13 fix the first two drifts, one per fold; T5.11 is the parity test, after them, so it lands with `TaskMessage` as its only named difference. Revisit option 1 if the projection ever needs a second exception. No new dependency; no §0 decision changes.
 
 ## 7. Risk register
 
