@@ -434,3 +434,15 @@ mode.cycle = "shift+tab"
 - A built-in is never overwritten: its edits go to `<name>-custom.toml`, which starts as a copy of the built-in's own file. A user theme is edited in place, keeping its comments and every other key.
 - A stem must match `[a-z0-9][a-z0-9._-]{0,63}` with no `..`; any other is refused with a warning, and a failed write is a warning too.
 - The file: optional `variant = "dark"` (or `"light"`) and `syntax = "<.tmTheme name>"`, then `[tokens]` with `<token> = { dark = "<colour>", light = "<colour>" }`. A colour is `#rrggbb`, an ANSI index `0`-`255` or one of the sixteen ANSI names. The tokens are text, dim, accent, user, agent, tool, ok, warn, error, diff_add, diff_del, diff_hunk, border, selection, mode_plan, mode_auto and mode_bypass.
+
+## Path-scoped rules
+
+`.cox/rules/*.md` and `.claude/rules/*.md` in the repository root (T67.6) hold project rules. Each file needs YAML frontmatter with a `paths` glob list. A rule is sent to the model only after a successful `read`, `edit` or `write` of a matching path, and only once per session. The text is appended after the cached system prefix, so instruction files stay byte-stable. The body is repository text, not a system instruction: escape sequences are stripped. A file that does not parse, has no `paths`, or points outside the root is skipped with a warning.
+
+```yaml
+---
+paths:
+  - src/**/*.rs
+---
+Format Rust with rustfmt.
+```

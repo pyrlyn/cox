@@ -1483,6 +1483,18 @@ pub enum Event {
         /// Why it stopped.
         stop: StopReason,
     },
+    /// `/goal` judged the turn that just finished (T67.4). It follows
+    /// `TurnDone`. `verdict` is `met`, `not_met`, `impossible`,
+    /// `max_turns`, `max_tokens`, `budget`, `interrupted`, `error` or
+    /// `refusal`.
+    GoalVerdict {
+        /// Which way the judge, the turn cap or the budget went.
+        verdict: String,
+        /// Why, as the judge wrote it or as the loop names the cap.
+        reason: String,
+        /// Turns finished since the goal was set, this one included.
+        turns_used: u32,
+    },
     /// An error occurred.
     Error {
         /// What went wrong.
@@ -1976,6 +1988,7 @@ mod tests {
     #[case::advised(Event::Advised { point: crate::plugin::DecidePoint::Route, plugin: "jev".into(), advice: crate::plugin::Advice { answer: crate::plugin::Answer::Choice { order: vec![0] }, confidence: Some(0.9), note: None }, applied: true })]
     #[case::notice(Event::Notice { level: Level::Warn, text: "hook skipped".into() })]
     #[case::turn_done(Event::TurnDone { turn: TurnId::new(), stop: StopReason::EndTurn })]
+    #[case::goal_verdict(Event::GoalVerdict { verdict: "met".into(), reason: "tests pass".into(), turns_used: 2 })]
     #[case::error(Event::Error { error: CoreError::Interrupted, fatal: false })]
     #[case::task_message(Event::TaskMessage { task: TaskId::new(), from: Some(TaskId::new()), hop: 1, text: "ping".into() })]
     fn event_json_roundtrip(#[case] event: Event) {

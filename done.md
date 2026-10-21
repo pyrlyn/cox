@@ -1,3 +1,71 @@
+#### T67.4 `/goal`: a judged stop condition
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~190 (landed larger; see Not done) · Priority: P1 · Complexity: 3
+
+Goal: `/goal <condition>` sets a goal, `/goal` shows it and `/goal clear` drops it. After every `TurnDone` while a goal is set, the cheap tier judges the condition through `Session::side_call`. `Met` stops; `NotMet` submits a continue turn; `Impossible` stops with the reason. The loop also stops at the autonomous turn and token caps (T66.9 has landed, so those replace a separate default of 20) or when `budget::decide` says so.
+
+What landed:
+- `/goal` is a built-in command. Setting it emits a notice and does not start a turn. `/goal` prints the condition and the turns used; `/goal clear` drops it.
+- `Event::GoalVerdict { verdict, reason, turns_used }` follows `TurnDone`. `verdict` is `met`, `not_met`, `impossible`, `max_turns`, `max_tokens`, `budget`, `interrupted`, `error` or `refusal`. `docs/protocol.jsonschema` gained that variant.
+- The judge is `Job::Summarize` (already the cheap tier) through `side_call`, which sends no tools and inserts a usage row. The prompt is the condition plus the last assistant text, clipped. `MET` / `NOT_MET` / `IMPOSSIBLE`, or JSON `{"verdict","reason"}`, parse; anything else is `NotMet`, never `Met`.
+- A `NotMet` answer submits one continue turn and judges again. `Met` and `Impossible` stop. A turn that already stopped for `Budget`, `Interrupted`, `Error` or `Refusal` is not judged. The autonomous `max_turns` and `max_tokens` stop the loop after the judge says it is not met yet. The goal stays set, so a later user turn is judged again.
+- The TUI matches `GoalVerdict` and draws nothing; T67.5 prints it. `/help` lists the command.
+
+Not done: the card names three files and ~190 lines. The event lives in `cox-protocol` (not `commands.rs`), the TUI match is required, and the schema and `/help` snapshot follow. So the tree also builds: `cargo hakari generate` after the renovate bumps that pointed `workspace-hack` at features those crate versions do not have; `load::default_tiers()`, which T33.40.13 calls and never defined; and two `clippy::needless_borrows_for_generic_args` fixes under rustc 1.99 (`target_agents.rs`, `status_line.rs`). Headless stream-json still returns on the first `TurnDone`, so a verdict after it is T67.5. `cox-voice` was not clippy'd here (`libstdc++` / whisper).
+
+Check:
+```text
+$ cargo +1.99.0 nextest run --locked -p cox-core -p cox-protocol
+cox-core 481 passed, 1 skipped; cox-protocol 125 passed
+(includes goal_stops_when_met, goal_unparseable_verdict_continues, goal_respects_budget_cap, goal_stops_at_max_turns, goal_command_shows_and_clears, protocol_jsonschema_matches_committed_file, event_json_roundtrip)
+$ cargo +1.99.0 nextest run --locked -p cox-tui -E 'test(screen_help_overlay)'
+1 passed
+$ cargo +1.99.0 nextest run --locked -p cox-config -p cox-session -E 'test(default_tiers_reads_the_embedded_code_tier) or test(/legacy_typesafe/) or test(open_moves_a_legacy_typesafe)'
+5 passed
+$ cargo +1.99.0 clippy --locked --workspace --all-targets --exclude cox-voice -- -D warnings
+clean (cox-voice left out: whisper's C++ build is not linked here)
+$ cargo +1.99.0 fmt --check -p cox-core -p cox-protocol -p cox-tui -p cox-config -p cox-session
+clean
+$ cargo +1.99.0 hakari generate --diff && cargo +1.99.0 hakari verify
+clean; workspace-hack works correctly
+$ COX_HOME=/tmp/cox-scratch cargo +1.99.0 run -q -p cox -- doctor
+exit 1: ANTHROPIC_API_KEY is not set (expected; keyring is off). toolchain, COX_HOME, db, sandbox, git, prices and plugin cache passed.
+```
+
+`mise` is not installed in this environment. The commands above use the `1.99.0` toolchain pinned in `mise.toml`, without changing the default toolchain.
+#### T67.10 MCP resources and prompts
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Goal: the MCP client lists and reads resources (`resources/list`, `resources/read`) and lists prompts (`prompts/list`). The model reaches them through one deferred read-only tool found by `tool_search`. Their output is untrusted: sanitized, and archived when over the cap.
+
+Files: `crates/cox-mcp/src/client.rs`, `crates/cox-mcp/tests/client.rs`, `crates/cox-tools/src/tool_search.rs`, `crates/cox-session/src/mcp.rs`
+
+Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
+
+Result:
+- `McpClient::list_resources`, `list_prompts` and `read_resource` follow rmcp's paginated list helpers and `resources/read`. A blob is named (`[binary … N bytes]`), not inlined. An MRTR `InputRequired` result is an error the model can read.
+- One deferred read-only tool, `mcp_resources` (`action` `resources` | `read` | `prompts`, optional `server`, `uri` for `read`). `tool_search`'s description names it. The session registers it only when at least one MCP server connected.
+- Server text is passed through the caller's sanitizer (the session passes `cox_sanitize::sanitize`; this crate does not depend on that guard) before it is archived or returned. Over `VISIBLE_BYTES` (8192), the archive row is written first and the model sees the head, the tail and `expand #id`. A failed archive returns no pointer.
+
+Check output (2026-10-19):
+```
+mise exec -- cargo nextest run --locked -p cox-mcp -p cox-tools
+  Summary: 319 tests run: 319 passed, 1 skipped
+  includes mcp_resources_lists_reads_and_archives_over_cap_first
+mise exec -- cargo clippy --locked -p cox-mcp -p cox-tools -p cox-session -p cox-config --all-targets -- -D warnings
+  clean
+mise exec -- cargo fmt --check
+  clean
+mise exec -- cargo hakari generate --diff
+  empty
+mise exec -- cargo hakari verify
+  workspace-hack works correctly
+mise exec -- cargo nextest run --locked -p cox-session -p cox-config -E 'test(/legacy_typesafe|open_moves_a_legacy|config_defaults_parse/)'
+  Summary: 5 tests run: 5 passed
+```
+
+Also on this branch, so the Check could run: restored `workspace-hack` to the last `cargo hakari generate` (renovate had bumped pins onto features those versions do not have); added the missing `cox_config::load::default_tiers` the jev fallback already calls; dropped a needless borrow clippy 1.99 rejects in `target_agents`.
 #### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T43.6 · Size: ~530 (landed larger; see Not done) · Priority: P2 · Complexity: 4
@@ -45,6 +113,31 @@ $ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
      (COX_KEYRING=off). Every other doctor row passed.
 ```
 
+#### T67.6 Path-scoped rules, loaded on demand
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~190 · Priority: P2 · Complexity: 3
+
+Goal: `.cox/rules/*.md` and `.claude/rules/*.md` with a frontmatter `paths:` glob list reach the model only when it reads or edits a matching file, once per rule per session. Instruction files keep loading as today.
+
+Files:
+- `crates/cox-ext/src/rules.rs` (new): `Rule { globs, body, source }`, `load_rules(roots) -> Loaded { rules, notices }` (re-read each time; a broken file is a notice and is skipped), `rules_for(touched, rules) -> Vec<&Rule>` (pure). Reuses `frontmatter.rs` and the `globset` the workspace already links.
+- `crates/cox-core`: `PathRules` trait; after a `read`/`edit`/`write` result, `append_rule_text` appends new matching rules to volatile `system[3]` after the last cache breakpoint, never in the system prefix. `cox-session` loads the git root (or `cwd` outside a repository) and registers `DiskPathRules`.
+- `docs/config.md` (generated from `cox-protocol`'s config docs)
+
+Steps:
+1. A rule body is untrusted repository text: it goes through `cox_sanitize::sanitize` and is framed as `<project_rule source="…">`, not as a system instruction.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-ext -p cox-core
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+`cox-ext` 61 passed, `cox-core` 490 passed (551 total). `rule_matches_only_its_globs`, `rule_injected_once`, `system_prefix_unchanged_by_rules` and `config_docs_config_md_matches_default_toml` pass. Clippy and fmt clean.
+
+Done when `rule_matches_only_its_globs`, `rule_injected_once` and `system_prefix_unchanged_by_rules` (byte-equal prefix with and without rules) pass.
+
+Deviations: `load_rules` returns `Loaded { rules, notices }` so a broken file is a warning the session can log, matching the fail-open rule. Injection lands in `system[3]` (the volatile block after the cache breakpoint) rather than a new message item, which is where volatile context already goes and keeps `system[0..=2]` byte-identical. `cox-session` wires the loader; `cox-core` only sees the `PathRules` trait. Also restores `cox_config::load::default_tiers` (callers in `cox-session` no longer compiled) and a needless-borrow in `target_agents`, and regenerates `workspace-hack` the same way as #408 so the workspace resolves after the rand/digest bumps.
 #### T66.14 Archive old sessions without deleting them
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T66.12 and its approved cards · Size: ~340 (landed larger; see Not done) · Priority: P3 · Complexity: 2
