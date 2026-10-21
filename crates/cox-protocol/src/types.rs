@@ -908,6 +908,20 @@ pub struct ContextBreakdown {
     pub cached: u32,
 }
 
+impl ContextBreakdown {
+    /// The context in use: the last call's reported context, else this
+    /// estimate before any call reported. Lives here so the TUI's `ctx N%`
+    /// and the desktop meter cannot drift; `cox-tui` may not depend on
+    /// `cox-app`, and both already depend on this crate.
+    pub fn used(&self, last_context: u32) -> u32 {
+        if last_context > 0 {
+            last_context
+        } else {
+            self.total
+        }
+    }
+}
+
 /// A parsed `.claude/commands/*.md`-style slash command the surface could
 /// not resolve to a built-in `Submission` variant, forwarded to `cox-ext`
 /// for execution.
@@ -1483,6 +1497,18 @@ pub enum Event {
         /// Why it stopped.
         stop: StopReason,
     },
+    /// `/goal` judged the turn that just finished (T67.4). It follows
+    /// `TurnDone`. `verdict` is `met`, `not_met`, `impossible`,
+    /// `max_turns`, `max_tokens`, `budget`, `interrupted`, `error` or
+    /// `refusal`.
+    GoalVerdict {
+        /// Which way the judge, the turn cap or the budget went.
+        verdict: String,
+        /// Why, as the judge wrote it or as the loop names the cap.
+        reason: String,
+        /// Turns finished since the goal was set, this one included.
+        turns_used: u32,
+    },
     /// An error occurred.
     Error {
         /// What went wrong.
@@ -1927,6 +1953,16 @@ mod tests {
         assert_eq!(usage.context_tokens(), 100 + 30 + 5);
     }
 
+    #[test]
+    fn context_used_is_the_reported_context_else_the_estimate() {
+        let b = ContextBreakdown {
+            total: 50_000,
+            ..ContextBreakdown::default()
+        };
+        assert_eq!(b.used(0), 50_000, "estimate before any call reported");
+        assert_eq!(b.used(12_345), 12_345, "a reported context wins");
+    }
+
     /// Every fieldless `Job` still serializes as its bare tag (unchanged by
     /// the hand-written impl), and `Plugin` serializes/round-trips as
     /// `plugin:<id>` — the literal ledger tag `to_tag`/`from_tag`
@@ -1976,6 +2012,7 @@ mod tests {
     #[case::advised(Event::Advised { point: crate::plugin::DecidePoint::Route, plugin: "jev".into(), advice: crate::plugin::Advice { answer: crate::plugin::Answer::Choice { order: vec![0] }, confidence: Some(0.9), note: None }, applied: true })]
     #[case::notice(Event::Notice { level: Level::Warn, text: "hook skipped".into() })]
     #[case::turn_done(Event::TurnDone { turn: TurnId::new(), stop: StopReason::EndTurn })]
+    #[case::goal_verdict(Event::GoalVerdict { verdict: "met".into(), reason: "tests pass".into(), turns_used: 2 })]
     #[case::error(Event::Error { error: CoreError::Interrupted, fatal: false })]
     #[case::task_message(Event::TaskMessage { task: TaskId::new(), from: Some(TaskId::new()), hop: 1, text: "ping".into() })]
     fn event_json_roundtrip(#[case] event: Event) {

@@ -4,6 +4,47 @@ https://github.com/pyrlyn/cox
 
 A modular terminal coding agent in Rust (coxswain: steers work while models, tools, and extensions row). TUI, headless, ACP, MCP.
 
+## Audit 2026-10-19
+
+Three review passes over clean `main` (`c0c3b6a`): pass 1 walked the crates module by module,
+pass 2 followed entry points and threats (tool inputs, MCP, the serve socket, OAuth loopback,
+self-update, `web_fetch`), pass 3 checked docs against code and the tests. It follows the find-only
+QA audit `docs/qa/2026-10-01-audit.md` (PR #88). Most of those F-items were never tracked here;
+the ones still open on `main` are fixed in this branch, the rest are listed below. IDs are
+`A19.n`; to take one, add its row to the task table and write a card the usual way (§2).
+
+Fixed in this branch (one commit each, with a regression test):
+
+| QA | Pass | Where | Fix |
+| --- | --- | --- | --- |
+| F8 | 1, 2 | `cox-sandbox/src/write.rs` unix `stage_confined` | A replaced file keeps its mode: no lost exec bit, no `0o600` widened to `0o644`. |
+| F7 | 1, 3 | `cox-tools/src/edit.rs` `apply_replace` | An empty `old` is refused instead of splicing `new` between every character. |
+| F2, F3 | 1, 3 | `cox-patch/src/apply.rs` `stage` | `Move to:` its own path, an existing file or a path another op touches is refused. |
+| F5 | 2 | `cox-tools/src/v4a/tool.rs` `call` | Two spellings of one confined file (`a.rs`, `./a.rs`) are refused. |
+| F6 | 3 | `cox-patch/src/apply.rs` `apply_hunks` | A pure insertion goes right after its `@@` header; a missing header is refused. |
+| F10 | 2, 3 | `cox-tools/src/bash/classify.rs` `command_risk` | `sort -o`, `tree -o`, `uniq IN OUT`, `xxd IN OUT`, `xxd -r` are `Write`, not `ReadOnly`. |
+| F12 | 3 | `cox-tools/src/edit.rs` `edit_at` | Only an all-CRLF file is normalised; a mixed file keeps its endings. |
+| F11 (part) | 2 | `cox-tools/src/web_fetch.rs` `max_bytes` | A model-chosen `max_bytes` is held to 1..=10 MiB. |
+
+Still open:
+
+| ID | Severity | Pass | Where | What | Why |
+| --- | --- | --- | --- | --- | --- |
+| A19.1 | high | 3 | `workspace-hack/Cargo.toml` (lines 28, 113) after the Renovate bumps #401–#406 | `cargo metadata --locked --all-features`, and so `cargo nextest run --locked`, fails on clean `main`: the hack asks for `crypto-common` feature `std`, which the locked 0.2.2 lacks, and then `digest` has the same problem. Run `cargo hakari generate`, and add `cargo hakari verify` to the checks Renovate PRs must pass. | Nobody can build or test `main` with `--locked`; this audit had to empty the hack locally to run tests. |
+| A19.2 | medium | 2 | `cox-web/src/lib.rs` `private_guard_policy`; `cox-permission` `WebFetch(domain:…)` | Redirects are checked against the private-address guard but not against the domain rules, so `deny WebFetch(domain:evil.example)` is bypassed by a redirect from an allowed host. Re-run the domain rules in the redirect policy, or refuse cross-host redirects. Rest of QA F11. | A deny rule that a redirect skips gives false assurance under prompt injection. |
+| A19.3 | medium | 2 | `cox/src/self_update.rs` `run`; `plugin_fetch` | `cox update` checks the archive against a `.sha256` from the same release, which proves integrity but not who built it. Verify a signature or GitHub build attestation before `self_replace`. | Anyone who can write a release asset can replace both files; a self-replacing binary is the worst place to trust that. |
+| A19.4 | low | 1 | `cox-config/src/cmd.rs` `append_allow_rule_in`; `cox-tools/src/write.rs` `atomic_write_trusted` | The temp-file-and-rename writes create the new file with the default mode, so a `config.toml` the user made `0o600` ends up `0o644`. Copy the old file's permissions onto the temp file, as `write_confined` now does. | A private config becomes readable to other local users after one "allow always". |
+| A19.5 | low | 1 | `cox-sandbox/src/write.rs` `#[cfg(not(unix))]` `stage_confined` | The F8 fix is unix-only; on Windows a replaced file still loses its read-only attribute. Copy the attribute before the rename. | Same bug class as F8, smaller impact. |
+| A19.6 | low | 3 | `scripts/leftovers.sh`; `.github/workflows/ci.yml` | QA F14 is still open: the script exits 1 with 590 messages on `main`, `just check` runs it, CI does not. Update the mapping or drop it from `just check`, then add it to CI. | A local gate that is always red teaches people to ignore it. |
+| A19.7 | low | 2 | `cox-tools/src/web_fetch.rs` `call` | The scheme check is case-sensitive, so `HTTPS://x` is refused. Compare the scheme case-insensitively. Rest of QA F11. | A valid URL fails; harmless, but confusing. |
+
+Checked and not a finding: the serve socket (`cox-serve/src/socket.rs`: owner-only, umask 077,
+symlink and group-bit refusals), the MCP OAuth loopback (`cox-mcp/src/auth.rs`: PKCE, `state`
+checked before a connection is accepted), `cox-app/src/remote.rs`, the project-config guards
+(T64.1–T64.7), path-rule normalisation (QA F4 is fixed in `cox-permission/src/lib.rs`
+`normalize`), and `config set` validation (QA F9 is fixed by `check_user_toml`; F13's
+`memory.rs` half is gone with the move of memory into the store).
+
 ## Cloud review findings (2026-10-08)
 
 New bugs, dead code and moves from a read-only Cursor cloud review of clean `main` (agent `bc-31eef317-b77c-5beb-976e-00002188574d`; full report: `cloud/cox.md` in the private `listepo/roadmap` repo). They form phase P64: T64.1–T64.23, ordered P0, P1, P2. **confirmed** means seen in the tree; **suspected** means plausible from the code but not proven. Crate paths are under `crates/`; line numbers are as of the review. None of these is in the task table yet: to take one, add its row and write a card the usual way (§2).
@@ -42,10 +83,14 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 
 | # | Status | Priority | Complexity | Readiness | Agent |
 | --- | --- | --- | --- | --- | --- |
+| T5.10 | todo | P3 | 2 | 0% | |
+| T5.11 | todo | P3 | 3 | 0% | |
+| T5.12 | todo | P2 | 2 | 0% | |
+| T5.13 | todo | P3 | 1 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
-| T33.40.9 | todo | P2 | 4 | 0% | |
+| T33.40.9 | done | P2 | 4 | 100% | grok-4.7 |
 | T33.40.10 | todo | P3 | 3 | 0% | |
-| T33.40.11 | todo | P2 | 2 | 0% | |
+| T33.40.11 | done | P2 | 2 | 100% | grok-4.7 |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | done | P2 | 4 | 100% | grok-4.7 |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
@@ -70,7 +115,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T57.7 | todo | P1 | 2 | 90% | |
 | T57.8 | todo | P1 | 5 | 0% | |
 | T57.9 | todo | P1 | 2 | 0% | |
-| T57.10 | todo | P2 | 2 | 0% | |
 | T57.11 | todo | P2 | 3 | 0% | |
 | T57.12 | todo | P3 | 2 | 0% | |
 | T57.13 | todo | P2 | 3 | 0% | |
@@ -735,6 +779,56 @@ P22–P30 (A27): P22 first; T22.1–T22.6 may proceed independently, then T22.7 
 
 ### P5 — TUI (goal: a daily-driver terminal UI with snapshots for every state)
 
+T5.10–T5.13 come from A166 (issue #116): the TUI's `Event` fold (`cox-tui` `state.rs` `on_event`, into `Vec<Cell>`) and `cox-app`'s `Timeline::apply` (into `Block`s) stay two folds, and one parity test keeps them from drifting. Order: T5.10, T5.12 and T5.13 in parallel, then T5.11. T5.12 edits `on_event`; if #107 has landed by then, the fold sits in `crates/cox-tui/src/state/event.rs` instead of `state.rs`.
+
+#### T5.10 Share cox-app's scenario runner by path
+
+Model: sonnet · Status: open · Depends: — · Size: ~150 moved, ~10 new · Files: `crates/cox-app/tests/it/scenarios.rs`, new `crates/cox-app/tests/it/scenario_runs.rs`, `crates/cox-app/tests/it/main.rs`
+Goal: the code that turns a scripted scenario into its live and replayed `Event` streams lives in one file that names no `cox_app` item, so T5.11 includes it by `#[path]` from `crates/cox` the same way `cox-app` already includes cox-core's `tests/common` harness.
+Steps:
+1. Move `Act`, `Case`, `core`, `cases`, the `Stub` and `Fake` test tools, `open`, `run`, `scenario` and `through_jsonl` from `scenarios.rs` into `scenario_runs.rs`, `pub(crate)` where `scenarios.rs` uses them. `fold`, `normalize`, the snapshots and the controller and meter tests stay.
+2. `scenario_runs.rs` reaches the harness as `super::common`, so any test binary that declares `mod common` next to it can include it; its scenario paths stay `CARGO_MANIFEST_DIR/../<home>/tests/scenarios`, which resolve the same from `crates/cox`.
+3. `main.rs` declares `mod scenario_runs;`.
+Check: `mise exec -- cargo nextest run -p cox-app -E 'test(/^scenarios::/)'` passes with no snapshot change; `rg -n 'cox_app' crates/cox-app/tests/it/scenario_runs.rs` prints nothing.
+Done when: the scenario tests pass unchanged and the runner file is `cox_app`-free.
+Out of scope: the parity test (T5.11); new scenarios.
+
+#### T5.11 Parity test: the TUI fold and the Timeline agree on every scenario
+
+Model: sonnet · Status: open · Depends: T5.10, T5.12, T5.13 · Size: ~180 (test) · Files: new `crates/cox/tests/it/fold_parity.rs`, `crates/cox/tests/it/main.rs`
+Goal: every case in `scenario_runs::cases()` folds, live and through JSONL, to the same projection in `cox_tui::State` (driven by `update(Msg::Event)`) and in `cox_app::Timeline`, so a change to the shared event semantics in one fold and not the other fails CI.
+Steps:
+1. `fold_parity.rs` includes `../../../cox-app/tests/it/scenario_runs.rs` by `#[path]` and cox-core's `tests/common/mod.rs` as its `common`, behind `#[cfg(feature = "app-server")]` (the feature that links `cox-app`).
+2. A neutral projection, written once in the test: the ordered entries (user text, assistant text, thinking text, tool call name with ok and visible output, notice level and text, error text and fatal, compaction summary text), the plan (`State::todo` vs `Timeline::plan`), and the tasks started and finished with their exit codes. `ToolGroup` blocks flatten to their child `Tool` blocks; `TurnMeta`, `Approval`, `Question` and `Checkpoint` blocks and the TUI's modals and status line stay out, because each fold keeps them in a shape the other has no use for.
+3. One known difference, named in a comment: a `TaskMessage` is a TUI cell and no Timeline block; the projection drops it until the desktop decides where task messages show.
+4. The test never calls `State::take_finished`, so the transcript stays whole.
+Check: `mise exec -- cargo nextest run -p cox -E 'test(/^fold_parity::/)'`; then revert T5.12's change locally and see the rewind case fail.
+Done when: the test passes on `main` with no exception besides `TaskMessage`.
+Out of scope: fixing a drift the test finds beyond T5.12 and T5.13 — each gets its own card by amendment.
+
+#### T5.12 TUI plan falls back with a conversation rewind
+
+Model: sonnet · Status: open · Depends: — · Size: ~40 plus test · Files: `crates/cox-tui/src/state.rs` (or `state/event.rs` after #107)
+Goal: after `Event::Rewound { conversation: true, to_turn }` the TUI's plan is the last successful `todo` list from a turn before `to_turn`, or empty, as the Timeline's already is (`plans.retain(|(turn, _)| turn < to_turn)`). Today `state.todo` keeps the list of the turn that was undone.
+Steps:
+1. Keep each successful `todo` result with its turn `seq` (`state.current_seq`), oldest first; `state.todo` stays the last one, so `view` and `/todo` do not change.
+2. On a conversation rewind drop the entries with `seq >= to_turn` and set `state.todo` to the new last one or empty. Rescanning the transcript would not work: `take_finished` drains finished cells from it.
+3. Test `rewind_restores_the_plan_before_the_cut_turn`: two turns with a `todo` each, rewind to the second, the first turn's list is the plan.
+Check: `mise exec -- cargo nextest run -p cox-tui -p cox`, then the three AGENTS.md commands.
+Done when: the test passes and fails with step 2 reverted.
+Out of scope: the parity test (T5.11).
+
+#### T5.13 Timeline takes a plan only from a successful `todo` result
+
+Model: haiku · Status: open · Depends: — · Size: ~5 plus test · Files: `crates/cox-app/src/timeline.rs`
+Goal: `Timeline::apply` on `ToolCallDone` records a plan only when `result.ok`, as the TUI does, so a failed `todo` call whose result still carries a `structured` list does not replace the plan.
+Steps:
+1. Add `result.ok` to the `call.is_some_and(|c| c.name == "todo")` condition.
+2. Test `failed_todo_keeps_the_previous_plan` in `timeline.rs`'s tests.
+Check: `mise exec -- cargo nextest run -p cox-app`, then the three AGENTS.md commands.
+Done when: the test passes and fails with step 1 reverted.
+Out of scope: the TUI side (already checks `ok`).
+
 ### P6 — Headless and MCP server (goal: scripts and other agents can drive cox)
 
 ### P7 — Extensions (goal: a Claude Code or Codex user's setup works unchanged)
@@ -860,25 +954,6 @@ Plan:
 Falsifier: if the false-raise rate exceeds 10 %, or the p95 late-fallback rate exceeds 20 %, `risk` is not recommended by default, and the user guide says so.
 Check: `just test-evals` is green offline (corpus schema, metric maths, budget stop, command line). R§5 has the E1 table.
 
-#### T33.40.9 `route` advisor: downgrade only
-
-Depends: T33.40.8, T33.40.1, T33.40.4 · Size: ~170 · Files: `plugins/jev/src/route.rs`, `plugins/jev/src/lib.rs`, `crates/cox/tests/it/plugins_jev.rs`
-Goal: J§5.2, plugin side.
-- The state is the prompt, the todo list, a summary of the last turn and the number of files touched.
-- The questions are the `tier` Choice over the offered tiers (with the plugin's descriptions and `other` → `code`) and the `wants_depth` Noul.
-- The advice is `cheap` only when:
-  - the choice is `cheap`;
-  - confidence ≥ 0.8;
-  - `wants_depth` < 0.3;
-  - the last turn did not error.
-- `capabilities.decide` gains `route`.
-Check:
-- guest tests `route_needs_high_confidence`, `route_keeps_code_after_error_turn` and `route_other_means_code`;
-- e2e over two scripted turns:
-  - a fixture choosing `cheap` at 0.9 gives a main-turn `usage` row on tier `cheap` and `Advised { applied: true }`;
-  - at 0.7 the turn runs on `code`;
-  - a fixture naming `think` is ignored, and the static pick runs.
-
 #### T33.40.10 Eval E2: route downgrade against the static pick
 
 Depends: T33.40.9 · Size: ~180 · Files: `evals/src/cox_evals/harness.py` (the `jev-route` preset), `evals/tests/test_harness.py`, `evals/tasks/11-…14-*.yaml` (data: four tasks that need the code tier, such as a multi-file rename with a failing test)
@@ -896,21 +971,6 @@ Plan:
 5. R§5 gets the table with the model versions and the date.
 Falsifier: if any task that passes in the baseline fails with the plugin, or the median saving per task is below 15 %, `route` stays off by default, and the guide says so.
 Check: `just test-evals` is green offline (preset expansion, cap stop, the paired table). R§5 has the E2 table.
-
-#### T33.40.11 User guide: the Jev plugin
-
-Depends: T33.40.6, T33.40.9 · Size: ~150 · Files: `docs/plugins/jev.md`, `docs/plugins.md` (link), `crates/cox/tests/it/doc_examples.rs`
-Goal: one page for users. It covers:
-- what Jev is and is not (J13);
-- building it from `plugins/jev` (`just plugin jev`) and `cox plugin install <dir>` (C3);
-- the key through `TYPESAFE_API_KEY` or the keyring entry `cox/typesafe`;
-- enabling points in `[plugins.decide]`;
-- per point, the exact state sent to TypeSafe (J17);
-- costs in `cox stats` as `plugin:jev`;
-- fail-open behaviour and `cox doctor` rows;
-- the E1/E2 results and the defaults they justify;
-- the migration from `[providers.typesafe]` (J§7).
-Check: `doc_examples` parses every `toml` block on the page against `Config` or the plugin manifest schema and fails on drift.
 
 #### T33.40.17 Optional: record live fixtures (needs the creator's key)
 
@@ -1417,12 +1477,6 @@ Depends: T57.5 · Size: ~100 · Files: `crates/cox-app/src/terminal.rs`, `crates
 Goal: `cox-app`'s terminal kill path uses T57.5's helper and nix moves to `cfg(unix)`; `self_update`'s `PermissionsExt` becomes `cfg(unix)`; the Unix-only tests (symlinks, file modes; R10.1.10) are marked `cfg(unix)` in the same change or in a sub-card when they exceed the 3 files. `cox-app` and `cox` join `just windows-check`.
 Check: T57.1's job passes with `cox-app` and `cox` in the list; `mise exec -- cargo nextest run -p cox-app -p cox` on macOS is unchanged.
 
-#### T57.10 Home, config and keys on Windows
-
-Depends: T57.9 · Size: ~80 · Files: `crates/cox-config/src/load.rs`, `crates/cox-session/src/doctor.rs`
-Goal: `cox_home()` resolves to `%USERPROFILE%\.cox` when `HOME` is unset (it falls back to `.` if both are, R10.1.8; that fallback becomes an error on Windows). keyring 4.2.0 already stores keys in the Windows Credential Manager (R10.4.5), so no dependency changes. `cox doctor` names the key store as "Windows Credential Manager" and the sandbox as "none (D7): every command asks". No test touches the Credential Manager (A49).
-Check: `mise exec -- cargo nextest run -p cox-config -p cox-session cox_home_uses_userprofile_without_home doctor_names_credential_manager_on_windows doctor_reports_no_sandbox_under_d7` (the lookups injected, so they run on every host).
-
 #### T57.11 Full workspace on Windows: check, clippy and nextest
 
 Depends: T57.4, T57.6, T57.8, T57.9 · Size: ~60 · Files: `.github/workflows/ci.yml`, `justfile`
@@ -1807,30 +1861,6 @@ Rationale in §6 A148. Idea-only: the source is the public Claude Code documenta
 
 **Not taken yet:** hooks of type `agent` (a later amendment, after T67.2), and `/security-review` (no card until the creator asks for one).
 
-#### T67.4 `/goal`: a judged stop condition
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~190 · Priority: P1 · Complexity: 3
-
-Goal: `/goal <condition>` sets a goal, `/goal` shows it and `/goal clear` drops it. After every `TurnDone` while a goal is set, the cheap tier judges the condition through `Session::side_call`. `Met` stops; `NotMet` submits a continue turn; `Impossible` stops with the reason. The loop also stops at `max_turns` (default 20) or when `budget::decide` says so.
-
-Files:
-- `crates/cox-protocol/src/commands.rs`: the three commands, and `Event::GoalVerdict { verdict, reason, turns_used }`.
-- `crates/cox-core/src/goal.rs` (new, pure): `Goal { condition, turns_used, max_turns }`, `Verdict { Met(String), NotMet(String), Impossible(String) }`, `evaluator_request(&Goal, last_turn_summary) -> Side`, `parse_verdict(&str) -> Verdict`.
-- `crates/cox-core/src/session.rs`
-
-Steps:
-1. The judge sees only the transcript summary and the condition, with no tools. An answer it cannot parse is `NotMet`, never `Met`.
-2. If T66.9 has landed, reuse its turn and token limits instead of a separate `max_turns`.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-core -p cox-protocol
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `goal_stops_when_met`, `goal_unparseable_verdict_continues`, `goal_respects_budget_cap` and `goal_stops_at_max_turns` pass with the scripted provider.
-
 #### T67.5 `/goal` in the TUI and stream-json
 
 Model: grok-4.7 · Status: open · Depends: T67.4 · Size: ~100 · Priority: P2 · Complexity: 2
@@ -1849,29 +1879,6 @@ mise exec -- cargo fmt --check
 ```
 
 Done when the `goal_status_line` insta snapshot and a stream-json e2e test with a scripted `Met` verdict pass.
-
-#### T67.6 Path-scoped rules, loaded on demand
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~190 · Priority: P2 · Complexity: 3
-
-Goal: `.cox/rules/*.md` and `.claude/rules/*.md` with a frontmatter `paths:` glob list reach the model only when it reads or edits a matching file, once per rule per session. Instruction files keep loading as today.
-
-Files:
-- `crates/cox-ext/src/rules.rs` (new): `Rule { globs, body, source }`, `load_rules(roots) -> Vec<Rule>` (re-read each time; a broken file is a warning and is skipped), `rules_for(touched, rules) -> Vec<&Rule>` (pure). Reuse `frontmatter.rs` and the `globset` the workspace already links.
-- `crates/cox-core/src/context.rs`: after a `read`/`edit`/`write` result, append the new matching rules as an item after the last cache breakpoint, never in the system prefix.
-- `docs/config.md`
-
-Steps:
-1. A rule body is untrusted repository text: it goes through `cox_sanitize::sanitize` and is framed as a project rule, not as a system instruction.
-
-Check:
-```bash
-mise exec -- cargo nextest run -p cox-ext -p cox-core
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-mise exec -- cargo fmt --check
-```
-
-Done when `rule_matches_only_its_globs`, `rule_injected_once` and `system_prefix_unchanged_by_rules` (byte-equal prefix with and without rules) pass.
 
 #### T67.7 Leaving Plan mode needs approval
 
@@ -1913,18 +1920,6 @@ mise exec -- cargo fmt --check
 
 Done when `deny_rule_beats_classifier`, `classifier_error_asks`, `classifier_timeout_asks` and `injected_tool_output_cannot_widen` pass.
 
-#### T67.10 MCP resources and prompts
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
-
-Goal: the MCP client lists and reads resources (`resources/list`, `resources/read`) and lists prompts (`prompts/list`). The model reaches them through one deferred read-only tool found by `tool_search`. Their output is untrusted: sanitized, and archived when over the cap.
-
-Files: `crates/cox-mcp/src/*` (at most two files), `crates/cox-tools/src/tool_search.rs`
-
-Check: `mise exec -- cargo nextest run -p cox-mcp -p cox-tools`, then clippy and fmt as above.
-
-Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
-
 #### T67.11 `cox run -p --json-schema`
 
 Model: grok-4.7 · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
@@ -1936,12 +1931,6 @@ Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`
 Check: `mise exec -- cargo nextest run -p cox json_schema`, then clippy and fmt as above.
 
 Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
-
-#### T67.13 Design: a GitHub Action and scheduled runs
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~150 (doc) · Priority: P3 · Complexity: 2
-
-Goal: `docs/design/github-action.md` and `docs/design/schedule.md`: how `cox run -p` runs in a GitHub workflow (inputs, key handling, sandbox, cost cap, what it may push) and on a schedule (where the schedule lives, locking, the ledger). No code until the creator approves; implementation cards come in a later amendment.
 
 ### P68 — Run targets (goal: a whole cox session runs on another machine, in a Docker container, in a Lima instance or in the Colima VM, driven from the desktop app, the TUI, `cox run -p` or the `agent` tool, with the remote on Linux, macOS or Windows and the client on any of them)
 
@@ -2223,6 +2212,7 @@ Order of value if time is short: M1 → M2 → P8 (T8.1–T8.3) → P6 → P7 �
 - A164 §3 P33 (T33.40.6 and T33.40.7 amended), by the creator (2026-10-17): T33.40.6/T33.40.7 e2e use `git push origin main` (classifier: Exec) instead of `git push --force origin main`, which the classifier already rates Destructive so `risk` is never asked.
 - A160 §3 P32 (new T32.17), by the creator (2026-10-13, for Mailune X1; numbered A155 on its branch, renumbered on merge because main's A155 is T33.46): `cox-config` consumes the shared `config-schema` crate (layering with named layers and per-key provenance, the `COX_*` env layer, comment-preserving edits) that was extracted from it, rtok and ketch, and drops its own copy. Why: the workspace rule against duplicated code across projects. Effect: one card; `config-schema` replaces `cox-config`'s direct `figment` and `toml_edit` dependencies. No §0 decision changes.
 - A165 §3 P66 (new T66.22–T66.24), by the creator (2026-10-17): the last three implementation cards from `docs/design/serve.md`, its proposals S7–S9. S7 adds the router and the `--stdio` bridge to `cox-serve` (workspace calls answered by the supervisor's own `App`, session calls routed by id to their worker, an `open` of a live session turned into `attach`, one attached client per session with `ended` for the one displaced); S8 adds the `cox serve` and `cox attach --stdio` commands, the hidden `--worker` flag and the docs section; S9 is the end-to-end test that kills a client, reattaches and checks that the rollout grows only by the turn. Why: they finish the chain T66.16–T66.21 so that a session outlives the client that opened it (D1, D4, D6). T66.22 depends on T66.18, T66.20 and T66.21, because serve.md S7 depends on S2, S5 and S6. No split: each card fits within 500 non-test lines. No new external dependency, so no `plan.md` §1 row is needed (serve.md requires none); `cox-serve` is already added by A162. T66.13 (heartbeat) and T66.14 still wait for their own later amendment. No §0 decision changes.
+- A166 §3 P5 (new T5.10–T5.13), issue #116 — the TUI's `Event` fold (`cox-tui` `state.rs` `on_event`, into `Vec<Cell>`) and `cox-app`'s `Timeline::apply` (into `Block`s) implement the same event semantics twice: the conversation-rewind cut, the plan as the latest `todo` result, task start and finish, `Notice` and `Error` entries, `Checkpoint` file counts, item streaming, and no entry for a signature-only thinking item. The TUI does not mirror `cox-core`'s loop; it only consumes its events. Decision: the issue's option 3 — keep two folds and pin them with one parity test that runs `cox-app`'s scripted scenarios through both. Why not option 2 (`cox-tui` → `cox-app`): it breaks D1's crate rules and `deps.rs` (`cox-tui` may depend only on `cox-core`, `cox-protocol`, `cox-sanitize` and `cox-render` among workspace crates) and would pull `cox-session`, `cox-store` and the plugin host into the terminal UI, which the slim build (`--no-default-features --features otel`) leaves out today. Why not option 1 (a shared fold in `cox-render` or `cox-protocol`): the two folds keep different things — the TUI tick-timed tool cells, `!` shell cells, plugin renders and modals; the Timeline keyed blocks and patches, `ToolGroup`s, `TurnMeta` and a `StyledDoc` parse — so a shared fold would need a hook for each, which is more code than the rules it would share; the one shared rule that is real logic, `ToolResult::todo_list`, already lives in `cox-protocol`. Reading the two folds side by side already finds three drifts: after a conversation rewind the Timeline's plan falls back to the list before `to_turn` while the TUI keeps the undone list; the TUI takes a plan only from a successful `todo` result while the Timeline takes it from any; a `TaskMessage` is a TUI cell and no Timeline block. Effect: four cards. T5.10 moves `cox-app`'s scenario runner into a file `crates/cox` includes by `#[path]`, as `cox-app` already includes cox-core's `tests/common`; T5.12 and T5.13 fix the first two drifts, one per fold; T5.11 is the parity test, after them, so it lands with `TaskMessage` as its only named difference. Revisit option 1 if the projection ever needs a second exception. No new dependency; no §0 decision changes.
 
 ## 7. Risk register
 
