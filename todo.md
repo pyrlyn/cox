@@ -1,5 +1,9 @@
 # Todo
 
+- T5.10. Share cox-app's scenario runner by path
+- T5.11. Parity test: the TUI fold and the Timeline agree on every scenario
+- T5.12. TUI plan falls back with a conversation rewind
+- T5.13. Timeline takes a plan only from a successful `todo` result
 - T32.17. `cox-config` loads through the shared `config-schema` crate
 - T33.40.7. Eval E1: risk escalation against the classifier alone
 - T33.40.9. `route` advisor: downgrade only
@@ -65,7 +69,6 @@
 - T61.9. One build graph for the Swift package tests
 - T61.10. SwiftLint plugin off during builds, on in the lint job
 - T66.13. Heartbeat re-entry for a resident session
-- T67.4. `/goal`: a judged stop condition
 - T67.5. `/goal` in the TUI and stream-json
 - T67.6. Path-scoped rules, loaded on demand
 - T67.7. Leaving Plan mode needs approval
