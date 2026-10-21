@@ -837,6 +837,36 @@
         ]
       },
       {
+        "description": "`/goal` judged the turn that just finished (T67.4). It follows\n`TurnDone`. `verdict` is `met`, `not_met`, `impossible`,\n`max_turns`, `max_tokens`, `budget`, `interrupted`, `error` or\n`refusal`.",
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "description": "Which way the judge, the turn cap or the budget went.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why, as the judge wrote it or as the loop names the cap.",
+            "type": "string"
+          },
+          "turns_used": {
+            "description": "Turns finished since the goal was set, this one included.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "type": {
+            "type": "string",
+            "const": "goal_verdict"
+          }
+        },
+        "required": [
+          "type",
+          "verdict",
+          "reason",
+          "turns_used"
+        ]
+      },
+      {
         "description": "An error occurred.",
         "type": "object",
         "properties": {
