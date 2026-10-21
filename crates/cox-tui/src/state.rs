@@ -2561,8 +2561,7 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
         }
         Event::Usage { usage, .. } => {
             state.status.cost_usd += usage.cost_usd;
-            state.status.context_tokens =
-                usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
+            state.status.context_tokens = usage.context_tokens();
             state.status.cache_ratio = cox_core::cache_diag::ratio_of(&usage);
         }
         Event::ModelSwitched { tier, to, .. } => {
