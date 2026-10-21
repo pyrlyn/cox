@@ -1896,6 +1896,7 @@ fn generate_config_docs(toml: &str) -> String {
     out.push_str(ACCESSIBILITY_DOCS);
     out.push_str(STATUS_LINE_DOCS);
     out.push_str(THEME_EDITOR_DOCS);
+    out.push_str(PATH_RULES_DOCS);
     out
 }
 
@@ -2063,6 +2064,23 @@ then `[tokens]` with `<token> = { dark = \"<colour>\", light = \"<colour>\" }`. 
 `#rrggbb`, an ANSI index `0`-`255` or one of the sixteen ANSI names. The tokens are text, dim, \
 accent, user, agent, tool, ok, warn, error, diff_add, diff_del, diff_hunk, border, selection, \
 mode_plan, mode_auto and mode_bypass.
+";
+
+/// T67.6: path-scoped rules are files, not `default.toml` keys, so the
+/// reference is appended after the generated tables.
+#[cfg(test)]
+const PATH_RULES_DOCS: &str = "
+## Path-scoped rules
+
+`.cox/rules/*.md` and `.claude/rules/*.md` in the repository root (T67.6) hold project rules. Each file needs YAML frontmatter with a `paths` glob list. A rule is sent to the model only after a successful `read`, `edit` or `write` of a matching path, and only once per session. The text is appended after the cached system prefix, so instruction files stay byte-stable. The body is repository text, not a system instruction: escape sequences are stripped. A file that does not parse, has no `paths`, or points outside the root is skipped with a warning.
+
+```yaml
+---
+paths:
+  - src/**/*.rs
+---
+Format Rust with rustfmt.
+```
 ";
 
 /// `~/.cox/keybindings.toml` (T25.5) is its own file, not a `default.toml`

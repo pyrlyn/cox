@@ -14,6 +14,101 @@ Result: `cox-vendor jev-fixtures` records TypeSafe's live replies into `crates/c
 - Without `TYPESAFE_API_KEY` the command exits 1 with a message and sends nothing; the key is read from the environment only. `--check` needs no key and sends nothing: it reports a recording that is missing or made for a body the plugin no longer sends.
 Not done: no live recording — this environment has no `TYPESAFE_API_KEY`, so `crates/cox/tests/fixtures/jev/` holds only `requests.json`, and the hand-built replies in `plugins_jev.rs` stay until the creator runs `TYPESAFE_API_KEY=… just vendor jev-fixtures`. `route` states wait for T33.40.9 (its card now says to add them to `plugins/jev/tests/fixtures.rs`); the script records any point `requests.json` lists, with no change.
 
+#### T32.17 `cox-config` loads through the shared `config-schema` crate
+
+Model: Claude / opus-5.5 · Status: done 2026-10-21 · Depends: — · Size: ~200 (plus tests) · Priority: P2 · Complexity: 3 · Files: `crates/cox-config/src/{load,cmd,lib}.rs`, `crates/cox-config/Cargo.toml`, `Cargo.toml`, `Cargo.lock`, `workspace-hack/Cargo.toml`, `toolchain.md`
+Goal: `config-schema` 0.1 (crates.io, `pyrlyn/crates-packages`) was extracted from this crate, rtok's `config/layers.rs` and ketch's `toml_file.rs`; `cox-config` consumes it instead of keeping its own copy (A160, the creator's approval for Mailune X1). Not a `git mv` card like the rest of P32: it deletes code the shared crate now owns. Behaviour stays the same: the layer order, `source_of`, `COX_*` handling, the A138 check in `cox config set` and the `ConfigError`/`CoreError::Config` variants; the existing `cox-config` and `crates/cox` config tests pass unchanged.
+
+Plan:
+1. `load.rs`: the layers go through `config_schema::Layers` (`toml_text` default, `file` user and project, `env` with an `EnvLayer` over `default.toml`'s key tree and the same ignore list, `overrides` for `COX_HOME` and the flags). Delete `Named`, `env_key`, `default_key_tree` and `to_core_error`; `find_git_root` keeps its canonical path over `config_schema::git_root`. `Layers` merges only, so the imported Claude layers keep figment's `adjoin` reading in a small JSON step (lists add, the lower layers win elsewhere), and `source_of` reports the lower layer for a key they only extended, as `adjoin` did. Array keys keep reading a `COX_*` value as TOML, not as a comma list.
+2. `cmd.rs`: `set` and `set_json_in` plan the edit with `config_schema::plan_edit_foreign`, check the result with `check_user_toml` (A138), then `Edit::apply`; delete the private `parse_value`, `toml_from_json` and the table walk.
+3. `lib.rs`: `ConfigError` keeps its variants; `InvalidToml` carries the parser's message as text, and `config_schema::Error` maps onto the existing variants.
+4. Manifests: `config-schema = "0.1"` in the workspace, `cox-config` drops its direct `figment` and `toml_edit`; `cargo hakari generate`; `toolchain.md` and §1.1. The workspace `rust.md` row is the creator's to add.
+
+Out of scope: `docs/config.jsonschema` keeps `schemars::schema_for!` (`config_schema::schema_text` drops `null` from `Option` types, which would change the committed schema and the desktop Settings screen's input).
+
+What landed:
+- Steps 1–4 in #287 (`cfd13ee5`): the layering, the `COX_*` env layer, the git-root walk and the comment-keeping `config set` edit go through `config_schema`; the private copies are gone and `cox-config` no longer depends on `figment`. `Cargo.lock` resolves `config-schema 0.1.0` from crates.io (checksummed) and `workspace-hack` is current.
+- This closing change: the gates rerun against the published crate, the card moved here, and the §1.1 row names the direct `toml_edit` dependency.
+
+Deviations:
+- `cox-config` keeps a direct `toml_edit`: `cmd::append_allow_rule_in` (T69.2, landed after #287) appends one rule to `permissions.allow` keeping each element's layout and comments, under a lock with a temp-file rename. `config-schema` 0.1 has no append edit; `plan_edit_foreign` replaces the whole array, which would drop the user's per-element comments.
+
+Check (2026-10-21, macOS arm64, `--config build.incremental=false --config profile.dev.debug=0 --config profile.test.debug=0` to fit the disk):
+- `cargo nextest run --workspace --locked`: 2804 passed, 17 skipped (covers `-p cox-config -p cox -p cox-app`).
+- `cargo fmt --check`: clean. `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo hakari verify`: "workspace-hack works correctly".
+- `cargo deny --locked check`: bans, licenses and sources ok; advisories fail on RUSTSEC-2026-0378/0379 (wasmtime 49.0.3), RUSTSEC-2026-0381 (webpki-roots) and RUSTSEC-2026-0382 (rustls-webpki 0.103.15), all already on main and outside this card; the bumps need the creator's permission.
+- Real binary against a scratch `COX_HOME`: `cox config set tiers.code.model claude-opus-5` kept both comments; `config show --sources` printed `tiers.code.model = "claude-opus-5"  # user`, `tiers.cheap.model = "env-model"  # env` (from `COX_TIERS_CHEAP_MODEL`) and `# default` for the rest; `config set no.such.key 5` and `config set tiers.code.model 5` were refused with the loader's error and left the file unchanged; `config get tiers.code.model` printed `claude-opus-5`.
+
+#### T67.4 `/goal`: a judged stop condition
+
+Model: Cursor / grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~190 (landed larger; see Not done) · Priority: P1 · Complexity: 3
+
+Goal: `/goal <condition>` sets a goal, `/goal` shows it and `/goal clear` drops it. After every `TurnDone` while a goal is set, the cheap tier judges the condition through `Session::side_call`. `Met` stops; `NotMet` submits a continue turn; `Impossible` stops with the reason. The loop also stops at the autonomous turn and token caps (T66.9 has landed, so those replace a separate default of 20) or when `budget::decide` says so.
+
+What landed:
+- `/goal` is a built-in command. Setting it emits a notice and does not start a turn. `/goal` prints the condition and the turns used; `/goal clear` drops it.
+- `Event::GoalVerdict { verdict, reason, turns_used }` follows `TurnDone`. `verdict` is `met`, `not_met`, `impossible`, `max_turns`, `max_tokens`, `budget`, `interrupted`, `error` or `refusal`. `docs/protocol.jsonschema` gained that variant.
+- The judge is `Job::Summarize` (already the cheap tier) through `side_call`, which sends no tools and inserts a usage row. The prompt is the condition plus the last assistant text, clipped. `MET` / `NOT_MET` / `IMPOSSIBLE`, or JSON `{"verdict","reason"}`, parse; anything else is `NotMet`, never `Met`.
+- A `NotMet` answer submits one continue turn and judges again. `Met` and `Impossible` stop. A turn that already stopped for `Budget`, `Interrupted`, `Error` or `Refusal` is not judged. The autonomous `max_turns` and `max_tokens` stop the loop after the judge says it is not met yet. The goal stays set, so a later user turn is judged again.
+- The TUI matches `GoalVerdict` and draws nothing; T67.5 prints it. `/help` lists the command.
+
+Not done: the card names three files and ~190 lines. The event lives in `cox-protocol` (not `commands.rs`), the TUI match is required, and the schema and `/help` snapshot follow. So the tree also builds: `cargo hakari generate` after the renovate bumps that pointed `workspace-hack` at features those crate versions do not have; `load::default_tiers()`, which T33.40.13 calls and never defined; and two `clippy::needless_borrows_for_generic_args` fixes under rustc 1.99 (`target_agents.rs`, `status_line.rs`). Headless stream-json still returns on the first `TurnDone`, so a verdict after it is T67.5. `cox-voice` was not clippy'd here (`libstdc++` / whisper).
+
+Check:
+```text
+$ cargo +1.99.0 nextest run --locked -p cox-core -p cox-protocol
+cox-core 481 passed, 1 skipped; cox-protocol 125 passed
+(includes goal_stops_when_met, goal_unparseable_verdict_continues, goal_respects_budget_cap, goal_stops_at_max_turns, goal_command_shows_and_clears, protocol_jsonschema_matches_committed_file, event_json_roundtrip)
+$ cargo +1.99.0 nextest run --locked -p cox-tui -E 'test(screen_help_overlay)'
+1 passed
+$ cargo +1.99.0 nextest run --locked -p cox-config -p cox-session -E 'test(default_tiers_reads_the_embedded_code_tier) or test(/legacy_typesafe/) or test(open_moves_a_legacy_typesafe)'
+5 passed
+$ cargo +1.99.0 clippy --locked --workspace --all-targets --exclude cox-voice -- -D warnings
+clean (cox-voice left out: whisper's C++ build is not linked here)
+$ cargo +1.99.0 fmt --check -p cox-core -p cox-protocol -p cox-tui -p cox-config -p cox-session
+clean
+$ cargo +1.99.0 hakari generate --diff && cargo +1.99.0 hakari verify
+clean; workspace-hack works correctly
+$ COX_HOME=/tmp/cox-scratch cargo +1.99.0 run -q -p cox -- doctor
+exit 1: ANTHROPIC_API_KEY is not set (expected; keyring is off). toolchain, COX_HOME, db, sandbox, git, prices and plugin cache passed.
+```
+
+`mise` is not installed in this environment. The commands above use the `1.99.0` toolchain pinned in `mise.toml`, without changing the default toolchain.
+#### T67.10 MCP resources and prompts
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~180 · Priority: P3 · Complexity: 3
+
+Goal: the MCP client lists and reads resources (`resources/list`, `resources/read`) and lists prompts (`prompts/list`). The model reaches them through one deferred read-only tool found by `tool_search`. Their output is untrusted: sanitized, and archived when over the cap.
+
+Files: `crates/cox-mcp/src/client.rs`, `crates/cox-mcp/tests/client.rs`, `crates/cox-tools/src/tool_search.rs`, `crates/cox-session/src/mcp.rs`
+
+Done when a test against the in-process MCP test server lists and reads one resource and one prompt, and an over-cap resource leaves an archive row first.
+
+Result:
+- `McpClient::list_resources`, `list_prompts` and `read_resource` follow rmcp's paginated list helpers and `resources/read`. A blob is named (`[binary … N bytes]`), not inlined. An MRTR `InputRequired` result is an error the model can read.
+- One deferred read-only tool, `mcp_resources` (`action` `resources` | `read` | `prompts`, optional `server`, `uri` for `read`). `tool_search`'s description names it. The session registers it only when at least one MCP server connected.
+- Server text is passed through the caller's sanitizer (the session passes `cox_sanitize::sanitize`; this crate does not depend on that guard) before it is archived or returned. Over `VISIBLE_BYTES` (8192), the archive row is written first and the model sees the head, the tail and `expand #id`. A failed archive returns no pointer.
+
+Check output (2026-10-19):
+```
+mise exec -- cargo nextest run --locked -p cox-mcp -p cox-tools
+  Summary: 319 tests run: 319 passed, 1 skipped
+  includes mcp_resources_lists_reads_and_archives_over_cap_first
+mise exec -- cargo clippy --locked -p cox-mcp -p cox-tools -p cox-session -p cox-config --all-targets -- -D warnings
+  clean
+mise exec -- cargo fmt --check
+  clean
+mise exec -- cargo hakari generate --diff
+  empty
+mise exec -- cargo hakari verify
+  workspace-hack works correctly
+mise exec -- cargo nextest run --locked -p cox-session -p cox-config -E 'test(/legacy_typesafe|open_moves_a_legacy|config_defaults_parse/)'
+  Summary: 5 tests run: 5 passed
+```
+
+Also on this branch, so the Check could run: restored `workspace-hack` to the last `cargo hakari generate` (renovate had bumped pins onto features those versions do not have); added the missing `cox_config::load::default_tiers` the jev fallback already calls; dropped a needless borrow clippy 1.99 rejects in `target_agents`.
 #### T59.4 Repo map ranked by a file graph (PageRank + git recency + co-change)
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T43.6 · Size: ~530 (landed larger; see Not done) · Priority: P2 · Complexity: 4
@@ -37,6 +132,156 @@ cargo +1.99.0 fmt --check -p cox-tools
   clean
 ```
 
+#### T57.10 Home, config and keys on Windows
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: T57.9 · Size: ~80 · Priority: P2 · Complexity: 2
+
+Goal: `cox_home()` resolves to `%USERPROFILE%\.cox` when `HOME` is unset. Both `HOME` and `USERPROFILE` unset is an error on Windows. `cox doctor` names the key store as "Windows Credential Manager" and the sandbox as "none (D7): every command asks". No test touches the Credential Manager.
+
+Files: `crates/cox-config/src/load.rs`, `crates/cox-session/src/doctor.rs`
+
+`cox_home_from` and `resolve_home` take the two variables and a `windows` flag, so the Windows miss runs on Linux. `HOME` wins over `USERPROFILE`. `COX_HOME` still wins over both. `cox_home()` and `home_dir()` keep returning `PathBuf`: `unwrap_or_else(cox_home)` is the call shape in the binary and the app, so `HomeUnset` maps back to `.` there. A Windows logon sets `USERPROFILE`. Doctor's missing-key text and the no-backend sandbox row take an injected OS; other hosts keep the macOS key hint and the "unconfined" sandbox row.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo nextest run --locked -p cox-config -p cox-session -E 'test(/cox_home_uses_userprofile_without_home|doctor_names_credential_manager_on_windows|doctor_reports_no_sandbox_under_d7/)'
+     Summary [   0.043s] 5 tests run: 5 passed, 169 skipped
+     (the filter also matched doctor_warns_not_fails_when_a_keyless_section_has_no_key and the_app_finds_the_provider_key_in_its_own_store)
+$ mise exec -- cargo clippy --locked -p cox-config -p cox-session --all-targets -- -D warnings
+     Finished clean
+$ mise exec -- cargo fmt --check
+     clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     toolchain, db, sandbox (bwrap), git, prefix ok; API keys fail because ANTHROPIC_API_KEY is unset (exit 1)
+```
+
+Not run: `just windows-check`. The Windows job-object and Credential Manager stores are not executed here. The doctor rows are the injected wording, not a live Credential Manager read.
+
+#### T33.40.11 User guide: the Jev plugin
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: T33.40.6, T33.40.9 · Size: ~150
+
+Goal: one page for users covering what Jev is, how to build and install it, the key, the decision points, the state each point sends, cost, fail-open, doctor, and the old `[providers.typesafe]` table.
+
+Files:
+- `docs/plugins/jev.md`
+- `docs/plugins.md`
+- `crates/cox/tests/it/doc_examples.rs`
+
+Result:
+- The page states J13: Jev answers decisions and is not a tier. `risk` only raises; `route` only downgrades a main turn to `cheap`.
+- `just plugin jev` is not a recipe. The page gives the cargo build that produces `cox_plugin_jev.wasm`, the copy to `plugins/jev/jev.wasm`, and `cox plugin install plugins/jev --yes`. `just plugin-test` is named as the test command, which does not write the wasm.
+- The key is `TYPESAFE_API_KEY`, then keyring entry `cox/typesafe`. A missing key fails that call open.
+- The state lists match the code: `risk` sends `task`, `cwd`, `workspace_roots`, `sandbox` and per call `tool`, `subject`, `input`, `classifier_risk`. `route` forwards `prompt`, `todo`, `last_turn`, `files_touched_count` and `static`. The core today fills `prompt` and `static` on the route question.
+- E1 and E2 are not in `research.md`. Both points stay off, which is the default, until those live runs exist. They need `TYPESAFE_API_KEY` and, for E2, `ANTHROPIC_API_KEY`.
+- `[providers.typesafe]` still sets the base URL and the key env var. `tiers.code.provider = "typesafe"` without the plugin loaded is the doctor warning that the section moved.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo nextest run -p cox --test it jev_guide_toml_blocks_match_config_or_the_manifest
+     PASS. The three toml fences parse as Config: [plugins.decide] names
+     jev for risk and route, [plugins.jev.risk] keeps irreversible 0.7 and
+     exfiltration 0.5, [providers.typesafe] keeps api_key_env TYPESAFE_API_KEY.
+$ mise exec -- cargo clippy -p cox --test it -- -D warnings
+     clean
+$ mise exec -- cargo fmt --check
+     clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     exit 1 only for the unset ANTHROPIC_API_KEY (COX_KEYRING=off).
+     Every other row passed on this branch.
+```
+
+#### T33.40.9 `route` advisor: downgrade only
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: T33.40.8, T33.40.1, T33.40.4 · Size: ~170 (route.rs plus the decide dispatcher and the manifest capability)
+
+Goal: J§5.2, plugin side. A main turn may move from `code` to `cheap` and never the other way. Silence keeps the static pick.
+
+Files:
+- `plugins/jev/src/route.rs`
+- `plugins/jev/src/lib.rs`
+- `crates/cox/tests/it/plugins_jev.rs`
+- `plugins/jev/src/decide.rs` (the call-out already lived here; `route` has to leave through it)
+- `plugins/jev/plugin.toml` (`capabilities.decide` gains `route`)
+
+Result:
+- The System One state is an allowlist: `prompt`, `todo`, `last_turn`, `files_touched_count`, and `static` (the core already sends `static` and `prompt`). Tool output is dropped.
+- Questions are `tier` (Choice over the offered names plus `other`; `cheap` is "mechanical: read, print, list, rename, run a named command, answer from context", `code` is "reasoning over code: multi-file edits, debugging, design") and `wants_depth` (Noul, "the user asks for careful or deep work"). No call-out when `cheap` is not offered.
+- Advice selects `cheap` only when the choice is `cheap`, confidence is at least 0.8, `wants_depth` is below 0.3, and `last_turn.error` / `last_turn.ended_in_error` is not set. `other`, `think` and `code` are silence, so the static pick (`code`) runs.
+- The core still applies its own monotone rule. This advisor returns no advice rather than a low-confidence `cheap`, so a 0.7 answer cannot pass the core's 0.6 `min_confidence`.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo test --manifest-path plugins/Cargo.toml -p cox-plugin-jev
+     30 passed, including route_needs_high_confidence,
+     route_keeps_code_after_error_turn, route_other_means_code,
+     route_questions_describe_the_offered_tiers,
+     route_question_asks_tier_and_depth
+$ mise exec -- cargo clippy --manifest-path plugins/Cargo.toml -p cox-plugin-jev --all-targets -- -D warnings
+     clean
+$ mise exec -- cargo nextest run -p cox --test it route_cheap_at_high_confidence_downgrades_both_calls route_below_the_confidence_gate_stays_on_code route_think_is_ignored_and_the_static_pick_runs
+     3 passed. The 0.9 fixture downgrades both scripted calls of the turn
+     to tier cheap and records Advised { point: route, applied: true }.
+     0.7 stays on code. A choice of think is ignored and the static pick runs.
+$ mise exec -- cargo nextest run -p cox --test it jev_request_carries_host_injected_bearer
+     passed (the risk call-out is unchanged)
+$ mise exec -- cargo fmt --check
+     clean
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     exit 1. API keys: ANTHROPIC_API_KEY is not set and keyring entry
+     'cox/anthropic' not found. Cargo sets COX_KEYRING=off. Every other row passed.
+```
+
+`low_risk_answer_leaves_the_call_allowed` failed in this environment after the call was allowed: confined `git` could not open `/dev/null`, and that sandbox denial asked for approval. It is not a change in the risk verdict. `cargo clippy --workspace` including `cox-voice` was not run here: `whisper-rs-sys` cannot link `libstdc++` with the local clang.
+#### T67.13 Design: a GitHub Action and scheduled runs
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~150 (doc; two design docs, see Result) · Priority: P3 · Complexity: 2
+
+Goal: `docs/design/github-action.md` and `docs/design/schedule.md`: how `cox run -p` runs in a GitHub workflow (inputs, key handling, sandbox, cost cap, what it may push) and on a schedule (where the schedule lives, locking, the ledger). No code until the creator approves; implementation cards come in a later amendment.
+
+Result:
+- `docs/design/github-action.md` specifies a composite action around `cox run -p`: prompt on stdin, `--budget` default 1, `--max-turns` default 4, headless `never` unless the workflow opts into `on-failure`, `permission-mode` limited to plan/default/auto, sandbox limited to read-only/workspace-write. `bypass` and `danger-full-access` are rejected. The cox job is `contents: read`, checkout uses `persist-credentials: false`, and the child env allowlist does not carry the provider key or `GITHUB_TOKEN`. A push, if any, is a later job that does not run cox. `cox.db` is uploaded as an artifact because the runner disk dies with the job.
+- `docs/design/schedule.md` puts the schedule in GitHub `on.schedule` plus a `concurrency` group. A fire opens a new session and takes the existing session lock. It does not resume and it does not talk to `cox serve`. A project file cannot name a schedule. A user-level scheduler is deferred so it does not collide with T66.13.
+- Both docs end with proposed cards. Those cards are not in `plan.md`.
+- No Rust, no workflow, no new dependency.
+
+Check output (2026-10-19):
+```
+$ test -s docs/design/github-action.md && test -s docs/design/schedule.md
+     both non-empty (146 and 126 lines)
+$ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     did not start. cargo cannot resolve workspace-hack on main:
+     crypto-common 0.2 has no `std` feature. That break is #408, not
+     this design. On the branch that contains #408, the same command
+     the same day exited 1 only because ANTHROPIC_API_KEY is unset
+     (COX_KEYRING=off). Every other doctor row passed.
+```
+
+#### T67.6 Path-scoped rules, loaded on demand
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: — · Size: ~190 · Priority: P2 · Complexity: 3
+
+Goal: `.cox/rules/*.md` and `.claude/rules/*.md` with a frontmatter `paths:` glob list reach the model only when it reads or edits a matching file, once per rule per session. Instruction files keep loading as today.
+
+Files:
+- `crates/cox-ext/src/rules.rs` (new): `Rule { globs, body, source }`, `load_rules(roots) -> Loaded { rules, notices }` (re-read each time; a broken file is a notice and is skipped), `rules_for(touched, rules) -> Vec<&Rule>` (pure). Reuses `frontmatter.rs` and the `globset` the workspace already links.
+- `crates/cox-core`: `PathRules` trait; after a `read`/`edit`/`write` result, `append_rule_text` appends new matching rules to volatile `system[3]` after the last cache breakpoint, never in the system prefix. `cox-session` loads the git root (or `cwd` outside a repository) and registers `DiskPathRules`.
+- `docs/config.md` (generated from `cox-protocol`'s config docs)
+
+Steps:
+1. A rule body is untrusted repository text: it goes through `cox_sanitize::sanitize` and is framed as `<project_rule source="…">`, not as a system instruction.
+
+Check:
+```bash
+mise exec -- cargo nextest run -p cox-ext -p cox-core
+mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+mise exec -- cargo fmt --check
+```
+`cox-ext` 61 passed, `cox-core` 490 passed (551 total). `rule_matches_only_its_globs`, `rule_injected_once`, `system_prefix_unchanged_by_rules` and `config_docs_config_md_matches_default_toml` pass. Clippy and fmt clean.
+
+Done when `rule_matches_only_its_globs`, `rule_injected_once` and `system_prefix_unchanged_by_rules` (byte-equal prefix with and without rules) pass.
+
+Deviations: `load_rules` returns `Loaded { rules, notices }` so a broken file is a warning the session can log, matching the fail-open rule. Injection lands in `system[3]` (the volatile block after the cache breakpoint) rather than a new message item, which is where volatile context already goes and keeps `system[0..=2]` byte-identical. `cox-session` wires the loader; `cox-core` only sees the `PathRules` trait. Also restores `cox_config::load::default_tiers` (callers in `cox-session` no longer compiled) and a needless-borrow in `target_agents`, and regenerates `workspace-hack` the same way as #408 so the workspace resolves after the rand/digest bumps.
 #### T66.14 Archive old sessions without deleting them
 
 Model: Cursor / grok-4.7 · Status: done 2026-10-20 · Depends: T66.12 and its approved cards · Size: ~340 (landed larger; see Not done) · Priority: P3 · Complexity: 2

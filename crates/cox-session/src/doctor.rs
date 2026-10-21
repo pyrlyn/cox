@@ -98,6 +98,7 @@ fn key_requirement(config: &cox_protocol::Config) -> KeyRequirement<'_> {
 fn check_api_keys_with(
     config: &cox_protocol::Config,
     resolve: impl FnOnce(&str, &str) -> Result<String, cox_protocol::errors::ProviderError>,
+    os: &str,
 ) -> CheckResult {
     let (section, env_var, required) = match key_requirement(config) {
         KeyRequirement::Key(section, env_var, required) => (section, env_var, required),
@@ -136,10 +137,7 @@ fn check_api_keys_with(
     if resolve(env_var, section).is_ok() {
         return CheckResult::ok("API keys", format!("{section} key found"));
     }
-    let detail = format!("{env_var} is not set and keyring entry 'cox/{section}' not found");
-    let fix = format!(
-        "set {env_var} or run `security add-generic-password -s cox -a {section} -w` (macOS) or your platform's keyring equivalent"
-    );
+    let (detail, fix) = missing_key(env_var, section, os);
     if required {
         CheckResult::fail("API keys", detail, fix)
     } else {
@@ -151,11 +149,39 @@ fn check_api_keys_with(
     }
 }
 
+/// Where a missing key is stored. Windows names Credential Manager
+/// (keyring 4's `windows-native-keyring-store`, R10.4.5). Other hosts keep
+/// the macOS `security` hint. `os` is injected so the Windows wording is
+/// tested on every host (T57.10).
+fn missing_key(env_var: &str, section: &str, os: &str) -> (String, String) {
+    if os == "windows" {
+        (
+            format!(
+                "{env_var} is not set and Windows Credential Manager entry 'cox/{section}' not found"
+            ),
+            format!(
+                "set {env_var} or store it in Windows Credential Manager (service cox, account {section})"
+            ),
+        )
+    } else {
+        (
+            format!("{env_var} is not set and keyring entry 'cox/{section}' not found"),
+            format!(
+                "set {env_var} or run `security add-generic-password -s cox -a {section} -w` (macOS) or your platform's keyring equivalent"
+            ),
+        )
+    }
+}
+
 /// Resolves the key exactly as the provider will (`cox_provider::http::resolve_key`:
 /// the section's env var, then keyring `cox/<section>`), so doctor and the
 /// session never disagree about whether a key exists.
 pub fn check_api_keys(config: &cox_protocol::Config) -> CheckResult {
-    check_api_keys_with(config, cox_provider::http::resolve_key)
+    check_api_keys_with(
+        config,
+        cox_provider::http::resolve_key,
+        std::env::consts::OS,
+    )
 }
 
 /// [`check_api_keys`] with the stored key looked up in `keys` rather than
@@ -165,27 +191,44 @@ pub fn check_api_keys_in(
     config: &cox_protocol::Config,
     keys: &dyn Fn(&str) -> Option<String>,
 ) -> CheckResult {
-    check_api_keys_with(config, |var, section| {
-        cox_provider::http::resolve_key_with(var, section, keys)
-    })
+    check_api_keys_with(
+        config,
+        |var, section| cox_provider::http::resolve_key_with(var, section, keys),
+        std::env::consts::OS,
+    )
+}
+
+/// [`check_sandbox`] with the backend name and the OS injected. Windows has
+/// no backend (D7): the row says every command asks, instead of the Unix
+/// "unconfined" wording. Tests pass `os` so that row runs on every host.
+fn check_sandbox_on(backend: Option<&str>, os: &str) -> CheckResult {
+    if let Some(name) = backend {
+        return CheckResult::ok("sandbox", name.to_string());
+    }
+    if os == "windows" {
+        return CheckResult::warn(
+            "sandbox",
+            "none (D7): every command asks".to_string(),
+            "Windows has no sandbox (D7); every command asks before it runs".to_string(),
+        );
+    }
+    CheckResult::warn(
+        "sandbox",
+        "none: shell commands run unconfined".to_string(),
+        match os {
+            "macos" => "sandbox-exec is part of macOS; check your installation".to_string(),
+            "linux" => "install bubblewrap: apt install bubblewrap (Debian/Ubuntu) or equivalent"
+                .to_string(),
+            _ => "sandbox is not supported on this platform".to_string(),
+        },
+    )
 }
 
 pub fn check_sandbox() -> CheckResult {
-    match cox_tools::sandbox::backend(cox_protocol::LinuxBackend::Auto) {
-        Some(backend) => CheckResult::ok("sandbox", backend.name().to_string()),
-        None => CheckResult::warn(
-            "sandbox",
-            "none: shell commands run unconfined".to_string(),
-            match std::env::consts::OS {
-                "macos" => "sandbox-exec is part of macOS; check your installation".to_string(),
-                "linux" => {
-                    "install bubblewrap: apt install bubblewrap (Debian/Ubuntu) or equivalent"
-                        .to_string()
-                }
-                _ => "sandbox is not supported on this platform".to_string(),
-            },
-        ),
-    }
+    check_sandbox_on(
+        cox_tools::sandbox::backend(cox_protocol::LinuxBackend::Auto).map(|backend| backend.name()),
+        std::env::consts::OS,
+    )
 }
 
 pub fn check_git() -> CheckResult {
@@ -245,9 +288,11 @@ mod tests {
         // (A49, T30.28).
         let mut config = cox_protocol::Config::default();
         config.tiers.code.provider = "nosuch".into();
-        let result = check_api_keys_with(&config, |_, _| {
-            panic!("an unknown provider must fail before any key is resolved")
-        });
+        let result = check_api_keys_with(
+            &config,
+            |_, _| panic!("an unknown provider must fail before any key is resolved"),
+            "linux",
+        );
         assert_eq!(result.status, "fail");
         assert!(result.detail.contains("[providers.nosuch]"));
     }
@@ -267,9 +312,11 @@ mod tests {
                 ..Default::default()
             },
         );
-        let result = check_api_keys_with(&config, |_, _| {
-            Err(cox_protocol::errors::ProviderError::Auth)
-        });
+        let result = check_api_keys_with(
+            &config,
+            |_, _| Err(cox_protocol::errors::ProviderError::Auth),
+            "linux",
+        );
         assert_eq!(result.status, "warn");
         // The keyring hint names service `cox`, account `<section>` — the
         // order `keyring::Entry::new("cox", section)` reads. The fix text
@@ -290,9 +337,11 @@ mod tests {
         ));
         config.providers.abi.insert("typesafe".into());
         assert_eq!(key_requirement(&config), KeyRequirement::Plugin("typesafe"));
-        let result = check_api_keys_with(&config, |_, _| {
-            panic!("a plugin's key is checked by its own row")
-        });
+        let result = check_api_keys_with(
+            &config,
+            |_, _| panic!("a plugin's key is checked by its own row"),
+            "linux",
+        );
         assert_eq!(result.status, "ok");
     }
 
@@ -300,9 +349,11 @@ mod tests {
     fn moved_section_without_plugin_warns_with_the_install_pointer() {
         let mut config = cox_protocol::Config::default();
         config.tiers.code.provider = "typesafe".into();
-        let result = check_api_keys_with(&config, |_, _| {
-            panic!("a moved section needs no key lookup")
-        });
+        let result = check_api_keys_with(
+            &config,
+            |_, _| panic!("a moved section needs no key lookup"),
+            "linux",
+        );
         assert_eq!(result.status, "warn");
         // No message argument: CodeQL reads printing a key-check result as
         // logging the key, though the result never holds one.
@@ -324,5 +375,33 @@ mod tests {
             "expected fail status when no stored key is available"
         );
         assert!(result.detail.contains("cox/anthropic"));
+    }
+
+    /// T57.10: Windows names Credential Manager. The lookup is injected, so
+    /// this never reads the real store (A49).
+    #[test]
+    fn doctor_names_credential_manager_on_windows() {
+        let mut config = cox_protocol::Config::default();
+        config.tiers.code.provider = "anthropic".into();
+        config.providers.anthropic.api_key_env = "COX_DOCTOR_TEST_UNSET_ANTHROPIC".into();
+        let result = check_api_keys_with(
+            &config,
+            |_, _| Err(cox_protocol::errors::ProviderError::Auth),
+            "windows",
+        );
+        assert_eq!(result.status, "fail");
+        assert!(result.detail.contains("Windows Credential Manager"));
+        assert!(result.fix.contains("Windows Credential Manager"));
+    }
+
+    /// T57.10: no sandbox backend on Windows is D7, not the Unix unconfined row.
+    #[test]
+    fn doctor_reports_no_sandbox_under_d7() {
+        let result = check_sandbox_on(None, "windows");
+        assert_eq!(result.status, "warn");
+        assert_eq!(result.detail, "none (D7): every command asks");
+        let unix = check_sandbox_on(None, "linux");
+        assert_eq!(unix.detail, "none: shell commands run unconfined");
+        assert!(unix.fix.contains("bubblewrap"));
     }
 }

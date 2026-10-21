@@ -98,6 +98,9 @@ pub fn stage(
                 after: None,
             },
             Op::Update { move_to, hunks, .. } => {
+                if let Some(to) = move_to {
+                    check_move_target(&path, to, read, &staged)?;
+                }
                 let before = require(read, &path)?;
                 let after = apply_hunks(&before, hunks)?;
                 Change {
@@ -111,6 +114,27 @@ pub fn stage(
         staged.insert(path, change);
     }
     Ok(staged.into_values().collect())
+}
+
+/// A move writes `to` and then removes `path`. Onto itself that removal
+/// deletes the file just written; onto an existing file it replaces content
+/// nothing archived; onto a path another op touches the two ops race.
+fn check_move_target(
+    path: &str,
+    to: &str,
+    read: &dyn Fn(&str) -> Option<String>,
+    staged: &BTreeMap<String, Change>,
+) -> Result<(), ToolError> {
+    let why = if to == path {
+        format!("`*** Move to: {to}` names the file being updated")
+    } else if read(to).is_some() {
+        format!("`*** Move to: {to}` but the file already exists")
+    } else if staged.contains_key(to) || staged.values().any(|c| c.path == to) {
+        format!("patch touches {to} twice")
+    } else {
+        return Ok(());
+    };
+    Err(ToolError::Denied { why })
 }
 
 fn require(read: &dyn Fn(&str) -> Option<String>, path: &str) -> Result<String, ToolError> {
@@ -142,10 +166,25 @@ fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, ToolError> {
             })
             .collect();
 
-        let from = seek_context(&lines, &hunk.context, cursor);
-        let at = locate(&lines, &old, from, hunk.eof).map_err(|why| ToolError::Denied {
-            why: format!("hunk {} {why}", n + 1),
-        })?;
+        let at = if old.is_empty() && !hunk.eof {
+            // A pure insertion has no lines of its own to search for: every
+            // position would match. The `@@` header is its only anchor, so
+            // the lines go right after it, and a header the file lacks fails
+            // rather than dropping the lines somewhere else.
+            anchor_after_context(&lines, &hunk.context, cursor).ok_or_else(|| {
+                ToolError::Denied {
+                    why: format!(
+                        "hunk {} only adds lines, so its `@@` header must name a line in the file",
+                        n + 1
+                    ),
+                }
+            })?
+        } else {
+            let from = seek_context(&lines, &hunk.context, cursor);
+            locate(&lines, &old, from, hunk.eof).map_err(|why| ToolError::Denied {
+                why: format!("hunk {} {why}", n + 1),
+            })?
+        };
         lines.splice(at..at + old.len(), new.iter().cloned());
         cursor = at + new.len();
     }
@@ -163,6 +202,18 @@ fn seek_context(lines: &[String], context: &[String], start: usize) -> usize {
         }
     }
     at
+}
+
+/// Like [`seek_context`], but every non-empty header must be found, and
+/// there must be at least one.
+fn anchor_after_context(lines: &[String], context: &[String], start: usize) -> Option<usize> {
+    let mut at = start;
+    let mut any = false;
+    for c in context.iter().filter(|c| !c.trim().is_empty()) {
+        at += lines[at..].iter().position(|l| l.trim() == c.trim())? + 1;
+        any = true;
+    }
+    any.then_some(at)
 }
 
 /// The three normalisers, tried in order (T3.5 step 2): exact, then
@@ -317,6 +368,25 @@ mod tests {
     }
 
     #[test]
+    fn v4a_pure_insertion_goes_right_after_its_context_header() {
+        let out = after(
+            &[("a.txt", "one\ntwo\nthree\n")],
+            "*** Begin Patch\n*** Update File: a.txt\n@@ one\n+inserted\n*** End Patch",
+        );
+        assert_eq!(out, "one\ninserted\ntwo\nthree\n");
+
+        for src in [
+            "*** Begin Patch\n*** Update File: a.txt\n@@ missing\n+inserted\n*** End Patch",
+            "*** Begin Patch\n*** Update File: a.txt\n@@\n+inserted\n*** End Patch",
+        ] {
+            match staged(&[("a.txt", "one\ntwo\n")], src) {
+                Err(ToolError::Denied { why }) => assert!(why.contains("only adds lines"), "{why}"),
+                other => panic!("expected Denied for {src:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn v4a_move_reports_both_paths() {
         let changes = staged(
             &[("a.rs", "x\n")],
@@ -326,6 +396,31 @@ mod tests {
         assert_eq!(changes[0].path, "b.rs");
         assert_eq!(changes[0].from.as_deref(), Some("a.rs"));
         assert_eq!(changes[0].status(), 'R');
+    }
+
+    #[test]
+    fn v4a_move_refuses_its_own_path_an_existing_file_and_a_touched_path() {
+        let files = [("a.rs", "x\n"), ("b.rs", "keep\n")];
+        for (src, want) in [
+            (
+                "*** Begin Patch\n*** Update File: a.rs\n*** Move to: a.rs\n@@\n-x\n+y\n*** End Patch",
+                "names the file being updated",
+            ),
+            (
+                "*** Begin Patch\n*** Update File: a.rs\n*** Move to: b.rs\n@@\n-x\n+y\n*** End Patch",
+                "already exists",
+            ),
+            (
+                "*** Begin Patch\n*** Add File: c.rs\n+z\n*** Update File: a.rs\n\
+                 *** Move to: c.rs\n@@\n-x\n+y\n*** End Patch",
+                "twice",
+            ),
+        ] {
+            match staged(&files, src) {
+                Err(ToolError::Denied { why }) => assert!(why.contains(want), "{why}"),
+                other => panic!("expected Denied for {src:?}, got {other:?}"),
+            }
+        }
     }
 
     #[test]
