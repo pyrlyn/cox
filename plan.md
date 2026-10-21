@@ -49,8 +49,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.11 | todo | P2 | 2 | 0% | |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | done | P2 | 4 | 100% | grok-4.7 |
-| T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
-| T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
+| T33.47 | todo | P2 | 4 | 95% | |
+| T33.47.8 | todo | P2 | 4 | 95% | |
 | T35.10 | todo | P3 | 2 | 0% | |
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
@@ -956,7 +956,18 @@ Check: a preview snapshot of the pane with two frames; ⌘⇧D toggles it; a sel
 
 Split by A157 into T33.47.8.1–T33.47.8.10, one layer each; this card closes when they are done.
 
-Remaining (all ten sub-cards are done): the hand check — ⌘⇧D and the palette row toggle the pane, two frames show, a click adds a chip and a second replaces it — and the falsifier 3 measurement in Instruments. Both need a person at the app: the agent that built the cards cannot drive a native window, and no fixture plugin declares a canvas.
+Remaining (all ten sub-cards are done): the hand check — ⌘⇧D and the palette row toggle the pane, two frames show, a click adds a chip and a second replaces it — and the falsifier 3 measurement in Instruments. Both need a person at the app: an agent run cannot drive a native window (screen capture and System Events need a permission prompt nobody answers). The plugin for them now exists: the Glance example (`plugins/examples/surfaces`) declares a canvas of two frames, "Count" and "Legend", every part it draws attaches a note, and it counts streamed `text_delta` chunks and asks for a redraw every 16th, since a command cannot redraw a canvas (`cox_redraw` is not built) (`surfaces_example` `the_canvas_draws_two_frames_and_a_click_attaches_a_note`).
+
+Hand check, with a scratch home:
+
+1. `mise exec -- cargo build -p cox-plugin-fixtures` builds the package; it lands in `target/debug/build/cox-plugin-fixtures-*/out/surfaces`.
+2. `COX_HOME=/tmp/cox-canvas cox plugin install <that directory>`, granting every line, `desktop.canvas` and `events:text_delta` included.
+3. `scripts/desktop/app.sh`, then open `Cox.app` with `COX_HOME=/tmp/cox-canvas` and start a session in any repository.
+4. ⌘⇧D shows the pane with "Count" and "Legend" side by side; ⌘⇧D again hides it; the palette's "Show Glance" shows it again.
+5. A click on "0 glances" adds the chip "Glance: count"; a click on "Legend"'s status row replaces it with "Glance: status". Removing the chip and clicking again adds a new one.
+6. While a reply streams, "Count"'s "chunks streamed" climbs in steps of 16 and "Legend" does not reload.
+
+Falsifier 3: with the pane shown, send a prompt that gets a long streamed reply and type into the composer while it streams, with `xcrun xctrace record --template SwiftUI --attach Cox --time-limit 30s --output /tmp/cox-canvas.trace` running. Pass: no hitch over 16 ms in the trace's Hitches track (DT§1). The design asks for a redraw twice a second; every 16th chunk is usually faster, so a pass holds for the design's rate too. Write the worst hitch, the redraw rate seen and the macOS version into this card's Check output.
 
 ### P34 — Subagents (goal: a subagent can be a custom named definition, capped in number, able to ask the user, and able to exchange follow-up messages with its parent and its siblings — all through the parent's own `Submission`/`Event` stream)
 
