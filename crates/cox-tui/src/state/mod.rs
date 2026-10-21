@@ -6,15 +6,21 @@
 //! `update`. No async, no I/O, no terminal: the runtime (`app`) feeds it key
 //! and core events and executes the `Cmd`s it returns, and a test feeds it
 //! the same `Event`s a real session emits, so every screen is replayable.
+//!
+//! This file holds `State`, `TurnRow` and the dispatch (`update`, `step`);
+//! each kind of input is folded in its own submodule (`event`, `keys`,
+//! `mouse`, `submit`, `act`, `plugin`, `theme`) and the plain data types
+//! (`msg`, `cell`, `modal`, `status`) are re-exported here, so every
+//! `cox_tui::state::*` path stays as it was before the split (#118).
 
 use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
 use std::ops::Range;
 
-use cox_protocol::ids::{CallId, ItemId, SessionId, TaskId};
+use cox_protocol::ids::{CallId, ItemId, TaskId};
 use cox_protocol::types::{
-    Content, ContextBreakdown, Effort, Level, Mode as SessionMode, PermissionMode, Presence, Role,
-    SandboxMode, Tier, TodoItem,
+    Content, Level, Mode as SessionMode, PermissionMode, Presence, Role, SandboxMode, Tier,
+    TodoItem,
 };
 
 use crate::banner::Banner;
@@ -26,20 +32,20 @@ use crate::glyph::{self, Glyphs};
 use crate::item_render::ItemRender;
 use crate::keymap::Keymap;
 use crate::markdown;
-use crate::modal::{Approval, PluginGrantDialog, Question, RemoveConfirm};
-use crate::picker::Picker;
+use crate::modal::PluginGrantDialog;
 use crate::pointer::Pointer;
 use crate::term::{Caps, Progress};
 use crate::theme::{Theme, ThemeFile};
-use crate::theme_editor::ThemeEditor;
 
 mod act;
 mod cell;
 mod event;
 mod keys;
+mod modal;
 mod mouse;
 mod msg;
 mod plugin;
+mod status;
 mod submit;
 #[cfg(test)]
 mod testkit;
@@ -47,9 +53,11 @@ mod theme;
 
 pub use cell::Cell;
 pub use keys::ESC_ESC_TICKS;
+pub use modal::Modal;
 pub use msg::{
     Ask, Cmd, GrantDecision, Msg, PluginMgmtRequest, PluginNewRequest, PluginRequest, PluginUiMsg,
 };
+pub use status::{GitStatus, Notify, Status};
 pub use submit::Loop;
 pub(crate) use submit::compose;
 
@@ -61,111 +69,6 @@ use mouse::on_mouse;
 use plugin::{declare_plugin_commands, plugin_command_out};
 use submit::loop_tick;
 use theme::apply_theme_choice;
-
-/// What the status line shows; filled from `TurnStarted`/`Usage`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Status {
-    pub model: String,
-    pub tier: Option<Tier>,
-    pub context_tokens: u32,
-    /// What `ctx N%` is a share of: the model's window from the last
-    /// `Event::ContextBreakdown` (A98), a 200k guess until one names it.
-    pub context_window: u32,
-    /// The last request's split (A98), which `/context` draws.
-    pub context: Option<ContextBreakdown>,
-    pub cost_usd: f64,
-    pub sandbox: SandboxMode,
-    pub busy: bool,
-    /// Last call's cache share 0..=1 (T8.3), shown as `cache N%`.
-    pub cache_ratio: f64,
-    /// Session spend cap, in USD (T28.1); the binary sets it from
-    /// `budget.session_usd`, so `$` names the spend over the cap.
-    pub budget_cap_usd: f64,
-    /// Fraction of the cap that warns (T28.1); the binary sets it from
-    /// `budget.warn_at`, and the cost segment turns `theme.warn` past it.
-    pub budget_warn_at: f64,
-    /// `/effort` override for the session (T28.1); `SetEffort` keeps it here
-    /// next to the mode the composer already shows, and the line badges it.
-    pub effort: Option<Effort>,
-}
-
-impl Status {
-    /// The context `ctx N%` and `/context` count (A98): the last call's
-    /// reported context, else the core's estimate for the request about to
-    /// go out — `ContextBreakdown::used`, the desktop meter's rule too.
-    pub fn context_used(&self) -> u32 {
-        self.context
-            .map_or(self.context_tokens, |b| b.used(self.context_tokens))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Modal {
-    Approval(Approval),
-    /// `ask_user` (T22.1): blocks the turn until a key answers or dismisses it.
-    Question(Question),
-    /// `NeedsApproval` at session open (T33.8, PL§3); more than one queues
-    /// in `pending_grants` below, since this is the same one modal slot.
-    PluginGrant(PluginGrantDialog),
-    /// `/plugin remove <id> [--keep-data]` (T33.33, PL§1c): confirms an
-    /// irreversible action before `Cmd::PluginMgmt(PluginMgmtRequest::Remove)`
-    /// reaches the runtime.
-    PluginRemove(RemoveConfirm),
-    /// `/refine` (T66.8): a proposed change drawn as a diff over the
-    /// transcript; `y` applies it, `n` or `Esc` drops it.
-    Refine(crate::refine::Review),
-    Picker(Picker),
-    /// `Ctrl+G` (T15.3): the working tree's `git diff HEAD`, drawn over the
-    /// transcript; `scroll` is lines from the top.
-    Diff {
-        text: String,
-        scroll: usize,
-    },
-    /// `?` on an empty composer (T24.6): `KEYMAP` grouped by context, drawn
-    /// over the transcript like the diff view.
-    Help,
-    /// `/context` (A98): the last request's window and split, drawn over
-    /// the transcript like `Help`.
-    Context,
-    /// `/agents` (T27.5): a navigable list of `agents_rows`, replacing the
-    /// static T27.2 `Notice`. `Up`/`Down` move `selected`; `Enter` on a
-    /// sibling-session row (`ids[selected].is_some()`) asks the runtime for
-    /// its rollout. A task row's id is `None` — no `SessionId` on the wire
-    /// yet (plan.md §3 P27) — so `Enter` on it is a no-op.
-    Agents {
-        rows: Vec<String>,
-        ids: Vec<Option<SessionId>>,
-        selected: usize,
-    },
-    /// `Enter` on an `/agents` sibling-session row (T27.5): that session's
-    /// rollout, replayed into cells the same pipeline a live turn uses
-    /// (`Msg::Rollout`), drawn read-only over the transcript like `Diff`;
-    /// `scroll` is lines from the top. `Esc` closes it.
-    Transcript {
-        cells: Vec<Cell>,
-        scroll: usize,
-    },
-    /// `OpenOverlay` (T33.24, PL§8): `id`'s `overlay` slot, full screen like
-    /// `Diff`/`Transcript` above; `Esc` closes it. The widget itself is not
-    /// carried here — it stays cached in `plugin_status` like every other
-    /// slot's last good render, so a redraw never needs to touch `modal`.
-    Plugin {
-        id: String,
-    },
-    /// The theme editor (T46.6): a band like `Picker`, drawn from
-    /// `ThemeEditor::lines`; `/theme` opens it and saves it (T46.7).
-    ThemeEditor(ThemeEditor),
-}
-
-/// What the status line shows of the working tree; a mirror of
-/// `cox_tools::git::Status` so this crate keeps no `cox-tools` dependency
-/// (T15.2).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GitStatus {
-    pub branch: String,
-    pub added: usize,
-    pub removed: usize,
-}
 
 #[derive(Debug, Clone)]
 pub struct State {
@@ -364,27 +267,6 @@ pub struct State {
     /// Push-to-talk (T54.6): whether a `Dictation` exists, `[voice]
     /// auto_submit`, and the recording in progress.
     pub voice: crate::voice::Voice,
-}
-
-/// `tui.notify` (T23.5): when a finished turn, an approval or a question
-/// rings the terminal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Notify {
-    /// Only while the terminal is unfocused.
-    Auto,
-    Always,
-    Off,
-}
-
-impl Notify {
-    /// An unknown value is `Auto`, like `diff::Mode::parse`.
-    pub fn parse(s: &str) -> Notify {
-        match s {
-            "always" => Notify::Always,
-            "off" => Notify::Off,
-            _ => Notify::Auto,
-        }
-    }
 }
 
 /// One user turn as the rewind timeline shows it.
