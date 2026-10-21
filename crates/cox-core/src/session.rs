@@ -138,6 +138,10 @@ pub(crate) struct Inner {
     catalog: Option<cox_models::Catalog>,
     /// Whether this turn already compacted after a context-length error.
     retried_after_too_long: bool,
+    /// The last finished turn stopped on `StopReason::Error`, which a
+    /// `route` question reports so a failed turn is never followed on
+    /// `cheap` (J5.2).
+    pub(crate) last_turn_failed: bool,
     /// `SessionStart` source awaiting its one dispatch (T22.3): armed by
     /// `build`, flushed on the first `submit` — by then the surface has
     /// installed the hook runner, and only once per session.
@@ -654,6 +658,7 @@ impl Session {
                 last_usage: None,
                 catalog: None,
                 retried_after_too_long: false,
+                last_turn_failed: false,
                 startup: (!is_child).then_some(if is_resume { "resume" } else { "startup" }),
                 startup_context: String::new(),
                 repomap: None,
@@ -2611,6 +2616,7 @@ impl Session {
         {
             let mut inner = self.inner.lock().await;
             inner.state = State::Idle;
+            inner.last_turn_failed = stop == StopReason::Error;
         }
         Ok(())
     }

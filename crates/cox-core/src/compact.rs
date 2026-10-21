@@ -450,7 +450,7 @@ pub(crate) struct SurvivingHandles {
 /// A label that is safe to print into the summary: tool names are
 /// registered by cox or an MCP server, and an earlier summary's lines are
 /// model-written text.
-fn is_label(s: &str) -> bool {
+pub(crate) fn is_label(s: &str) -> bool {
     (1..=64).contains(&s.len())
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))

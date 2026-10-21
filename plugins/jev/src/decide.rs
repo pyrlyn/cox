@@ -4,8 +4,9 @@
 //! into advice. The host gates, ledgers and retries the call, so the guest
 //! never reaches the paid endpoint itself. Pure, so it tests on the host.
 //!
-//! What is asked and how the answers read are `risk`'s (T33.40.6, J§5.1);
-//! this module only moves the request out and the reply back.
+//! What is asked and how the answers read are `risk`'s (T33.40.6, J§5.1)
+//! and `route`'s (T33.40.9, J§5.2); this module only moves the request out
+//! and the reply back.
 
 use cox_plugin_sdk::{
     Advice, CallTarget, DecideOut, DecidePoint, DecideResume, ModelCall, OwnProvider,
@@ -14,6 +15,7 @@ use cox_plugin_sdk::{
 use serde_json::json;
 
 use crate::risk::{self, Thresholds};
+use crate::route;
 use crate::wire::{self, SystemOneRequest};
 
 /// The `[[provider]]` section a call-out names (`plugin.toml`).
@@ -21,18 +23,21 @@ pub const SECTION: &str = "typesafe";
 /// The stable model a call-out asks for (J5).
 pub const MODEL: &str = "jev-1.13.0";
 
-/// `cox_decide`: a call-out for a `risk` question about at least one call,
-/// silence for anything else. The core asks `risk` once per tool batch
-/// (T33.40.6.1), so a question with no items has nothing to judge.
+/// `cox_decide`: a call-out for a `risk` question about at least one call
+/// or a `route` question that offers `cheap`, silence for anything else.
+/// The core asks `risk` once per tool batch (T33.40.6.1), so a question
+/// with no items has nothing to judge; `route` only ever downgrades.
 pub fn decide(asked: &Asked) -> DecideOut {
-    if asked.point != DecidePoint::Risk || asked.items.is_empty() {
-        return DecideOut::Advice(None);
-    }
-    let body = SystemOneRequest::new(
-        risk::state(asked),
-        MODEL,
-        risk::questions(asked.items.len()),
-    );
+    let (state, questions) = match asked.point {
+        DecidePoint::Risk if !asked.items.is_empty() => {
+            (risk::state(asked), risk::questions(asked.items.len()))
+        }
+        DecidePoint::Route if route::offers_cheap(asked) => {
+            (route::state(asked), route::questions(asked))
+        }
+        _ => return DecideOut::Advice(None),
+    };
+    let body = SystemOneRequest::new(state, MODEL, questions);
     // The host overwrites tier, job and model (PL§7d); the rest is a
     // `cox_protocol::types::Request` whose one user message is the body
     // `provider::stream` sends verbatim.
@@ -65,8 +70,9 @@ pub fn decide(asked: &Asked) -> DecideOut {
     }
 }
 
-/// `cox_decide_resume`: the reply judged against `thresholds`, or silence
-/// when it does not parse or flags no call.
+/// `cox_decide_resume`: the reply judged by its point — `risk` against
+/// `thresholds`, `route` against J§5.2's gate — or silence when it does
+/// not parse or advises nothing.
 pub fn resume(resumed: &DecideResume, thresholds: &Thresholds) -> Option<Advice> {
     let body: String = resumed
         .events
@@ -75,7 +81,12 @@ pub fn resume(resumed: &DecideResume, thresholds: &Thresholds) -> Option<Advice>
         .filter_map(|e| e.get("text").and_then(Value::as_str))
         .collect();
     let answers = wire::parse(&body).ok()?;
-    risk::verdict(&answers, resumed.question.items.len(), thresholds)
+    let asked = &resumed.question;
+    match asked.point {
+        DecidePoint::Risk => risk::verdict(&answers, asked.items.len(), thresholds),
+        DecidePoint::Route => route::verdict(&answers, asked),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -130,10 +141,44 @@ mod tests {
 
     #[test]
     fn other_points_and_empty_batches_are_silent() {
-        let mut route = batch(&["ls"]);
-        route.point = DecidePoint::Route;
-        assert_eq!(decide(&route), DecideOut::Advice(None));
+        let mut rank = batch(&["ls"]);
+        rank.point = DecidePoint::Rank;
+        assert_eq!(decide(&rank), DecideOut::Advice(None));
         assert_eq!(decide(&batch(&[])), DecideOut::Advice(None));
+        // `route` with no `cheap` on offer has nothing to downgrade to.
+        let code_only = Asked {
+            point: DecidePoint::Route,
+            state: json!({}),
+            options: vec!["code".into()],
+            items: vec![],
+        };
+        assert_eq!(decide(&code_only), DecideOut::Advice(None));
+    }
+
+    #[test]
+    fn route_question_calls_out_and_resumes_to_cheap() {
+        let asked = Asked {
+            point: DecidePoint::Route,
+            state: json!({ "static": "code", "prompt": "list files",
+                           "last_turn": { "errored": false } }),
+            options: vec!["cheap".into(), "code".into()],
+            items: vec![],
+        };
+        let body = body(decide(&asked));
+        assert_eq!(body["state"]["prompt"], "list files");
+        assert_eq!(body["questions"]["tier"]["type"], "choice");
+        assert_eq!(body["questions"]["wants_depth"]["type"], "noul");
+        let reply = json!({ "answers": {
+            "tier": { "type": "choice", "choice": "cheap", "confidence": 0.9,
+                      "probabilities": { "cheap": 0.9, "code": 0.1 } },
+            "wants_depth": { "type": "noul", "noul": 0.1 },
+        }});
+        let resumed = DecideResume {
+            question: asked,
+            events: vec![json!({ "type": "text_delta", "text": reply.to_string() })],
+        };
+        let advice = resume(&resumed, &Thresholds::default()).expect("a downgrade");
+        assert_eq!(advice.answer, Answer::Choice { order: vec![0] });
     }
 
     #[test]

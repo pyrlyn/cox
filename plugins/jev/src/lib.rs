@@ -12,12 +12,13 @@
 //! - [`decide`] — the two-phase `cox_decide`/`cox_decide_resume` (T33.40.4).
 //! - [`risk`] — the J§5.1 `risk` advisor (T33.40.6): the batch's questions,
 //!   the `[plugins.jev.risk]` thresholds and the raise-only verdict.
-//!
-//! The `route` advisor (T33.40.9) lands in a later card.
+//! - [`route`] — the J§5.2 `route` advisor (T33.40.9): the turn's
+//!   questions and the downgrade-only verdict.
 
 pub mod decide;
 pub mod provider;
 pub mod risk;
+pub mod route;
 pub mod wire;
 
 /// The `wasm32-unknown-unknown` exports (PL§4), gated so the pure [`wire`]
@@ -109,7 +110,11 @@ mod tests {
             let price = model.price.as_ref().expect("a price row");
             assert_eq!((price.input, price.output), (0.042, 0.0), "J7");
         }
-        assert_eq!(manifest.capabilities.decide, ["risk"], "T33.40.6");
+        assert_eq!(
+            manifest.capabilities.decide,
+            ["risk", "route"],
+            "T33.40.6, T33.40.9"
+        );
         assert_eq!(manifest.validate(), Ok(()));
     }
 }

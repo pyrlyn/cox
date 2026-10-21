@@ -8,21 +8,27 @@
 //! Separate from `session.rs` because this is the one place a turn waits on
 //! a plugin's answer, and from `router.rs` because routing stays pure.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use cox_models::PriceTable;
 use cox_protocol::errors::CoreError;
 use cox_protocol::plugin::{DecidePoint, Question};
-use cox_protocol::types::{Event, Job, Tier};
+use cox_protocol::types::{Content, Event, Job, Message, Tier, TodoItem};
 use cox_sanitize::redact::scrub;
-use serde_json::json;
+use serde_json::{Value, json};
 
+use crate::compact;
 use crate::router::{self, Overrides, Route, Router};
 use crate::session::Session;
 
 /// How much of the prompt a `route` question carries (J5.2: ≤ 2k tokens).
 const PROMPT_CHARS: usize = 8_000;
+/// How many todo rows a `route` question carries, and how much of each:
+/// the list is model-written and only hints at the turn's size.
+const TODO_ROWS: usize = 20;
+const TODO_CHARS: usize = 200;
 
 impl Session {
     /// This user turn's route: `route` advice applied to the static pick
@@ -41,9 +47,14 @@ impl Session {
         let Some(plugin) = decide.route.as_deref() else {
             return Ok(route);
         };
-        let (overrides, prefix) = {
+        let (overrides, prefix, mut state) = {
             let inner = self.inner.lock().await;
-            (inner.overrides.clone(), inner.last_context_tokens)
+            let last_start = inner.turn_marks.last().map(|m| m.start);
+            (
+                inner.overrides.clone(),
+                inner.last_context_tokens,
+                route_state(&inner.history, last_start, inner.last_turn_failed),
+            )
         };
         let explicit = confirm_think || route.tier == Tier::Think || overrides.main_tier.is_some();
         if self.job != Job::Main || explicit {
@@ -59,14 +70,13 @@ impl Session {
         if offer.iter().all(|tier| *tier == route.tier) {
             return Ok(route);
         }
+        state.insert("static".into(), json!(tier_name(route.tier)));
+        // The same redaction the rollout gets (J3: state is built from
+        // scrubbed text), clipped to the question's size.
+        state.insert("prompt".into(), json!(clip(prompt, PROMPT_CHARS)));
         let question = Question {
             point: DecidePoint::Route,
-            state: json!({
-                "static": tier_name(route.tier),
-                // The same redaction the rollout gets (J3: state is built
-                // from scrubbed text), clipped to the question's size.
-                "prompt": scrub(prompt).chars().take(PROMPT_CHARS).collect::<String>(),
-            }),
+            state: Value::Object(state),
             options: offer.iter().copied().map(tier_name).collect(),
             items: vec![],
         };
@@ -128,6 +138,71 @@ impl Session {
             _ => false,
         }
     }
+}
+
+/// The J5.2 state beside the prompt, read off `history` before this turn's
+/// message joins it: the todo list the model last reported, the previous
+/// turn's tools and errors (from `last_start` on), and how many files the
+/// session touched. Never tool output: a result says only whether it failed.
+fn route_state(
+    history: &[Message],
+    last_start: Option<usize>,
+    failed: bool,
+) -> serde_json::Map<String, Value> {
+    let mut todos: HashMap<_, &Value> = HashMap::new();
+    let mut todo = Vec::new();
+    for c in history.iter().flat_map(|m| &m.content) {
+        match c {
+            Content::ToolUse { id, name, input } if name == "todo" => {
+                todos.insert(*id, input);
+            }
+            Content::ToolResult {
+                call_id, is_error, ..
+            } if !is_error => {
+                if let Some(items) = todos.get(call_id).and_then(|i| i.get("items")) {
+                    todo =
+                        serde_json::from_value::<Vec<TodoItem>>(items.clone()).unwrap_or_default();
+                }
+            }
+            _ => {}
+        }
+    }
+    let todo: Vec<Value> = todo
+        .iter()
+        .take(TODO_ROWS)
+        .map(|t| json!({ "text": clip(&t.text, TODO_CHARS), "state": t.state }))
+        .collect();
+    let last = last_start
+        .and_then(|s| history.get(s..))
+        .unwrap_or_default();
+    let (mut tools, mut errors, mut last_failed) = (Vec::new(), 0, false);
+    for c in last.iter().flat_map(|m| &m.content) {
+        match c {
+            // A name is model-written; only a registrable one goes out.
+            Content::ToolUse { name, .. } if compact::is_label(name) => tools.push(name.as_str()),
+            Content::ToolResult { is_error, .. } => {
+                errors += usize::from(*is_error);
+                last_failed = *is_error;
+            }
+            _ => {}
+        }
+    }
+    let mut state = serde_json::Map::new();
+    state.insert("todo".into(), json!(todo));
+    state.insert(
+        "last_turn".into(),
+        json!({ "tools": tools, "errors": errors, "errored": failed || last_failed }),
+    );
+    state.insert(
+        "files_touched_count".into(),
+        json!(compact::working_state(history).files.len()),
+    );
+    state
+}
+
+/// `text` scrubbed and cut to `chars` characters.
+fn clip(text: &str, chars: usize) -> String {
+    scrub(text).chars().take(chars).collect()
 }
 
 /// A tier's wire name (`"cheap"`), the form `Question.options` carries.
@@ -374,6 +449,93 @@ mod tests {
         assert_eq!(asked.len(), 1);
         assert_eq!(asked[0].options, vec!["cheap", "code"]);
         assert_eq!(tiers, vec![Tier::Cheap]);
+    }
+
+    #[tokio::test]
+    async fn route_question_carries_todo_last_turn_and_files_touched() {
+        use cox_protocol::ids::{CallId, ItemId};
+
+        use crate::compact::TurnMark;
+
+        let (session, _, fake, _) = session(1, Duration::ZERO, cheap(0.9));
+        let (todo, write, test) = (CallId::new(), CallId::new(), CallId::new());
+        let calls = [
+            (
+                todo,
+                "todo",
+                json!({ "items": [{ "id": "1", "text": "ship it", "state": "in_progress" }] }),
+            ),
+            (
+                write,
+                "write",
+                json!({ "path": "src/a.rs", "content": "x" }),
+            ),
+            (test, "bash", json!({ "command": "cargo test" })),
+        ];
+        let results = [(todo, false), (write, false), (test, true)];
+        {
+            let mut inner = session.inner.lock().await;
+            inner.history.push(Message {
+                role: Role::User,
+                content: vec![Content::Text {
+                    text: "start".into(),
+                }],
+            });
+            inner.history.push(Message {
+                role: Role::Assistant,
+                content: calls
+                    .into_iter()
+                    .map(|(id, name, input)| Content::ToolUse {
+                        id,
+                        name: name.into(),
+                        input,
+                    })
+                    .collect(),
+            });
+            inner.history.push(Message {
+                role: Role::User,
+                content: results
+                    .into_iter()
+                    .map(|(call_id, is_error)| Content::ToolResult {
+                        call_id,
+                        content: "SECRET-OUTPUT".into(),
+                        is_error,
+                    })
+                    .collect(),
+            });
+            inner.turn_marks.push(TurnMark {
+                item: ItemId::new(),
+                start: 0,
+                seq: 1,
+            });
+        }
+        submit(&session, false).await;
+        let state = &fake.asked()[0].state;
+        assert!(!state.to_string().contains("SECRET"), "{state}");
+        assert_eq!(
+            state["todo"],
+            json!([{ "text": "ship it", "state": "in_progress" }])
+        );
+        assert_eq!(
+            state["last_turn"],
+            json!({ "tools": ["todo", "write", "bash"], "errors": 1, "errored": true })
+        );
+        assert_eq!(state["files_touched_count"], 1);
+        assert_eq!(state["prompt"], "rename foo to bar");
+    }
+
+    #[tokio::test]
+    async fn route_question_reports_a_turn_that_stopped_on_an_error() {
+        let (session, _, fake, _) = session(1, Duration::ZERO, cheap(0.9));
+        session.inner.lock().await.last_turn_failed = true;
+        submit(&session, false).await;
+        let state = &fake.asked()[0].state;
+        assert_eq!(
+            state["last_turn"],
+            json!({ "tools": [], "errors": 0, "errored": true })
+        );
+        assert_eq!(state["todo"], json!([]));
+        assert_eq!(state["files_touched_count"], 0);
     }
 
     #[tokio::test]

@@ -285,7 +285,7 @@ A decision plugin (A25/P21; Jev is the first) needs to *answer* questions the co
 
 | Point | Where in the core today | Question | Rule the core enforces |
 | --- | --- | --- | --- |
-| `route` | `router::pick`, `Job::Main` only, once per `UserTurn` | Choice among tiers ≤ the static pick | never up, never `think` (D5); opt-in per session config; the core offers a downgrade only when its own cost estimate predicts a saving over the static pick (2026-09-26, T33.40.8) |
+| `route` | `router::pick`, `Job::Main` only, once per `UserTurn` | Choice among tiers ≤ the static pick; the state is the scrubbed prompt, the static tier, the last reported `todo` list, `last_turn` (tool names, failed-result count, `errored`) and `files_touched_count`, never tool output (T33.40.9) | never up, never `think` (D5); opt-in per session config; the core offers a downgrade only when its own cost estimate predicts a saving over the static pick (2026-09-26, T33.40.8) |
 | `risk` | after the classifier, before `Engine::decide` (`turn.rs:244-259`) | Score of severity | may raise `Risk`, never lower it; asked only when raising to `Destructive` would change the engine's outcome (2026-09-26, T33.40.6) |
 | `approve_hint` | approval modal | Noul, a caution note only | warning-only: may add "caution", never say a call "looks safe" — monotone the same direction as `risk` (2026-09-26, §14 decision 10; bare "looks safe" display is unsafe against a steered state, R§4.3.6 J12) |
 | `compact` | after `TurnDone`, before the threshold check | Noul "compact now?" | may only compact earlier; never skips a mandatory compaction |
