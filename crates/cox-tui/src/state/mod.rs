@@ -2312,8 +2312,7 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
         }
         Event::Usage { usage, .. } => {
             state.status.cost_usd += usage.cost_usd;
-            state.status.context_tokens =
-                usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
+            state.status.context_tokens = usage.context_tokens();
             state.status.cache_ratio = cox_core::cache_diag::ratio_of(&usage);
         }
         Event::ModelSwitched { tier, to, .. } => {
@@ -2424,7 +2423,9 @@ fn on_event(state: &mut State, ev: Event) -> Vec<Cmd> {
         Event::SessionStarted { .. }
         | Event::Compacted { .. }
         | Event::GrantRevoked { .. }
-        | Event::RepoMapBuilt { .. } => {}
+        | Event::RepoMapBuilt { .. }
+        // T67.5 draws the goal; until then the verdict is recorded and not shown.
+        | Event::GoalVerdict { .. } => {}
     }
     cmds
 }
@@ -2545,6 +2546,9 @@ fn think_consent_answered(state: &mut State, answer: QuestionAnswer) -> Vec<Cmd>
 }
 
 #[cfg(test)]
+mod testkit;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::theme;
@@ -2554,33 +2558,31 @@ mod tests {
     use cox_protocol::types::{Content, Message, PermissionMode, Role, SandboxMode};
     use crossterm::event::{KeyCode, KeyEvent};
 
-    /// Types `text` into the composer and submits it with a plain `Enter`,
-    /// the way a user queues or sends a message.
-    fn type_line(state: &mut State, text: &str) {
-        for c in text.chars() {
-            update(state, Msg::Key(KeyEvent::from(KeyCode::Char(c))));
-        }
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Enter)));
-    }
+    use super::testkit::*;
 
-    /// Types a slash command and submits it. `/` at column 0 opens the
-    /// palette (`Edit::OpenCommands`) but already left the `/` itself in the
-    /// composer, so — as `clear_command_emits_cmd_clear` established — `Esc`
-    /// closes the palette without losing it, then the rest types normally.
-    fn type_command(state: &mut State, line: &str) -> Vec<Cmd> {
-        type_after_sigil(state, '/', line)
-    }
-
-    /// `line` after the picker its leading `sigil` opens was closed with
-    /// `Esc`, which keeps the sigil in the composer; then `Enter`.
-    fn type_after_sigil(state: &mut State, sigil: char, line: &str) -> Vec<Cmd> {
-        let rest = line.strip_prefix(sigil).unwrap_or(line);
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Char(sigil))));
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Esc)));
-        for c in rest.chars() {
-            update(state, Msg::Key(KeyEvent::from(KeyCode::Char(c))));
-        }
-        update(state, Msg::Key(KeyEvent::from(KeyCode::Enter)))
+    /// The status context size is `Usage::context_tokens`, the rule the
+    /// ledger and `cox-app` share, so huge counts saturate instead of
+    /// overflowing the hand-written sum this replaced.
+    #[test]
+    fn usage_context_tokens_saturate_like_the_protocol_rule() {
+        let mut state = State::new(PermissionMode::Default, SandboxMode::WorkspaceWrite);
+        let usage = cox_protocol::types::Usage {
+            input_tokens: u32::MAX,
+            output_tokens: 1,
+            cache_read_tokens: 7,
+            cache_write_tokens: 9,
+            estimated: false,
+            cost_usd: 0.0,
+            latency_ms: 0,
+        };
+        update(
+            &mut state,
+            Msg::Event(Event::Usage {
+                turn: TurnId::new(),
+                usage,
+            }),
+        );
+        assert_eq!(state.status.context_tokens, u32::MAX);
     }
 
     /// T45.6: `@<agent> task` at line start runs that agent directly.

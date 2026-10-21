@@ -80,3 +80,66 @@ fn cursor_doc_commands_match_the_real_binary() {
         "{out}"
     );
 }
+
+/// T33.40.11: every `toml` fence in the Jev guide is a `Config` fragment
+/// or a plugin manifest, so a renamed key fails here.
+#[test]
+fn jev_guide_toml_blocks_match_config_or_the_manifest() {
+    let text = include_str!("../../../../docs/plugins/jev.md");
+    let blocks = toml_fences(text);
+    assert!(
+        blocks.len() >= 3,
+        "the guide should show decide, risk thresholds and the legacy provider"
+    );
+    let mut saw_decide = false;
+    let mut saw_thresholds = false;
+    let mut saw_typesafe = false;
+    for block in &blocks {
+        if let Ok(config) = toml_edit::de::from_str::<cox_protocol::Config>(block) {
+            if config.plugins.decide.risk.as_deref() == Some("jev")
+                && config.plugins.decide.route.as_deref() == Some("jev")
+            {
+                saw_decide = true;
+            }
+            if let Some(jev) = config.plugins.entries.get("jev") {
+                assert_eq!(jev["risk"]["irreversible"], 0.7, "{jev}");
+                assert_eq!(jev["risk"]["exfiltration"], 0.5, "{jev}");
+                saw_thresholds = true;
+            }
+            if config
+                .providers
+                .typesafe
+                .as_ref()
+                .is_some_and(|t| t.api_key_env == "TYPESAFE_API_KEY")
+            {
+                saw_typesafe = true;
+            }
+            continue;
+        }
+        let manifest: cox_plugin_api::PluginManifest = toml_edit::de::from_str(block)
+            .unwrap_or_else(|e| panic!("neither Config nor a manifest:\n{block}\n{e}"));
+        manifest
+            .validate()
+            .unwrap_or_else(|e| panic!("manifest: {e}"));
+    }
+    assert!(saw_decide, "no [plugins.decide] block names jev");
+    assert!(saw_thresholds, "no [plugins.jev.risk] block");
+    assert!(saw_typesafe, "no [providers.typesafe] block");
+}
+
+fn toml_fences(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current: Option<String> = None;
+    for line in text.lines() {
+        match (&mut current, line.trim()) {
+            (Some(_), "```") => out.push(current.take().unwrap_or_default()),
+            (Some(block), _) => {
+                block.push_str(line);
+                block.push('\n');
+            }
+            (None, "```toml") => current = Some(String::new()),
+            (None, _) => {}
+        }
+    }
+    out
+}
