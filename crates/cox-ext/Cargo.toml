@@ -28,6 +28,8 @@ process-wrap = { workspace = true }
 pathdiff = { workspace = true }
 # T22.3: a `matcher` that is not a plain tool name compiles as a regex.
 regex = { workspace = true }
+# T67.6: path-scoped rule globs. The workspace already links globset.
+globset = { workspace = true }
 # T66.5: the harness fingerprint and the per-edit content hashes; already a
 # workspace dependency.
 sha2 = { workspace = true }

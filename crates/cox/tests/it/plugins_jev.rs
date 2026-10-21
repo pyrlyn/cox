@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
-//! T33.40.4 and T33.40.6 Checks: the Jev plugin as a provider and as the
-//! J§5.1 `risk` advisor, end to end and offline. The real binary installs
+//! T33.40.4, T33.40.6 and T33.40.9 Checks: the Jev plugin as a provider, as
+//! the J§5.1 `risk` advisor and as the J§5.2 `route` advisor, end to end
+//! and offline. The real binary installs
 //! the Jev package built by `cox-plugin-fixtures` into a scratch `COX_HOME`,
 //! `[providers.typesafe] base_url` points it at a local wiremock, and a
 //! scripted `write` in `auto` mode, or a `git push origin main` under a
@@ -18,7 +19,7 @@ use assert_cmd::Command;
 use cox_plugin_fixtures::JEV_DIR;
 use cox_protocol::ids::SessionId;
 use cox_protocol::traits::Store as _;
-use cox_protocol::types::{Job, ProviderId};
+use cox_protocol::types::{Job, ProviderId, Tier};
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -635,4 +636,98 @@ fn one_jev_request_per_tool_batch() {
     assert_eq!(items[1]["subject"], "npm publish");
     assert_eq!(body["questions"].as_object().unwrap().len(), 12, "{body}");
     assert_eq!(rig.of_type("tool_call_done").len(), 3);
+}
+
+/// One user turn that writes a file and then stops: two scripted provider
+/// calls, and one `route` question for the turn (T33.40.9).
+const ROUTE_TURNS: &str = "\
+[[turn]]\ntext = \"writing\"\ntool_calls = \
+[{ name = \"write\", input = { path = \"a.txt\", content = \"x\" } }]\n\n";
+
+/// A System One reply to the `route` questions: `tier` is `choice` at
+/// `confidence`, `wants_depth` is `depth`.
+fn route_reply(choice: &str, confidence: f64, depth: f64) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "model": "jev-1.13.0",
+        "answers": {
+            "tier": {
+                "type": "choice",
+                "choice": choice,
+                "confidence": confidence,
+                "probabilities": { "cheap": confidence, "code": 1.0 - confidence, "other": 0.0 }
+            },
+            "wants_depth": { "type": "noul", "noul": depth }
+        },
+        "usage": { "input_tokens": 20, "output_tokens": 0 }
+    }))
+}
+
+fn route_rig(server: &Typesafe) -> Rig {
+    Rig::build(
+        server,
+        ROUTE_TURNS,
+        "",
+        "",
+        "route = \"jev\"\nroute_ms = 30000\n",
+    )
+}
+
+fn main_tiers(rig: &Rig) -> Vec<Tier> {
+    rig.rows()
+        .into_iter()
+        .filter(|row| row.job == Job::Main)
+        .map(|row| row.tier)
+        .collect()
+}
+
+#[test]
+fn route_cheap_at_high_confidence_downgrades_both_calls() {
+    let server = Typesafe::answering(route_reply("cheap", 0.9, 0.1));
+    let rig = route_rig(&server);
+    rig.run();
+
+    let tiers = main_tiers(&rig);
+    assert!(
+        tiers.len() >= 2 && tiers.iter().all(|tier| *tier == Tier::Cheap),
+        "{tiers:?} {}",
+        rig.rollout_text()
+    );
+    let advised = rig.of_type("advised");
+    assert_eq!(advised.len(), 1, "{}", rig.rollout_text());
+    assert_eq!(advised[0]["point"], "route");
+    assert_eq!(advised[0]["plugin"], "jev");
+    assert_eq!(advised[0]["applied"], true, "{}", advised[0]);
+    let body: Value = serde_json::from_slice(&server.requests()[0].body).unwrap();
+    assert_eq!(body["state"]["prompt"], "write them");
+    assert_eq!(body["questions"]["tier"]["type"], "choice");
+    assert_eq!(body["questions"]["wants_depth"]["type"], "noul");
+}
+
+#[test]
+fn route_below_the_confidence_gate_stays_on_code() {
+    let server = Typesafe::answering(route_reply("cheap", 0.7, 0.1));
+    let rig = route_rig(&server);
+    rig.run();
+
+    let tiers = main_tiers(&rig);
+    assert!(
+        !tiers.is_empty() && tiers.iter().all(|tier| *tier == Tier::Code),
+        "{tiers:?} {}",
+        rig.rollout_text()
+    );
+}
+
+#[test]
+fn route_think_is_ignored_and_the_static_pick_runs() {
+    let server = Typesafe::answering(route_reply("think", 0.95, 0.0));
+    let rig = route_rig(&server);
+    rig.run();
+
+    let tiers = main_tiers(&rig);
+    assert!(
+        !tiers.is_empty() && tiers.iter().all(|tier| *tier == Tier::Code),
+        "{tiers:?} {}",
+        rig.rollout_text()
+    );
+    assert!(rig.of_type("advised").is_empty(), "{}", rig.rollout_text());
 }

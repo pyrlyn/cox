@@ -21,5 +21,6 @@ pub mod instructions;
 pub mod memory;
 pub mod presence;
 pub mod proc;
+pub mod rules;
 pub mod skills;
 pub mod styles;
