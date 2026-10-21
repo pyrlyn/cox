@@ -177,7 +177,7 @@ desktop-test: desktop-xcframework
 
 # The macOS app, Debug and ad-hoc signed (T37.32.1, DT§7): the XCFramework, then XcodeGen's
 # thin Cox.xcodeproj from desktop/macos/project.yml, then desktop/macos/build/Cox.app. No
-# signing identity; Developer ID and notarization are T37.32.2. Run it on a fixture with
+# signing identity; the notarized Release build is `just desktop-release`. Run it on a fixture with
 # `desktop/macos/build/Cox.app/Contents/MacOS/Cox -CoxFixture desktop/macos/Fixtures/edit.json`.
 desktop-app: desktop-xcframework
     mise exec -- bash scripts/desktop/app.sh
@@ -199,6 +199,14 @@ desktop-open: desktop-xcframework
 # same through the `desktop build` workflow.
 desktop-dmg: desktop-app
     bash scripts/desktop/dmg.sh
+
+# The shipped app (T37.32.2): the macOS `cox` CLI, then a Release Cox.app with Hardened Runtime and
+# that CLI in Contents/Helpers, packed by dmg.sh into desktop/macos/build/Cox-<version>-<build>-arm64.dmg.
+# Notarize it with scripts/desktop/notarize.sh; write its appcast with scripts/desktop/appcast.sh.
+desktop-release: desktop-xcframework
+    MACOSX_DEPLOYMENT_TARGET=26.0 mise exec -- cargo build -p cox --profile dist --locked --target aarch64-apple-darwin
+    COX_CONFIGURATION=Release COX_CLI="$(mise exec -- cargo metadata --format-version 1 --no-deps | tr ',' '\n' | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)/aarch64-apple-darwin/dist/cox" mise exec -- bash scripts/desktop/app.sh
+    COX_CONFIGURATION=Release bash scripts/desktop/dmg.sh
 
 # The Windows app (T58.3). Visual Studio is the Xcode counterpart: `just desktop-windows-open`
 # opens desktop/windows/Cox.sln. Build and test run from that directory so global.json pins
