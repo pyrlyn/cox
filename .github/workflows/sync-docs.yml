@@ -35,6 +35,7 @@ jobs:
       locales: ru uk
       # Internal pages beyond the shared list.
       extra-excludes: |
+        ci-platforms.md
         compat.md
         i18n.md
     secrets:
