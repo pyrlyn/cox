@@ -29,7 +29,7 @@ jobs:
       value: ${{ steps.r.outputs.value }}
     steps:
       - id: r
-        uses: pyrlyn/ci/.github/actions/macos-runner@4b5b5470544893cd515b88c751e92728341c6daa # main
+        uses: pyrlyn/ci/.github/actions/macos-runner@main
         with:
           runner: ${{ vars.MACOS_RUNNER }}
           value: '["xcode-27"]'
@@ -545,7 +545,7 @@ jobs:
       # images' real key is not known yet, so the committed images sit under `hosted-pending`;
       # this step, after setup-xcode has picked Xcode, prints the real key to the job
       # summary so a follow-up can rename the directory and drop the override.
-      - uses: pyrlyn/ci/.github/actions/snapshot-version@bb9266564bad04d7e8ec7b8a2b46c90d9f0ca8df # ci/feat/snapshot-version, pin to main after ci#87 merges
+      - uses: pyrlyn/ci/.github/actions/snapshot-version@main
         with:
           env-prefix: COX
           override: hosted-pending
