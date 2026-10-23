@@ -9062,6 +9062,7 @@ dependencies = [
  "winapi",
  "windows",
  "windows-core",
+ "windows-sys 0.52.0",
  "windows-sys 0.61.2",
  "winnow 0.7.15",
  "winnow 1.0.4",
