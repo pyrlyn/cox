@@ -29,7 +29,7 @@ jobs:
       value: ${{ steps.r.outputs.value }}
     steps:
       - id: r
-        uses: pyrlyn/ci/.github/actions/macos-runner@4b5b5470544893cd515b88c751e92728341c6daa # main
+        uses: pyrlyn/ci/.github/actions/macos-runner@main
         with:
           runner: ${{ vars.MACOS_RUNNER }}
           value: '["xcode-27"]'
@@ -48,13 +48,10 @@ jobs:
       - id: config
         uses: pyrlyn/ci/.github/actions/config@main
 
-  # The shared pyrlyn/ci workflow, pinned by commit (descendant of e6e376e, which
-  # pins Xcode 27 through the setup-xcode action; `xcode-version` defaults to 27, and of
-  # pyrlyn/ci#47: with `skip` every target runs its no-op steps on ubuntu-latest, so a
-  # docs-only change starts no macOS runner for `rust / aarch64-apple-darwin`):
-  # fmt once, then per target clippy (--all-targets --all-features), check, and
-  # nextest on every target (Linux x86_64 and aarch64, macOS aarch64; macOS is
-  # Apple Silicon only).
+  # The shared pyrlyn/ci workflow: fmt once, then per Linux target (x86_64 and
+  # aarch64) clippy (--all-targets --all-features), check, and the full nextest
+  # suite. Linux only (docs/ci-platforms.md): the tests gated to macOS run in the
+  # optional `macos` job below.
   rust:
     needs: config
     if: >-
@@ -68,13 +65,12 @@ jobs:
       actions: write
     with:
       mold: true # mold + clang on Linux runners (mise.toml [env])
-      # The shared matrix minus Windows: the workspace does not build there
-      # yet (P57); the `windows` job below checks the crates that do.
+      # Linux only. Windows: the workspace does not build there yet (P57); the
+      # `windows` job below checks the crates that do. macOS: the `macos` job.
       matrix: >-
         [
         {"os": "ubuntu-latest", "target": "x86_64-unknown-linux-gnu"},
-        {"os": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-gnu"},
-        {"os": "xcode-27", "target": "aarch64-apple-darwin"}
+        {"os": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-gnu"}
         ]
       # The manifest is virtual with `default-members`; ci-rust's default `package-args`
       # (--workspace) already covers every member, so no `clippy-args` here.
@@ -94,6 +90,40 @@ jobs:
       cache-all-refs: true
       # Docs-only: every job is a no-op that still reports (`rust / <target>` stay required).
       skip: ${{ needs.config.outputs.docs-only == 'true' }}
+
+  # Only the Rust tests gated to macOS (cfg(target_os = "macos"): the Seatbelt sandbox and
+  # what runs under it); everything else runs on Linux in `rust` (docs/ci-platforms.md).
+  # Optional: continue-on-error, so it never blocks a merge. PLATFORM_TESTS lists them by
+  # name; keep it in sync when such a test is added or renamed. `--no-tests=pass` keeps an
+  # empty selection green.
+  macos:
+    needs: [config, macos-runner]
+    if: >-
+      vars.MACOS_CI_DISABLED != 'true' &&
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    continue-on-error: true
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
+    timeout-minutes: 45
+    env:
+      PLATFORM_TESTS: >-
+        test(/(^|::)argv_wraps_an_interactive_login_shell_in_seatbelt$/) | test(/(^|::)sandbox_macos_backend_is_seatbelt_and_wraps_the_shell$/) | test(/(^|::)sandbox_macos_blocks_the_network_unless_allowed$/) | test(/(^|::)sandbox_macos_denies_writes_outside_the_root$/) | test(/(^|::)sandbox_macos_keeps_git_read_only_inside_the_root$/) | test(/(^|::)sandbox_macos_read_only_denies_writes_inside_the_root$/) | test(/(^|::)sandbox_macos_workspace_write_allows_writes_inside_the_root$/) | test(/(^|::)terminal_output_is_not_in_the_rollout$/) | test(/(^|::)terminal_write_outside_the_workspace_is_denied_under_workspace_write$/)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: pyrlyn/ci/.github/actions/setup-xcode@main
+        with:
+          version: '27'
+
+      - uses: pyrlyn/ci/.github/actions/setup-rust@main
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - uses: taiki-e/install-action@23d41aa71228a2692ee31bb433f070fd4bdc6661 # nextest
+
+      # Same features as the `rust` job.
+      - name: platform tests
+        run: cargo nextest run --workspace --all-features --no-tests=pass -E "$PLATFORM_TESTS"
 
   # Linux job B (plan.md T4.2): no bwrap on PATH, so the sandbox must fall
   # back to Landlock + seccomp and still hold the same guarantees.
@@ -164,6 +194,8 @@ jobs:
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success'
       || needs.changes.outputs.swift == 'true')
+    # Platform-only (docs/ci-platforms.md): optional, never blocks a merge.
+    continue-on-error: true
     runs-on: windows-latest
     defaults:
       run:
@@ -375,6 +407,8 @@ jobs:
       vars.MACOS_CI_DISABLED != 'true' &&
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    # Platform-only (docs/ci-platforms.md): optional, never blocks a merge.
+    continue-on-error: true
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -440,6 +474,8 @@ jobs:
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    # Platform-only (docs/ci-platforms.md): optional, never blocks a merge.
+    continue-on-error: true
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -460,15 +496,6 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s scripts -p 'test_brand_icons.py'
           python3 scripts/brand_icons.py --check
-
-      # Which Swift packages desktop-macos may skip on a pull request (T63.2).
-      - name: swift test selection
-        run: python3 -m unittest discover -s scripts/desktop -p 'test_swift_test_select.py'
-      - name: sccache wiring
-        run: python3 -m unittest discover -s scripts -p 'test_sccache_config.py'
-
-      - name: xcframework.sh skip stamp
-        run: python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
 
       - name: swiftlint fixtures
         working-directory: desktop/macos
@@ -528,6 +555,8 @@ jobs:
       && (needs.changes.result != 'success'
       || needs.changes.outputs.swift == 'true' || needs.changes.outputs.rust == 'true')
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    # Platform-only (docs/ci-platforms.md): optional, never blocks a merge.
+    continue-on-error: true
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(needs.macos-runner.outputs.value)[0] || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -545,7 +574,7 @@ jobs:
       # images' real key is not known yet, so the committed images sit under `hosted-pending`;
       # this step, after setup-xcode has picked Xcode, prints the real key to the job
       # summary so a follow-up can rename the directory and drop the override.
-      - uses: pyrlyn/ci/.github/actions/snapshot-version@bb9266564bad04d7e8ec7b8a2b46c90d9f0ca8df # ci/feat/snapshot-version, pin to main after ci#87 merges
+      - uses: pyrlyn/ci/.github/actions/snapshot-version@main
         with:
           env-prefix: COX
           override: hosted-pending
@@ -607,6 +636,29 @@ jobs:
             echo "the build rewrote the Swift dependency pins above: commit the resolved files" >&2
             exit 1
           fi
+
+  # The script unit tests that do not need macOS (they use fakes, no Xcode): which Swift packages
+  # desktop-macos may skip on a pull request (T63.2), the sccache wiring and xcframework.sh's
+  # skip stamp. Moved off desktop-macos-lint: OS-independent work runs on Linux.
+  scripts:
+    needs: config
+    if: >-
+      !cancelled() && needs.config.outputs.docs-only != 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: swift test selection
+        run: python3 -m unittest discover -s scripts/desktop -p 'test_swift_test_select.py'
+      - name: sccache wiring
+        run: python3 -m unittest discover -s scripts -p 'test_sccache_config.py'
+
+      - name: xcframework.sh skip stamp
+        run: python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
 
   # The desktop design tokens (T37.17, DS§2): regenerate Tokens.swift,
   # Colors.xcassets and tokens.css from desktop/design/tokens/*.json and fail

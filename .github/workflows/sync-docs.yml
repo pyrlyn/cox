@@ -28,13 +28,14 @@ permissions:
 
 jobs:
   sync:
-    uses: pyrlyn/ci/.github/workflows/sync-docs.yml@3ec09a0a755a32b77bcbf069f32b262c368351e5 # main
+    uses: pyrlyn/ci/.github/workflows/sync-docs.yml@main
     permissions:
       contents: read
     with:
       locales: ru uk
       # Internal pages beyond the shared list.
       extra-excludes: |
+        ci-platforms.md
         compat.md
         i18n.md
     secrets:
