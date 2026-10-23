@@ -101,7 +101,7 @@ runs:
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
     - if: steps.ffi.outputs.cache-hit != 'true'
-      uses: pyrlyn/ci/.github/actions/sccache@4593f306d517f774a96a954613d0c07fa3d23979 # ci/shared-sccache-metal, pin to main after merge (as ci.yml)
+      uses: pyrlyn/ci/.github/actions/sccache@main
       with:
         access-key-id: ${{ inputs.sccache-access-key-id }}
         secret-access-key: ${{ inputs.sccache-secret-access-key }}
