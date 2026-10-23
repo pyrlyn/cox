@@ -200,6 +200,7 @@ Programs the project uses and the direct packages from its manifests.
 | SwiftTerm | local (`CoxPlatform`) | https://github.com/migueldeicaza/SwiftTerm | T51.5: the terminal pane's VT emulator and renderer, `TerminalView` only — the shell runs in Rust (research.md §9.5.2; 1.20.0, the latest release, 2026-08-18; MIT) |
 | swift-dependencies | local (`CoxModel`, `CoxPlatform`; the `Cox` app target, `desktop/macos/project.yml`) | https://github.com/pointfreeco/swift-dependencies | The stores read the launch-wide core, secret store and inbox through `@Dependency`; `LaunchCore` registers the core and inbox with `prepareDependencies`, `CoxPlatform` gives the secret store its live value, tests override them with `DependenciesTestSupport`'s traits or `withDependencies` (DT§4.6; 1.17.1, the latest release, 2026-08-28; MIT) |
 | KeyboardShortcuts | local (the `Cox` app target, `desktop/macos/project.yml`) | https://github.com/sindresorhus/KeyboardShortcuts | T51.15: the two global hotkeys' recorder, registration and storage in Settings › General (DT§4.6; 3.1.0, the latest release, 2026-09-11; MIT) |
+| Sparkle | local (the `Cox` app target, `desktop/macos/project.yml`) | https://github.com/sparkle-project/Sparkle | T37.32.2: updates outside the App Store from an EdDSA-signed appcast, and its `generate_appcast`/`sign_update` tools for `scripts/desktop/appcast.sh` (DT§7, research.md §9.5.1; 2.10.0, the latest release, 2026-09-13; MIT) |
 
 ## NuGet (`desktop/windows`)
 

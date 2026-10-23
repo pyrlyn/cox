@@ -4,9 +4,10 @@
 # and every other line of Swift lives in the local packages, so the project stays a few lines
 # of spec and never merge-conflicts.
 #
-# Debug is ad-hoc signed (`-`): no signing identity, no team, no Keychain. The downloadable
-# Debug DMG is re-signed with Developer ID by scripts/desktop/dmg.sh (T37.32.3); Hardened
-# Runtime for a shipped build, notarization and Sparkle are T37.32.2.
+# Both configurations build ad-hoc signed (`-`): no signing identity, no team, no Keychain.
+# scripts/desktop/sign.sh re-signs the app with Developer ID for a DMG (T37.32.3). Release turns
+# on the Hardened Runtime that notarization needs and is what `just desktop-release` ships with
+# Sparkle and the bundled CLI (T37.32.2).
 name: Cox
 options:
   deploymentTarget:
@@ -17,6 +18,9 @@ settings:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.2"
     CURRENT_PROJECT_VERSION: "1"
+    # The appcast's EdDSA public key (Info.plist SUPublicEDKey). Empty here, so a dev or Debug
+    # build never starts the updater; the release build passes the key (T37.32.2).
+    COX_SPARKLE_PUBLIC_KEY: ""
 packages:
   CoxCore:
     path: Packages/CoxCore
@@ -37,6 +41,10 @@ packages:
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     exactVersion: 3.1.0
+  # T37.32.2: updates outside the App Store, from an EdDSA-signed appcast (DT§7); MIT.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 targets:
   Cox:
     type: application
@@ -51,6 +59,7 @@ targets:
       - package: CoxTranscript
       - package: CoxUI
       - package: KeyboardShortcuts
+      - package: Sparkle
       - package: swift-dependencies
         product: Dependencies
     settings:

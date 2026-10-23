@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The macOS cox CLI's entitlements, for its Hardened Runtime signature (scripts/package.sh, and
+  scripts/desktop/sign.sh for the copy inside Cox.app). wasmtime 49 maps compiled plugin code
+  without MAP_JIT, so without this key the kernel kills cox on a WASM plugin's first call;
+  `allow-jit` alone is not enough (T37.32.2, DT§11 Q5). The app's own copy of the key is
+  desktop/macos/App/Cox.entitlements, which Xcode reads.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

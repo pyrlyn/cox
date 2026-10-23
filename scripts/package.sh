@@ -62,7 +62,10 @@ if [ -n "${COX_SIGN_IDENTITY:-}" ]; then
   echo "==> signing as $COX_SIGN_IDENTITY"
   # Hardened runtime and a secure timestamp are what notarisation would demand
   # later; signing that way now means a notarised release changes nothing here.
+  # Under that runtime the WASM plugin host needs cox.entitlements, or the kernel
+  # kills cox on a plugin's first call.
   codesign --force --options runtime --timestamp \
+    --entitlements "$ROOT/scripts/cox.entitlements" \
     --sign "$COX_SIGN_IDENTITY" "$STAGE/$PACKED_NAME"
   codesign --verify --strict --verbose=2 "$STAGE/$PACKED_NAME"
 fi

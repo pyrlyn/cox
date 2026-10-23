@@ -30,8 +30,7 @@ struct MenuBarContent: View {
   }
 
   private var menu: MenuBarState {
-    let running = model.sidebar.sections.first { $0.id == "running" }?.rows ?? []
-    return MenuBarState(inbox: model.sidebar.inboxItems, running: running, today: today) {
+    MenuBarState(inbox: model.sidebar.inboxItems, running: model.running, today: today) {
       model.sidebar.entry($0)?.session.title
     }
   }

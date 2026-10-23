@@ -200,6 +200,15 @@ desktop-open: desktop-xcframework
 desktop-dmg: desktop-app
     bash scripts/desktop/dmg.sh
 
+# The shipped build (T37.32.2, DT§7): Release with the Hardened Runtime and the release CLI inside
+# as Contents/Helpers/cox, packed as desktop/macos/build/Cox-<version>-arm64.dmg. Notarize it
+# with scripts/desktop/notarize.sh and write its appcast with scripts/desktop/appcast.sh; both
+# need the release secrets.
+desktop-release: desktop-xcframework
+    mise exec -- cargo build --profile dist --locked -p cox
+    COX_CONFIGURATION=Release COX_CLI="$(mise exec -- cargo metadata --no-deps --format-version=1 | sed -nE 's/.*"target_directory":"([^"]+)".*/\1/p')/dist/cox" mise exec -- bash scripts/desktop/app.sh
+    COX_CONFIGURATION=Release bash scripts/desktop/dmg.sh
+
 # The Windows app (T58.3). Visual Studio is the Xcode counterpart: `just desktop-windows-open`
 # opens desktop/windows/Cox.sln. Build and test run from that directory so global.json pins
 # SDK 10 and the Microsoft.Testing.Platform runner. `just desktop-windows-run` builds Debug

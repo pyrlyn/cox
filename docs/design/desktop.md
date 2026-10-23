@@ -604,8 +604,8 @@ Rules:
 | `CoxUI` | Views and the design system (DT§5.9); imports no other cox package, so a card is built from plain values | — |
 | `CoxTranscriptText` | `TranscriptTextView`: the transcript as one TextKit 2 `NSTextView`, every timeline block a tracked text range (`BlockRanges`: id → range, location → id), styled by a `TranscriptStyle` the caller builds from tokens (each Rust `StyleToken` maps to a style colour, never a literal); a reply's text is built from its `StyledDoc` spans, and `apply` splices each timeline patch into its own block's range instead of rebuilding the text (`AppendText`, `DocTail`, upsert, remove); tool, approval, question and subagent cards are view-backed attachments (one character each) hosting the SwiftUI views the caller passes as `TranscriptCards`, so it depends on no CoxUI (T37.40, T37.41, T37.43, DT§5.2, `research.md` §9.5.13) | `CoxModel`'s `CoxClient` |
 | `CoxTranscript` | `TranscriptView`: a `SessionStore`'s timeline in `CoxTranscriptText`'s view, a tool, tool-group or task block as CoxUI's `ToolCard`, an approval or question in a caller's slot, with `TranscriptStyle.cox` built from CoxUI's tokens; it follows the store through `SessionStore.didApply`, so each patch batch the store applies is spliced into the text. The one place the three meet, so CoxUI and `CoxTranscriptText` stay independent (T37.23). Also `SessionComposer`: CoxUI's `Composer` over CoxModel's `ComposerStore` (T37.24) | `CoxModel`, `CoxTranscriptText`, `CoxUI` |
-| `CoxPlatform` | `Host` implementation, notifications with actions, Sparkle, OAuth handoff, `NSWorkspace` "open in editor", SwiftTerm and `WebView` panes (M2); the secret store's live dependency value (T63.4.1) | `CoxModel`, swift-dependencies |
-| App target | `@main`, scenes, menus, entitlements, Info.plist, assets; `project.yml` for XcodeGen, `just desktop-app` builds an ad-hoc signed Debug `Cox.app` (T37.32.1) | all |
+| `CoxPlatform` | `Host` implementation, notifications with actions, OAuth handoff, `NSWorkspace` "open in editor", SwiftTerm and `WebView` panes (M2); the secret store's live dependency value (T63.4.1) | `CoxModel`, swift-dependencies |
+| App target | `@main`, scenes, menus, entitlements, Info.plist, assets; Sparkle's updater and Check for Updates… (`Updates.swift`, T37.32.2: app-level glue, so no package's tests link Sparkle); `project.yml` for XcodeGen, `just desktop-app` builds an ad-hoc signed Debug `Cox.app` (T37.32.1), `just desktop-release` the Release one with the bundled CLI (T37.32.2) | all |
 
 **Dependencies.** A store reads a launch-wide service through swift-dependencies'
 `@Dependency` instead of an initializer argument: `SettingsStore` and the
@@ -1118,19 +1118,35 @@ generates it from `project.yml`, so only that spec is in git (T37.32.1).
 - **Dev loop.** An Xcode "Run Script" phase calls the script only when a Rust
   input changed; CI builds from scratch. Rust never compiles inside every
   Swift build.
-- **Bundled CLI.** The same build puts the `cox` binary in
-  `Cox.app/Contents/Helpers/cox`; the app offers "Install command-line tool"
-  (a symlink in `/usr/local/bin` or `~/.local/bin`), so app and CLI never
-  drift in version or database schema.
-- **Signing.** Developer ID Application, Hardened Runtime, notarized with
-  `notarytool`, stapled. No App Sandbox (DT-6). Entitlements: none beyond the
-  defaults unless a plugin runtime needs JIT (wasmtime: `allow-jit` — to be
-  confirmed by the first signed build, DT§11 Q5).
+- **Bundled CLI.** The release build puts the `cox` binary in
+  `Cox.app/Contents/Helpers/cox` (`app.sh` with `COX_CLI`, copied in after
+  xcodebuild so the Swift build never compiles Rust), so app and CLI never
+  drift in version or database schema. The Homebrew cask links it onto
+  `PATH`; an in-app "Install command-line tool" (a symlink in
+  `/usr/local/bin` or `~/.local/bin`) is not built yet.
+- **Signing.** Developer ID Application, Hardened Runtime (the Release
+  configuration), notarized with `notarytool`, stapled: `sign.sh` signs
+  inside-out (the CLI and Sparkle's `Autoupdate` as bare executables, then
+  Sparkle's XPC services, `Updater.app` and framework, then the app),
+  `notarize.sh` submits the DMG, staples it and requires `spctl --assess` to
+  name a notarized Developer ID for both the DMG and the app inside. No App
+  Sandbox (DT-6). One entitlement, `com.apple.security.cs.allow-unsigned-executable-memory`,
+  on the app and on the CLI: wasmtime 49 maps compiled plugin code without
+  `MAP_JIT`, so under the Hardened Runtime the kernel kills the process on a
+  plugin's first call; `allow-jit` alone is not enough (both tried on
+  `cox-plugin`'s host tests signed ad-hoc with the runtime flag, T37.32.2).
 - **Updates.** Sparkle 2 (R9.3.17) with an EdDSA-signed appcast on GitHub
-  Releases; updates never kill running turns: "Install on quit", or after
-  asking when sessions are running (the Codex SIGKILL-on-update complaint,
-  R9.2).
-- **Other channels.** A Homebrew cask pointing at the same notarized DMG.
+  Releases: `appcast.sh` runs Sparkle's `generate_appcast` for the release
+  DMG and verifies the DMG's and the feed's signatures; the app reads
+  `/releases/latest/download/appcast.xml`, so test releases (never latest)
+  are never offered, and it requires a signed feed. The updater starts only
+  in a build that carries the public key (`COX_SPARKLE_PUBLIC_KEY`), so Debug
+  and dev builds never check. Updates never kill running turns: with sessions
+  running, Sparkle's relaunch asks first, and Install on Quit installs when
+  the app quits (the Codex SIGKILL-on-update complaint, R9.2).
+- **Other channels.** A Homebrew cask, `cox-app` (`scripts/cask.sh --app`),
+  pointing at the same notarized DMG, `auto_updates` because Sparkle updates
+  in place.
 - **CI.** A macOS job: build the XCFramework, `swift test` for the packages,
   UI tests on the scripted scenarios, a notarization dry run on tags.
 

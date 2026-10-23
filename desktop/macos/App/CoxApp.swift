@@ -9,7 +9,8 @@
 // Settings opens from the app menu (⌘,); the menu-bar extra shows what needs you (T51.14);
 // two recorded global hotkeys open that menu and a new session (T51.15); session titles are
 // in Spotlight, and a result opens its session (T51.16); App Intents ask cox in a project and
-// open a session (T51.17); a new session window opens at 1440×900, cut to the screen (T37.44.14).
+// open a session (T51.17); a new session window opens at 1440×900, cut to the screen (T37.44.14);
+// a release build checks for updates through Sparkle (T37.32.2).
 
 import AppKit
 import CoxClient
@@ -48,7 +49,10 @@ struct CoxApp: App {
     }
     .windowStyle(.hiddenTitleBar)
     .defaultWindowPlacement(Self.placement)
-    .commands { ShellCommands() }
+    .commands {
+      ShellCommands()
+      UpdateCommands(updates: model.updates)
+    }
     .environment(\.pointerRule, .live)
     // What needs you and what runs, from the menu bar, while `desktop.menu_bar` is on (T51.14).
     MenuBarExtra(isInserted: showsMenuBar) {
@@ -89,6 +93,8 @@ final class AppModel {
   let registry = AppStore()
   /// The remote hosts the sidebar lists (T52.21); a fixture launch connects none.
   let remotes: RemoteHosts
+  /// Sparkle's updater; it runs only in a build that carries the appcast's key (T37.32.2).
+  let updates = Updates()
   /// A scene's `openWindow`, for the hotkeys and the intents, which fire outside every view
   /// (T51.15, T51.17); `nil` until the first window or the menu-bar label appears.
   private var openWindow: OpenWindowAction?
@@ -120,7 +126,12 @@ final class AppModel {
     Hotkeys.register(self)
     CoxIntents.register(self)
     sidebar.didRefresh = { [weak self] in self?.indexSessions() }
+    updates.running = { [weak self] in self?.running.count ?? 0 }
   }
+
+  /// The sidebar's running sessions: the menu bar lists them, and an update's relaunch asks
+  /// before stopping them.
+  var running: [SidebarRow] { sidebar.sections.first { $0.id == "running" }?.rows ?? [] }
 
   /// Mirrors the sidebar's last read into Spotlight: titles, projects and times only.
   private func indexSessions() {
