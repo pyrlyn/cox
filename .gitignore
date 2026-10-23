@@ -22,3 +22,4 @@ desktop/windows/**/bin/
 desktop/windows/**/obj/
 # Gradle's per-project cache (Kotlin plugin SDK).
 .gradle/
+.rtok/

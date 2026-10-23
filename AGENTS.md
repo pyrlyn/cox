@@ -74,7 +74,7 @@ The rule that keeps crates honest: anything that talks to the network, the files
 
 ## Workflow
 
-Tasks carry `Status:` (`open`|`in progress`) and `Model:`. Claim only `open`; set `in progress` + model. ≤200 LOC, ≤3 files per task. Run the task's Check, then the three commands above, commit `<task-id>: <title>`. Every implemented task is marked `Status: done <date>` and moved to `done.md` with its Check output — implemented work left in `plan.md` as `open` or `in progress` is unfinished. **Before you stop** (end/compaction/handoff): unfinished → `open`, `Model: -`.
+Tasks carry `Status:` (`open`|`in progress`) and `Model:`. Claim only `open`; set `in progress` + model. ≤3 files per task. Run the task's Check, then the three commands above, commit `<task-id>: <title>`. Every implemented task is marked `Status: done <date>` and moved to `done.md` with its Check output — implemented work left in `plan.md` as `open` or `in progress` is unfinished. **Before you stop** (end/compaction/handoff): unfinished → `open`, `Model: -`.
 
 ## Conventions
 
