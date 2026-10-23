@@ -153,6 +153,8 @@ mod unix {
     /// of a script drops its exec bit and every edit of a `0o600` file (a
     /// key, an `.env`) widens it to `0o666` minus umask. A symlink leaf is
     /// replaced, not followed, so its target's mode is not borrowed.
+    // `st_mode` is u16 on macOS and u32 on Linux, so the conversion is a no-op on Linux only.
+    #[allow(clippy::useless_conversion)]
     fn existing_mode(dir: &OwnedFd, name: &std::ffi::OsStr) -> Option<u32> {
         let st = fstatat(dir, name, AtFlags::AT_SYMLINK_NOFOLLOW).ok()?;
         let kind = SFlag::from_bits_truncate(st.st_mode & SFlag::S_IFMT.bits());
