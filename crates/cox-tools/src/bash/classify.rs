@@ -389,10 +389,34 @@ fn command_risk(words: &[String]) -> Risk {
         },
         "find" if has("-delete") || has("-exec") || has("-execdir") || has("-ok") => Risk::Exec,
         "find" => Risk::ReadOnly,
+        // These readers also take an output file: `sort -o FILE`,
+        // `tree -o FILE`, `uniq IN OUT`, `xxd IN OUT` and `xxd -r` write it,
+        // so they must not ride the read-only label past the approval gate.
+        "sort" if short('o') || args.iter().any(|a| a.starts_with("--output")) => Risk::Write,
+        "tree" if short('o') => Risk::Write,
+        "uniq" if positionals(args, &["-f", "-s", "-w"]) > 1 => Risk::Write,
+        "xxd" if short('r') || has("-revert") => Risk::Write,
+        "xxd" if positionals(args, &["-c", "-g", "-l", "-o", "-s", "-n"]) > 1 => Risk::Write,
         n if READ_ONLY.contains(&n) => Risk::ReadOnly,
         n if is_ps_reader(n) && plain_ps_args(args) => Risk::ReadOnly,
         _ => Risk::Exec,
     }
+}
+
+/// How many file operands `args` holds: words that are not flags, skipping
+/// the value after each flag in `takes_value`. A lone `-` is stdin or stdout
+/// and still counts, since it holds a place.
+fn positionals(args: &[String], takes_value: &[&str]) -> usize {
+    let mut count = 0;
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        if takes_value.contains(&word.as_str()) {
+            words.next();
+        } else if word == "-" || !word.starts_with('-') {
+            count += 1;
+        }
+    }
+    count
 }
 
 /// PowerShell's file readers (T69.1). `type` and `more` are shared with cmd
@@ -610,5 +634,32 @@ mod tests {
             vec!["Remove-Item ~/.ssh/id_rsa".to_owned()]
         );
         assert!(segments("Get-Content a | Select-String x").opaque);
+    }
+
+    /// Readers that can also write their output to a file are read-only only
+    /// while they print to stdout.
+    #[test]
+    fn readers_that_write_an_output_file_are_not_read_only() {
+        for line in [
+            "sort -o README.md README.md",
+            "sort -uo out.txt in.txt",
+            "sort --output=out.txt in.txt",
+            "tree -o tree.txt",
+            "uniq in.txt out.txt",
+            "uniq -f 1 in.txt out.txt",
+            "xxd in.bin out.hex",
+            "xxd -r dump.hex",
+        ] {
+            assert_eq!(classify(line), Risk::Write, "{line}");
+        }
+        for line in [
+            "sort -n data.txt",
+            "tree -L 2",
+            "uniq -c in.txt",
+            "uniq -f 1 in.txt",
+            "xxd -l 64 in.bin",
+        ] {
+            assert_eq!(classify(line), Risk::ReadOnly, "{line}");
+        }
     }
 }

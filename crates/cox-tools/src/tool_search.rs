@@ -108,7 +108,8 @@ impl Tool for ToolSearchTool {
         ToolSpec {
             name: "tool_search".to_string(),
             description: "Find tools that are not in your current tool list. Only the core \
-                tools are always present; MCP servers, `ask_user`, `web_fetch`, `agent` and \
+                tools are always present; MCP servers, MCP resources and prompts \
+                (`mcp_resources`), `ask_user`, `web_fetch`, `agent` and \
                 other extras are found here. Pass a short `query` describing what you need \
                 (\"create github issue\", \"fetch a web page\"); up to 5 matching tools \
                 are returned and become callable on your next turn. `detail` is \

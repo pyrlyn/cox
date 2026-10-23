@@ -127,9 +127,25 @@ impl Tool for ApplyPatchTool {
                 resolved.insert(to.clone(), confine(&cx.writable_roots, &cx.cwd, to)?);
             }
         }
+        refuse_aliases(&resolved)?;
 
         apply_at(&patch, &resolved, cx).await
     }
+}
+
+/// `stage` tells paths apart by their spelling, so `a.rs` and `./a.rs` look
+/// like two files. Two spellings of one file would let a move onto itself
+/// write the file and then remove it, or let two ops race on one file.
+fn refuse_aliases(resolved: &BTreeMap<String, PathBuf>) -> Result<(), ToolError> {
+    let mut seen: BTreeMap<&PathBuf, &str> = BTreeMap::new();
+    for (rel, full) in resolved {
+        if let Some(other) = seen.insert(full, rel) {
+            return Err(ToolError::Denied {
+                why: format!("`{other}` and `{rel}` name the same file"),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Everything after `confine`: its own function so a test can swap a path
@@ -272,6 +288,25 @@ mod tests {
             SessionId::new(),
             cox_protocol::CallId::new(),
         )
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn apply_patch_refuses_a_move_onto_another_spelling_of_its_own_path() {
+        let swap = crate::swap_fixture::Swap::new();
+        swap.file("a.rs", "x\n");
+        let cx = swap_cx(&swap);
+
+        let patch = "*** Begin Patch\n*** Update File: a.rs\n*** Move to: ./a.rs\n@@\n-x\n+y\n\
+                     *** End Patch";
+        let err = ApplyPatchTool
+            .call(json!({ "patch": patch }), &cx)
+            .await
+            .expect_err("must refuse");
+
+        assert!(matches!(err, ToolError::Denied { .. }), "{err:?}");
+        let kept = std::fs::read_to_string(swap.root.join("a.rs")).expect("file must survive");
+        assert_eq!(kept, "x\n");
     }
 
     #[cfg(unix)]
