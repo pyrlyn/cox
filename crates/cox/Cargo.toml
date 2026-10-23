@@ -109,6 +109,10 @@ thiserror = { workspace = true }
 # T0.7: the CLI boundary loads .env/.env.local before parsing flags.
 dotenvy = { workspace = true }
 serde_json = { workspace = true }
+# T67.11: `--json-schema` checks the final answer against a local schema.
+# Default features resolve remote `$ref`s over reqwest; a schema file is
+# local, so those stay off and a remote reference cannot be fetched.
+jsonschema = { version = "0.59", default-features = false }
 # T0.5: doctor command checks: crossterm for terminal size
 crossterm = { workspace = true }
 serde = { workspace = true }

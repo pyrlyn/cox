@@ -204,7 +204,7 @@ Deferred to **v0.2+** (not rejected): LSP client (diagnostics into context); Gem
 
 | Crate | Owns | Key deps (pinned in T0.1; versions verified in R§4.5) |
 |-------|------|------|
-| `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15 |
+| `cox` | clap surface, dispatch, `doctor`, `config` (printing, and the flag layer built from `Cli`), `stats`, `expand`, `record`, `sessions`, `self update` | clap 4.6, anyhow, dotenvy 0.15, jsonschema 0.59 (T67.11: `--json-schema` validates the final answer; default features off so a schema cannot fetch a remote `$ref`; transitive `borrow-or-share` is MIT-0, allowed in `deny.toml`) |
 | `cox-config` | the one config owner (T32.16; split out of `cox`): layering (default/user/project/env/flag) through the shared `config-schema` crate (T32.17), validation, `cox config set` editing and the `docs/config.jsonschema` drift test. Errors are a `thiserror` enum | config-schema 0.1 (figment and toml_edit inside it), schemars, thiserror; toml_edit 0.25 directly for the `permissions.allow` append (T69.2), which `config-schema` has no edit for |
 | `cox-session` | session assembly as a library (T37.1; split out of `cox`): `open(SessionSpec)` → session, effective config and typed `Warning`s — provider, tools, MCP, skills, hooks, plugins, fork/handoff/resume lineage, external agents, cloud agent drivers (T56.6); login-shell environment (T37.11). No clap, no anyhow, no printing | async-trait, tokio-util, agent-client-protocol (moved from `cox` with the external-agent code), nix `signal` (T37.11: process-group kill of a slow login shell), cox-cursor-cloud and futures (T56.6: the cloud agent driver and its run stream; both already in the tree), similar 3.2 (T66.8: the unified diff a refine review shows; already a workspace dependency) |
 | `cox-app` | the UI-agnostic app core (T37.8–T37.10, T37.38): `Timeline` fold to serde `TimelinePatch`es, tool summaries and `ToolGroup`, the coalescing `Controller`, `Workspace`, `Inbox`, `Intent`/`dispatch`, `Completer`. No terminal toolkit, no CLI crate | tokio (drain task), serde_json; cox-render without `ratatui`; chrono 0.4 (no default features; `clock`, `std`): local midnight and the ISO week start for the Context tab's project totals (T37.29.3.3); portable-pty 0.9.0 (MIT): the terminal pane's PTY (T51.3); nix (MIT; `signal`, `process`): closing a terminal signals its process group (T51.3); url 2.5.8 (MIT OR Apache-2.0): the browser tools pass only http/https (T51.7); async-trait (MIT OR Apache-2.0): the async host traits (P52); toml_edit 0.25 (MIT OR Apache-2.0, already in the tree through cox-config): the welcome hero reads `Cargo.toml`'s `[workspace] members` (T37.49) |
@@ -675,7 +675,7 @@ Every tool's `subject()` is what rules match on: the confined path, the command 
 
 ```
 cox [PROMPT] [--continue | --resume <id>]           interactive TUI; PROMPT is the first turn
-cox run -p <prompt> [--output-format text|json|stream-json] [--max-turns N] [--allowed-tools a,b]
+cox run -p <prompt> [--output-format text|json|stream-json] [--json-schema <file>] [--max-turns N] [--allowed-tools a,b]
         [--permission-mode default|plan|auto|bypass] [--approve never|on-request] [--answer <text>]
         [--continue | --resume <id>] [--deep]        headless; exit 0 ok · 1 error · 2 denied · 3 budget · 4 interrupted
 cox sessions [--grep <q>] [--json] [--limit N] [--archived]  list / search rollouts; --archived is the swept list
@@ -1920,17 +1920,6 @@ mise exec -- cargo fmt --check
 
 Done when `deny_rule_beats_classifier`, `classifier_error_asks`, `classifier_timeout_asks` and `injected_tool_output_cannot_widen` pass.
 
-#### T67.11 `cox run -p --json-schema`
-
-Model: grok-4.7 · Status: open · Depends: — · Size: ~120 · Priority: P3 · Complexity: 2
-
-Goal: `--json-schema <file>` validates the final answer against the schema. On failure cox sends one retry turn with the validation errors; a second failure exits non-zero and prints the errors.
-
-Files: `crates/cox/src/cli.rs`, `crates/cox/src/run.rs`
-
-Check: `mise exec -- cargo nextest run -p cox json_schema`, then clippy and fmt as above.
-
-Done when e2e tests with the scripted provider cover valid first time, valid after one retry, and a non-zero exit after two failures.
 
 ### P68 — Run targets (goal: a whole cox session runs on another machine, in a Docker container, in a Lima instance or in the Colima VM, driven from the desktop app, the TUI, `cox run -p` or the `agent` tool, with the remote on Linux, macOS or Windows and the client on any of them)
 

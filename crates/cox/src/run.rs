@@ -72,6 +72,9 @@ struct Outcome {
     files_changed: bool,
     // Why an `--autonomous` run ended; `None` for every other run.
     autonomous: Option<AutonomousStop>,
+    // T67.11: the final answer failed `--json-schema` twice. `None` when
+    // the flag is off or the answer matched.
+    schema_errors: Option<String>,
 }
 
 impl Outcome {
@@ -82,6 +85,9 @@ impl Outcome {
             // finish its job however calmly its last turn ended; only a
             // passing gate (or the turn's own stop) keeps the turn's code.
             _ if self.gave_up() => EXIT_ERROR,
+            // A finished turn whose text still fails the schema did not
+            // produce the answer the flag asked for.
+            _ if self.schema_errors.is_some() => EXIT_ERROR,
             None | Some(StopReason::Error) => EXIT_ERROR,
             Some(StopReason::Refusal { .. }) => EXIT_DENIED,
             Some(StopReason::Budget) => EXIT_BUDGET,
@@ -208,6 +214,21 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
     } else {
         args.prompt.clone()
     };
+    if args.json_schema.is_some() && prompt.is_none() {
+        eprintln!("cox: --json-schema requires --prompt");
+        return Ok(EXIT_ERROR);
+    }
+    // T67.11: a missing or unusable schema fails before a session opens.
+    let schema = match args.json_schema.as_deref() {
+        Some(path) => match load_schema(path) {
+            Ok(validator) => Some(validator),
+            Err(e) => {
+                eprintln!("cox: {e}");
+                return Ok(EXIT_ERROR);
+            }
+        },
+        None => None,
+    };
     let Some(prompt) = prompt else {
         resume::run(cli, args)?;
         return Ok(EXIT_OK);
@@ -329,8 +350,8 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
                 })
                 .await?;
         }
-        let outcome = match (&autonomous, loop_spec) {
-            (Some(auto), _) => {
+        let outcome = match (&autonomous, loop_spec, schema.as_ref()) {
+            (Some(auto), _, _) => {
                 let prompt = (prompt, attachments);
                 run_autonomous(
                     &session,
@@ -342,7 +363,7 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
                 )
                 .await
             }
-            (None, Some(loop_spec)) => {
+            (None, Some(loop_spec), _) => {
                 run_loop(
                     &session,
                     &mut rx,
@@ -354,7 +375,19 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
                 )
                 .await
             }
-            (None, None) => {
+            (None, None, Some(validator)) => {
+                run_with_schema(
+                    &session,
+                    &mut rx,
+                    (prompt, attachments),
+                    format,
+                    approvals,
+                    confirm_think,
+                    validator,
+                )
+                .await
+            }
+            (None, None, None) => {
                 let prompt = (prompt, attachments);
                 drive(&session, &mut rx, prompt, format, approvals, confirm_think).await
             }
@@ -377,6 +410,9 @@ pub fn run(cli: &Cli, args: &RunArgs, cwd: &Path) -> anyhow::Result<i32> {
     })?;
     if let Some(stop) = &outcome.autonomous {
         eprintln!("cox: autonomous run stopped: {}", describe(stop));
+    }
+    if let Some(errors) = &outcome.schema_errors {
+        eprintln!("cox: answer does not match --json-schema:\n{errors}");
     }
     if unconfirmed_architect && matches!(outcome.stop, Some(StopReason::Refusal { .. })) {
         eprintln!(
@@ -432,6 +468,99 @@ fn read_images(paths: &[PathBuf]) -> Result<Vec<Attachment>, String> {
             image::attachment(name, &data).map_err(|e| why(&e))
         })
         .collect()
+}
+
+/// A local JSON Schema, compiled once. Remote `$ref` resolution is off
+/// (the crate's default features), so a schema cannot fetch anything.
+const SCHEMA_MAX_BYTES: u64 = 256 * 1024;
+
+fn load_schema(path: &Path) -> anyhow::Result<jsonschema::Validator> {
+    let meta = std::fs::metadata(path)
+        .map_err(|e| anyhow::anyhow!("--json-schema {}: {e}", path.display()))?;
+    if meta.len() > SCHEMA_MAX_BYTES {
+        anyhow::bail!(
+            "--json-schema {}: file exceeds {SCHEMA_MAX_BYTES} bytes",
+            path.display()
+        );
+    }
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("--json-schema {}: {e}", path.display()))?;
+    let value: Value = serde_json::from_str(&text).map_err(|e| {
+        anyhow::anyhow!("--json-schema {}: not a JSON schema ({e})", path.display())
+    })?;
+    jsonschema::validator_for(&value)
+        .map_err(|e| anyhow::anyhow!("--json-schema {}: {e}", path.display()))
+}
+
+/// `None` when `answer` is JSON that satisfies `validator`. Otherwise the
+/// errors, capped, for the one retry turn and for stderr.
+fn schema_mismatch(validator: &jsonschema::Validator, answer: &str) -> Option<String> {
+    let value: Value = match serde_json::from_str(answer.trim()) {
+        Ok(value) => value,
+        Err(e) => return Some(format!("answer is not JSON: {e}")),
+    };
+    let mut lines = Vec::new();
+    for error in validator.iter_errors(&value) {
+        if lines.len() == 20 {
+            lines.push("…".to_string());
+            break;
+        }
+        lines.push(error.to_string());
+    }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn schema_retry(errors: &str) -> String {
+    format!(
+        "The previous answer did not match the JSON schema. Reply with only a JSON value that satisfies it.\nValidation errors:\n{errors}"
+    )
+}
+
+/// `cox run -p --json-schema` (T67.11): one turn, then at most one retry
+/// whose prompt is the validation errors. A second mismatch keeps the last
+/// answer and records the errors so the process exits non-zero.
+async fn run_with_schema(
+    session: &Session,
+    rx: &mut mpsc::Receiver<Event>,
+    prompt: (String, Vec<Attachment>),
+    format: Format,
+    approvals: Option<Duration>,
+    confirm_think: bool,
+    validator: &jsonschema::Validator,
+) -> anyhow::Result<Outcome> {
+    let (mut text, mut attachments) = prompt;
+    let mut total = Outcome::default();
+    for attempt in 0..2 {
+        let turn = drive(
+            session,
+            rx,
+            (text, std::mem::take(&mut attachments)),
+            format,
+            approvals,
+            confirm_think,
+        )
+        .await?;
+        let answer = turn.result.clone();
+        let stop = turn.stop.clone();
+        let failed = turn.failed;
+        total.merge(turn);
+        if failed || !matches!(stop, Some(StopReason::EndTurn | StopReason::MaxTurns)) {
+            return Ok(total);
+        }
+        match schema_mismatch(validator, &answer) {
+            None => return Ok(total),
+            Some(errors) if attempt == 0 => text = schema_retry(&errors),
+            Some(errors) => {
+                total.schema_errors = Some(errors);
+                return Ok(total);
+            }
+        }
+    }
+    Ok(total)
 }
 
 /// Runs one turn to completion on an already-open `session`, reading its
