@@ -5,7 +5,9 @@
 //! The end-to-end check of PL§15 (T33.45.8): the built `plugins/examples/
 //! surfaces` package loads in a terminal and a desktop session, each keeps
 //! the parts its surface has, and the other surface's parts are dropped with
-//! one notice or answered with `NotOnThisSurface`. Its own module, apart from
+//! one notice or answered with `NotOnThisSurface`. Its canvas exports run
+//! from the compiled guest too (T33.47.8), which the inline-WAT hosts of
+//! `live.rs` cannot return frames from. Its own module, apart from
 //! `live.rs`'s inline-WAT tests, because it needs the compiled guest and the
 //! SDK path it exercises, not a hand-written module.
 
@@ -16,7 +18,8 @@ mod tests {
     use std::time::Duration;
 
     use cox_plugin_api::{
-        CommandIn, CommandOut, NoticeLevel, PluginNotice, RenderIn, Slot, Surface, Widget,
+        CanvasAttach, CanvasIn, CanvasOut, CanvasSelect, CommandIn, CommandOut, NoticeLevel,
+        PluginNotice, RenderIn, Slot, Surface, Widget,
     };
     use cox_plugin_fixtures::{SURFACES_DIR, SURFACES_WASM};
     use cox_protocol::PluginStore;
@@ -94,9 +97,16 @@ mod tests {
         assert_eq!(plugin.granted_status(), [Slot::StatusRight]);
         assert!(init.desktop.inspector.is_none());
         assert!(init.desktop.toolbar.is_empty() && init.desktop.palette.is_empty());
+        assert!(init.desktop.canvas.is_none());
 
         let notice = notice_text(&live);
-        for part in ["desktop.inspector", "desktop.toolbar", "desktop.palette"] {
+        let parts = [
+            "desktop.inspector",
+            "desktop.toolbar",
+            "desktop.palette",
+            "desktop.canvas",
+        ];
+        for part in parts {
             assert!(notice.contains(part), "{notice}");
         }
         assert!(!notice.contains("keys"), "{notice}");
@@ -120,6 +130,10 @@ mod tests {
         );
         assert_eq!(init.desktop.toolbar.len(), 1);
         assert_eq!(init.desktop.palette.len(), 1);
+        assert_eq!(
+            init.desktop.canvas.as_ref().expect("a canvas").select_attr,
+            "data-glance"
+        );
 
         let notice = notice_text(&live);
         assert!(notice.contains("keys"), "{notice}");
@@ -172,5 +186,34 @@ mod tests {
             rows[1].1[0].link.as_deref(),
             Some("https://github.com/pyrlyn/cox")
         );
+    }
+
+    #[test]
+    fn the_canvas_draws_two_frames_and_a_click_becomes_an_attachment() {
+        let live = started(Surface::Desktop);
+        let _: CommandOut = call(&live, "cox_command", &command("glance"));
+        let size = CanvasIn {
+            width_pt: 900,
+            height_pt: 600,
+        };
+        let out: CanvasOut = call(&live, "cox_canvas", &size);
+        let (kept, dropped) = out.capped();
+        assert!(dropped.is_empty(), "{dropped:?}");
+        let ids: Vec<_> = kept.frames.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, ["count", "parts"]);
+        assert!(kept.frames[0].html.contains("<h1>1</h1>"), "the live count");
+
+        let click = CanvasSelect {
+            frame: "parts".into(),
+            value: "toolbar".into(),
+        };
+        assert_eq!(click.check(), Ok(()));
+        let attach: Option<CanvasAttach> = call(&live, "cox_canvas_select", &click);
+        let attach = attach
+            .expect("an attachment")
+            .capped()
+            .expect("within caps");
+        assert_eq!(attach.name, "Glance: toolbar");
+        assert!(attach.text.contains("\"parts\""), "{}", attach.text);
     }
 }

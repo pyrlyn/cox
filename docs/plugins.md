@@ -188,6 +188,8 @@ What a page can do: lay itself out with HTML, inline `<style>` and `style` attri
 
 A click runs the app's own script, which lives in a content world the page cannot reach: it outlines the nearest element that carries `select_attr` and reports its value. cox drops a value over 256 characters or with control characters, then calls `cox_canvas_select` with the frame's `id` and the value. A returned `CanvasAttach` (`name` up to 80 characters, `text` up to 8 KiB, both sanitized) becomes a `text/plain` chip in the composer, which the person sends with their next message or removes; the next click on the same canvas replaces it. `None` adds nothing. Nothing from the canvas reaches the model unless the person sends it. The design is `docs/design/plugin-canvas.md`.
 
+`plugins/examples/surfaces` (Glance) is a working example: it draws two frames, its glance count and its desktop parts, marks each part with `data-glance`, and turns a click into a note that names the part.
+
 ## Cloud agents
 
 A `[[cloud_agents]]` entry runs a background task on a hosted cloud agent. The host drives it: no export of the package is called for it. The package still names a `wasm` file, as `[[external_agents]]` does. The one backend is `cursor`, and no cloud plugin ships in this repository; the offline tests use a fixture package.
