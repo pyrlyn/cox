@@ -16,7 +16,8 @@ mod tests {
     use std::time::Duration;
 
     use cox_plugin_api::{
-        CommandIn, CommandOut, NoticeLevel, PluginNotice, RenderIn, Slot, Surface, Widget,
+        CanvasAttach, CanvasIn, CanvasOut, CanvasSelect, CommandIn, CommandOut, Effects,
+        EventBatch, NoticeLevel, PluginNotice, RenderIn, Slot, Surface, Widget,
     };
     use cox_plugin_fixtures::{SURFACES_DIR, SURFACES_WASM};
     use cox_protocol::PluginStore;
@@ -96,7 +97,13 @@ mod tests {
         assert!(init.desktop.toolbar.is_empty() && init.desktop.palette.is_empty());
 
         let notice = notice_text(&live);
-        for part in ["desktop.inspector", "desktop.toolbar", "desktop.palette"] {
+        assert!(init.desktop.canvas.is_none());
+        for part in [
+            "desktop.inspector",
+            "desktop.toolbar",
+            "desktop.palette",
+            "desktop.canvas",
+        ] {
             assert!(notice.contains(part), "{notice}");
         }
         assert!(!notice.contains("keys"), "{notice}");
@@ -120,6 +127,10 @@ mod tests {
         );
         assert_eq!(init.desktop.toolbar.len(), 1);
         assert_eq!(init.desktop.palette.len(), 1);
+        assert_eq!(
+            init.desktop.canvas.as_ref().expect("a canvas").title,
+            "Glance"
+        );
 
         let notice = notice_text(&live);
         assert!(notice.contains("keys"), "{notice}");
@@ -172,5 +183,47 @@ mod tests {
             rows[1].1[0].link.as_deref(),
             Some("https://github.com/pyrlyn/cox")
         );
+    }
+
+    /// The pane's frames and a click's chip (T33.47.8): the built plugin
+    /// draws two frames within the caps, sixteen streamed chunks ask for a
+    /// redraw that shows them, and a click on a drawn part gives an
+    /// attachment.
+    #[test]
+    fn the_canvas_draws_two_frames_and_a_click_attaches_a_note() {
+        let live = started(Surface::Desktop);
+        let size = CanvasIn {
+            width_pt: 900,
+            height_pt: 600,
+        };
+        let out: CanvasOut = call(&live, "cox_canvas", &size);
+        let (kept, dropped) = out.capped();
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(kept.frames.len(), 2);
+        assert!(kept.frames[0].html.contains("0 glances"));
+
+        let batch = |n: usize| EventBatch {
+            first_seq: 1,
+            dropped: 0,
+            events: vec![serde_json::json!({"type": "text_delta"}); n],
+        };
+        let effects: Effects = call(&live, "cox_on_event", &batch(15));
+        assert!(!effects.redraw, "fifteen chunks do not redraw");
+        let effects: Effects = call(&live, "cox_on_event", &batch(1));
+        assert!(effects.redraw, "the sixteenth does");
+
+        let _: CommandOut = call(&live, "cox_command", &command("glance"));
+        let out: CanvasOut = call(&live, "cox_canvas", &size);
+        assert!(out.frames[0].html.contains("1 glances"));
+        assert!(out.frames[0].html.contains("16 chunks streamed"));
+
+        let click = CanvasSelect {
+            frame: "count".into(),
+            value: "count".into(),
+        };
+        let attach: Option<CanvasAttach> = call(&live, "cox_canvas_select", &click);
+        let attach = attach.expect("a drawn part attaches");
+        assert_eq!(attach.name, "Glance: count");
+        assert!(attach.text.contains("1 glances"), "{}", attach.text);
     }
 }
