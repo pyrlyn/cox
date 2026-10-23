@@ -22,7 +22,10 @@ guard arguments.count >= 3 else {
   FileHandle.standardError.write(Data("usage: cox-bench <Cox.app> <fixture.json> [runs]\n".utf8))
   exit(2)
 }
-let app = URL(filePath: arguments[1]).appending(path: "Contents/MacOS/Cox")
+guard let app = Bundle(url: URL(filePath: arguments[1]))?.executableURL else {
+  FileHandle.standardError.write(Data("cox-bench: \(arguments[1]) is no app bundle\n".utf8))
+  exit(2)
+}
 let runs = arguments.count > 3 ? max(1, Int(arguments[3]) ?? 5) : 5
 
 let scratch = FileManager.default.temporaryDirectory.appending(path: "cox-bench-\(getpid())")
@@ -87,7 +90,13 @@ for run in 1...runs {
     usleep(1_000)
   }
   let launched = start.duration(to: .now)
-  guard process.isRunning, launched < .seconds(30) else {
+  guard process.isRunning else {
+    let status = process.terminationStatus
+    FileHandle.standardError.write(
+      Data("cox-bench: run \(run): the app exited (\(status)) before showing a window\n".utf8))
+    finish(1)
+  }
+  guard launched < .seconds(30) else {
     process.terminate()
     FileHandle.standardError.write(Data("cox-bench: run \(run) showed no window in 30 s\n".utf8))
     finish(1)

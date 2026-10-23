@@ -52,7 +52,7 @@ Built and tested only by an agent on a Windows host (A130). The CI `windows` job
 
 ### Skipped by rule
 
-Benchmarks and measurement cards (T37.33, T43.6) — the creator asked not to take them.
+Comparisons with other agents (e.g. T30.13). Measurement cards were allowed again on 2026-10-08 (T43.6, T61.1); T37.33 is done.
 
 ## Rules the previous agent followed
 

@@ -1447,6 +1447,24 @@ How it was measured. Swift Testing on an Apple M3 Max (Mac15,9, 64 GB), macOS 27
 
 Verdict: Textual fails the drag in the shape the transcript needs, the Markdown copy and the clamp, and its one cross-block shape misses the first-frame and scroll budgets by more than 10×. The TextKit 2 view passes all four, so it becomes its own package `desktop/macos/Packages/CoxTranscriptText` (T37.37's rule); Textual is not a dependency.
 
+#### 9.5.14 DT§1 budget suite (T37.33, measured 2026-10-21)
+
+`just desktop-bench [runs]` (`scripts/desktop/bench.sh`) builds the Debug app, then runs two halves and prints one row per budget; the log is `desktop/macos/build/bench.log`. In process: CoxTranscript's `TranscriptBenchmarkTests` (`swift test --no-parallel --filter TranscriptBenchmarkTests`), a 2 000-block transcript (prose, code, diff, a finished tool card, in rotation) through `TranscriptView` with cross-block selection on, each frame timed as main-thread layout + draw with `CACurrentMediaTime` as in §9.5.13. From outside the app: `desktop/macos/Benchmarks`' `cox-bench` launches `Cox.app` with `-CoxFixture` on a 2 000-block fixture grown at run time from `desktop/macos/Fixtures/edit.json`'s snapshot, under a scratch `COX_HOME` and `COX_KEYRING=off`; launch time runs from `Process.run()` to the first layer-0 window of that pid in `CGWindowListCopyWindowInfo(.optionOnScreenOnly)`, and memory is `proc_pid_rusage` (`ri_resident_size`, budgeted; `ri_phys_footprint`, reported) 3 s after that window. The median of the runs decides; the first run is printed apart.
+
+| DT§1 budget | Measured (Apple M3 Max, Mac15,9, 64 GB, macOS 27.0.1, Xcode 27.1 / Swift 6.4; load average 18–20) | Verdict |
+| --- | --- | --- |
+| First frame of a 2 000-block session ≤ 400 ms (the launch budget) | 216.6 ms | within |
+| Scrolling ≤ 1 % hitch time (1 500 frames × 40 pt, 2 000 blocks) | p50 5.02 / p95 8.69 / p99 9.29 / max 10.27 ms, hitch 0.00 % | within |
+| Streaming 200 tok/s: main thread busy ≤ 25 %, no frame > 16 ms (300 frames after 2 000 blocks) | busy 14.6 %, p99 3.90 ms, max 4.32 ms | within |
+| Cold launch to an interactive window ≤ 400 ms | **not measured**: `CoxFFI.xcframework` could not be built (disk at 2.8 GB free and falling while other agents built; the dist build plus the debug bindgen build need several GB more), so there was no `Cox.app` to launch | — |
+| Idle memory, one session of 2 000 blocks, ≤ 150 MB RSS | **not measured**, same reason | — |
+| Keypress to glyph ≤ 16 ms | not in the suite: Instruments, by hand | — |
+| Core never stalls on the UI | not in the suite: the Rust test in `cox-app` (DT§4.5) | — |
+
+The launcher itself was checked end to end against a stand-in: a throwaway AppKit app that orders one window in 200 ms after launch, built outside the repository. Three runs: window at 659 / 373 / 354 ms (load average 37.8; the 200 ms delay included), RSS 72–75 MB, footprint 15 MB, each run terminated. A bare AppKit window already holds about 72 MB resident, so the 150 MB RSS budget leaves the app about 78 MB for SwiftUI, the Rust core and the transcript. System apps cannot stand in: a directly exec'd `/System/Applications/Calculator.app` is killed with SIGKILL before its first window (launch constraints), while the ad-hoc signed `Cox.app` is run this way by design (`justfile` `desktop-app`).
+
+Limits: timed on a shared M3 Max, not DT§1's M1 MacBook Air with 8 GB; the Debug app, which a shipped Release build can only beat; "cold" means the first run after a build, since a cold file cache needs `sudo purge`. Not in a nightly job: CI workflow files were out of this change's scope, and a hosted macOS runner is a VM whose budgets are known issues (`TranscriptBenchmarkTests`' `withinBudget`). Next: run `just desktop-bench` on the M1 Air with free disk and fill the launch and memory rows.
+
 ### 9.6 ACP host: the four agents' launch lines and the ACP surface cox consumes (checked 2026-09-29, input for DT§3.3.1)
 
 Scope: what `cox-app` needs to spawn Claude Code's, Codex's, Gemini CLI's and Cursor's ACP agents as top-level sessions (P52, T52.1), and which ACP messages it must fold. Registry rows come from the npm registry API (`https://registry.npmjs.org/<package>`, `dist-tags.latest`, that version's `bin`, `engines`, `dependencies`, `deprecated`); repository rows from the tagged release's own files. The ACP schema rows are read from the crate source `Cargo.lock` resolves (`agent-client-protocol` 2.2.0, `agent-client-protocol-schema` 1.9.1). Cited below as R9.6.n.

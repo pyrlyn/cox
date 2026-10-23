@@ -1152,9 +1152,20 @@ generates it from `project.yml`, so only that spec is in git (T37.32.1).
   increased-contrast (R9.3.19); XCUITest for the smoke path: open a project,
   send a prompt, approve, review, rewind — against `cox-ffi`'s
   `Scripted` provider build flag.
-- **Performance.** The DT§1 budgets as XCTest metrics, run by
-  `just desktop-bench`, and recorded in `research.md` §4.x like the other
-  measurements.
+- **Performance.** `just desktop-bench` (T37.33) runs the DT§1 budgets and
+  prints one row per budget; `research.md` §9.5.14 keeps the numbers. In
+  process, CoxTranscript's `TranscriptBenchmarkTests`: a 2 000-block
+  transcript's first frame (≤ 400 ms), scrolling (≤ 1 % hitch time) and a
+  200 tok/s stream (≤ 25 % busy, no frame over 16 ms), timed per frame with
+  `CACurrentMediaTime`. From outside the app, `desktop/macos/Benchmarks`'
+  `cox-bench`: the built app launched on a 2 000-block fixture (grown from a
+  recorded one) to its first visible window in the window server's list, then
+  its idle resident memory (≤ 150 MB) — no UI-test target, so no
+  Accessibility grant and no benchmark code in the app. Keypress to glyph
+  stays an Instruments check by hand. A port to another OS repeats the same
+  two halves: an in-process frame timer over the transcript view, and an
+  outside launcher that waits for the first window and reads the process's
+  memory.
 - **Real runs.** Manual checks use a scratch `COX_HOME`, like every other
   surface.
 

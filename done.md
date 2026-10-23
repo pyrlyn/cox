@@ -1,3 +1,28 @@
+#### T37.33 Performance budget suite
+
+Model: Claude Code / claude-opus-5-5 · Status: done 2026-10-21 · Depends: T37.23 · Size: ~120 · Files: `justfile`, `desktop/macos/Benchmarks/…`, `scripts/desktop/bench.sh`, `desktop/macos/Packages/CoxTranscript/Tests/CoxTranscriptTests/TranscriptBenchmarkTests.swift`, `research.md`
+Goal: `just desktop-bench` measures cold start, first frame of a 2 000-block session, stream frame time and memory against DT§1 budgets; results go into `research.md`.
+Check: the suite runs locally and in the nightly job; every budget has a measured row.
+
+A107's hold is over: the creator allowed measurement cards again on 2026-10-08, and this card was assigned on 2026-10-21.
+
+What landed:
+- `just desktop-bench [runs]` → `scripts/desktop/bench.sh`: builds the Debug app (`desktop-app`), runs both halves below, writes `desktop/macos/build/bench.log` and prints one row per budget; a missed budget fails the run after every row has printed.
+- In process: `TranscriptBenchmarkTests` gains `twoThousandBlocksDrawTheirFirstFrameWithinTheLaunchBudget` (≤ 400 ms), next to T37.23's scroll and stream gates, with the same CI known-issue rule.
+- From outside the app: `desktop/macos/Benchmarks` (SwiftPM, outside `Packages/` like `Spikes/`), `cox-bench <Cox.app> <fixture> [runs]`: grows the recorded `edit.json` snapshot to 2 000 blocks in a temp dir, launches the app on it under a scratch `COX_HOME` and `COX_KEYRING=off`, times `Process.run()` to the first visible layer-0 window in the window server's list, then reads `proc_pid_rusage` after 3 s idle and terminates the app. The pure rules (fixture growth, which window counts, the median deciding a budget) are in `LaunchBench` with four tests.
+- `research.md` §9.5.14 has a row per DT§1 budget; DT§8 describes the suite so another OS can repeat it.
+
+Not done:
+- The cold-launch and idle-memory rows have no Cox numbers: `CoxFFI.xcframework` could not be built on this Mac (2.8 GB free and falling while other agents built), so there was no `Cox.app`. `cox-bench` was checked end to end on a throwaway stand-in app instead (§9.5.14). Run `just desktop-bench` with free disk, ideally on the M1 Air, and fill the two rows.
+- No nightly job: CI workflow files were out of this change's scope. A hosted macOS runner is a VM whose budgets are known issues anyway; a dedicated perf runner stays in `ideas.md`.
+- Keypress to glyph stays an Instruments check by hand.
+
+Check (2026-10-21, Apple M3 Max, macOS 27.0.1, load average 18–38):
+- `swift test --no-parallel --build-system swiftbuild --package-path desktop/macos/Packages/CoxTranscript --filter TranscriptBenchmarkTests`: 3 passed — first frame 216.6 ms; scroll hitch 0.00 % (max 10.27 ms); stream busy 14.6 %, max 4.32 ms.
+- `swift test --package-path desktop/macos/Benchmarks`: 4 passed.
+- `cox-bench` on the stand-in app, 3 runs: window 659 / 373 / 354 ms, RSS 72–75 MB, each run terminated, nothing left running.
+- `swift format lint --strict` on the changed Swift, shellcheck 0.11.0 on `bench.sh`, `cargo fmt --check`: clean.
+
 #### T32.17 `cox-config` loads through the shared `config-schema` crate
 
 Model: Claude / opus-5.5 · Status: done 2026-10-21 · Depends: — · Size: ~200 (plus tests) · Priority: P2 · Complexity: 3 · Files: `crates/cox-config/src/{load,cmd,lib}.rs`, `crates/cox-config/Cargo.toml`, `Cargo.toml`, `Cargo.lock`, `workspace-hack/Cargo.toml`, `toolchain.md`

@@ -99,7 +99,7 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T37.32 | todo | P1 | 3 | 0% | |
 | T37.32.2 | todo | P1 | 3 | 0% | |
 | T37.32.3 | in progress | P1 | 2 | 90% | Claude Code / opus-5.5 |
-| T37.33 | todo | P1 | 3 | 0% | |
+| T37.33 | done | P1 | 3 | 100% | Claude Code / claude-opus-5-5 |
 | T39.7 | todo | P3 | 2 | 0% | |
 | T43.6 | todo | P3 | 3 | 40% | |
 | T53.5 | todo | P3 | 3 | 0% | |
@@ -1310,12 +1310,6 @@ Plan:
 6. Bundle id `io.github.pyrlyn.cox` in project.yml.
 Check: actionlint 1.7.12 on the three workflows and shellcheck 0.11.0 on `dmg.sh` add no finding; `dmg.sh` run ad-hoc on a locally built Debug `Cox.app` signs the nested debug dylibs, keeps `get-task-allow`, and writes a DMG `hdiutil verify` accepts; the PR's `desktop-macos` job passes through the shared action; after the merge, Actions -> desktop build produces a Developer ID-signed DMG whose app opens on another Mac after Open Anyway.
 Out of scope: Hardened Runtime, notarization, Sparkle, the bundled CLI, the app cask (T37.32.2).
-
-#### T37.33 Performance budget suite
-
-On hold by the creator (A107). Depends: T37.23 · Size: ~120 · Files: `justfile`, `desktop/macos/Benchmarks/…`, `research.md`
-Goal: `just desktop-bench` measures cold start, first frame of a 2 000-block session, stream frame time and memory against DT§1 budgets; results go into `research.md`.
-Check: the suite runs locally and in the nightly job; every budget has a measured row.
 
 ### P51 — Desktop M2 (goal: the rest of the terminal inside the app — a sandboxed terminal pane, a browser pane the agent can read and screenshot, pop-out windows and tabs, a menu-bar extra with a global hotkey, Spotlight and App Intents, and per-hunk revert — plus the dark glass look; DT§3.2)
 

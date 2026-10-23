@@ -107,7 +107,7 @@ No new dependency: WebKit is a system framework the app already links (CoxPlatfo
 
 1. A frame runs a page script, loads anything, or navigates: the isolation failed; the canvas is switched off until fixed.
 2. A selection reaches the model without the person sending it: the design failed; the attachment path is the only route.
-3. The canvas slows the transcript: `cox_canvas` must never run on the main actor, and frame reloads must not block typing. Measured against DT§1's budget (no hitch over 16 ms while streaming) with the SwiftUI Instruments template on the T33.47.8 build while a fixture plugin redraws twice a second; `just desktop-bench` (T37.33) is on hold, so this is by hand.
+3. The canvas slows the transcript: `cox_canvas` must never run on the main actor, and frame reloads must not block typing. Measured against DT§1's budget (no hitch over 16 ms while streaming) with the SwiftUI Instruments template on the T33.47.8 build while a fixture plugin redraws twice a second; `just desktop-bench` (T37.33) drives no plugin canvas, so this is by hand.
 
 ## 10. Open questions for the creator
 
