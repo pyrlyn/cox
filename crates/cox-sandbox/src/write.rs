@@ -58,8 +58,8 @@ mod unix {
 
     use cox_protocol::ToolError;
     use nix::errno::Errno;
-    use nix::fcntl::{OFlag, open, openat, renameat};
-    use nix::sys::stat::{Mode, mkdirat};
+    use nix::fcntl::{AtFlags, OFlag, open, openat, renameat};
+    use nix::sys::stat::{Mode, SFlag, fchmod, fstatat, mkdirat};
     use nix::unistd::{UnlinkatFlags, unlinkat};
 
     use super::temp_name;
@@ -126,6 +126,7 @@ mod unix {
             return Err(confined(path, roots));
         }
         let dir = open_parent(roots, path, parent)?;
+        let kept = existing_mode(&dir, name);
         let tmp = temp_name(name);
         let fd = openat(
             &dir,
@@ -140,8 +141,24 @@ mod unix {
             name: name.to_os_string(),
             committed: false,
         };
+        if let Some(bits) = kept {
+            fchmod(&fd, mode(bits)).map_err(|_| ToolError::Io)?;
+        }
         File::from(fd).write_all(bytes).map_err(|_| ToolError::Io)?;
         Ok(staged)
+    }
+
+    /// The permission bits of the regular file the write replaces, if any.
+    /// The rename puts a new inode in its place, so without this every edit
+    /// of a script drops its exec bit and every edit of a `0o600` file (a
+    /// key, an `.env`) widens it to `0o666` minus umask. A symlink leaf is
+    /// replaced, not followed, so its target's mode is not borrowed.
+    // `st_mode` is u16 on macOS and u32 on Linux, so the conversion is a no-op on Linux only.
+    #[allow(clippy::useless_conversion)]
+    fn existing_mode(dir: &OwnedFd, name: &std::ffi::OsStr) -> Option<u32> {
+        let st = fstatat(dir, name, AtFlags::AT_SYMLINK_NOFOLLOW).ok()?;
+        let kind = SFlag::from_bits_truncate(st.st_mode & SFlag::S_IFMT.bits());
+        (kind == SFlag::S_IFREG).then_some(u32::from(st.st_mode) & 0o777)
     }
 
     /// Opens `parent`, creating the components that do not exist yet. The
@@ -321,6 +338,24 @@ mod tests {
             std::fs::read(f.outside.join("secret.txt")).expect("secret"),
             b"secret"
         );
+    }
+
+    #[test]
+    fn replacing_a_file_keeps_its_permission_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = fixture();
+        let roots = [f.root.clone()];
+        for bits in [0o755, 0o600] {
+            let path = confine(&roots, &f.root, &format!("f{bits:o}")).expect("confine");
+            std::fs::write(&path, b"old").expect("seed");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(bits)).expect("chmod");
+
+            write_confined(&roots, &path, b"new").expect("write");
+
+            let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
+            assert_eq!(mode, bits, "{path:?}");
+            assert_eq!(std::fs::read(&path).expect("read"), b"new");
+        }
     }
 
     #[test]

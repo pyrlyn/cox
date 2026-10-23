@@ -63,6 +63,10 @@ ignore = [
     "RUSTSEC-2026-0370", # zvariant 5 via zbus 5
     "RUSTSEC-2026-0371", # zbus_names 4 via zbus 5
     "RUSTSEC-2026-0372", # zvariant_derive 5 via zbus 5
+    # Unmaintained (archived upstream, no fixed release) and reached only
+    # through askama_parser's config parsing at build time; no vulnerability
+    # attached. Re-review when askama drops basic-toml. Added 2026-10-21.
+    "RUSTSEC-2026-0374", # basic-toml 0.1 via askama
 ]
 
 [sources]
