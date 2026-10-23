@@ -1,0 +1,9 @@
+---
+source: crates/cox-tui/src/modal.rs
+expression: text
+---
+ exit_plan  Leave Plan mode?
+ rename the helper
+ red
+ 1) Approve  2) Keep planning
+ > ▏   1 approves · 2 keeps planning · Esc dismisses

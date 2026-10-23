@@ -757,6 +757,21 @@ async fn run_one(
         Ok(ran) => ran,
         Err(pointer) => return (id, *pointer),
     };
+    // T67.7: the tool only reports the decision. Leaving Plan mode happens
+    // here, after the person approved and before the result is archived, so
+    // the next provider step already runs as Default. The name is checked
+    // so another tool's structured payload cannot flip the mode.
+    if tool.spec().name == "exit_plan"
+        && !output.is_error
+        && output
+            .structured
+            .as_ref()
+            .and_then(|v| v.get("approved"))
+            .and_then(Value::as_bool)
+            == Some(true)
+    {
+        let _ = session.leave_plan_mode().await;
+    }
     if let (Some(input), Some(detail), Some(mut cx)) = (retry, sandbox_denial(&output), cx) {
         let call = ToolCall {
             id,

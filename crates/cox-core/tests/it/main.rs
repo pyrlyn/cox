@@ -15,6 +15,7 @@ mod checkpoint;
 mod compact;
 mod context;
 mod dedup;
+mod exit_plan;
 mod hooks;
 mod memory_extract;
 mod microcompact;
