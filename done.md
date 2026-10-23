@@ -1,3 +1,24 @@
+#### T37.32.3 Debug macOS app DMG on CI, every feature, Developer ID-signed
+
+Model: Claude Code / opus-5.5 · Status: done 2026-10-21 · Depends: T37.32.1 · Size: ~200 · Priority: P1 · Complexity: 2 · Files: `.github/workflows/desktop-build.yml`, `.github/actions/desktop-macos/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `scripts/desktop/dmg.sh`, `desktop/macos/project.yml`, `justfile`
+Goal: the first build of the macOS app someone can download from CI and run (A135): Debug, not a release build, with every macOS feature the app has, attached to every release.
+
+What landed:
+- #134 (`1e5542f2`): the survey (no feature needs an Info.plist usage key or an entitlement; no voice UI and no bundled CLI, which stays T37.32.2), `.github/actions/desktop-macos` shared by ci.yml and the new workflow, `scripts/desktop/dmg.sh` (`just desktop-dmg`: inside-out re-sign with `COX_SIGN_IDENTITY` or ad-hoc, `codesign --verify --deep --strict`, the Developer ID authority check, `Cox-<version>-<build>-debug-arm64.dmg` with an /Applications link), `desktop-build.yml` with the DMG check and the `desktop-macos-dmg` artifact, release.yml's `desktop` job with `require-signing` and the DMG in `publish`, and the bundle id `io.github.pyrlyn.cox`.
+- Later, outside this card: #135 (`66b046a7`) made release.yml the one release workflow, so `desktop-build.yml` is `workflow_call` only and a test DMG is a `vX.Y.Z-test.N` prerelease tag; the Developer ID import moved to `pyrlyn/ci`'s `macos-keychain` action and `.github/actions/macos-signing` is gone; #365 (`9be0ca49`) skips macOS jobs under `MACOS_CI_DISABLED`.
+- This closing change: the local Check rerun on current main, the card moved here, and T37.32.2's note names the current signing action.
+
+Deviations: plan steps 2 and 5 as written (an in-repo signing action, a `workflow_dispatch` trigger) were replaced by #135 and the `pyrlyn/ci` action; the card's "Actions -> desktop build" run is now a `-test` release tag.
+
+Check (2026-10-21, macOS 27 arm64, Xcode 27):
+- actionlint 1.7.12: `desktop-build.yml` clean. `ci.yml:141` (`if: false` on the windows job, A130) and `release.yml:175` (SC2012/SC2035/SC2046 on the `SHA256SUMS` line) and `:319` (SC1083 on `@{u}`) are findings that predate the card, except one SC2035 for the `*.dmg` glob #134 added to the `SHA256SUMS` line; workflow files were left as they are. shellcheck 0.11.0 on `dmg.sh` and `app.sh`: clean.
+- `just desktop-xcframework`, `scripts/desktop/app.sh`, then `dmg.sh` with no identity: re-signed `Cox.debug.dylib` and `__preview.dylib` ad-hoc and verified each (`codesign --verify --strict`); the app's entitlements are exactly `com.apple.security.get-task-allow = true`; identifier `io.github.pyrlyn.cox`; `codesign --verify --deep --strict` passed; wrote `Cox-0.1.2-1-debug-arm64.dmg` (80 MB), `hdiutil verify`: checksum VALID.
+- desktop-build.yml's DMG check by hand: the DMG mounts read-only, holds `Cox.app` and an `Applications -> /Applications` link, the plist's executable is arm64, and the mounted app verifies. `Cox` started from the mounted DMG on `Fixtures/edit.json` with a scratch `COX_HOME` was still running after 8 s, then was killed.
+- Swift, one package at a time as `swift_test.sh` runs them: CoxPlatform 45, CoxModel 196 (1 known issue), CoxTranscript 62, CoxUI 290 passed; CoxTranscriptText 38 of 39 (`tenThousandBlocksBuiltPatchByPatchFitTheLaunchBudget`, `firstFrame <= 400`, a timing budget under the load of parallel builds) and CoxCore 33 of 34 (`thisRepositoryReadsAsARustWorkspaceWithItsInstructions`, which reads the developer's own `~/.claude/CLAUDE.md`) failed on this machine; neither touches what this card changes.
+- `python3 -m unittest discover -s scripts/desktop`: 24 passed. `cargo fmt --check`: clean.
+
+Not done: a Developer ID-signed DMG from CI opened on another Mac after Open Anyway. It needs the org certificate secrets, a release or `-test` tag run with macOS CI enabled, and a second Mac; the first signed release build is T37.32.2's Check (`spctl --assess`). `cargo nextest` and `clippy` were not run: the disk had 1.3 GB free under other sessions' builds, and this change touches no Rust.
+
 #### T32.17 `cox-config` loads through the shared `config-schema` crate
 
 Model: Claude / opus-5.5 · Status: done 2026-10-21 · Depends: — · Size: ~200 (plus tests) · Priority: P2 · Complexity: 3 · Files: `crates/cox-config/src/{load,cmd,lib}.rs`, `crates/cox-config/Cargo.toml`, `Cargo.toml`, `Cargo.lock`, `workspace-hack/Cargo.toml`, `toolchain.md`

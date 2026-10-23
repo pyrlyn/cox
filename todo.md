@@ -15,7 +15,6 @@
 - T35.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T37.32. Signing, notarization, Sparkle, bundled CLI, Homebrew cask
 - T37.32.2. Developer ID signing, notarization, Sparkle, bundled CLI, Homebrew cask
-- T37.32.3. Debug macOS app DMG on CI, every feature, Developer ID-signed
 - T37.33. Performance budget suite
 - T39.7. Optional: live check against the real Gemini endpoint (needs the creator's key)
 - T43.6. Bench the map on and off
