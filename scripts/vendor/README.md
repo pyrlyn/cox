@@ -16,6 +16,9 @@ uv run --project scripts/vendor cox-vendor models --check   # report a diff, wri
 uv run --project scripts/vendor cox-vendor model-names      # only the models' display names, nothing else
 
 uv run --project scripts/vendor cox-vendor whisper-models   # the pinned ggml table cox voice may download
+
+TYPESAFE_API_KEY=… uv run --project scripts/vendor cox-vendor jev-fixtures   # live Jev replies; paid, creator only
+uv run --project scripts/vendor cox-vendor jev-fixtures --check             # no key, no request: are recordings current?
 ```
 
 `whisper-models` (T54.1) writes `crates/cox-voice/data/whisper-models.json`
@@ -23,6 +26,22 @@ from the Hugging Face API for `ggerganov/whisper.cpp`: one row per offered
 model with a URL pinned to the repository commit, the size and the SHA-256
 (the LFS oid). A file with no LFS oid or size is refused. Its `fetch` takes
 the URL, because it reads two documents.
+
+`jev-fixtures` (T33.40.17) records TypeSafe's live System One replies
+into `crates/cox/tests/fixtures/jev/<point>-<name>.json`. It sends the
+bodies in `requests.json` beside them, which the Jev plugin's own
+`decide` writes (`plugins/jev/tests/fixtures.rs`; re-bless with
+`cargo --config 'env.COX_BLESS="1"' test --manifest-path plugins/Cargo.toml
+-p cox-plugin-jev --test fixtures` after a question-set change), so the
+question set is never copied here. Each file holds the body, the reply,
+the reply's model version and the date, with every string redacted by
+the rollout scrubber's shapes plus the key itself; a reply that does not
+answer exactly the questions asked writes nothing. It costs money and
+needs the creator's `TYPESAFE_API_KEY` in the environment (never the
+keychain; without it the command exits 1 and sends nothing), so it never
+runs in CI. `--check` needs no key and sends nothing: it reports a
+recording that is missing or was made for a body the plugin no longer
+sends.
 
 `models` (T30.20) regenerates the `[[model]]` rows of
 `crates/cox-provider/prices.toml` and the `[providers.*].models` arrays of

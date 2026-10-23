@@ -91,7 +91,6 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T33.40.9 | done | P2 | 4 | 100% | grok-4.7 |
 | T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | done | P2 | 2 | 100% | grok-4.7 |
-| T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.45 | done | P2 | 4 | 100% | grok-4.7 |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
 | T33.47.8 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
@@ -972,14 +971,6 @@ Plan:
 Falsifier: if any task that passes in the baseline fails with the plugin, or the median saving per task is below 15 %, `route` stays off by default, and the guide says so.
 Check: `just test-evals` is green offline (preset expansion, cap stop, the paired table). R§5 has the E2 table.
 
-#### T33.40.17 Optional: record live fixtures (needs the creator's key)
-
-Depends: T33.40.6, T33.40.9 · Size: ~150 · Files: `scripts/vendor/src/cox_vendor/jev_fixtures.py`, `scripts/vendor/tests/test_jev_fixtures.py`, `tests/fixtures/jev/*.json` (data)
-Goal: replace the hand-built fixtures, which follow the documented shapes, with recorded ones.
-- The script sends the plugin's own `risk` and `route` question sets for a handful of fixed states.
-- It redacts with the rollout scrubber, writes the bodies and records the model version and the date.
-- It runs only with `TYPESAFE_API_KEY` set by the creator. It never reads the keychain.
-Check: the offline pytest (body construction, redaction, no key means a clear exit) is green. With recorded fixtures, T33.40.4 and T33.40.6 stay green unchanged.
 
 #### T33.47 Plugin canvas: a desktop pane of plugin-drawn pages
 

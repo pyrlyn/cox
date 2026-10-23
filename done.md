@@ -1,3 +1,19 @@
+#### T33.40.17 Optional: record live fixtures (needs the creator's key)
+
+Model: Claude Code / claude-opus-5-5 · Status: done 2026-10-21 · Priority: P3 · Complexity: 2 · Depends: T33.40.6, T33.40.9 · Size: ~150 · Files: `scripts/vendor/src/cox_vendor/jev_fixtures.py`, `scripts/vendor/tests/test_jev_fixtures.py`, `tests/fixtures/jev/*.json` (data) (also touched: `plugins/jev/tests/fixtures.rs`, `scripts/vendor/src/cox_vendor/registry.py`, `scripts/vendor/README.md`)
+Goal: replace the hand-built fixtures, which follow the documented shapes, with recorded ones.
+- The script sends the plugin's own `risk` and `route` question sets for a handful of fixed states.
+- It redacts with the rollout scrubber, writes the bodies and records the model version and the date.
+- It runs only with `TYPESAFE_API_KEY` set by the creator. It never reads the keychain.
+Check: the offline pytest (body construction, redaction, no key means a clear exit) is green. With recorded fixtures, T33.40.4 and T33.40.6 stay green unchanged.
+
+Result: `cox-vendor jev-fixtures` records TypeSafe's live replies into `crates/cox/tests/fixtures/jev/<point>-<name>.json` (the directory beside `fixtures/cursor`, which the e2e rig already reads; the card's root-level `tests/fixtures` does not exist).
+- The bodies are not built in Python. `plugins/jev/tests/fixtures.rs` runs the plugin's own `decide` over four fixed `risk` batches (`cargo-test`, `git-push`, `env-upload`, `edit-then-publish`) and checks them against the committed `requests.json` (re-blessed with `COX_BLESS=1`), so the question set keeps one owner and a change to it fails a test until the bodies are re-blessed. A second test parses every recorded reply with `wire::parse` and requires an answer for exactly the questions asked.
+- The script sends each body to `https://api.typesafe.ai/v1/systemone` with `Authorization: Bearer`, refuses a reply that is not JSON, does not answer exactly the questions asked or names an undocumented answer type, and writes nothing unless every reply passed. Each file holds the endpoint, the reply's model version, the date, the body and the reply.
+- Redaction walks every JSON string (so it cannot break the JSON) with a port of `cox_sanitize::redact::scrub`'s five shapes plus the literal key. Python cannot call the Rust scrubber; a test checks the marker and the shape list against `redact.rs` and runs its table.
+- Without `TYPESAFE_API_KEY` the command exits 1 with a message and sends nothing; the key is read from the environment only. `--check` needs no key and sends nothing: it reports a recording that is missing or made for a body the plugin no longer sends.
+Not done: no live recording — this environment has no `TYPESAFE_API_KEY`, so `crates/cox/tests/fixtures/jev/` holds only `requests.json`, and the hand-built replies in `plugins_jev.rs` stay until the creator runs `TYPESAFE_API_KEY=… just vendor jev-fixtures`. `route` states wait for T33.40.9 (its card now says to add them to `plugins/jev/tests/fixtures.rs`); the script records any point `requests.json` lists, with no change.
+
 #### T32.17 `cox-config` loads through the shared `config-schema` crate
 
 Model: Claude / opus-5.5 · Status: done 2026-10-21 · Depends: — · Size: ~200 (plus tests) · Priority: P2 · Complexity: 3 · Files: `crates/cox-config/src/{load,cmd,lib}.rs`, `crates/cox-config/Cargo.toml`, `Cargo.toml`, `Cargo.lock`, `workspace-hack/Cargo.toml`, `toolchain.md`
