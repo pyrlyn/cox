@@ -20,7 +20,7 @@ aho-corasick = { version = "1" }
 anstyle = { version = "1" }
 anyhow = { version = "1" }
 bit-set = { version = "0.8" }
-bit-vec = { version = "0.8" }
+bit-vec = { version = "0.10" }
 bitflags = { version = "2", default-features = false, features = ["std"] }
 bstr = { version = "1" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "wasmbind"] }
