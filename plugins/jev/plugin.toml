@@ -30,7 +30,7 @@ provider = "typesafe"
 context_window = 64000
 price = { input = 0.042, output = 0.0 }
 
-# J§5.1 (T33.40.6): raise a call's risk, never lower it. `route` joins with
-# T33.40.9.
+# J§5.1 (T33.40.6): raise a call's risk, never lower it. J§5.2 (T33.40.9):
+# downgrade a main turn to `cheap`, never raise it.
 [capabilities]
-decide = ["risk"]
+decide = ["risk", "route"]

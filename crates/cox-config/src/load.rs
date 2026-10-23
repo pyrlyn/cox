@@ -22,6 +22,7 @@
 //! violations `load` returns.
 
 use std::env;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use config_schema::{EnvLayer, Layers};
@@ -33,22 +34,77 @@ use serde_json::Value as JsonValue;
 /// `.claude/settings.json` files.
 const CLAUDE: &str = "claude-settings";
 
+/// `HOME` and `USERPROFILE` are both unset. On Windows that used to become
+/// `.`, which hid a missing profile (R10.1.8, T57.10). Unix keeps `.`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HomeUnset;
+
+impl std::fmt::Display for HomeUnset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HOME and USERPROFILE are unset")
+    }
+}
+
+/// `HOME`, then `USERPROFILE`. `windows` is the host: both unset is
+/// [`HomeUnset`] there and `.` everywhere else. Tests pass the flag so the
+/// Windows miss runs on every host.
+pub fn resolve_home(
+    home: Option<&OsStr>,
+    userprofile: Option<&OsStr>,
+    windows: bool,
+) -> Result<PathBuf, HomeUnset> {
+    if let Some(dir) = home {
+        return Ok(PathBuf::from(dir));
+    }
+    if let Some(dir) = userprofile {
+        return Ok(PathBuf::from(dir));
+    }
+    if windows {
+        Err(HomeUnset)
+    } else {
+        Ok(PathBuf::from("."))
+    }
+}
+
+/// `COX_HOME` when it is set, otherwise [`resolve_home`] plus `.cox`.
+pub fn cox_home_from(
+    cox_home_env: Option<&OsStr>,
+    home: Option<&OsStr>,
+    userprofile: Option<&OsStr>,
+    windows: bool,
+) -> Result<PathBuf, HomeUnset> {
+    if let Some(dir) = cox_home_env {
+        return Ok(PathBuf::from(dir));
+    }
+    Ok(resolve_home(home, userprofile, windows)?.join(".cox"))
+}
+
 /// Where `cox` looks for its home directory. `COX_HOME` overrides `~/.cox`
 /// (plan.md §1.6 `core.home` comment) for the whole `~/.cox` tree, not just
 /// the `core.home` config value — this is what every task's `COX_HOME=...`
 /// scratch-tree invocation relies on.
+///
+/// The `PathBuf` return stays: `unwrap_or_else(cox_home)` is the call shape
+/// in the binary and the app. On Windows a missing profile is [`HomeUnset`]
+/// from [`cox_home_from`]; this maps that one case back to `.` so those
+/// callers keep compiling. A Windows logon sets `USERPROFILE`.
 pub fn cox_home() -> PathBuf {
-    match env::var_os("COX_HOME") {
-        Some(dir) => PathBuf::from(dir),
-        None => home_dir().join(".cox"),
-    }
+    cox_home_from(
+        env::var_os("COX_HOME").as_deref(),
+        env::var_os("HOME").as_deref(),
+        env::var_os("USERPROFILE").as_deref(),
+        cfg!(windows),
+    )
+    .unwrap_or_else(|_| PathBuf::from("."))
 }
 
 pub fn home_dir() -> PathBuf {
-    env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
+    resolve_home(
+        env::var_os("HOME").as_deref(),
+        env::var_os("USERPROFILE").as_deref(),
+        cfg!(windows),
+    )
+    .unwrap_or_else(|_| PathBuf::from("."))
 }
 
 /// The user config file: `<cox_home>/config.toml`.
@@ -1132,6 +1188,30 @@ mod tests {
         assert_eq!(cfg.tiers.code.model, "claude-sonnet-5");
         assert!(cfg.providers.custom.contains_key("deepseek"));
         assert!(!cfg.providers.anthropic.models.is_empty());
+    }
+
+    /// T57.10: `USERPROFILE` is the home when `HOME` is unset, and on
+    /// Windows neither variable is the old `.` fallback.
+    #[test]
+    fn cox_home_uses_userprofile_without_home() {
+        let profile = OsStr::new(r"C:\Users\ada");
+        let home = cox_home_from(None, None, Some(profile), true).expect("profile");
+        assert_eq!(home, PathBuf::from(profile).join(".cox"));
+        assert_eq!(
+            cox_home_from(None, None, None, true),
+            Err(HomeUnset),
+            "Windows has no current-directory home"
+        );
+        assert_eq!(
+            cox_home_from(None, None, None, false).expect("unix fallback"),
+            PathBuf::from(".").join(".cox")
+        );
+        // HOME still wins when both are set.
+        let unix = OsStr::new("/home/ada");
+        assert_eq!(
+            resolve_home(Some(unix), Some(profile), true).expect("home"),
+            PathBuf::from(unix)
+        );
     }
 
     /// T33.40.13: the fallback a legacy `typesafe` tier copies is the
