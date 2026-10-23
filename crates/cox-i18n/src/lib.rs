@@ -9,9 +9,11 @@
 //! marks fuzzy) resolves from `en`, message by message, so a partial
 //! translation is safe to ship.
 //!
-//! Pure Rust: the catalogs are parsed with `polib` and the `Plural-Forms`
-//! rules evaluated by [`plural`], so there is no libintl and nothing to
-//! install on macOS or Windows.
+//! Pure Rust through `gettext-catalog`: it parses the catalogs, evaluates
+//! `Plural-Forms`, fills `{name}` placeholders and negotiates the chain, so
+//! there is no libintl and nothing to install on macOS or Windows. [`catalog`],
+//! [`plural`] and [`format`] are that crate. This one keeps the embedded
+//! catalogs, `{brand}`, the process-wide localizer and [`export`].
 //!
 //! Its own crate so every surface (TUI, CLI, the desktop apps through
 //! `po-export`) reads one set of catalogs without pulling the i18n stack
@@ -24,18 +26,13 @@
 // drop this allow once its public items are documented.
 #![allow(missing_docs)]
 
-pub mod catalog;
 pub mod export;
-pub mod format;
-pub mod plural;
 
-use std::borrow::Cow;
-use std::fmt;
+pub use gettext_catalog::{
+    Args, LanguageIdentifier, Value, catalog, format, parse_tag, plural, requested_languages,
+};
+
 use std::sync::OnceLock;
-
-pub use unic_langid::LanguageIdentifier;
-
-use crate::catalog::{Catalog, Entry};
 
 /// One embedded locale.
 #[derive(Debug, Clone, Copy)]
@@ -101,139 +98,101 @@ pub enum I18nError {
     Duplicate { code: String, key: String },
 }
 
-/// A message argument.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    Str(String),
-    Int(i64),
-    Float(f64),
-}
-
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Value::Str(s) => f.write_str(s),
-            Value::Int(i) => write!(f, "{i}"),
-            Value::Float(x) => write!(f, "{x}"),
-        }
-    }
-}
-
-impl From<&str> for Value {
-    fn from(s: &str) -> Self {
-        Value::Str(s.to_owned())
-    }
-}
-impl From<String> for Value {
-    fn from(s: String) -> Self {
-        Value::Str(s)
-    }
-}
-impl From<&String> for Value {
-    fn from(s: &String) -> Self {
-        Value::Str(s.clone())
-    }
-}
-macro_rules! int_value {
-    ($($t:ty),*) => {$(
-        impl From<$t> for Value {
-            fn from(v: $t) -> Self {
-                Value::Int(i64::try_from(v).unwrap_or(i64::MAX))
+impl From<gettext_catalog::Error> for I18nError {
+    fn from(err: gettext_catalog::Error) -> Self {
+        match err {
+            gettext_catalog::Error::Parse { code, detail } => Self::Parse { code, detail },
+            gettext_catalog::Error::PluralForms { code, detail } => {
+                Self::PluralForms { code, detail }
             }
-        }
-    )*};
-}
-int_value!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl From<f64> for Value {
-    fn from(v: f64) -> Self {
-        Value::Float(v)
-    }
-}
-impl From<f32> for Value {
-    fn from(v: f32) -> Self {
-        Value::Float(f64::from(v))
-    }
-}
-
-/// Named message arguments, filling `{name}` placeholders. The argument
-/// named `count` also selects the plural form.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Args {
-    values: Vec<(Cow<'static, str>, Value)>,
-}
-
-impl Args {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Sets `name` (replacing an earlier value).
-    pub fn set(&mut self, name: impl Into<Cow<'static, str>>, value: impl Into<Value>) {
-        let name = name.into();
-        let value = value.into();
-        match self.values.iter_mut().find(|(n, _)| *n == name) {
-            Some(slot) => slot.1 = value,
-            None => self.values.push((name, value)),
+            gettext_catalog::Error::Duplicate { code, key } => Self::Duplicate { code, key },
+            // `Error` is non-exhaustive. Placeholder and plural-expression
+            // failures are not produced while loading a catalog.
+            other => Self::Parse {
+                code: String::new(),
+                detail: other.to_string(),
+            },
         }
     }
-
-    pub fn get(&self, name: &str) -> Option<&Value> {
-        self.values.iter().find(|(n, _)| n == name).map(|(_, v)| v)
-    }
 }
 
-/// How the `count` argument selects a plural form.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Count {
-    /// An integer (the sign dropped: gettext counts are unsigned).
-    Whole(u64),
-    /// A fraction, a string or no `count` at all: CLDR `other`.
-    Other,
-}
-
-fn count_of(args: Option<&Args>) -> Count {
-    match args.and_then(|a| a.get("count")) {
-        Some(Value::Int(i)) => Count::Whole(i.unsigned_abs()),
-        Some(Value::Float(x)) if x.is_finite() && x.fract() == 0.0 && x.abs() < 1e19 => {
-            // Truncation is exact here: the value is integral and in range.
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            Count::Whole(x.abs() as u64)
-        }
-        _ => Count::Other,
-    }
-}
+/// The same catalogs as [`LOCALES`], in the shape the shared localizer stores.
+/// Windows folders and CLDR category names stay on [`Locale`] for [`export`].
+const CATALOG_LOCALES: &[gettext_catalog::Locale] = &[
+    gettext_catalog::Locale {
+        code: LOCALES[0].code,
+        source: LOCALES[0].source,
+        other_form: LOCALES[0].other_form,
+    },
+    gettext_catalog::Locale {
+        code: LOCALES[1].code,
+        source: LOCALES[1].source,
+        other_form: LOCALES[1].other_form,
+    },
+    gettext_catalog::Locale {
+        code: LOCALES[2].code,
+        source: LOCALES[2].source,
+        other_form: LOCALES[2].other_form,
+    },
+];
 
 /// A negotiated chain of catalogs, most preferred first and `en` last.
 pub struct Localizer {
-    catalogs: Vec<(&'static Locale, Catalog)>,
+    inner: gettext_catalog::Localizer,
 }
 
 impl Localizer {
     /// Catalogs for `requested` (most preferred first) negotiated against
     /// [`LOCALES`], always ending in [`DEFAULT_LOCALE`].
     pub fn new(requested: &[LanguageIdentifier]) -> Result<Self, I18nError> {
-        let catalogs = negotiate(requested)
-            .into_iter()
-            .map(|locale| Ok((locale, Catalog::parse(locale.code, locale.source)?)))
-            .collect::<Result<_, I18nError>>()?;
-        Ok(Self { catalogs })
+        Self::from_catalog_locales(CATALOG_LOCALES, DEFAULT_LOCALE, requested)
     }
 
     /// [`Localizer::new`] over raw tags as the OS or env spell them
     /// (`uk_UA.UTF-8`, `ru-RU`); tags that do not parse are skipped.
     pub fn for_tags<S: AsRef<str>>(tags: &[S]) -> Result<Self, I18nError> {
-        let requested: Vec<_> = tags.iter().filter_map(|t| parse_tag(t.as_ref())).collect();
-        Self::new(&requested)
+        Ok(Self::with_brand(gettext_catalog::Localizer::for_tags(
+            CATALOG_LOCALES,
+            DEFAULT_LOCALE,
+            tags,
+        )?))
     }
 
     /// The user's languages from the env, then the OS ([`requested_languages`]).
     pub fn from_env() -> Result<Self, I18nError> {
-        Self::new(&requested_languages())
+        Ok(Self::with_brand(gettext_catalog::Localizer::from_env(
+            CATALOG_LOCALES,
+            DEFAULT_LOCALE,
+        )?))
+    }
+
+    fn from_catalog_locales(
+        locales: &'static [gettext_catalog::Locale],
+        default: &str,
+        requested: &[LanguageIdentifier],
+    ) -> Result<Self, I18nError> {
+        Ok(Self::with_brand(gettext_catalog::Localizer::new(
+            locales, default, requested,
+        )?))
+    }
+
+    fn with_brand(inner: gettext_catalog::Localizer) -> Self {
+        Self {
+            inner: inner.with_constant("brand", BRAND_NAME),
+        }
+    }
+
+    // `new(&[])` cannot fail, but it is still a `Result`. `Default` is that
+    // empty chain without an unwrap; nothing resolves, so `{brand}` is unused.
+    fn empty() -> Self {
+        Self {
+            inner: gettext_catalog::Localizer::default(),
+        }
     }
 
     /// The negotiated locale codes, most preferred first, `en` last.
     pub fn chain(&self) -> Vec<&'static str> {
-        self.catalogs.iter().map(|(l, _)| l.code).collect()
+        self.inner.chain()
     }
 
     /// The first locale in the chain with a usable translation of `id`
@@ -241,49 +200,13 @@ impl Localizer {
     /// has one, the English source text (`msgid`/`msgid_plural`) of the
     /// entry. `None` when no catalog, `en` included, defines `id`.
     pub fn try_format(&self, id: &str, args: Option<&Args>) -> Option<String> {
-        let count = count_of(args);
-        let template = self
-            .catalogs
-            .iter()
-            .find_map(|(locale, catalog)| pick(locale, catalog, catalog.get(id)?, count))
-            .or_else(|| {
-                let entry = self.catalogs.iter().rev().find_map(|(_, c)| c.get(id))?;
-                Some(source_text(entry, count))
-            })?;
-        Some(format::render(template, |name| {
-            args.and_then(|a| a.get(name))
-                .map(ToString::to_string)
-                .or_else(|| (name == "brand").then(|| BRAND_NAME.to_owned()))
-        }))
+        self.inner.try_format(id, args)
     }
 
     /// [`Localizer::try_format`], or the id itself when nothing defines it, so
     /// a missing string shows up in the UI as its id instead of blank space.
     pub fn format(&self, id: &str, args: Option<&Args>) -> String {
-        self.try_format(id, args).unwrap_or_else(|| id.to_owned())
-    }
-}
-
-/// The translated form of `entry` for `count` in `locale`, if it has one.
-fn pick<'a>(locale: &Locale, catalog: &Catalog, entry: &'a Entry, count: Count) -> Option<&'a str> {
-    let forms = entry.translated(catalog.rule.nplurals())?;
-    if entry.msgid_plural.is_none() {
-        return forms.first().map(String::as_str);
-    }
-    match count {
-        Count::Whole(n) => forms.get(catalog.rule.index(n)).map(String::as_str),
-        Count::Other => entry
-            .other
-            .as_deref()
-            .or_else(|| forms.get(locale.other_form).map(String::as_str)),
-    }
-}
-
-/// The English source of `entry`, with English plural selection.
-fn source_text(entry: &Entry, count: Count) -> &str {
-    match (&entry.msgid_plural, count) {
-        (Some(_), Count::Whole(1)) | (None, _) => &entry.msgid,
-        (Some(plural), _) => plural,
+        self.inner.format(id, args)
     }
 }
 
@@ -291,49 +214,9 @@ fn source_text(entry: &Entry, count: Count) -> &str {
 /// order (so `uk-UA` and `uk_UA.UTF-8` select `uk`), appending
 /// [`DEFAULT_LOCALE`] when it is not already in the chain.
 pub fn negotiate(requested: &[LanguageIdentifier]) -> Vec<&'static Locale> {
-    let mut chain: Vec<&'static Locale> = Vec::new();
-    let codes = requested
-        .iter()
-        .map(|id| id.language.as_str())
-        .chain([DEFAULT_LOCALE]);
-    for code in codes {
-        if let Some(locale) = LOCALES.iter().find(|l| l.code == code)
-            && !chain.iter().any(|l| l.code == code)
-        {
-            chain.push(locale);
-        }
-    }
-    chain
-}
-
-/// Parses a tag as POSIX env vars and OS APIs spell it: `uk_UA.UTF-8`,
-/// `ru_RU@euro`, `en-US`. `C` and `POSIX` carry no language and give `None`.
-pub fn parse_tag(raw: &str) -> Option<LanguageIdentifier> {
-    let tag = raw.split(['.', '@']).next()?.trim().replace('_', "-");
-    if tag.is_empty() || tag.eq_ignore_ascii_case("c") || tag.eq_ignore_ascii_case("posix") {
-        return None;
-    }
-    tag.parse().ok()
-}
-
-/// The user's languages, most preferred first: the POSIX message locale
-/// (`LC_ALL`, `LC_MESSAGES`, `LANG`, first one set wins), then the OS UI
-/// languages (macOS and Windows preferences; a GUI app gets no `LANG`).
-pub fn requested_languages() -> Vec<LanguageIdentifier> {
-    requested_from(|name| std::env::var(name).ok(), sys_locale::get_locales())
-}
-
-fn requested_from(
-    env: impl Fn(&str) -> Option<String>,
-    os: impl IntoIterator<Item = String>,
-) -> Vec<LanguageIdentifier> {
-    let posix = ["LC_ALL", "LC_MESSAGES", "LANG"]
+    gettext_catalog::negotiate(CATALOG_LOCALES, DEFAULT_LOCALE, requested)
         .into_iter()
-        .find_map(|name| env(name).filter(|v| !v.is_empty()));
-    posix
-        .into_iter()
-        .chain(os)
-        .filter_map(|tag| parse_tag(&tag))
+        .filter_map(|locale| LOCALES.iter().find(|shipped| shipped.code == locale.code))
         .collect()
 }
 
@@ -342,11 +225,7 @@ fn requested_from(
 /// degrades to an empty chain, where every message renders as its id.
 pub fn global() -> &'static Localizer {
     static GLOBAL: OnceLock<Localizer> = OnceLock::new();
-    GLOBAL.get_or_init(|| {
-        Localizer::from_env().unwrap_or(Localizer {
-            catalogs: Vec::new(),
-        })
-    })
+    GLOBAL.get_or_init(|| Localizer::from_env().unwrap_or_else(|_| Localizer::empty()))
 }
 
 /// `id` in the user's language through [`global`]; see [`Localizer::format`].
@@ -371,6 +250,7 @@ macro_rules! tr {
 
 #[cfg(test)]
 mod tests {
+    use super::catalog::Catalog;
     use super::*;
 
     /// The template, kept in the crate but only read by tests.
@@ -398,7 +278,11 @@ mod tests {
 
     #[test]
     fn every_embedded_locale_builds() {
-        for locale in LOCALES {
+        assert_eq!(CATALOG_LOCALES.len(), LOCALES.len());
+        for (shared, locale) in CATALOG_LOCALES.iter().zip(LOCALES) {
+            assert_eq!(shared.code, locale.code);
+            assert_eq!(shared.source, locale.source);
+            assert_eq!(shared.other_form, locale.other_form);
             Catalog::parse(locale.code, locale.source).unwrap_or_else(|e| panic!("{e}"));
             locale
                 .code
@@ -584,26 +468,20 @@ mod tests {
 
     /// A chain built from inline catalogs, to exercise the fallback rules.
     fn inline_chain(en: &'static str, uk: &'static str) -> Localizer {
-        let locale = |code, source| -> &'static Locale {
-            Box::leak(Box::new(Locale {
-                code,
-                windows: "",
-                source,
-                plural_categories: if code == "en" {
-                    &["one", "other"]
-                } else {
-                    &["one", "few", "many"]
-                },
+        let locales: &'static [gettext_catalog::Locale] = Box::leak(Box::new([
+            gettext_catalog::Locale {
+                code: "uk",
+                source: uk,
                 other_form: 1,
-            }))
-        };
-        let (uk, en) = (locale("uk", uk), locale("en", en));
-        Localizer {
-            catalogs: vec![
-                (uk, Catalog::parse("uk", uk.source).expect("uk")),
-                (en, Catalog::parse("en", en.source).expect("en")),
-            ],
-        }
+            },
+            gettext_catalog::Locale {
+                code: "en",
+                source: en,
+                other_form: 1,
+            },
+        ]));
+        let uk = parse_tag("uk").expect("uk");
+        Localizer::from_catalog_locales(locales, "en", &[uk]).expect("builds")
     }
 
     const EN_HDR: &str = "msgid \"\"\nmsgstr \"Plural-Forms: nplurals=2; plural=(n != 1);\\n\"\n\n";
@@ -667,22 +545,17 @@ mod tests {
     }
 
     #[test]
-    fn posix_env_wins_over_os_languages() {
-        let env = |name: &str| (name == "LANG").then(|| "uk_UA.UTF-8".to_owned());
-        let requested = requested_from(env, ["ru-RU".to_owned()]);
-        let chain = Localizer::new(&requested).expect("builds").chain();
-        assert_eq!(chain, ["uk", "ru", "en"]);
-        // LC_ALL beats LANG; an empty value counts as unset.
-        let env = |name: &str| match name {
-            "LC_ALL" => Some(String::new()),
-            "LC_MESSAGES" => Some("ru_RU.UTF-8".to_owned()),
-            "LANG" => Some("uk_UA.UTF-8".to_owned()),
-            _ => None,
-        };
-        let chain = Localizer::new(&requested_from(env, []))
-            .expect("builds")
-            .chain();
-        assert_eq!(chain, ["ru", "en"]);
+    fn request_order_is_kept_and_english_ends_the_chain() {
+        // Env precedence (`LC_ALL`, then `LC_MESSAGES`, then `LANG`, then the
+        // OS) lives in gettext-catalog. What cox adds is that the chain is
+        // that order and [`DEFAULT_LOCALE`] is last.
+        let uk = parse_tag("uk_UA.UTF-8").expect("uk");
+        let ru = parse_tag("ru-RU").expect("ru");
+        assert_eq!(
+            Localizer::new(&[uk, ru.clone()]).expect("builds").chain(),
+            ["uk", "ru", "en"]
+        );
+        assert_eq!(Localizer::new(&[ru]).expect("builds").chain(), ["ru", "en"]);
     }
 
     #[test]

@@ -1323,10 +1323,8 @@ dependencies = [
 name = "cox-i18n"
 version = "0.1.2"
 dependencies = [
- "polib",
- "sys-locale",
+ "gettext-catalog",
  "thiserror 2.0.21",
- "unic-langid",
  "workspace-hack",
 ]
 
@@ -3075,6 +3073,18 @@ dependencies = [
  "r-efi 6.0.0",
  "rand_core 0.10.1",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "gettext-catalog"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94a6661c51bd98ae7ed4fa666c590c1de6331d1f5ac9a92a4263ad226d959d24"
+dependencies = [
+ "polib",
+ "sys-locale",
+ "thiserror 2.0.21",
+ "unic-langid",
 ]
 
 [[package]]

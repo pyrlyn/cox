@@ -11,8 +11,8 @@ guide, conventions and the export.
 - Plurals select on `{count}`; Russian and Ukrainian forms are `[0]` one,
   `[1]` few, `[2]` many; `# cldr-other: <text>` gives CLDR `other`
   (fractions) where it differs from the few form.
-- Do not start a file with a bare `#` line: polib, the parser the crate
-  uses, rejects it.
+- Do not start a file with a bare `#` line: the parser (`gettext-catalog`,
+  which uses polib) rejects it.
 
 ## Changing strings
 

@@ -182,13 +182,13 @@ cpal = "0.18"
 rubato = "5"
 
 # cox-i18n
-# gettext localization (en default, ru, uk; docs/i18n.md). polib parses the
-# embedded .po catalogs in pure Rust (no libintl, so nothing to install on
-# macOS or Windows); unic-langid validates the language tags negotiation
-# matches on; sys-locale reads the OS UI languages when no env var names one.
-polib = "0.3"
-unic-langid = "0.9"
-sys-locale = "0.3"
+# gettext localization (en default, ru, uk; docs/i18n.md). gettext-catalog
+# 0.1.0 (MIT OR Apache-2.0) parses the embedded .po catalogs, evaluates
+# Plural-Forms, fills `{name}` placeholders and negotiates the locale chain.
+# It is the published form of the code that used to live in cox-i18n, so
+# polib, unic-langid and sys-locale are no longer direct dependencies.
+# Pure Rust: no libintl, so nothing to install on macOS or Windows.
+gettext-catalog = "0.1.0"
 
 # dev-deps
 insta = { version = "1.48", features = ["json"] }

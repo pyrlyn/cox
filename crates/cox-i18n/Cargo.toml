@@ -6,9 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-polib = { workspace = true }
-unic-langid = { workspace = true }
-sys-locale = { workspace = true }
+# Catalog parsing, Plural-Forms, `{name}` placeholders and the localizer.
+# Version from crates.io, not a path: cox keeps only its catalogs and export.
+gettext-catalog = { workspace = true }
 thiserror = { workspace = true }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
