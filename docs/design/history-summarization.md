@@ -1,6 +1,6 @@
 # History summarization
 
-Status: in progress (draft PR). Branch: `feat/history-summarization`, from
+Status: implemented in this PR (draft); see `docs/how-it-works.md`. Branch: `feat/history-summarization`, from
 `origin/main` (not stacked on `feat/agent-context-caching`: it does not need
 the MCP memo; the context blocks it builds on are already on `main`).
 
@@ -28,12 +28,13 @@ the MCP memo; the context blocks it builds on are already on `main`).
    summary itself becomes the next cached segment.
 3. **Prompt**: the compact prompt asks explicitly for facts, decisions and
    open tasks in fixed sections, so a later step can parse and carry them.
-4. **Cross-session brief**: on session end (or compaction) the summary is
-   stored in `cox-store` keyed by the canonical workspace root. A new session
-   in the same workspace gets a bounded "previous sessions" brief in the
-   history block after the prefix. Never keyed by anything wider than the
-   project root; a different root never reads it. Config: `[context]
-   session_brief = true|false`, `session_brief_tokens`.
+4. **Cross-session brief**: on compaction the summary is stored in
+   `cox-store` (`session_briefs`), keyed by the canonical workspace root (full
+   git-root path, not the folder name). A new top-level session in the same
+   root gets it, capped, in the volatile `system[3]` block right after the
+   prefix breakpoint. A different root never reads it. Config: `[context]
+   session_brief = true|false`, `session_brief_chars`. Not saved on session
+   end, only on compaction.
 
 ## Tests (stub model, no network)
 

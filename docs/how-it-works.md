@@ -279,6 +279,28 @@ Append-only: the rollout keeps every original line; `dropped` ids are
 just skipped when building future requests. Early turns keep their
 verbatim text right up until they are summarised.
 
+`context.compact_at_tokens` adds an absolute trigger (whichever fires first;
+`0`, the default, is off). The summary is the first history message, right
+after the cached prefix (system prompt and tool schemas), so compaction never
+changes `system[0..=2]` or a cache breakpoint; the summary then becomes the
+start of the next cached segment. The summariser writes `## Goal`,
+`## Facts`, `## Decisions`, `## Open todo` and `## Next step`.
+
+### Session brief: the next session starts where this one left off
+
+With `context.session_brief = true` (default) every compaction also saves its
+summary in `cox.db` (`session_briefs`), keyed by the canonical workspace root
+(the git root as a full path), so two checkouts that share a folder name never
+share a brief. A new top-level session in the same root reads it once at open
+and gets it, capped at `session_brief_chars`, in `system[3]` inside
+`<previous_sessions>`, after the cached prefix. A resumed session or a
+subagent does not get it; it already has its own history.
+
+Disable with `session_brief = false` (nothing is saved or read). Limitations:
+only a session that compacted leaves a brief; the newest brief replaces the
+older one; it is not shown on resume. Tests: `cargo nextest run -p cox-core
+brief_` and `-p cox-store brief_`.
+
 ## Where it lands on disk
 
 Under `~/.cox/` (`COX_HOME` overrides; never touch the real home in

@@ -9,6 +9,7 @@ mod common;
 mod allow_for_session;
 mod approve_writes;
 mod bash_tasks;
+mod brief;
 mod budget;
 mod chat_wire;
 mod checkpoint;

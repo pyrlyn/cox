@@ -126,6 +126,38 @@ pub(crate) fn split(marks: &[TurnMark], keep_turns: u32) -> Option<(usize, Vec<I
     Some((cut, dropped))
 }
 
+/// `needs_compaction` or the absolute `compact_at_tokens` trigger, whichever
+/// fires first; `0` leaves only the fraction.
+pub(crate) fn due(last: u32, max_context: u32, ctx: &cox_protocol::config::ContextConfig) -> bool {
+    needs_compaction(last, max_context, ctx.compact_at)
+        || (ctx.compact_at_tokens > 0 && last >= ctx.compact_at_tokens)
+}
+
+/// The key a session brief is stored under: the canonical git root (or the
+/// cwd outside a repository) as a full path. A bare folder name would let two
+/// projects called `app` read each other's brief.
+pub(crate) fn project_key(cwd: &std::path::Path) -> String {
+    let start = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let mut dir = start.clone();
+    loop {
+        if dir.join(".git").exists() {
+            return dir.to_string_lossy().into_owned();
+        }
+        if !dir.pop() {
+            return start.to_string_lossy().into_owned();
+        }
+    }
+}
+
+/// How a new session's `system[3]` carries the saved brief.
+pub(crate) fn brief_block(body: &str, max_chars: u32) -> String {
+    let body: String = body.chars().take(max_chars as usize).collect();
+    format!(
+        "<previous_sessions>\n{}\n</previous_sessions>",
+        body.trim_end()
+    )
+}
+
 pub(crate) fn needs_compaction(
     last_context_tokens: u32,
     max_context: u32,
@@ -919,6 +951,17 @@ impl Session {
             reason: trigger.reason(),
         })
         .await?;
+        if self.config.context.session_brief {
+            // The brief is a convenience: a store that cannot save it is a
+            // warning, never a failed compaction.
+            if let Err(error) = self.store.brief_put(&project_key(&self.cwd), &summary) {
+                self.emit(Event::Notice {
+                    level: Level::Warn,
+                    text: format!("session brief not saved: {error}"),
+                })
+                .await?;
+            }
+        }
         let _ = hooks::fire(self, HookEvent::PostCompact, payload).await;
         // §1.10 step 5 (P43): the prefix restarts here anyway, so the repo
         // map is rebuilt with it; no notice of its own.
@@ -1212,6 +1255,35 @@ mod tests {
         assert!(needs_compaction(750, 1000, 0.75));
         assert!(!needs_compaction(749, 1000, 0.75));
         assert!(!needs_compaction(1, 0, 0.75));
+    }
+
+    #[test]
+    fn compact_trigger_fires_on_the_absolute_token_limit_first() {
+        let mut ctx = cox_protocol::config::ContextConfig::default();
+        assert!(!due(5_000, 1_000_000, &ctx), "0 is off: only the fraction");
+        ctx.compact_at_tokens = 5_000;
+        assert!(due(5_000, 1_000_000, &ctx));
+        assert!(!due(4_999, 1_000_000, &ctx));
+        assert!(due(750, 1000, &ctx), "the fraction still fires first");
+    }
+
+    #[test]
+    fn brief_block_is_capped_and_tagged() {
+        let b = brief_block("abcdef\n", 3);
+        assert_eq!(b, "<previous_sessions>\nabc\n</previous_sessions>");
+    }
+
+    #[test]
+    fn project_key_is_the_full_root_not_the_folder_name() {
+        let tmp = std::env::temp_dir().join(cox_protocol::ids::SessionId::new().to_string());
+        let (a, b) = (tmp.join("x/app"), tmp.join("y/app"));
+        for d in [&a, &b] {
+            std::fs::create_dir_all(d.join("src")).expect("mkdir");
+            std::fs::create_dir_all(d.join(".git")).expect("mkdir");
+        }
+        assert_ne!(project_key(&a), project_key(&b));
+        assert_eq!(project_key(&a.join("src")), project_key(&a));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

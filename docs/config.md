@@ -134,6 +134,9 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 ## `[context]`
 
 - `compact_at` = `0.75` — fraction of max_context
+- `compact_at_tokens` = `0` — absolute trigger in tokens; 0 = off
+- `session_brief` = `true` — carry the last summary into the next session (per project)
+- `session_brief_chars` = `4000` — cap on the brief a new session receives
 - `keep_turns` = `2`
 - `microcompact_after_turns` = `6`
 - `tool_output_visible_bytes` = `8192`
