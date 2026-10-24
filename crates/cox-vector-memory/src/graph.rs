@@ -10,6 +10,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Integer, Text};
 
@@ -103,11 +104,16 @@ impl SqliteGraphStore {
     pub fn open(path: &Path) -> Result<Self> {
         let mut conn = SqliteConnection::establish(&path.to_string_lossy()).map_err(err)?;
         conn.batch_execute(SCHEMA).map_err(err)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     fn with<T>(&self, f: impl FnOnce(&mut SqliteConnection) -> Result<T>) -> Result<T> {
-        let mut c = self.conn.lock().map_err(|_| Error("graph: poisoned lock".into()))?;
+        let mut c = self
+            .conn
+            .lock()
+            .map_err(|_| Error("graph: poisoned lock".into()))?;
         f(&mut c)
     }
 }
@@ -157,10 +163,11 @@ impl GraphStore for SqliteGraphStore {
 
     fn edge_count(&self, project: &str) -> Result<usize> {
         self.with(|c| {
-            let r: Count = diesel::sql_query("SELECT COUNT(*) AS n FROM mem_edge WHERE project = ?")
-                .bind::<Text, _>(project)
-                .get_result(c)
-                .map_err(err)?;
+            let r: Count =
+                diesel::sql_query("SELECT COUNT(*) AS n FROM mem_edge WHERE project = ?")
+                    .bind::<Text, _>(project)
+                    .get_result(c)
+                    .map_err(err)?;
             Ok(r.n as usize)
         })
     }
@@ -170,8 +177,9 @@ impl GraphStore for SqliteGraphStore {
             return Ok(Vec::new());
         }
         // Seeds go in as a JSON array so the query text stays fixed.
-        let seed_json = serde_json::to_string(&seeds.iter().map(|s| sql_id(*s)).collect::<Vec<_>>())
-            .map_err(err)?;
+        let seed_json =
+            serde_json::to_string(&seeds.iter().map(|s| sql_id(*s)).collect::<Vec<_>>())
+                .map_err(err)?;
         let rows: Vec<Row> = self.with(|c| {
             diesel::sql_query(
                 "WITH RECURSIVE
@@ -200,7 +208,11 @@ impl GraphStore for SqliteGraphStore {
             .into_iter()
             .filter_map(|r| {
                 Some(Related {
-                    entry: Entry { project: r.project, kind: Kind::parse(&r.kind)?, text: r.text },
+                    entry: Entry {
+                        project: r.project,
+                        kind: Kind::parse(&r.kind)?,
+                        text: r.text,
+                    },
                     depth: r.depth as u32,
                 })
             })

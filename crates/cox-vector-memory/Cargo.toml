@@ -7,7 +7,9 @@ license.workspace = true
 description = "Long-term agent memory on embedded Qdrant Edge"
 
 [features]
-default = ["qdrant-edge"]
+# Off: qdrant-edge forces parking_lot `deadlock_detection`, which cannot
+# coexist with `send_guard` (enabled by nucleo) in the cox workspace.
+default = []
 qdrant-edge = ["dep:qdrant-edge"]
 
 [dependencies]

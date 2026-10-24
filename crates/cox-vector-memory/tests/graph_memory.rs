@@ -7,7 +7,11 @@
 use cox_vector_memory::{Entry, GraphStore, Kind, Related, Relation, SqliteGraphStore};
 
 fn fact(project: &str, text: &str) -> Entry {
-    Entry { project: project.into(), kind: Kind::Fact, text: text.into() }
+    Entry {
+        project: project.into(),
+        kind: Kind::Fact,
+        text: text.into(),
+    }
 }
 
 fn texts(v: &[Related]) -> Vec<(&str, u32)> {
@@ -17,9 +21,12 @@ fn texts(v: &[Related]) -> Vec<(&str, u32)> {
 /// Chain a - b - c - d in `project`; returns the ids.
 fn chain(g: &SqliteGraphStore, project: &str) -> [u64; 4] {
     let ids = ["a", "b", "c", "d"].map(|t| g.add_node(&fact(project, t)).unwrap());
-    g.add_edge(project, ids[0], ids[1], &Relation::DependsOn).unwrap();
-    g.add_edge(project, ids[2], ids[1], &Relation::RelatedTo).unwrap();
-    g.add_edge(project, ids[2], ids[3], &Relation::WorkedWith).unwrap();
+    g.add_edge(project, ids[0], ids[1], &Relation::DependsOn)
+        .unwrap();
+    g.add_edge(project, ids[2], ids[1], &Relation::RelatedTo)
+        .unwrap();
+    g.add_edge(project, ids[2], ids[3], &Relation::WorkedWith)
+        .unwrap();
     ids
 }
 
@@ -33,8 +40,14 @@ fn open() -> (tempfile::TempDir, SqliteGraphStore) {
 fn traversal_respects_depth() {
     let (_d, g) = open();
     let ids = chain(&g, "p");
-    assert_eq!(texts(&g.neighbors("p", &[ids[0]], 1).unwrap()), vec![("b", 1)]);
-    assert_eq!(texts(&g.neighbors("p", &[ids[0]], 2).unwrap()), vec![("b", 1), ("c", 2)]);
+    assert_eq!(
+        texts(&g.neighbors("p", &[ids[0]], 1).unwrap()),
+        vec![("b", 1)]
+    );
+    assert_eq!(
+        texts(&g.neighbors("p", &[ids[0]], 2).unwrap()),
+        vec![("b", 1), ("c", 2)]
+    );
     assert!(g.neighbors("p", &[ids[0]], 0).unwrap().is_empty());
 }
 
@@ -64,14 +77,13 @@ fn no_cross_project_leak() {
     assert!(g.neighbors("p2", &[a[0]], 2).unwrap().is_empty());
 }
 
-#[cfg(feature = "qdrant-edge")]
 #[test]
 fn vector_hits_expand_through_graph() {
     use cox_vector_memory::{
-        HashEmbedder, QdrantEdgeStore, RecallConfig, VectorMemory, render_block_with_related,
+        HashEmbedder, RecallConfig, SqliteVectorStore, VectorMemory, render_block_with_related,
     };
     let dir = tempfile::tempdir().unwrap();
-    let store = QdrantEdgeStore::open(dir.path(), "p", 256).unwrap();
+    let store = SqliteVectorStore::open(&dir.path().join("vec.sqlite"), "p").unwrap();
     let m = VectorMemory::new("p", store, HashEmbedder::new(256), RecallConfig::default());
     let g = SqliteGraphStore::open(&dir.path().join("graph.sqlite")).unwrap();
     let seed = "Payments service uses postgres replicas";
@@ -80,10 +92,15 @@ fn vector_hits_expand_through_graph() {
     let beyond = "Weekly sync happens on monday";
     m.remember(Kind::Fact, seed).unwrap();
     let ids = [seed, near, far, beyond].map(|t| g.add_node(&fact("p", t)).unwrap());
-    g.add_edge("p", ids[0], ids[1], &Relation::RelatedTo).unwrap();
-    g.add_edge("p", ids[1], ids[2], &Relation::RelatedTo).unwrap();
-    g.add_edge("p", ids[2], ids[3], &Relation::RelatedTo).unwrap();
-    let (hits, related) = m.recall_with_graph(&g, "postgres replicas for payments", 2).unwrap();
+    g.add_edge("p", ids[0], ids[1], &Relation::RelatedTo)
+        .unwrap();
+    g.add_edge("p", ids[1], ids[2], &Relation::RelatedTo)
+        .unwrap();
+    g.add_edge("p", ids[2], ids[3], &Relation::RelatedTo)
+        .unwrap();
+    let (hits, related) = m
+        .recall_with_graph(&g, "postgres replicas for payments", 2)
+        .unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(texts(&related), vec![(near, 1), (far, 2)]);
     let block = render_block_with_related(&hits, &related).unwrap();

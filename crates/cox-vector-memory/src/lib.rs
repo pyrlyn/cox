@@ -8,16 +8,22 @@
 //! prefix so the provider prompt cache still covers that prefix.
 //!
 //! Storage and embeddings sit behind traits ([`VectorStore`], [`Embedder`]).
-//! The default store is embedded Qdrant Edge (`qdrant-edge`, beta, in-process,
-//! no server). [`HashEmbedder`] is a deterministic offline embedder used in
+//! Target store: embedded Qdrant Edge (`qdrant-edge` feature, beta, no
+//! server); it cannot build inside the cox workspace yet (parking_lot
+//! feature conflict with nucleo), so [`SqliteVectorStore`] is the default. [`HashEmbedder`] is a deterministic offline embedder used in
 //! tests and as a no-network fallback; it matches shared words, not meaning.
+
+// Experimental crate: public items are documented in docs/vector-memory.md.
+#![allow(missing_docs)]
 
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
 mod graph;
+mod sqlite_vec;
 pub use graph::{GraphStore, Related, Relation, SqliteGraphStore};
+pub use sqlite_vec::SqliteVectorStore;
 
 #[cfg(feature = "qdrant-edge")]
 mod qdrant;
@@ -124,7 +130,10 @@ pub struct RecallConfig {
 
 impl Default for RecallConfig {
     fn default() -> Self {
-        Self { top_k: 5, min_score: 0.35 }
+        Self {
+            top_k: 5,
+            min_score: 0.35,
+        }
     }
 }
 
@@ -138,11 +147,20 @@ pub struct VectorMemory<S, E> {
 
 impl<S: VectorStore, E: Embedder> VectorMemory<S, E> {
     pub fn new(project: impl Into<String>, store: S, embedder: E, config: RecallConfig) -> Self {
-        Self { project: project.into(), store, embedder, config }
+        Self {
+            project: project.into(),
+            store,
+            embedder,
+            config,
+        }
     }
 
     pub fn remember(&self, kind: Kind, text: &str) -> Result<()> {
-        let entry = Entry { project: self.project.clone(), kind, text: text.trim().to_owned() };
+        let entry = Entry {
+            project: self.project.clone(),
+            kind,
+            text: text.trim().to_owned(),
+        };
         let v = self.embedder.embed(&entry.text)?;
         self.store.upsert(&entry, v)?;
         self.store.flush()
@@ -150,9 +168,14 @@ impl<S: VectorStore, E: Embedder> VectorMemory<S, E> {
 
     pub fn recall(&self, query: &str) -> Result<Vec<Hit>> {
         let v = self.embedder.embed(query)?;
-        let hits = self.store.search(v, self.config.top_k, self.config.min_score)?;
+        let hits = self
+            .store
+            .search(v, self.config.top_k, self.config.min_score)?;
         // Defence in depth: the store is already per project.
-        Ok(hits.into_iter().filter(|h| h.entry.project == self.project).collect())
+        Ok(hits
+            .into_iter()
+            .filter(|h| h.entry.project == self.project)
+            .collect())
     }
 
     /// Vector recall, then graph expansion from the hit nodes up to
@@ -228,7 +251,10 @@ impl Embedder for HashEmbedder {
 
     fn embed(&self, text: &str) -> Result<Vec<f32>> {
         let mut v = vec![0f32; self.dim];
-        for w in text.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 2) {
+        for w in text
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 2)
+        {
             let d = Sha256::digest(w.to_lowercase().as_bytes());
             let i = u64::from_le_bytes(d[..8].try_into().expect("8 bytes")) as usize % self.dim;
             v[i] += 1.0;

@@ -7,9 +7,9 @@
 use std::path::Path;
 
 use qdrant_edge::{
-    Distance, EdgeConfigBuilder, EdgeShard, EdgeVectorParams, NamedQuery, PointInsertOperations,
-    PointOperations, PointStruct, QueryEnum, SearchRequestBuilder, UpdateOperation,
-    WithPayloadInterface,
+    DEFAULT_VECTOR_NAME, Distance, EdgeConfigBuilder, EdgeShard, EdgeVectorParamsBuilder,
+    NamedQuery, PointInsertOperations, PointOperations, PointStruct, QueryEnum,
+    SearchRequestBuilder, UpdateOperation, WithPayloadInterface,
 };
 use serde_json::json;
 
@@ -34,11 +34,17 @@ impl QdrantEdgeStore {
         } else {
             std::fs::create_dir_all(&dir).map_err(err)?;
             let config = EdgeConfigBuilder::new()
-                .vector("", EdgeVectorParams::new(dim, Distance::Cosine).build())
+                .vector(
+                    DEFAULT_VECTOR_NAME,
+                    EdgeVectorParamsBuilder::new(dim, Distance::Cosine).build(),
+                )
                 .build();
             EdgeShard::new(&dir, config).map_err(err)?
         };
-        Ok(Self { project: project.to_owned(), shard })
+        Ok(Self {
+            project: project.to_owned(),
+            shard,
+        })
     }
 }
 
@@ -53,15 +59,20 @@ impl VectorStore for QdrantEdgeStore {
             json!({"project": entry.project, "kind": entry.kind.as_str(), "text": entry.text}),
         );
         self.shard
-            .update(UpdateOperation::PointOperation(PointOperations::UpsertPoints(
-                PointInsertOperations::PointsList(vec![point.into()]),
-            )))
+            .update(UpdateOperation::PointOperation(
+                PointOperations::UpsertPoints(PointInsertOperations::PointsList(vec![
+                    point.into(),
+                ])),
+            ))
             .map_err(err)
     }
 
     fn search(&self, vector: Vec<f32>, limit: usize, min_score: f32) -> Result<Vec<Hit>> {
         let req = SearchRequestBuilder::new(
-            QueryEnum::Nearest(NamedQuery { query: vector.into(), using: None }),
+            QueryEnum::Nearest(NamedQuery {
+                query: vector.into(),
+                using: None,
+            }),
             limit,
         )
         .score_threshold(min_score)
@@ -78,7 +89,10 @@ impl VectorStore for QdrantEdgeStore {
                     kind: Kind::parse(&s("kind")?)?,
                     text: s("text")?,
                 };
-                Some(Hit { entry, score: p.score })
+                Some(Hit {
+                    entry,
+                    score: p.score,
+                })
             })
             .collect())
     }
