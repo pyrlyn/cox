@@ -7,7 +7,8 @@ session loop yet**. The storage backend is beta and may change.
 
 1. **Remember.** A user fact or a past session summary is embedded and stored
    as a point in an embedded [Qdrant Edge](https://qdrant.tech/edge/) shard
-   (`qdrant-edge = "=0.9.0"`, Apache-2.0, in-process, no server). Each project
+   (`qdrant-edge = "=0.9.0"`, Apache-2.0, in-process, no server), or in the
+   SQLite fallback (see "Backends" below). Each project
    gets its own on-disk shard (`<root>/<sha256(project)[..8]>`), and every point
    also carries `project` in its payload. The point id is a hash of
    project + kind + text, so the same fact is stored once.
@@ -33,13 +34,26 @@ and as a no-network fallback; it matches shared words, not meaning. cox has no
 embeddings API yet; a provider or local (LM Studio / nomic-embed) embedder
 plugs in through `Embedder`.
 
+## Backends and the Qdrant Edge conflict
+
+`qdrant-edge` 0.9.0 always enables parking_lot `deadlock_detection`; cox
+already enables `send_guard` through `nucleo`. parking_lot refuses both at
+once, so Qdrant Edge **cannot build inside the cox workspace today**. Hence:
+
+- Default vector backend: `SqliteVectorStore` (vectors as f32 blobs, exact
+  cosine scan per project). It is **not Qdrant**; fine for thousands of
+  entries per project.
+- `QdrantEdgeStore` stays behind the opt-in `qdrant-edge` feature (off) and
+  is excluded from hakari (`.config/hakari.toml`). It passes the same test
+  suite when the crate is built standalone, outside the workspace.
+- Unblock: upstream making `deadlock_detection` optional in qdrant-edge, or
+  cox dropping `send_guard` from nucleo's path.
+
 ## Enable / disable
 
-The crate is not used by any binary yet, so it is off by default. Backend:
-
-- `qdrant-edge` cargo feature (default on) builds `QdrantEdgeStore`.
-- `cargo build -p cox-vector-memory --no-default-features` drops Qdrant Edge
-  (graph and traits only).
+The crate is not used by any binary yet, so memory is off. Backends:
+`SqliteVectorStore` (always built), `QdrantEdgeStore` (`qdrant-edge`
+feature, standalone only for now).
 
 Wiring into the session (config flag, memory tool integration, context
 assembly) is a follow-up; see the PR.
@@ -52,6 +66,8 @@ cargo nextest run -p cox-vector-memory
 cargo test -p cox-vector-memory
 ```
 
+The vector suite runs once per backend (`sqlite_backend`, and
+`qdrant_edge_backend` with `--features qdrant-edge` outside the workspace).
 Covered: a fact survives closing and reopening the shard; similarity ranks the
 relevant fact first; an unrelated query surfaces nothing (score threshold);
 no cross-project leak (vector and graph); duplicate facts deduplicate; the
