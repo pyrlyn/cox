@@ -1,0 +1,62 @@
+# Agent context caching
+
+Status: in progress (draft PR). Savings figures are **estimates**.
+
+cox is an agent that owns its context, so token savings come from four layers.
+This note maps each layer onto what exists and names the gap this branch closes.
+
+**Top criterion: a cache is never served to the wrong request.** Every layer
+keys on the full content that determines the answer, and each has negative
+tests that fail on a foreign hit.
+
+## 1. MCP tool-result memoization (new)
+
+- Where: `cox-mcp/src/memo.rs`, used by `McpTool::call` (`cox-mcp/src/client.rs`).
+- Key: server + tool + canonical JSON of the arguments (object keys sorted
+  recursively; values, types and array order are significant).
+- Only approved tools whose effective risk is `ReadOnly` are memoized;
+  write/destructive or pending-contract tools never are. Errors never stored.
+- Bounds: per-server TTL and entry cap; oldest entry evicted first.
+- Config: `[mcp_servers.<name>] memo_ttl_secs` (default 0 = off) and
+  `memo_max_entries` (default 128). Opt-in because a read-only tool can still
+  return live data.
+- Scope: one memo per connected server per session, never shared across
+  sessions/conversations.
+- Estimate: fewer external calls (10–30% in doc-heavy sessions); with re-read
+  dedup (`dedup.rs`) an identical result becomes a pointer, not a resend.
+
+## 2. Context blocks (exists)
+
+`cox-core/src/context.rs` builds every request from ordered blocks:
+`system[0]` base prompt, `system[1]` instructions, `system[2]` project
+context/repo map/skills (prefix breakpoint), `system[3]` volatile rules and
+style, tool schemas sorted by name, history with rolling breakpoints.
+Blocks are rebuilt from session state each request (no cross-conversation
+store), so reuse happens only in the provider cache, which is content-keyed.
+
+## 3. History summarization (exists)
+
+`cox-core/src/compact.rs` replaces every turn but the last `keep_turns` with one
+summary over budget, keeps the last two turns verbatim, and the summary turn is
+appended to that session's history, so it is the next cached prefix. It lives
+in session history only and cannot leak into another conversation.
+
+## 4. Provider prompt cache (exists)
+
+`cox-provider-anthropic/src/request.rs` places up to four `cache_control`
+breakpoints; OpenAI caches the same byte-stable prefix automatically. No
+timestamps or ids in `system[0..=2]` (snapshot-tested).
+
+## Tests added
+
+- memo: identical request hits (underlying call count 1); different tool,
+  argument value, type, nesting, array order, server -> miss and fresh call;
+  key-order-only difference -> hit; TTL expiry and cap eviction -> fresh call;
+  mutating/pending tools never cached; error results never cached.
+- context: different system/instructions/history -> different prefix bytes.
+
+## Expected savings (estimate)
+
+Stable prefix ~15–25k tokens, cache reads ~10% of input price: a 20-request
+session saves roughly 70–85% of prefix input tokens versus no caching
+(estimate). Layers 2–4 already earn that; layer 1 saves external API calls.
