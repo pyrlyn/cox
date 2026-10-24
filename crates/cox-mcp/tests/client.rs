@@ -942,3 +942,136 @@ async fn mcp_resources_lists_reads_and_archives_over_cap_first() {
     client.close().await;
     task.abort();
 }
+
+/// Two tools on one server: `look` is read-only, `poke` is not. Each call
+/// counts and answers with its own tool name and arguments, so a result
+/// served to the wrong request shows as the wrong text.
+struct MemoServer {
+    calls: Arc<AtomicUsize>,
+}
+
+impl ServerHandler for MemoServer {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let map = serde_json::Map::new();
+        let ro = rmcp::model::ToolAnnotations::from_raw(None, Some(true), None, None, None);
+        let look = rmcp::model::Tool::new("look", "read", map.clone()).with_annotations(ro.clone());
+        let peek = rmcp::model::Tool::new("peek", "read", map.clone()).with_annotations(ro);
+        let poke = rmcp::model::Tool::new("poke", "write", map);
+        Ok(ListToolsResult::with_all_items(vec![look, peek, poke]))
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let n = self.calls.fetch_add(1, Ordering::SeqCst);
+        let args = Value::Object(request.arguments.unwrap_or_default());
+        let text = format!("{} {args} #{n}", request.name);
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]).into())
+    }
+}
+
+async fn memo_client(name: &str, ttl: u64) -> (HashMap<String, Arc<dyn Tool>>, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handler = MemoServer {
+        calls: calls.clone(),
+    };
+    let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+    tokio::spawn(async move {
+        use rmcp::ServiceExt;
+        let running = handler
+            .serve(tokio::io::split(server_io))
+            .await
+            .expect("handshake");
+        let _ = running.waiting().await;
+    });
+    let client = McpClient::from_transport(
+        name,
+        tokio::io::split(client_io),
+        Duration::from_secs(2),
+        None,
+    )
+    .await
+    .expect("client handshake")
+    .with_memo(ttl, 16);
+    let rows = client.listed(false, None, false).await.expect("list");
+    let tools = rows
+        .into_iter()
+        .map(|r| (r.tool.spec().name, r.tool))
+        .collect();
+    (tools, calls)
+}
+
+async fn run(tools: &HashMap<String, Arc<dyn Tool>>, name: &str, args: Value) -> String {
+    tools[name].call(args, &cx()).await.expect("call").text
+}
+
+#[tokio::test]
+async fn memo_serves_only_an_identical_read_only_request() {
+    let (t, calls) = memo_client("m", 60).await;
+    let a = run(&t, "mcp__m__look", json!({"q": "x", "n": 1})).await;
+    let b = run(&t, "mcp__m__look", json!({"n": 1, "q": "x"})).await;
+    assert_eq!(a, b);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn memo_never_returns_a_foreign_result() {
+    let (t, calls) = memo_client("m", 60).await;
+    run(&t, "mcp__m__look", json!({"q": "x"})).await;
+    let cases = [
+        ("mcp__m__peek", json!({"q": "x"})),
+        ("mcp__m__look", json!({"q": "y"})),
+        ("mcp__m__look", json!({"q": "x", "user": "other"})),
+        ("mcp__m__look", json!({"q": ["x"]})),
+        ("mcp__m__look", json!({})),
+    ];
+    for (i, (tool, args)) in cases.iter().enumerate() {
+        let got = run(&t, tool, args.clone()).await;
+        let bare = tool.rsplit("__").next().unwrap_or_default();
+        assert!(
+            got.starts_with(&format!("{bare} {args} #")),
+            "foreign hit: {got}"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            i + 2,
+            "no fresh call for {tool} {args}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn memo_never_caches_a_mutating_tool() {
+    let (t, calls) = memo_client("m", 60).await;
+    let a = run(&t, "mcp__m__poke", json!({"q": "x"})).await;
+    let b = run(&t, "mcp__m__poke", json!({"q": "x"})).await;
+    assert_ne!(a, b);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn memo_is_off_by_default_and_per_server() {
+    let (t, calls) = memo_client("m", 0).await;
+    run(&t, "mcp__m__look", json!({"q": "x"})).await;
+    run(&t, "mcp__m__look", json!({"q": "x"})).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    let (one, c1) = memo_client("one", 60).await;
+    let (two, c2) = memo_client("two", 60).await;
+    run(&one, "mcp__one__look", json!({"q": "x"})).await;
+    run(&two, "mcp__two__look", json!({"q": "x"})).await;
+    assert_eq!(
+        (c1.load(Ordering::SeqCst), c2.load(Ordering::SeqCst)),
+        (1, 1)
+    );
+}
