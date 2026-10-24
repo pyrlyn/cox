@@ -70,3 +70,16 @@ node delete cascades its edges; vector hits expand through the graph.
   Future alternatives to watch: LadybugDB (`lbug`), `agdb`.
 - The graph stores a copy of kind and text so traversal does not need a
   Qdrant lookup; both stores must be written together.
+
+## Future graph backends
+
+Current graph memory is stored in plain SQLite tables (`nodes`, `edges`) and
+traversed with recursive CTEs via diesel, behind the `GraphStore` trait.
+
+[Grafeo](https://github.com/GrafeoDB/grafeo) (crate `grafeo` 0.6.0, released
+2026-10-23) is a candidate second backend: pure Rust, embedded library mode
+(no server), Apache-2.0, GQL/Cypher queries, built-in vector search. It would
+be added behind a cargo feature flag once it reaches 1.0 or gains a second
+active maintainer (currently almost all commits are by one author).
+
+There is no implementation change for now; SQLite remains the only backend.
