@@ -79,15 +79,24 @@ def stream_json_lines(markdown: str) -> list[str]:
     if not fences:
         raise ValueError("the example sequence has no json block")
     lines = [line for line in fences[0].splitlines() if line.strip()]
+    check_stream(lines)
+    return lines
+
+
+def check_stream(lines: list[str]) -> None:
+    """A run the mapper (T35.4) was written for: only documented event
+    types, opened by system/init and closed by a successful result. Shared
+    with `cursor_live_fixtures`, which holds a real run to the same shape."""
     events = [json.loads(line) for line in lines]
+    if not events:
+        raise ValueError("the run has no stream-json lines")
     for event in events:
         if event.get("type") not in STREAM_JSON_TYPES:
             raise ValueError(f"undocumented stream-json type: {event.get('type')!r}")
     if events[0].get("subtype") != "init":
-        raise ValueError("the example does not start with system/init")
+        raise ValueError("the run does not start with system/init")
     if events[-1].get("type") != "result" or events[-1].get("is_error") is not False:
-        raise ValueError("the example does not end with a successful result")
-    return lines
+        raise ValueError("the run does not end with a successful result")
 
 
 def cursor_permission_ids(markdown: str) -> set[str]:
@@ -143,15 +152,24 @@ def build(fetch) -> dict[str, str]:
         "sources": [OUTPUT_FORMAT_URL],
         "lines": stream_json_lines(pages[OUTPUT_FORMAT_URL]),
     }
-    dump = lambda doc: json.dumps(doc, indent=2, ensure_ascii=False) + "\n"  # noqa: E731
     return {"stream_json.json": dump(stream), "acp.json": dump(acp_fixture(pages))}
+
+
+def dump(doc: dict) -> str:
+    return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
 
 def run(*, check: bool = False, fetch=None) -> bool:
     """Fetch the pages, rebuild both fixtures and — unless `check` — write
     the ones whose bytes differ. Returns whether any differs."""
+    return write(build(fetch or download), check=check)
+
+
+def write(files: dict[str, str], *, check: bool) -> bool:
+    """Write each file under FIXTURE_DIR whose bytes differ, unless
+    `check`. Returns whether any differs."""
     changed = False
-    for name, text in build(fetch or download).items():
+    for name, text in files.items():
         path = FIXTURE_DIR / name
         if path.exists() and path.read_text() == text:
             continue
