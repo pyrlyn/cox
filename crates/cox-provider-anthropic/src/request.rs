@@ -664,6 +664,142 @@ mod tests {
         assert!(body.get("thinking").is_none());
     }
 
+    /// Every `cache_control` block in the body, in document order.
+    fn cache_controls(v: &Value, out: &mut Vec<Value>) {
+        match v {
+            Value::Object(map) => {
+                if let Some(cc) = map.get("cache_control") {
+                    out.push(cc.clone());
+                }
+                for value in map.values() {
+                    cache_controls(value, out);
+                }
+            }
+            Value::Array(items) => items.iter().for_each(|i| cache_controls(i, out)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn cache_control_ttl_follows_config() {
+        let mut req = base("claude-sonnet-5");
+        req.messages = vec![user_text("one"), user_text("two")];
+        req.cache_breakpoints = vec![1, 3, 4];
+
+        let mut short = Vec::new();
+        cache_controls(&build_body(&req, cfg(None)), &mut short);
+        assert_eq!(short.len(), 3);
+        for cc in &short {
+            assert_eq!(cc, &json!({"type": "ephemeral", "ttl": "5m"}));
+        }
+
+        let long_cfg = BuildCfg {
+            ttl: CacheTtl::OneHour,
+            ..cfg(None)
+        };
+        let body = build_body(&req, long_cfg);
+        let mut long = Vec::new();
+        cache_controls(&body, &mut long);
+        assert_eq!(long.len(), 3);
+        for cc in &long {
+            assert_eq!(cc, &json!({"type": "ephemeral", "ttl": "1h"}));
+        }
+        // `type` comes before `ttl` on the wire: key order is cache-stable.
+        let dumped = serde_json::to_string(&body["system"][1]).expect("serializes");
+        assert!(dumped.ends_with(r#""cache_control":{"type":"ephemeral","ttl":"1h"}}"#));
+    }
+
+    #[test]
+    fn breakpoints_land_on_system_block_and_last_message_block() {
+        let mut req = base("claude-sonnet-5");
+        req.messages = vec![Message {
+            role: Role::User,
+            content: vec![
+                Content::Text { text: "a".into() },
+                Content::Text { text: "b".into() },
+            ],
+        }];
+        req.cache_breakpoints = vec![1, 3];
+        let body = build_body(&req, cfg(None));
+        assert!(body["system"][0].get("cache_control").is_none());
+        assert!(body["system"][1].get("cache_control").is_some());
+        assert!(body["system"][2].get("cache_control").is_none());
+        let blocks = &body["messages"][0]["content"];
+        assert!(blocks[0].get("cache_control").is_none());
+        assert!(blocks[1].get("cache_control").is_some());
+        // Never on the top level or on tool definitions.
+        assert!(body.get("cache_control").is_none());
+        assert!(body["tools"][0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn no_breakpoints_means_no_cache_control() {
+        let mut req = base("claude-sonnet-5");
+        req.messages = vec![user_text("hi")];
+        req.cache_breakpoints = vec![];
+        assert_eq!(count_cache_control(&build_body(&req, cfg(None))), 0);
+    }
+
+    /// Cache hit: a later turn appends history but the stable prefix
+    /// (tools + cached system blocks) serializes to the same bytes.
+    #[test]
+    fn stable_prefix_bytes_identical_across_turns() {
+        let mut turn1 = base("claude-sonnet-5");
+        turn1.messages = vec![user_text("first")];
+        turn1.cache_breakpoints = vec![1, 3];
+        let mut turn2 = turn1.clone();
+        turn2.messages.push(Message {
+            role: Role::Assistant,
+            content: vec![Content::Text { text: "ok".into() }],
+        });
+        turn2.messages.push(user_text("second"));
+        turn2.cache_breakpoints = vec![1, 4, 5];
+
+        let (a, b) = (build_body(&turn1, cfg(None)), build_body(&turn2, cfg(None)));
+        let bytes = |v: &Value| serde_json::to_vec(v).expect("serializes");
+        assert_eq!(bytes(&a["tools"]), bytes(&b["tools"]));
+        assert_eq!(bytes(&a["system"][0]), bytes(&b["system"][0]));
+        assert_eq!(bytes(&a["system"][1]), bytes(&b["system"][1]));
+        assert_eq!(bytes(&a["model"]), bytes(&b["model"]));
+        // Two builds of the same request are byte-identical too.
+        assert_eq!(bytes(&a), bytes(&build_body(&turn1, cfg(None))));
+    }
+
+    /// Cache miss: changing a cached system block or the tool set changes
+    /// the prefix bytes, so the provider cannot serve a stale prefix.
+    #[test]
+    fn prefix_changes_when_system_or_tools_change() {
+        let mut req = base("claude-sonnet-5");
+        req.messages = vec![user_text("hi")];
+        let bytes = |v: &Value| serde_json::to_vec(v).expect("serializes");
+        let original = build_body(&req, cfg(None));
+
+        let mut new_system = req.clone();
+        new_system.system[1].text = "You are cox, v2.".into();
+        let changed = build_body(&new_system, cfg(None));
+        assert_ne!(bytes(&original["system"][1]), bytes(&changed["system"][1]));
+        assert_eq!(bytes(&original["tools"]), bytes(&changed["tools"]));
+
+        let mut new_tools = req.clone();
+        new_tools.tools.push(ToolSpec {
+            name: "write".into(),
+            description: "Write a file".into(),
+            input_schema: json!({"type": "object"}),
+            deferred: false,
+            risk: Risk::Write,
+            concurrency: Concurrency::Parallel,
+        });
+        let changed = build_body(&new_tools, cfg(None));
+        assert_ne!(bytes(&original["tools"]), bytes(&changed["tools"]));
+
+        // The volatile block changing (date) leaves the cached prefix alone.
+        let mut new_date = req.clone();
+        new_date.system[2].text = "date: 2026-09-03".into();
+        let changed = build_body(&new_date, cfg(None));
+        assert_eq!(bytes(&original["system"][1]), bytes(&changed["system"][1]));
+        assert_ne!(bytes(&original["system"][2]), bytes(&changed["system"][2]));
+    }
+
     fn count_cache_control(v: &Value) -> usize {
         match v {
             Value::Object(map) => {
