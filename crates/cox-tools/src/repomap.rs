@@ -19,7 +19,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::path::confine;
-use crate::read::{BINARY_SNIFF_BYTES, VISIBLE_CAP_BYTES};
+use crate::read::{BINARY_SNIFF_BYTES, REPOMAP_MAX_FILE_BYTES};
 use crate::{git, outline};
 
 #[path = "rank.rs"]
@@ -188,7 +188,7 @@ fn render(
 /// File text, or `None` for a binary, an oversized or unreadable file.
 fn text_of(abs: &Path) -> Option<String> {
     let meta = std::fs::metadata(abs).ok()?;
-    if !meta.is_file() || meta.len() > VISIBLE_CAP_BYTES as u64 {
+    if !meta.is_file() || meta.len() > REPOMAP_MAX_FILE_BYTES as u64 {
         return None;
     }
     let bytes = std::fs::read(abs).ok()?;

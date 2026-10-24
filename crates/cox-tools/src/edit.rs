@@ -84,21 +84,12 @@ impl Tool for EditTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "edit".to_string(),
-            description: "Replace text in a file: finds `old` and replaces it with `new`. \
-                `old` must match exactly once (or, if no exact match exists, once after \
-                collapsing runs of spaces/tabs and trimming line ends on both sides) unless \
-                `replace_all` is set, in which case every match is replaced. Errors this tool \
-                may return: `path {path} escapes workspace root {root}` (path outside the \
-                workspace), `not found` (the file itself does not exist), `binary file` (the \
-                file is not valid UTF-8 text), `ambiguous match: N candidates` (with the \
-                matching line numbers — narrow `old` to make it unique), `denied: old_string \
-                not found. Closest lines:\n<line>: <text>` (no match even with the whitespace \
-                fallback — the closest lines are shown for reference), `io error`. \
-                Instead of `old`/`new` you may pass `ops`, a batch of `{op: \"replace\" | \
-                \"insert_after\", anchor, content}` that name lines by the anchors `read` prints \
-                with `anchors: true` (an indent-only change keeps an anchor valid). If any anchor \
-                is stale the whole batch is rejected with `denied: stale anchor` and the fresh \
-                anchors; otherwise the ops apply together against the line numbers you read."
+            description: "Replace `old` with `new` in a file. `old` must match exactly once \
+                (whitespace-insensitive fallback) unless `replace_all` is set. A miss lists \
+                the closest lines; several matches list their line numbers, so narrow `old`. \
+                Or pass `ops`: a batch of `{op: \"replace\" | \"insert_after\", anchor, \
+                content}` using the anchors `read` prints with `anchors: true`; a stale anchor \
+                rejects the whole batch and returns fresh ones."
                 .to_string(),
             input_schema: json!({
                 "type": "object",

@@ -48,6 +48,34 @@ const MINIMAL_TOOLS: &[&str] = &[
     "expand",
 ];
 
+/// Whether `model` belongs to a family trained on the V4A `apply_patch`
+/// grammar (OpenAI GPT, Codex and o-series). Matched on the last path
+/// segment so router prefixes like `openai/gpt-5` work too.
+pub(crate) fn prefers_apply_patch(model: &str) -> bool {
+    let m = model
+        .rsplit('/')
+        .next()
+        .unwrap_or(model)
+        .to_ascii_lowercase();
+    m.starts_with("gpt")
+        || m.contains("codex")
+        || (m.starts_with('o') && m[1..].starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// The edit tool `context.edit_tools = "auto"` leaves out for `model`:
+/// `edit` and `apply_patch` do the same job, and both schemas cost ~1.5k
+/// tokens of prefix. `None` keeps both (`"both"`, or a list that lacks one).
+fn dropped_edit_tool(config: &cox_protocol::Config, model: &str) -> Option<&'static str> {
+    if config.context.edit_tools != "auto" {
+        return None;
+    }
+    Some(if prefers_apply_patch(model) {
+        "edit"
+    } else {
+        "apply_patch"
+    })
+}
+
 /// Opens the repo map at the end of `system[2]` (P43).
 pub(crate) const REPO_MAP_OPEN: &str = "<repo_map>\n";
 
@@ -133,7 +161,15 @@ pub fn assemble_with_skills(
     stable: &Stable,
     mode: PermissionMode,
 ) -> Request {
-    let all: Vec<_> = tools.iter().map(|t| t.spec()).collect();
+    let tc = config.tiers.get(tier);
+    let mut all: Vec<_> = tools.iter().map(|t| t.spec()).collect();
+    // Only drop one when the other is really there to do the job.
+    if let Some(drop) = dropped_edit_tool(config, &tc.model) {
+        let has = |n: &str| all.iter().any(|s| s.name == n);
+        if has("edit") && has("apply_patch") {
+            all.retain(|s| s.name != drop);
+        }
+    }
     let deferring = config.context.deferred_tools;
     let minimal = is_minimal(config);
     // The minimal profile keeps its tool list only, whatever `deferred`
@@ -213,7 +249,6 @@ pub fn assemble_with_skills(
         },
     ];
     let cache_breakpoints = breakpoints(system.len(), history.len());
-    let tc = config.tiers.get(tier);
     Request {
         tier,
         job: Job::Main,
@@ -345,6 +380,73 @@ pub fn microcompact(
         })
         .collect()
 }
+
+/// Read dedup at assembly time: a successful `read` whose input and result
+/// text are byte-identical to an earlier successful `read` in `messages`
+/// shows a short reference to that earlier call instead of the bytes again.
+/// The live `Dedup` table only looks `dedup_window_turns` back when the
+/// call runs; this catches the re-reads it missed. Identical result text
+/// proves the file range is unchanged, so an edit in between that changed
+/// the content, or a different range/mode, never matches. Pure over a copy
+/// and deterministic, so the same history always yields the same bytes and
+/// the cached prefix stays stable; the earlier block is never touched.
+pub fn dedup_reads(messages: &[Message]) -> Vec<Message> {
+    let mut inputs: HashMap<CallId, String> = HashMap::new();
+    for msg in messages {
+        for c in &msg.content {
+            if let Content::ToolUse { id, name, input } = c
+                && name == "read"
+            {
+                inputs.insert(*id, input.to_string());
+            }
+        }
+    }
+    // (input, result text) -> first call that produced it.
+    let mut seen: HashMap<(&str, &str), CallId> = HashMap::new();
+    messages
+        .iter()
+        .map(|msg| {
+            let content = msg
+                .content
+                .iter()
+                .map(|c| match c {
+                    Content::ToolResult {
+                        call_id,
+                        content,
+                        is_error: false,
+                    } if content.len() > DEDUP_MIN_BYTES => {
+                        let Some(input) = inputs.get(call_id) else {
+                            return c.clone();
+                        };
+                        match seen.get(&(input.as_str(), content.as_str())) {
+                            Some(first) => Content::ToolResult {
+                                call_id: *call_id,
+                                content: format!(
+                                    "unchanged: identical to the earlier read result of call \
+                                     {first} ({} bytes)",
+                                    content.len()
+                                ),
+                                is_error: false,
+                            },
+                            None => {
+                                seen.insert((input.as_str(), content.as_str()), *call_id);
+                                c.clone()
+                            }
+                        }
+                    }
+                    _ => c.clone(),
+                })
+                .collect();
+            Message {
+                role: msg.role,
+                content,
+            }
+        })
+        .collect()
+}
+
+/// Results this short cost less than the reference that would replace them.
+const DEDUP_MIN_BYTES: usize = 256;
 
 /// A routed-down turn's request (T33.40.8, J20): thinking blocks from
 /// turns before `turn_start` were signed by the static tier's model, so the
@@ -1372,3 +1474,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod savings_tests;

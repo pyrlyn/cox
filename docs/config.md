@@ -135,7 +135,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 
 - `compact_at` = `0.75` — fraction of max_context
 - `keep_turns` = `2`
-- `microcompact_after_turns` = `6`
+- `microcompact_after_turns` = `4`
 - `tool_output_visible_bytes` = `8192`
 - `tool_output_head_lines` = `60`
 - `tool_output_tail_lines` = `20`
@@ -145,6 +145,7 @@ Generated from `config/default.toml` by a test in `cox-protocol/src/config.rs`; 
 - `deferred_tools` = `true`
 - `system_prompt` = `"default"` — default | minimal (T30.1); `core.profile = "minimal"` implies it
 - `repomap_budget_tokens` = `0` — repo map in system[2] (P43); 0 = off until the T43.6 bench
+- `edit_tools` = `"auto"` — auto (one edit tool per model family) | both
 ## `[compaction]`
 
 - `strategy` = `"state+llm"` — state+llm | llm (T59.1): state+llm writes files touched and errors seen from the transcript; llm is the opt-out

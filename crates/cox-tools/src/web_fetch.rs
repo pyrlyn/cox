@@ -10,7 +10,7 @@
 //! rules still match on the URL `subject` reports.
 
 use async_trait::async_trait;
-use cox_protocol::{Concurrency, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolSpec};
+use cox_protocol::{ArchivePut, Concurrency, Risk, Tool, ToolCx, ToolError, ToolOutput, ToolSpec};
 use serde_json::{Value, json};
 
 use crate::write::str_field;
@@ -51,6 +51,25 @@ impl WebFetchTool {
 /// memory, so an unbounded `max_bytes` let one call pull gigabytes.
 const MAX_BYTES: usize = 10 * 1024 * 1024;
 
+/// Most readable text one fetch puts in front of the model (~5k tokens).
+/// The download cap (`max_bytes`) bounds raw HTML; this bounds what is left
+/// after reduction. Longer text is archived whole and cut here, and the
+/// trailer names the archive id for `expand`, the same contract as `grep`.
+pub(crate) const VISIBLE_TEXT_BYTES: usize = 20 * 1024;
+
+/// `text` cut at the last whole line inside `limit` bytes, or `None` when it
+/// already fits.
+pub(crate) fn clip(text: &str, limit: usize) -> Option<&str> {
+    if text.len() <= limit {
+        return None;
+    }
+    let mut boundary = limit;
+    while boundary > 0 && !text.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    Some(&text[..text[..boundary].rfind('\n').unwrap_or(boundary)])
+}
+
 /// The model's `max_bytes`, defaulted and held to `1..=MAX_BYTES`.
 fn max_bytes(input: &Value) -> usize {
     input
@@ -69,8 +88,8 @@ impl Tool for WebFetchTool {
             description: "Fetch a URL and return its readable text: HTML is reduced to \
                 headings, paragraphs, lists and code blocks; other content types come back \
                 as-is. Pass `max_bytes` to cap what is downloaded (default 100 KiB, at \
-                most 10 MiB); the result says when it was cut. Only http and https URLs; 10 s \
-                timeout."
+                most 10 MiB). Text over 20 KiB is cut and archived; read the rest with \
+                `expand`. http(s) only; 10 s timeout."
                 .to_string(),
             input_schema: json!({
                 "type": "object",
@@ -113,8 +132,28 @@ impl Tool for WebFetchTool {
         } else {
             String::new()
         };
+        let body = match clip(&fetched.text, VISIBLE_TEXT_BYTES) {
+            None => fetched.text.clone(),
+            Some(head) => {
+                let id = cx
+                    .archive
+                    .put(ArchivePut {
+                        session: cx.session,
+                        call: cx.call,
+                        tool: "web_fetch".into(),
+                        subject: Some(url.clone()),
+                        bytes: fetched.text.clone().into_bytes(),
+                    })
+                    .await
+                    .map_err(|_| ToolError::Io)?;
+                format!(
+                    "{head}\n… {} more bytes; archived as {id} (use `expand`)",
+                    fetched.text.len() - head.len()
+                )
+            }
+        };
         Ok(ToolOutput {
-            text: format!("{}\n[{url} · {} bytes{cut}]", fetched.text, fetched.bytes),
+            text: format!("{body}\n[{url} · {} bytes{cut}]", fetched.bytes),
             is_error: false,
             diff: None,
             structured: None,
@@ -132,5 +171,23 @@ mod tests {
         assert_eq!(max_bytes(&json!({"max_bytes": 4096})), 4096);
         assert_eq!(max_bytes(&json!({"max_bytes": 0})), 1);
         assert_eq!(max_bytes(&json!({"max_bytes": u64::MAX})), MAX_BYTES);
+    }
+
+    #[test]
+    fn clip_keeps_short_text_and_cuts_long_text_to_the_visible_budget() {
+        assert_eq!(clip("short\npage", VISIBLE_TEXT_BYTES), None);
+        // A fixed 100 KiB page: 2048 lines of 50 bytes.
+        let page = format!("{}\n", "x".repeat(49)).repeat(2048);
+        let head = clip(&page, VISIBLE_TEXT_BYTES).expect("cut");
+        assert!(head.len() <= VISIBLE_TEXT_BYTES);
+        assert!(
+            head.len() > VISIBLE_TEXT_BYTES - 50,
+            "cut at a line, not earlier"
+        );
+        // Savings: at most a fifth of the page reaches the model.
+        assert!(head.len() * 5 <= page.len());
+        // Multi-byte text never splits a char.
+        let wide = "é".repeat(VISIBLE_TEXT_BYTES);
+        assert!(clip(&wide, VISIBLE_TEXT_BYTES).is_some());
     }
 }

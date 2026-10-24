@@ -191,16 +191,12 @@ impl Tool for BashTool {
         ToolSpec {
             name: "bash".to_string(),
             description: format!(
-                "Runs a shell command line in the workspace and returns its output \
-                (stdout and stderr interleaved, ANSI stripped) followed by `[exit <code> in \
-                <ms>]`. Output streams while the command runs; a long-running command is \
-                stopped after `timeout_s` seconds (default 120). Prefer the dedicated `read`, \
-                `grep`, `glob` and `edit` tools for file work; use `bash` for builds, tests, \
-                git and anything that needs a process. `shell` picks the interpreter \
-                ({default} by default, or `bash`, `zsh`, `fish`, `dash`, `ksh`, `tcsh`, `nu`, \
-                `pwsh` when the command line needs that shell's syntax); it errors if the \
-                shell is not installed. Pass `background: true` for a server \
-                or watcher you do not want to wait for."
+                "Run a shell command in the workspace; returns stdout+stderr (ANSI \
+                stripped) and `[exit <code> in <ms>]`. Stopped after `timeout_s` (default \
+                120). Use `read`/`grep`/`glob`/`edit` for file work, `bash` for builds, tests, \
+                git and processes. `shell` picks the interpreter ({default} by default; \
+                bash, zsh, fish, dash, ksh, tcsh, nu, pwsh). `background: true` for servers \
+                and watchers."
             ),
             input_schema,
             deferred: false,

@@ -847,6 +847,11 @@ pub struct ContextConfig {
     /// Token budget for the session repo map, placed last in system[2]
     /// (P43); `0` is off, the default until the T43.6 bench sets one.
     pub repomap_budget_tokens: u32,
+    /// `context.edit_tools`: which diff-shaped edit tools the model sees.
+    /// `"auto"` (default) sends one per model family — `apply_patch` (V4A)
+    /// to GPT/Codex/o-series models, `edit` to everyone else — so the
+    /// prefix carries one edit schema instead of two; `"both"` sends both.
+    pub edit_tools: String,
 }
 
 impl Default for ContextConfig {
@@ -854,7 +859,7 @@ impl Default for ContextConfig {
         Self {
             compact_at: 0.75,
             keep_turns: 2,
-            microcompact_after_turns: 6,
+            microcompact_after_turns: 4,
             tool_output_visible_bytes: 8192,
             tool_output_head_lines: 60,
             tool_output_tail_lines: 20,
@@ -864,6 +869,7 @@ impl Default for ContextConfig {
             deferred_tools: true,
             system_prompt: "default".to_string(),
             repomap_budget_tokens: 0,
+            edit_tools: "auto".to_string(),
         }
     }
 }

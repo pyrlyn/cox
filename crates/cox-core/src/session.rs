@@ -1996,8 +1996,16 @@ impl Session {
         // One assembly for the first try and T28.3's pre-call retry, so the
         // retried request differs only in the history it is given.
         let build = |history: &[Message], marks: &[usize], microcompact_after: u32| {
+            // Dedup first so a re-read references its original, which
+            // microcompaction may later turn into a pointer in turn.
+            // `dedup_window_turns = 0` turns this off with the live table.
+            let deduped = if self.config.context.dedup_window_turns == 0 {
+                history.to_vec()
+            } else {
+                crate::context::dedup_reads(history)
+            };
             let req_messages = crate::context::microcompact(
-                history,
+                &deduped,
                 marks,
                 self.config.context.keep_turns,
                 microcompact_after,
