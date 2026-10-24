@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use crate::memo::{self, Memo};
 use async_trait::async_trait;
 use cox_protocol::config::{CHILD_ENV_ALLOWLIST, McpServerConfig};
 use cox_protocol::errors::ToolError;
@@ -251,11 +252,31 @@ pub struct McpClient {
     service: Arc<RunningService<RoleClient, CoxClient>>,
     timeout: Duration,
     asking: Arc<Asking>,
+    /// Read-only results this session already fetched (off by default).
+    memo: Arc<Memo>,
 }
 
 impl McpClient {
     /// Spawns a stdio server or opens a Streamable HTTP one and handshakes.
     pub async fn connect(
+        name: &str,
+        cfg: &McpServerConfig,
+        timeout: Duration,
+        auth: &Auth,
+    ) -> Result<Self, ClientError> {
+        let mut client = Self::open(name, cfg, timeout, auth).await?;
+        client.memo = Arc::new(Memo::new(cfg.memo_ttl_secs, cfg.memo_max_entries));
+        Ok(client)
+    }
+
+    /// Returns a client with this server's memo set, for tests and callers
+    /// that build the client from a transport.
+    pub fn with_memo(mut self, ttl_secs: u64, max_entries: usize) -> Self {
+        self.memo = Arc::new(Memo::new(ttl_secs, max_entries));
+        self
+    }
+
+    async fn open(
         name: &str,
         cfg: &McpServerConfig,
         timeout: Duration,
@@ -338,6 +359,7 @@ impl McpClient {
             service: Arc::new(service),
             timeout,
             asking,
+            memo: Arc::new(Memo::new(0, 0)),
         })
     }
 
@@ -364,6 +386,7 @@ impl McpClient {
             service: Arc::new(service),
             timeout,
             asking,
+            memo: Arc::new(Memo::new(0, 0)),
         })
     }
 
@@ -718,6 +741,13 @@ impl Tool for McpTool {
                 structured: None,
             });
         }
+        // Only an approved read-only tool may be memoized: a write must
+        // reach the server every time, and the key is the exact request.
+        let memo_key = (self.spec().risk == Risk::ReadOnly && self.client.memo.enabled())
+            .then(|| memo::key(&self.tool.name, &input));
+        if let Some(hit) = memo_key.as_deref().and_then(|k| self.client.memo.get(k)) {
+            return Ok(hit);
+        }
         let mut params = CallToolRequestParams::new(self.tool.name.clone());
         if let Some(args) = input.as_object() {
             params = params.with_arguments(args.clone());
@@ -742,7 +772,11 @@ impl Tool for McpTool {
                 None => return Err(ToolError::Timeout),
             },
         };
-        Ok(output_of(result))
+        let out = output_of(result);
+        if let Some(k) = memo_key {
+            self.client.memo.put(k, &out);
+        }
+        Ok(out)
     }
 }
 
@@ -1137,6 +1171,7 @@ mod tests {
                 url: Some(format!("{base}/mcp")),
                 env: HashMap::new(),
                 sandbox: true,
+                ..Default::default()
             },
         )])
     }

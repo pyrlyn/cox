@@ -34,12 +34,9 @@ style, tool schemas sorted by name, history with rolling breakpoints.
 Blocks are rebuilt from session state each request (no cross-conversation
 store), so reuse happens only in the provider cache, which is content-keyed.
 
-## 3. History summarization (exists)
+## 3. History summarization
 
-`cox-core/src/compact.rs` replaces every turn but the last `keep_turns` with one
-summary over budget, keeps the last two turns verbatim, and the summary turn is
-appended to that session's history, so it is the next cached prefix. It lives
-in session history only and cannot leak into another conversation.
+Moved to its own draft PR (#487, `docs/design/history-summarization.md`).
 
 ## 4. Provider prompt cache (exists)
 
@@ -53,7 +50,13 @@ timestamps or ids in `system[0..=2]` (snapshot-tested).
   argument value, type, nesting, array order, server -> miss and fresh call;
   key-order-only difference -> hit; TTL expiry and cap eviction -> fresh call;
   mutating/pending tools never cached; error results never cached.
-- context: different system/instructions/history -> different prefix bytes.
+- context isolation tests: planned (not yet written).
+
+## Bench
+
+Not run yet: the local Mac disk is full (~5 GB free), so the workspace does
+not build. Real-traffic hit rate: not measured; no replay done. No numbers
+are invented here.
 
 ## Expected savings (estimate)
 
