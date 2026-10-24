@@ -1,6 +1,5 @@
 ---
 source: crates/cox-store/src/lib.rs
-assertion_line: 1218
 expression: rendered
 ---
 -- archive
@@ -130,6 +129,13 @@ CREATE TABLE 'rollout_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
 
 -- rollout_fts_idx
 CREATE TABLE 'rollout_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+
+-- session_briefs
+CREATE TABLE session_briefs (
+  project TEXT PRIMARY KEY NOT NULL,
+  body TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 
 -- sessions
 CREATE TABLE sessions (
