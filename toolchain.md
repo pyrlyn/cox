@@ -77,7 +77,8 @@ Programs the project uses and the direct packages from its manifests.
 | extism | local (default features off) | https://github.com/extism/extism | cox-plugin: the WASM plugin host (A52, T33.3); no ureq, no URL or file module loading |
 | extism-pdk | local, `plugins/` guest workspace (default features off) | https://github.com/extism/rust-pdk | cox-plugin-sdk: the official Rust PDK the guest SDK wraps (exports, `cox:host/v1` imports, extism memory; T33.27) |
 | figment | local | https://crates.io/crates/figment | Config loading |
-| polib | local | https://crates.io/crates/polib | cox-i18n: parses the embedded gettext `.po` catalogs in pure Rust (no libintl; `docs/i18n.md`) |
+| gettext-catalog | local | https://crates.io/crates/gettext-catalog | cox-i18n: catalog parsing, `Plural-Forms`, `{name}` placeholders and the localizer (0.1.0, MIT OR Apache-2.0; pure Rust, no libintl). polib, unic-langid and sys-locale are its dependencies, not cox's |
+| polib | transitive (`gettext-catalog`) | https://crates.io/crates/polib | parses the embedded gettext `.po` catalogs in pure Rust (no libintl; `docs/i18n.md`) |
 | futures | local | https://crates.io/crates/futures | Rust dependency |
 | globset | local | https://crates.io/crates/globset | Rust dependency |
 | grep-regex | local | https://crates.io/crates/grep-regex | T3.3: plan.md names "grep-regex + grep-searcher sinks"; grep-regex (the RegexMatcher grep-searcher needs) was missing from this list. |
@@ -116,7 +117,7 @@ Programs the project uses and the direct packages from its manifests.
 | shlex | local | https://crates.io/crates/shlex | Rust dependency |
 | similar | local | https://crates.io/crates/similar | Rust dependency |
 | syntect | local | https://crates.io/crates/syntect | Rust dependency Lives in `cox-render` (T32.2). |
-| sys-locale | local | https://crates.io/crates/sys-locale | cox-i18n: the OS UI languages when the env names none |
+| sys-locale | transitive (`gettext-catalog`) | https://crates.io/crates/sys-locale | the OS UI languages when the env names none |
 | two-face | local | https://crates.io/crates/two-face | T24.3: extended syntax definitions Lives in `cox-render` (T32.2). |
 | terminal-colorsaurus | local | https://crates.io/crates/terminal-colorsaurus | T22.6: OSC 11 background colour query for `tui.theme = "auto"` Lives in `cox-render` (T32.2). |
 | tempfile | local | https://crates.io/crates/tempfile | Rust dependency |
@@ -138,7 +139,7 @@ Programs the project uses and the direct packages from its manifests.
 | tui-textarea-2 | local | https://crates.io/crates/tui-textarea-2 | Rust dependency |
 | typify | local (build-dependency) | https://github.com/oxidecomputer/typify | cox-provider `build.rs`: Anthropic request and stream types generated from the vendored `schema/anthropic-openapi.json` (T30.10, T30.12) |
 | ulid | local | https://crates.io/crates/ulid | Identifiers |
-| unic-langid | local | https://crates.io/crates/unic-langid | cox-i18n: BCP 47 language identifiers for locale negotiation |
+| unic-langid | transitive (`gettext-catalog`) | https://crates.io/crates/unic-langid | BCP 47 language identifiers for locale negotiation |
 | unicode-width | local | https://crates.io/crates/unicode-width | Rust dependency |
 | vt100 | local | https://crates.io/crates/vt100 | Rust dependency |
 | wasmtime | local (`anyhow` feature only) | https://github.com/bytecodealliance/wasmtime | cox-plugin: the runtime under extism; declared only to enable the `anyhow` feature extism 1.41.0 needs with its default features off (T33.3) |
