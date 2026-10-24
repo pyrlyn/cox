@@ -44,6 +44,12 @@ pub enum ExportError {
     },
 }
 
+impl From<gettext_catalog::Error> for ExportError {
+    fn from(err: gettext_catalog::Error) -> Self {
+        Self::Catalog(I18nError::from(err))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Shape {
     Simple(Vec<Piece>),
@@ -112,7 +118,7 @@ fn unsupported(code: &str, id: &str, reason: impl Into<String>) -> ExportError {
 /// Parses a template with `{brand}` inlined as text: the product name is
 /// fixed in every format.
 fn lower_text(code: &str, id: &str, text: &str) -> Result<Vec<Piece>, ExportError> {
-    format::validate(text).map_err(|e| unsupported(code, id, e))?;
+    format::validate(text).map_err(|e| unsupported(code, id, e.to_string()))?;
     let mut out: Vec<Piece> = Vec::new();
     for p in format::pieces(text) {
         let p = match p {
