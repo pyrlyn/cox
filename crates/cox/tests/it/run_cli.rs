@@ -86,6 +86,62 @@ fn stream_json_lists_every_event_and_the_claude_aliases() {
     assert_eq!(&types[done + 1..], ["result"]);
 }
 
+/// T67.5: a scripted `Met` verdict is one `goal_verdict` record on
+/// stream-json. The prompt's first line is `/goal`, which headless runs
+/// before the turn; auto-title is off so it cannot take the judge's turn.
+#[test]
+fn stream_json_writes_a_goal_verdict_when_met() {
+    let (work, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let scenario = work.path().join("goal.toml");
+    std::fs::write(
+        &scenario,
+        concat!(
+            "[[turn]]\n",
+            "text = \"I added the test.\"\n",
+            "\n",
+            "[[turn]]\n",
+            "job = \"summarize\"\n",
+            "text = \"MET: the test exists\"\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        home.path().join("config.toml"),
+        "[session]\nauto_title = false\n",
+    )
+    .unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_cox"));
+    let out = cmd
+        .current_dir(work.path())
+        .env("COX_HOME", home.path())
+        .env("HOME", home.path())
+        .env("COX_PROVIDER", "scripted")
+        .env("COX_SCENARIO", &scenario)
+        .args([
+            "--cwd",
+            work.path().to_str().unwrap(),
+            "run",
+            "-p",
+            "/goal the test exists\nadd the test",
+            "--output-format",
+            "stream-json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let verdict = String::from_utf8(out)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .find(|value| value["type"] == "goal_verdict")
+        .expect("no goal_verdict record");
+    assert_eq!(verdict["verdict"], "met");
+    assert_eq!(verdict["reason"], "the test exists");
+    assert_eq!(verdict["turns_used"], 1);
+}
+
 /// T34.7/SM§6: `stream-json`'s writer (`run.rs`) is
 /// `serde_json::to_string(&cox_core::redact::scrub_event(&ev))` for every
 /// `Event`, generically (D2) — `scrub_event` special-cases only
