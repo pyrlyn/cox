@@ -3,10 +3,9 @@
 // Licensed under GPL-3.0 or later; see https://www.gnu.org/licenses/gpl-3.0.html
 
 //! Instruction files (`AGENTS.md`/`CLAUDE.md` hierarchy), skills
-//! (`SKILL.md`), slash commands, output styles, subagent definitions, and
-//! hook config.
-//! Separate because these are user- and repo-supplied extension points, not
-//! core agent logic.
+//! (`SKILL.md`), slash commands, output styles, subagent definitions, hook
+//! config, and the shared process-tree spawn (T57.5). Separate because these
+//! are user- and repo-supplied extension points, not core agent logic.
 
 // why: this crate was not under `missing_docs` before the workspace lints;
 // drop this allow once its public items are documented.
@@ -21,6 +20,7 @@ pub mod hooks;
 pub mod instructions;
 pub mod memory;
 pub mod presence;
+pub mod proc;
 pub mod rules;
 pub mod skills;
 pub mod styles;

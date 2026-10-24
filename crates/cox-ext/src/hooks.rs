@@ -23,6 +23,8 @@ use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
+use crate::proc::{TreeChild, WaitFail};
+
 pub struct ShellHooks {
     events: HashMap<String, Vec<HookConfig>>,
     cwd: PathBuf,
@@ -245,36 +247,26 @@ async fn run_one(
     cwd: &PathBuf,
 ) -> HookOutcome {
     let failed = |error: String| HookOutcome::Failed { error };
-    let mut child = match Command::new(shell)
+    let mut command_line = Command::new(shell);
+    command_line
         .arg("-c")
         .arg(command)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .kill_on_drop(true)
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    let mut child = match TreeChild::spawn(command_line) {
         Ok(child) => child,
         Err(e) => return failed(format!("spawn failed: {e}")),
     };
-    let pid = child.id();
-    if let Some(mut stdin) = child.stdin.take() {
+    if let Some(mut stdin) = child.stdin().take() {
         // A hook that never reads stdin is fine; a closed pipe is not an error.
         let _ = stdin.write_all(payload.to_string().as_bytes()).await;
     }
-    let output = match tokio::time::timeout(limit, child.wait_with_output()).await {
-        Ok(Ok(out)) => out,
-        Ok(Err(e)) => return failed(format!("wait failed: {e}")),
-        Err(_) => {
-            // `kill_on_drop` took the shell; the group takes its children.
-            if let Some(pid) = pid {
-                let _ = nix::sys::signal::killpg(
-                    nix::unistd::Pid::from_raw(pid as i32),
-                    nix::sys::signal::Signal::SIGKILL,
-                );
-            }
+    let output = match child.wait_with_output(limit).await {
+        Ok(out) => out,
+        Err(WaitFail::Io(e)) => return failed(format!("wait failed: {e}")),
+        Err(WaitFail::TimedOut) => {
             return failed(format!("timed out after {}s", limit.as_secs()));
         }
     };
@@ -617,5 +609,70 @@ mod tests {
             matches!(out, HookOutcome::Failed { ref error } if error.contains("timed out")),
             "{out:?}"
         );
+    }
+
+    #[cfg(unix)]
+    fn alive(pid: i32) -> bool {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    /// The hook command backgrounds `sleep` and then blocks. Killing only
+    /// the shell would leave that sleep running after the timeout.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn hook_timeout_kills_the_grandchild() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let mut events = HashMap::new();
+        events.insert(
+            "PreToolUse".into(),
+            vec![HookConfig {
+                matcher: None,
+                command: format!("sleep 30 & echo $! > {}; wait", pidfile.display()),
+                timeout_s: Some(1),
+                kind: HookKind::Command,
+            }],
+        );
+        let hooks = ShellHooks::new(
+            &HooksConfig {
+                events,
+                ..HooksConfig::default()
+            },
+            dir.path().to_path_buf(),
+        );
+        let started = std::time::Instant::now();
+        let out = hooks
+            .run(
+                HookEvent::PreToolUse,
+                serde_json::json!({ "tool_name": "bash" }),
+                Duration::from_secs(5),
+            )
+            .await;
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(
+            matches!(out, HookOutcome::Failed { ref error } if error.contains("timed out")),
+            "{out:?}"
+        );
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        for _ in 0..40 {
+            if !alive(pid) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("backgrounded sleep {pid} survived the hook timeout");
     }
 }

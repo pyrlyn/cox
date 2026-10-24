@@ -25,7 +25,6 @@
 - T56.10. Optional: live check against a real Cursor account (needs the creator's key)
 - T57.1. Windows CI job: `cargo check` over a growing crate list
 - T57.4. `path::confine` on Windows paths
-- T57.5. One kill path for process trees: hooks and the session environment
 - T57.6. The same kill path for the lsp server, the status line and external agents
 - T57.7. `cox-tools` compiles on Windows
 - T57.8. `bash` on Windows: ConPTY inside a job object

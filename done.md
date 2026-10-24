@@ -137,6 +137,23 @@ cargo +1.99.0 fmt --check -p cox-tools
   clean
 ```
 
+#### T57.5 One kill path for process trees: hooks and the session environment
+
+Model: grok-4.7 · Status: done 2026-10-19 · Depends: T57.1 · Size: ~220 (landed larger) · Priority: P1 · Complexity: 4
+
+Goal: a hook and the login-shell probe time out by killing the whole child tree. Unix uses a process group (`killpg(SIGKILL)`); Windows uses a job object (`TerminateJobObject`). One helper, `cox_ext::proc::TreeChild`, serves both call sites and is what T57.6 should call. The login-shell probe is `cfg(unix)`. On Windows `login_env` returns the process environment and no warning — R10.8, unverified on a Windows host, recorded here rather than guessed. nix is no longer a direct dependency of `cox-ext` or `cox-session`.
+
+Files: `crates/cox-ext/src/proc.rs` (new), `crates/cox-ext/src/hooks.rs`, `crates/cox-session/src/env.rs`, `crates/cox-ext/Cargo.toml`, `crates/cox-session/Cargo.toml`, `Cargo.toml`, `toolchain.md`, `justfile`
+
+Landed larger than the card's three files: the helper is its own module so T57.6 can call it without reaching into the hook runner, and dropping nix from `cox-session` is that crate's manifest. `cox-ext` joined `just windows-check`. `cox-session` did not: `external_agents.rs` and `target_agents.rs` still call `process_group(0)` (T57.6 and the target runner), so a Windows check of the whole crate would fail for a reason this card does not own. There is no `rust.md`; the dependency row went to `toolchain.md` and plan §1.1.
+
+Check output (2026-10-19):
+```
+$ mise exec -- cargo nextest run --locked -p cox-ext -p cox-session -E 'test(/hook_timeout_kills_the_grandchild|login_shell_timeout_kills_the_tree/)'
+     Summary 2 tests run: 2 passed
+     (hook_timeout_kills_the_grandchild, login_shell_timeout_kills_the_tree;
+      login_env_returns_the_shells_exported_path and a_shell_past_the_timeout_falls_back_to_the_process_env also passed)
+$ mise exec -- cargo clippy --locked -p cox-ext -p cox-session --all-targets -- -D warnings
 #### T57.10 Home, config and keys on Windows
 
 Model: grok-4.7 · Status: done 2026-10-19 · Depends: T57.9 · Size: ~80 · Priority: P2 · Complexity: 2
@@ -157,6 +174,11 @@ $ mise exec -- cargo clippy --locked -p cox-config -p cox-session --all-targets 
 $ mise exec -- cargo fmt --check
      clean
 $ COX_HOME=/tmp/cox-scratch mise exec -- cargo run -- doctor
+     toolchain, db, sandbox (bwrap), git, prefix ok; API keys row fails because ANTHROPIC_API_KEY is unset (exit 1)
+```
+
+Not done: `just windows-check` (cargo-xwin's clang-cl shim has no version in this environment, same as T57.4). The Windows job object path is `cfg(windows)` and was not executed.
+
      toolchain, db, sandbox (bwrap), git, prefix ok; API keys fail because ANTHROPIC_API_KEY is unset (exit 1)
 ```
 
