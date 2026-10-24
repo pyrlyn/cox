@@ -1095,4 +1095,25 @@ mod tests {
         assert!(matches!(err, ProviderError::Overloaded));
         assert_eq!(server.received_requests().await.map(|r| r.len()), Some(1));
     }
+
+    /// OpenAI-style APIs cache prefixes automatically: breakpoints set by
+    /// cox-core must never leak an Anthropic `cache_control` into the body.
+    #[test]
+    fn breakpoints_never_emit_cache_control() {
+        let mut req = base("gpt-5");
+        req.messages = vec![
+            Message {
+                role: Role::User,
+                content: vec![Content::Text { text: "one".into() }],
+            },
+            Message {
+                role: Role::User,
+                content: vec![Content::Text { text: "two".into() }],
+            },
+        ];
+        req.cache_breakpoints = vec![1, 2, 3];
+        let body = build_body(&req).expect("builds");
+        let dumped = serde_json::to_string(&body).expect("serializes");
+        assert!(!dumped.contains("cache_control"), "{dumped}");
+    }
 }
