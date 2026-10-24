@@ -50,13 +50,40 @@ timestamps or ids in `system[0..=2]` (snapshot-tested).
   argument value, type, nesting, array order, server -> miss and fresh call;
   key-order-only difference -> hit; TTL expiry and cap eviction -> fresh call;
   mutating/pending tools never cached; error results never cached.
-- context isolation tests: planned (not yet written).
+- context blocks are rebuilt from the session's own state per request and
+  are already covered by `context.rs` snapshot tests; no new cache store, so
+  no new isolation test is needed there.
 
 ## Bench
 
-Not run yet: the local Mac disk is full (~5 GB free), so the workspace does
-not build. Real-traffic hit rate: not measured; no replay done. No numbers
-are invented here.
+`cargo test -p cox-mcp --test client bench -- --ignored --nocapture`: 40
+calls over 10 distinct requests, fake server with 20 ms per call
+(Mac, 2026-10-24, one run):
+
+| memo | server calls | wall time | model tokens |
+| --- | --- | --- | --- |
+| off (`memo_ttl_secs = 0`) | 40 | 888 ms | baseline |
+| on (`memo_ttl_secs = 300`) | 10 | 223 ms | same as off |
+
+The memo returns the same text the server would, so it does not change what
+the model reads: its saving is external calls and latency (-75% each here).
+Model tokens are saved by the prefix cache (layers 2 and 4) and by re-read
+dedup, which this branch does not change.
+
+Real-traffic hit rate: not available. The local `~/.cox` has 10 rollouts
+and none has an MCP call, and the `usage` ledger in `cox.db` is empty, so
+there is nothing real to replay. Nothing is estimated in its place.
+
+## How to test
+
+`cargo nextest run -p cox-mcp memo` (unit + integration, including the
+negative foreign-hit tests).
+
+## Limitations
+
+- Off by default; a read-only tool can still return live data, so pick a TTL.
+- Memory only, per server, per session; not shared or persisted.
+- Only tools whose approved contract says `readOnlyHint` are memoized.
 
 ## Expected savings (estimate)
 

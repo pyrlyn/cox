@@ -1735,6 +1735,20 @@
           "description": "Whether a stdio server runs under `sandbox::Policy` (T33.42,\n`docs/design/plugins.md` §14 decision 4). `false` opts this named\nserver out, for setups that need it; irrelevant to a `url` server.",
           "type": "boolean",
           "default": true
+        },
+        "memo_ttl_secs": {
+          "description": "Seconds a read-only tool result is reused for an identical call\n(same tool, same canonical arguments) in one session; `0` is off.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "memo_max_entries": {
+          "description": "Most memoized results kept per server; the oldest goes first.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 128
         }
       },
       "additionalProperties": false

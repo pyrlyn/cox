@@ -948,6 +948,7 @@ async fn mcp_resources_lists_reads_and_archives_over_cap_first() {
 /// served to the wrong request shows as the wrong text.
 struct MemoServer {
     calls: Arc<AtomicUsize>,
+    delay: Duration,
 }
 
 impl ServerHandler for MemoServer {
@@ -973,6 +974,7 @@ impl ServerHandler for MemoServer {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        tokio::time::sleep(self.delay).await;
         let n = self.calls.fetch_add(1, Ordering::SeqCst);
         let args = Value::Object(request.arguments.unwrap_or_default());
         let text = format!("{} {args} #{n}", request.name);
@@ -981,9 +983,18 @@ impl ServerHandler for MemoServer {
 }
 
 async fn memo_client(name: &str, ttl: u64) -> (HashMap<String, Arc<dyn Tool>>, Arc<AtomicUsize>) {
+    memo_client_slow(name, ttl, Duration::ZERO).await
+}
+
+async fn memo_client_slow(
+    name: &str,
+    ttl: u64,
+    delay: Duration,
+) -> (HashMap<String, Arc<dyn Tool>>, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let handler = MemoServer {
         calls: calls.clone(),
+        delay,
     };
     let (client_io, server_io) = tokio::io::duplex(64 * 1024);
     tokio::spawn(async move {
@@ -1074,4 +1085,28 @@ async fn memo_is_off_by_default_and_per_server() {
         (c1.load(Ordering::SeqCst), c2.load(Ordering::SeqCst)),
         (1, 1)
     );
+}
+
+/// Bench (run with `--ignored --nocapture`): a fixed set of 40 calls over 10
+/// distinct requests against a server that takes 20 ms per call, memo off
+/// and on. Prints server calls, wall time and result bytes the server sent.
+#[tokio::test]
+#[ignore = "bench"]
+async fn bench_memo_on_a_fixed_request_set() {
+    let set: Vec<Value> = (0..40)
+        .map(|i| json!({"q": format!("topic-{}", i % 10)}))
+        .collect();
+    for ttl in [0, 300] {
+        let (t, calls) = memo_client_slow("b", ttl, Duration::from_millis(20)).await;
+        let start = std::time::Instant::now();
+        let mut bytes = 0;
+        for args in &set {
+            bytes += run(&t, "mcp__b__look", args.clone()).await.len();
+        }
+        let ms = start.elapsed().as_millis();
+        let n = calls.load(Ordering::SeqCst);
+        println!(
+            "BENCH memo_ttl={ttl}: requests=40 server_calls={n} wall_ms={ms} result_bytes={bytes}"
+        );
+    }
 }
