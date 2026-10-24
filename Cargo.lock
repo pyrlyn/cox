@@ -4,20 +4,11 @@ version = 4
 
 [[package]]
 name = "addr2line"
-version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b"
-dependencies = [
- "gimli 0.32.3",
-]
-
-[[package]]
-name = "addr2line"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59317f77929f0e679d39364702289274de2f0f0b22cbf50b2b8cff2169a0b27a"
 dependencies = [
- "gimli 0.33.0",
+ "gimli",
 ]
 
 [[package]]
@@ -601,21 +592,6 @@ dependencies = [
  "dunce",
  "fs_extra",
  "pkg-config",
-]
-
-[[package]]
-name = "backtrace"
-version = "0.3.76"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb531853791a215d7c62a30daf0dde835f381ab5de4589cfe7c649d2cbe92bd6"
-dependencies = [
- "addr2line 0.25.1",
- "cfg-if",
- "libc",
- "miniz_oxide 0.8.9",
- "object 0.37.3",
- "rustc-demangle",
- "windows-link",
 ]
 
 [[package]]
@@ -1981,6 +1957,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cox-vecdb"
+version = "0.1.2"
+dependencies = [
+ "cox-vector-memory",
+ "libsqlite3-sys",
+ "parking_lot",
+ "qdrant-edge",
+ "serde_json",
+]
+
+[[package]]
 name = "cox-vector-memory"
 version = "0.1.2"
 dependencies = [
@@ -2137,7 +2124,7 @@ dependencies = [
  "cranelift-control",
  "cranelift-entity",
  "cranelift-isle",
- "gimli 0.33.0",
+ "gimli",
  "hashbrown 0.17.1",
  "libm",
  "log",
@@ -3242,7 +3229,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
 dependencies = [
  "crc32fast",
- "miniz_oxide 0.9.1",
+ "miniz_oxide",
  "zlib-rs",
 ]
 
@@ -3558,12 +3545,6 @@ dependencies = [
  "rand_core 0.10.1",
  "wasm-bindgen",
 ]
-
-[[package]]
-name = "gimli"
-version = "0.32.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
 name = "gimli"
@@ -4835,15 +4816,6 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniz_oxide"
-version = "0.8.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
-dependencies = [
- "adler2",
-]
-
-[[package]]
-name = "miniz_oxide"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
@@ -5317,15 +5289,6 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.37.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
-dependencies = [
- "memchr",
-]
-
-[[package]]
-name = "object"
 version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd229a0361b9d0d4396176e02d65897f487eebeab7caa6d443855ee152ca0b9c"
@@ -5571,10 +5534,8 @@ version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
 dependencies = [
- "backtrace",
  "cfg-if",
  "libc",
- "petgraph",
  "redox_syscall",
  "smallvec",
  "windows-link",
@@ -5661,16 +5622,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adba4db388f687393c18c51348d44a41d870ca9df71a2c98172ea3035dc6936e"
 dependencies = [
  "pest",
-]
-
-[[package]]
-name = "petgraph"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
-dependencies = [
- "fixedbitset 0.4.2",
- "indexmap 2.14.2",
 ]
 
 [[package]]
@@ -6173,8 +6124,6 @@ dependencies = [
 [[package]]
 name = "qdrant-edge"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bf059f7c7f5145aea9b8ccfea3e6f9bcf7d0fd2440132a1489c02124473468c"
 dependencies = [
  "ahash",
  "aligned-vec",
@@ -9430,7 +9379,7 @@ version = "49.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36abb25de5518707e5ba96b586366b09db168d2d4976cb9dac57265a317497ea"
 dependencies = [
- "addr2line 0.26.1",
+ "addr2line",
  "async-trait",
  "bitflags 2.13.2",
  "bumpalo",
@@ -9441,7 +9390,7 @@ dependencies = [
  "log",
  "mach2",
  "memfd",
- "object 0.40.0",
+ "object",
  "once_cell",
  "postcard",
  "pulley-interpreter",
@@ -9480,11 +9429,11 @@ dependencies = [
  "cranelift-bforest",
  "cranelift-bitset",
  "cranelift-entity",
- "gimli 0.33.0",
+ "gimli",
  "hashbrown 0.17.1",
  "indexmap 2.14.2",
  "log",
- "object 0.40.0",
+ "object",
  "postcard",
  "rustc-demangle",
  "semver",
@@ -9564,10 +9513,10 @@ dependencies = [
  "cranelift-entity",
  "cranelift-frontend",
  "cranelift-native",
- "gimli 0.33.0",
+ "gimli",
  "itertools 0.14.0",
  "log",
- "object 0.40.0",
+ "object",
  "pulley-interpreter",
  "smallvec",
  "target-lexicon",
@@ -9622,7 +9571,7 @@ checksum = "5577f3a5a979a7c3b1b23c1e9f13e70a8583acc8828471ec56f282117fc4952b"
 dependencies = [
  "cranelift-codegen",
  "log",
- "object 0.40.0",
+ "object",
  "wasmtime-environ",
 ]
 
@@ -10317,7 +10266,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.2.17",
  "getrandom 0.4.3",
- "gimli 0.33.0",
+ "gimli",
  "hashbrown 0.16.1",
  "hashbrown 0.17.1",
  "hyper",
@@ -10334,7 +10283,7 @@ dependencies = [
  "num-complex",
  "num-integer",
  "num-traits",
- "object 0.40.0",
+ "object",
  "once_cell",
  "opentelemetry",
  "opentelemetry_sdk",

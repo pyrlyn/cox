@@ -240,3 +240,7 @@ opt-level = 1
 # a JoinError and keeps going (fail open on extensions), which abort removes.
 [profile.dist]
 inherits = "dev"
+
+# exp/vector-bench: local qdrant-edge fork without forced deadlock_detection.
+[patch.crates-io]
+qdrant-edge = { path = "/Users/listepo/Grok/forks/qdrant-edge" }

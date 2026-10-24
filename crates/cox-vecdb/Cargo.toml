@@ -1,0 +1,24 @@
+[package]
+name = "cox-vecdb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Experimental SQLite-backed HNSW vector store (exp/vector-bench)"
+publish = false
+
+[features]
+default = []
+# Enables the benchmark binary's Qdrant Edge and SqliteVectorStore engines.
+bench = ["dep:qdrant-edge", "dep:cox-vector-memory", "dep:serde_json"]
+
+[dependencies]
+libsqlite3-sys = { workspace = true }
+parking_lot = "0.12"
+qdrant-edge = { version = "=0.9.0", optional = true }
+cox-vector-memory = { path = "../cox-vector-memory", optional = true }
+serde_json = { workspace = true, optional = true }
+
+[[bin]]
+name = "vecbench"
+required-features = ["bench"]
