@@ -11,7 +11,8 @@
 //! Target store: embedded Qdrant Edge (`qdrant-edge` feature, beta, no
 //! server); it cannot build inside the cox workspace yet (parking_lot
 //! feature conflict with nucleo), so [`SqliteVectorStore`] is the default.
-//! [`HashEmbedder`] is a deterministic offline embedder used in tests and as a no-network fallback; it matches shared words, not meaning.
+//! [`HashEmbedder`] is a deterministic offline embedder used in tests
+//! and as a no-network fallback; it matches shared words, not meaning.
 
 // Experimental crate: public items are documented in docs/vector-memory.md.
 #![allow(missing_docs)]
