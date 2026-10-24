@@ -1,0 +1,60 @@
+name: rename-function
+prompt: |
+  test_shapes.py fails: it expects the function `area_of` in
+  shapes/geometry.py to be called `rectangle_area`. Rename it everywhere it
+  is defined or used, without changing test_shapes.py, then run
+  `python3 -m unittest` and show that it passes.
+setup: |
+  mkdir -p shapes
+  : > shapes/__init__.py
+  cat > shapes/geometry.py <<'EOF'
+  def area_of(width, height):
+      return width * height
+  EOF
+  cat > shapes/report.py <<'EOF'
+  from shapes.geometry import area_of
+
+
+  def describe(width, height):
+      return f"{width}x{height} has area {area_of(width, height)}"
+  EOF
+  cat > test_shapes.py <<'EOF'
+  import unittest
+
+  from shapes.geometry import rectangle_area
+  from shapes.report import describe
+
+
+  class ShapesTest(unittest.TestCase):
+      def test_rectangle_area(self):
+          self.assertEqual(rectangle_area(3, 4), 12)
+
+      def test_describe(self):
+          self.assertEqual(describe(2, 5), "2x5 has area 10")
+  EOF
+  cksum test_shapes.py > .test.sum
+check: |
+  python3 -m unittest -q &&
+  ! grep -rn --include='*.py' area_of shapes &&
+  cksum test_shapes.py | cmp -s - .test.sum
+timeout_s: 300
+dry_run:
+  turns:
+  - text: renaming it in both files
+    calls:
+    - tool: write
+      input:
+        path: shapes/geometry.py
+        content: |
+          def rectangle_area(width, height):
+              return width * height
+    - tool: write
+      input:
+        path: shapes/report.py
+        content: |
+          from shapes.geometry import rectangle_area
+
+
+          def describe(width, height):
+              return f"{width}x{height} has area {rectangle_area(width, height)}"
+    final: renamed area_of to rectangle_area

@@ -88,8 +88,8 @@ Not added: the provider stack and the permission/sandbox/sanitize/mcp/config cra
 | T5.12 | todo | P2 | 2 | 0% | |
 | T5.13 | todo | P3 | 1 | 0% | |
 | T33.40.7 | todo | P2 | 3 | 0% | |
+| T33.40.10 | todo | P3 | 3 | 70% | |
 | T33.40.9 | done | P2 | 4 | 100% | grok-4.7 |
-| T33.40.10 | todo | P3 | 3 | 0% | |
 | T33.40.11 | done | P2 | 2 | 100% | grok-4.7 |
 | T33.40.17 | todo | P3 | 2 | 0% | |
 | T33.47 | in progress | P2 | 4 | 95% | Claude Code / claude-opus-5-5 |
@@ -969,6 +969,31 @@ Plan:
 5. R§5 gets the table with the model versions and the date.
 Falsifier: if any task that passes in the baseline fails with the plugin, or the median saving per task is below 15 %, `route` stays off by default, and the guide says so.
 Check: `just test-evals` is green offline (preset expansion, cap stop, the paired table). R§5 has the E2 table.
+
+Landed 2026-10-21 (branch `feat/t33.40.10`):
+- the `jev-route` preset in the harness's `PRESETS` registry, with `--budget`, `--max-usd` and `--plugin-dir`;
+- the ledger read through `cox stats --session --csv`;
+- the paired table and the falsifier line;
+- tasks 11–14;
+- the offline tests;
+- the R§5 section with the reproduce command and an empty table.
+
+Left: the live run and its table. It needs T33.40.9, because the Jev manifest has no `route` yet, and the creator's go-ahead (decision 9).
+
+#### T33.40.11 User guide: the Jev plugin
+
+Depends: T33.40.6, T33.40.9 · Size: ~150 · Files: `docs/plugins/jev.md`, `docs/plugins.md` (link), `crates/cox/tests/it/doc_examples.rs`
+Goal: one page for users. It covers:
+- what Jev is and is not (J13);
+- building it from `plugins/jev` (`just plugin jev`) and `cox plugin install <dir>` (C3);
+- the key through `TYPESAFE_API_KEY` or the keyring entry `cox/typesafe`;
+- enabling points in `[plugins.decide]`;
+- per point, the exact state sent to TypeSafe (J17);
+- costs in `cox stats` as `plugin:jev`;
+- fail-open behaviour and `cox doctor` rows;
+- the E1/E2 results and the defaults they justify;
+- the migration from `[providers.typesafe]` (J§7).
+Check: `doc_examples` parses every `toml` block on the page against `Config` or the plugin manifest schema and fails on drift.
 
 #### T33.40.17 Optional: record live fixtures (needs the creator's key)
 
