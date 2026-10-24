@@ -38,4 +38,7 @@ workspace-members = ["cox-plugin-api", "cox-plugin-fixtures"]
 third-party = [
     { name = "crossterm" },
     { name = "uniffi" },
+    # Optional, off by default: it forces parking_lot `deadlock_detection`,
+    # which conflicts with `send_guard` (nucleo). Keep it out of the hack.
+    { name = "qdrant-edge" },
 ]
