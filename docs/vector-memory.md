@@ -99,3 +99,35 @@ be added behind a cargo feature flag once it reaches 1.0 or gains a second
 active maintainer (currently almost all commits are by one author).
 
 There is no implementation change for now; SQLite remains the only backend.
+
+## sqlite-vec backend (`sqlite-vec` feature)
+
+Why `load_extension` is not used: diesel 2.3 does not expose the raw
+`sqlite3*` handle of a `SqliteConnection`, so `sqlite3_enable_load_extension`
+and `sqlite3_load_extension` cannot be called on it, and shipping a separate
+`vec0.dylib` would be fragile anyway.
+
+How it works: the `sqlite-vec` crate (=0.1.6) compiles sqlite-vec into the
+binary against the same bundled `libsqlite3-sys` that diesel uses (one SQLite
+symbol set). `VecSqliteConnection::establish` registers `sqlite3_vec_init`
+once per process with `sqlite3_auto_extension`, so SQLite initialises the
+extension on every connection opened afterwards, then checks
+`SELECT vec_version()`. Dynamic extension loading stays disabled. The only
+`unsafe` block is in `vec_conn::register` (scoped `#[allow(unsafe_code)]`).
+`VecSqliteConnection` derefs to `SqliteConnection`, so it is used with diesel
+as is.
+
+`SqliteVecStore` implements `VectorStore` on a `vec0` table with
+`distance_metric=cosine` and a `project` partition key; entry metadata lives in
+`mem_vec0_meta` keyed by the same rowid.
+
+- Enable: `cargo build -p cox-vector-memory --features sqlite-vec`.
+- Disable: omit the feature (default); `SqliteVectorStore` (blob scan) stays.
+- Test: `cargo test -p cox-vector-memory --features sqlite-vec` (vec_version,
+  vec0 KNN order, 8 threads on separate connections, store upsert/search/
+  project isolation).
+
+Limitations: the dimension is fixed per database file (`float[dim]`); KNN in
+vec0 0.1.6 is brute force (no ANN index); sqlite-vec is pre-1.0; registration
+is process-wide, so every SQLite connection in the process gets the extension;
+not yet wired into the agent.

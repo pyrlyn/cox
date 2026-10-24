@@ -25,6 +25,10 @@ mod graph;
 mod sqlite_vec;
 pub use graph::{GraphStore, Related, Relation, SqliteGraphStore};
 pub use sqlite_vec::SqliteVectorStore;
+#[cfg(feature = "sqlite-vec")]
+mod vec_conn;
+#[cfg(feature = "sqlite-vec")]
+pub use vec_conn::{SqliteVecStore, VecSqliteConnection};
 
 #[cfg(feature = "qdrant-edge")]
 mod qdrant;
