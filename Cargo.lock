@@ -5195,7 +5195,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -6817,7 +6817,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -7719,7 +7719,7 @@ dependencies = [
  "serde",
  "tempfile",
  "textwrap",
- "toml 0.9.12+spec-1.1.0",
+ "toml 1.1.6+spec-1.1.0",
  "uniffi_internal_macros",
  "uniffi_meta",
  "uniffi_pipeline",
@@ -7764,7 +7764,7 @@ dependencies = [
  "quote",
  "serde",
  "syn 2.0.119",
- "toml 0.9.12+spec-1.1.0",
+ "toml 1.1.6+spec-1.1.0",
  "uniffi_meta",
 ]
 
@@ -9067,7 +9067,7 @@ dependencies = [
  "winnow 1.0.4",
  "zerovec",
  "zstd",
- "zstd-safe",
+ "zstd-safe 8.1.0",
  "zstd-sys",
 ]
 
@@ -9301,7 +9301,7 @@ version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
 dependencies = [
- "zstd-safe",
+ "zstd-safe 7.3.0",
 ]
 
 [[package]]
@@ -9309,6 +9309,15 @@ name = "zstd-safe"
 version = "7.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd44c6a7284e91f3717755b24315a302edd9153a01f753c3cba3d765e8eafac"
 dependencies = [
  "zstd-sys",
 ]
