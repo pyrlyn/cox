@@ -34,20 +34,53 @@ fn attr<'a>(
         .map(|attribute| &attribute.value)
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn telemetry_correlates_agent_provider_and_tool_without_content_by_default() {
-    let child = std::process::Command::new(std::env::current_exe().expect("current test binary"))
-        .args([
-            "--exact",
-            "telemetry_content_capture_child",
-            "--ignored",
-            "--nocapture",
-        ])
-        .env("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
-        .status()
-        .expect("run opt-in child test");
-    assert!(child.success(), "opt-in child test failed");
+/// Runs one `#[ignore]`d child test alone in a fresh copy of this test binary.
+///
+/// `tracing` caches per-callsite interest in process-global state. When other
+/// tests in the same binary hit the same callsites concurrently (with no
+/// subscriber, or with their own scoped one), that cache can be rebuilt while
+/// this test's scoped subscriber is active, and spans such as
+/// `invoke_agent cox.turn` are silently dropped. A child process that runs a
+/// single test on a single thread has no such neighbours, so the capture is
+/// deterministic.
+fn run_isolated_child(name: &str, capture_content: bool) {
+    let mut command =
+        std::process::Command::new(std::env::current_exe().expect("current test binary"));
+    command.args([
+        "--exact",
+        name,
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    if capture_content {
+        command.env("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true");
+    } else {
+        command.env_remove("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT");
+    }
+    let output = command.output().expect("run isolated child test");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "isolated child test `{name}` failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // `--exact` with a wrong path matches nothing and still exits 0.
+    assert!(
+        stdout.contains("1 passed"),
+        "isolated child test `{name}` did not run:\n{stdout}"
+    );
+}
 
+#[test]
+fn telemetry_correlates_agent_provider_and_tool_without_content_by_default() {
+    run_isolated_child("telemetry::telemetry_default_child", false);
+    run_isolated_child("telemetry::telemetry_content_capture_child", true);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "run in an isolated process by telemetry_correlates_agent_provider_and_tool_without_content_by_default"]
+async fn telemetry_default_child() {
     let spans = captured_spans().await;
 
     let session = spans
@@ -90,7 +123,7 @@ async fn telemetry_correlates_agent_provider_and_tool_without_content_by_default
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "run by the default-content test in a process with the opt-in variable"]
+#[ignore = "run in an isolated process with the opt-in variable by telemetry_correlates_agent_provider_and_tool_without_content_by_default"]
 async fn telemetry_content_capture_child() {
     let spans = captured_spans().await;
     let provider = spans

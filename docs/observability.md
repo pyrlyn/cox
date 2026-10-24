@@ -82,6 +82,22 @@ These four are written only under
 asserts they are absent by default and present after the opt-in, so the
 default cannot regress silently.
 
+### Testing the span contract
+
+The contract test lives in `crates/cox-core/tests/it/telemetry.rs`. It
+installs a scoped `tracing` subscriber that bridges to an in-memory
+OpenTelemetry exporter, runs the scripted `one_tool` session and checks the
+session → turn → provider/tool parent links and attributes.
+
+Run it with `cargo test -p cox-core --test it telemetry`. The visible test
+re-executes the test binary twice, each time running one `#[ignore]`d child
+test alone on one thread: once without and once with the opt-in variable.
+Limitation: `tracing` caches callsite interest process-wide, so a scoped
+subscriber can miss spans while other tests in the same process hit the same
+callsites; that made the test flaky in full parallel runs. Any new test that
+asserts on captured spans should use the same isolated-child pattern rather
+than a scoped subscriber in the shared test process.
+
 ## Backends
 
 Every backend below speaks OTLP/HTTP; only the endpoint and headers change.
