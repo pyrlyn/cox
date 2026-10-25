@@ -233,10 +233,14 @@ debug = "line-tables-only"
 debug = false
 opt-level = 1
 
-# The profile that 'dist' will build with (scripts/package.sh, the release CLI
-# archives): `dev`, so every release is a dev build (unoptimized, line tables,
-# no LTO, not stripped), like the Debug macOS app it ships with.
-# `panic = "abort"` is deliberately absent: cox-mcp turns a panicking task into
-# a JoinError and keeps going (fail open on extensions), which abort removes.
+# The profile that 'dist' builds with (cargo-dist and scripts/package.sh, the release CLI archives). Light
+# optimization without LTO: close to a dev build in time, far smaller than one.
+# `panic` stays "unwind" on purpose: the code relies on `catch_unwind` / JoinError.
 [profile.dist]
-inherits = "dev"
+inherits = "release"
+opt-level = 1
+lto = "off"
+codegen-units = 256
+incremental = true
+debug = "line-tables-only"
+strip = "debuginfo"
