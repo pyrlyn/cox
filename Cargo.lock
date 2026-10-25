@@ -43,7 +43,7 @@ dependencies = [
  "futures-concurrency",
  "rustc-hash",
  "rustix",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "shell-words",
@@ -59,7 +59,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4893bfb11e0e193aa5a64611a126ee87567acb1879556519c902722899229de"
 dependencies = [
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -70,7 +70,7 @@ checksum = "1d595a79e1665d02c91c7dd1bedd118501e75cc0a3d5b1651b5150ec4c5c1e0d"
 dependencies = [
  "anyhow",
  "derive_more",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "serde_with",
@@ -263,7 +263,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_derive",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -453,7 +453,7 @@ checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -973,7 +973,7 @@ dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -1058,7 +1058,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86954634b6c48b4336b02a6602756405f8bd1a53a5f7b0349937b6260fa96522"
 dependencies = [
  "figment",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1242,7 +1242,7 @@ dependencies = [
  "nix 0.31.3",
  "portable-pty",
  "rmcp",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "tempfile",
@@ -1259,7 +1259,7 @@ version = "0.1.2"
 dependencies = [
  "config-schema",
  "cox-protocol",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
@@ -1344,7 +1344,7 @@ dependencies = [
  "cox-app",
  "cox-protocol",
  "serde_json",
- "syn 3.0.8",
+ "syn 3.0.9",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -1447,7 +1447,7 @@ name = "cox-plugin-api"
 version = "0.1.2"
 dependencies = [
  "figment",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1468,7 +1468,7 @@ dependencies = [
  "insta",
  "pretty_assertions",
  "rstest",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1762,7 +1762,7 @@ dependencies = [
  "nix 0.31.3",
  "proptest",
  "rstest",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -2223,7 +2223,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -2256,7 +2256,7 @@ checksum = "2ac7135c3ef02b2f7833bbeb1be5ba7f966dcde8a87c6b87f65a778d71a02785"
 dependencies = [
  "darling_core 0.24.1",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -2523,7 +2523,7 @@ checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -3020,7 +3020,7 @@ checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -3668,7 +3668,7 @@ dependencies = [
  "indoc",
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -4203,7 +4203,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -5668,7 +5668,7 @@ checksum = "92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -5845,7 +5845,7 @@ dependencies = [
  "process-wrap",
  "reqwest 0.13.5",
  "rmcp-macros",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "sse-stream",
@@ -5868,7 +5868,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde_json",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6147,14 +6147,14 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
+checksum = "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e"
 dependencies = [
  "chrono",
  "dyn-clone",
  "ref-cast",
- "schemars_derive 1.2.2",
+ "schemars_derive 1.2.3",
  "serde",
  "serde_json",
 ]
@@ -6173,14 +6173,14 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d98c67716b46af2f0b8cf752abc930f6f9aecfbf671ecfb531db8a31dbe4e2ba"
+checksum = "e1c3a92094fa7d61aa124645844facb6b554dfc797136d0f5fd1f890e2bffc69"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde_derive_internals 0.30.0",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6314,7 +6314,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6336,7 +6336,7 @@ checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6373,7 +6373,7 @@ checksum = "8d3b1629de253c70a0508c3899572da79ca359fdab27c7920ff00406df418906"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6403,7 +6403,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6432,7 +6432,7 @@ dependencies = [
  "indexmap 2.14.2",
  "jiff",
  "schemars 0.9.0",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "serde_core",
  "serde_json",
  "serde_with_macros",
@@ -6448,7 +6448,7 @@ dependencies = [
  "darling 0.24.1",
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6779,9 +6779,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.8"
+version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01016da373cd8f7ef12624f796309f5c31ba8d646dd08856c02cd741d823c622"
+checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6805,7 +6805,7 @@ checksum = "901704edd0dfe137f1987838ee4f259e4e063c31371bdb423f7ae38ec6f77f02"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -7053,7 +7053,7 @@ checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -7153,7 +7153,7 @@ checksum = "78773a2a397f451582ce068015985c33193cf6dea8b74d2a639fe457b2f07b0e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -7616,7 +7616,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "syn 3.0.8",
+ "syn 3.0.9",
  "thiserror 2.0.21",
  "unicode-ident",
 ]
@@ -7634,7 +7634,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tokenstream",
- "syn 3.0.8",
+ "syn 3.0.9",
  "typify-impl",
 ]
 
@@ -8049,7 +8049,7 @@ dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
  "wasm-bindgen-shared",
 ]
 
@@ -9079,7 +9079,7 @@ dependencies = [
  "rustix",
  "rustls",
  "rustls-webpki",
- "schemars 1.2.2",
+ "schemars 1.2.3",
  "security-framework-sys",
  "semver",
  "serde",
@@ -9092,7 +9092,7 @@ dependencies = [
  "smallvec",
  "strum",
  "syn 2.0.119",
- "syn 3.0.8",
+ "syn 3.0.9",
  "thiserror 2.0.21",
  "time",
  "tinystr",
@@ -9173,7 +9173,7 @@ checksum = "33811428bee40dbceb6d545e95754741d17a6aef9a4849f0fd62e2ba4f412a78"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
  "synstructure",
 ]
 
@@ -9232,7 +9232,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
  "zbus_names",
  "zvariant",
  "zvariant_utils",
@@ -9295,7 +9295,7 @@ checksum = "f75b4683f6c7f45248d4d64056a24298c6281e0993356d7d1b4a1a962ef10d4a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
  "synstructure",
 ]
 
@@ -9336,7 +9336,7 @@ checksum = "34df6fc39dbd26ddc9c10e6a2984476e13acce22e64e4487636ef494369225da"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -9412,7 +9412,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 3.0.8",
+ "syn 3.0.9",
  "zvariant_utils",
 ]
 
@@ -9425,6 +9425,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "syn 3.0.8",
+ "syn 3.0.9",
  "winnow 1.0.4",
 ]
