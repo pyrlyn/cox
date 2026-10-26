@@ -44,7 +44,6 @@ type Injected = (Option<(HeaderName, HeaderValue)>, Option<Duration>);
 /// `cox_provider_stream` (T33.18).
 pub(crate) struct Net {
     allow: Capabilities,
-    client: OnceLock<Result<reqwest::Client, String>>,
     sections: Mutex<HashMap<String, Bound>>,
     /// The section whose `cox_provider_stream` is running, if any.
     active: Mutex<Option<String>>,
@@ -53,17 +52,19 @@ pub(crate) struct Net {
 impl Net {
     /// From the granted capability lines (`grant::capability_list`).
     pub(crate) fn new(granted: &BTreeSet<String>) -> Self {
-        let net = granted
+        let net: Vec<String> = granted
             .iter()
             .filter_map(|line| line.strip_prefix("net:"))
             .map(str::to_owned)
             .collect();
+        if !net.is_empty() {
+            warm();
+        }
         Self {
             allow: Capabilities {
                 net,
                 ..Capabilities::default()
             },
-            client: OnceLock::new(),
             sections: Mutex::new(HashMap::new()),
             active: Mutex::new(None),
         }
@@ -98,6 +99,7 @@ impl Net {
             }
             None => None,
         };
+        warm();
         self.sections
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -232,11 +234,7 @@ impl Net {
         if let Some((name, value)) = injected {
             headers.insert(name, value);
         }
-        let client = self
-            .client
-            .get_or_init(client)
-            .as_ref()
-            .map_err(|e| failed(e))?;
+        let client = shared_client().map_err(failed)?;
         let mut builder = client.request(method, url).headers(headers);
         if let Some(timeout) = timeout {
             builder = builder.timeout(timeout);
@@ -279,6 +277,24 @@ impl Net {
             body: String::from_utf8_lossy(&body).into_owned(),
         })
     }
+}
+
+/// The one client every plugin's `cox_http` shares (it is an `Arc` inside).
+///
+/// Building it loads rustls' root store, which takes hundreds of
+/// milliseconds in a debug build: more than a plugin call's default
+/// 200 ms `call_ms` cap. Built lazily inside the first `cox_http`, that cost
+/// was charged to the guest's deadline and the call timed out, so [`warm`]
+/// builds it host-side when a plugin is granted a host or bound a section.
+static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+
+fn shared_client() -> Result<&'static reqwest::Client, &'static str> {
+    CLIENT.get_or_init(client).as_ref().map_err(String::as_str)
+}
+
+/// Builds the shared client now, outside any guest call's deadline.
+fn warm() {
+    let _ = shared_client();
 }
 
 /// Redirects are off: a 3xx to a host outside the allow-list would
