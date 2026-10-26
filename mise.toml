@@ -1,13 +1,15 @@
 [tools]
-python = "3.15.0" # runs ptools
-uv = "0.13.0" # installs the pipx: ptools tool
+python = "3.15.1" # runs ptools
+uv = "0.13.5" # installs the pipx: ptools tool
 "cargo:cargo-sweep" = "0.8.0" # `mise run sweep`: drops build artifacts unused for 1 day (ptools sweep)
 mold = { version = "2.42.1", os = ["linux"] } # linker, Linux only; mise [env] below turns it on where it is installed
 sccache = { version = "0.18.0", os = ["linux", "macos"] } # compiler cache; the [env] block below makes it the rustc wrapper where it is installed
 "cargo:cargo-cache" = "0.8.3" # `just cache` / `just cache-autoclean`; the shared cargo home fills up
 "pipx:git+https://github.com/pyrlyn/tools.git" = "d6eb6452cbb7ec4b350de87194548915c2648c27" # `mise run sweep`, `just cache`, `just swarfr` (ptools, Python; pyrlyn/tools#8, repin to a tag once merged)
 rust = { version = "1.99.0", components = "rustfmt,clippy", targets = ["wasm32-unknown-unknown"] } # the one Rust version for local work, CI and releases; wasm32: the guest workspace `plugins/` (T33.27, PL§13)
-node = "24.21.0" # latest LTS; runs Style Dictionary, the desktop token generator (`just desktop-tokens`, T37.17, DS§2)
+node = "26.12.1" # latest LTS; runs Style Dictionary, the desktop token generator (`just desktop-tokens`, T37.17, DS§2)
+"npm:agent-browser" = "0.39.2" # browser automation CLI for agents: Drive and screenshot the planned WebView preview pane.
+"npm:agent-device" = "0.21.31" # device/app automation CLI for agents (Callstack): Launch and drive the macOS/Windows desktop apps.
 zig = "0.16.0" # linker for `cargo zigbuild`: the Linux cox build the Terminal-Bench containers run (T30.9)
 "aqua:rust-cross/cargo-zigbuild" = "0.23.4" # cross-builds that Linux cox from macOS without a Docker build step
 "github:rust-cross/cargo-xwin" = { version = "0.23.1", os = ["macos", "linux"] } # `just windows-check` off Windows (T57.1): cargo against the MSVC CRT and SDK it fetches, no aqua entry; Windows runs cargo natively
