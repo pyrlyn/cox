@@ -359,6 +359,21 @@ fn built_in_segments(state: &State) -> Vec<(bool, String)> {
     if let Some(title) = &state.title {
         out.push((false, crate::text::sanitize(title)));
     }
+    // T67.5: the goal and how many judged turns it has used. Droppable, and
+    // placed before the countdown so a narrow row still sheds the countdown
+    // first (`fit` removes the last `false` segment).
+    if let Some(goal) = &state.goal {
+        let cond = crate::text::truncate(
+            &crate::text::sanitize(&goal.condition),
+            40,
+            state.glyphs.ellipsis,
+        );
+        let counts = match goal.max_turns {
+            Some(max) => format!("{}/{}", goal.turns_used, max),
+            None => goal.turns_used.to_string(),
+        };
+        out.push((false, format!("goal {counts} {cond}")));
+    }
     // Right-most droppable: `fit` removes the last `false` segment first, so
     // the countdown is the first thing to go on a narrow line.
     if let Some(seg) = loop_countdown {
@@ -621,6 +636,51 @@ mod tests {
         let cmds = declare(&mut state, "right", vec![Slot::StatusRight]);
         bus.serve(&mut state, cmds);
         state
+    }
+
+    /// T67.5: `/goal` puts the condition and the turn count on the status
+    /// line, and each verdict is one transcript line.
+    #[test]
+    fn goal_status_line() {
+        use cox_protocol::types::{Event, Level};
+
+        let mut state = State::new(PermissionMode::Default, SandboxMode::WorkspaceWrite);
+        state.status.model = "sonnet-5".into();
+        update(
+            &mut state,
+            Msg::Event(Event::Notice {
+                level: Level::Info,
+                text: "goal: tests pass (0/12)".into(),
+            }),
+        );
+        update(
+            &mut state,
+            Msg::Event(Event::GoalVerdict {
+                verdict: "met".into(),
+                reason: "the test exists".into(),
+                turns_used: 1,
+            }),
+        );
+        let line = line_at(&state, 200).to_string();
+        assert!(line.contains("goal 1/12 tests pass"), "{line}");
+        assert!(
+            state.transcript.iter().any(|cell| matches!(
+                cell,
+                crate::state::Cell::Notice { text, .. } if text == "goal met: the test exists"
+            )),
+            "{:?}",
+            state.transcript
+        );
+        insta::assert_snapshot!(line);
+        update(
+            &mut state,
+            Msg::Event(Event::Notice {
+                level: Level::Info,
+                text: "goal cleared".into(),
+            }),
+        );
+        let cleared = line_at(&state, 200).to_string();
+        assert!(!cleared.contains("goal "), "{cleared}");
     }
 
     /// P42: `[architect]` sits right before the permission mode it

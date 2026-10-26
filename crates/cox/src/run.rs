@@ -448,10 +448,18 @@ async fn drive(
 ) -> anyhow::Result<Outcome> {
     // The core runs the turn inside `submit`, so it must live on its own
     // task or nothing could answer an `ApprovalRequired` mid-turn.
+    // A prompt whose first line is a slash command (the way `--plain`
+    // reads one) runs that command first. `/goal` has to be set before the
+    // turn it judges, and headless has no other slash path.
     let (text, attachments) = prompt;
-    let turn = tokio::spawn({
+    let (lead, text) = peel_slash_command(&text);
+    if let Some(sub) = lead {
+        session.submit(sub).await?;
+    }
+    let command_only = text.is_empty();
+    let turn = (!command_only).then(|| {
         let session = session.clone();
-        async move {
+        tokio::spawn(async move {
             session
                 .submit(Submission::UserTurn {
                     text,
@@ -459,8 +467,15 @@ async fn drive(
                     confirm_think,
                 })
                 .await
-        }
+        })
     });
+    let turn_fut = async move {
+        match turn {
+            Some(handle) => handle.await,
+            None => std::future::pending().await,
+        }
+    };
+    tokio::pin!(turn_fut);
     let mut outcome = Outcome::default();
     let mut out = std::io::stdout().lock();
     let mut driver = approvals.map(|_| spawn_stdin());
@@ -475,7 +490,14 @@ async fn drive(
     // `notice`/`task_completed` events are never dropped. `rx.recv` stays
     // the first (biased) branch so a message already sitting in the
     // channel is always drained before this decides the run is idle.
-    let mut ended = false;
+    // T67.5: `TurnDone` is not the end of `submit` when a goal is set.
+    // `pursue_goal` emits `GoalVerdict` after the session is already idle,
+    // so breaking on the first idle `TurnDone` drops that event. Wait until
+    // the spawned `submit` has finished too. A command-only prompt already
+    // finished inside this function.
+    let mut ended = command_only;
+    let mut task_finished = command_only;
+    let mut task_error = None;
     loop {
         let deadline = pending.iter().map(|(_, at)| *at).min();
         let ev = tokio::select! {
@@ -505,7 +527,14 @@ async fn drive(
                 }
                 continue;
             }
-            () = session.wait_idle(), if ended => break,
+            res = &mut turn_fut, if !task_finished => {
+                task_finished = true;
+                if let Ok(Err(e)) = res {
+                    task_error = Some(e);
+                }
+                continue;
+            }
+            () = session.wait_idle(), if ended && task_finished => break,
         };
         // T28.4: this surface prints, so every event passes through the one
         // redaction helper first; folding the scrubbed copy keeps `result`,
@@ -540,10 +569,26 @@ async fn drive(
             ended = true;
         }
     }
-    if let Ok(Err(e)) = turn.await {
+    if let Some(e) = task_error {
         return Err(e.into());
     }
     Ok(outcome)
+}
+
+/// The first line of a prompt, when it is a slash command `--plain` would
+/// submit, runs before the rest of the text. Anything else stays one prompt.
+fn peel_slash_command(prompt: &str) -> (Option<Submission>, String) {
+    let Some((first, rest)) = prompt.split_once('\n') else {
+        return (None, prompt.to_string());
+    };
+    let first = first.trim();
+    if !first.starts_with('/') {
+        return (None, prompt.to_string());
+    }
+    match cox_tui::commands::parse(first, Tier::Code) {
+        Some(cox_tui::commands::Action::Submit(sub)) => (Some(sub), rest.trim().to_string()),
+        _ => (None, prompt.to_string()),
+    }
 }
 
 /// `cox run --loop <interval> -p "…" --max-iterations N` (T27.6, the
