@@ -237,10 +237,33 @@ Two refinements keep the window small without losing evidence:
 - **Dedup:** an identical read-only call within
   `context.dedup_window_turns` (default 8) with no write to its subject
   since returns `"unchanged since #<id>"` instead of the bytes again.
+  When a request is assembled, a `read` older than that window whose input
+  and result text are byte-identical to an earlier `read` in the history
+  is sent as a one-line reference to that earlier call. Identical text is
+  the guard: a changed file, another range, mode or path, another tool or
+  a failed read never matches, and the earlier block is never rewritten,
+  so the cached prefix stays put. `dedup_window_turns = 0` turns both off.
 - **Microcompaction:** tool results older than
-  `context.microcompact_after_turns` (default 6) become
+  `context.microcompact_after_turns` (default 4) become
   `Pointer { archive, summary }` in new requests. The rollout on disk is
-  untouched — only what the model is (re)sent shrinks.
+  untouched — only what the model is (re)sent shrinks. The default was 6;
+  at 4 the cache break that each new pointer causes lands in history that
+  is about to be re-sent anyway, so the bench shows a net win (see
+  `evals/token/README.md`). Set it back with
+  `context.microcompact_after_turns = 6`.
+- **One edit tool per model:** `edit` and `apply_patch` do the same job.
+  With `context.edit_tools = "auto"` (default) a GPT, Codex or o-series
+  model gets `apply_patch` (the V4A grammar it was trained on) and every
+  other model gets `edit`, so the prefix carries one schema instead of
+  two. The choice follows the tier's model, so a routed-down turn on a
+  different family gets its own tool (that turn's prefix is a different
+  cache entry anyway). `edit_tools = "both"` restores both.
+- **Tool-side caps:** `read` shows at most 32 KiB of one file and names
+  the next `lines` range to read; `web_fetch` shows at most 20 KiB of the
+  reduced page text and archives the rest for `expand`. Inside a session
+  the loop's own `tool_output_visible_bytes` cut (8 KiB) is usually
+  tighter, so these caps matter most for `cox mcp`, ACP and other callers
+  that take tool output directly.
 
 ## What the model sees: the cache-stable prefix
 

@@ -17,18 +17,21 @@ seconds on a laptop.
 
 `crates/cox/examples/bench.rs` replays every transcript through the real
 `Session` loop: `Scripted` provider fed with specs generated from the
-transcript, real `read`/`grep`/`glob` tools over `workspace/`, plus two
-never-called deferred tools (`web_fetch`, `ask_user`) so the deferred
-toggle has schemas to include. The loop writes real ledger rows to a
+transcript, real `read`/`grep`/`glob` tools over `workspace/`, the two
+never-called edit tools (`edit`, `apply_patch`) so the `edit_tools` toggle
+has schemas to drop, plus two never-called deferred tools (`web_fetch`,
+`ask_user`) so the deferred toggle has schemas to include. The loop writes real ledger rows to a
 `MemoryStore`; the bench sums them. Toggles are the real config flags:
 
 | mechanism | disabled by |
 |---|---|
 | archive (D6a) | `tool_output_visible_bytes = u32::MAX`, head/tail 1M |
-| dedup (D6b) | `dedup_window_turns = 0` |
+| dedup (D6b) | `dedup_window_turns = 0` (live table and history `read` dedup) |
 | outline (D6c) | transcript `read` calls rewritten `outline` → `text` |
 | deferred (D6d) | `deferred_tools = false` |
 | compaction (D6f) | `compact_at = 1.0`, `microcompact_after_turns = u32::MAX`, no `/compact` |
+| microcompact6 | `microcompact_after_turns = 6` (the default before it was 4) |
+| edit-tools-both | `edit_tools = "both"` (both edit schemas in every request) |
 | prefix (D6e) | **emulated** (see below) |
 
 Baseline is shipped defaults plus one `/compact` after the 4th turn (the
@@ -55,7 +58,9 @@ at record time.
 `data/big.rs` (generated 1 000-line file for truncation/outline/dedup
 effects). Transcripts exercise each mechanism on purpose: big-file reads
 (archive), repeated identical reads (dedup), `mode: "outline"` reads
-(outline), 6-turn length (compaction).
+(outline), 6-turn length (compaction). `long-review.jsonl` is a 16-turn
+review that re-reads files more than `dedup_window_turns` apart, so the
+history `read` dedup and earlier microcompaction have something to do.
 
 ## Re-recording
 

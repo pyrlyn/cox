@@ -49,7 +49,6 @@ pub fn tools(answer: Option<String>, store: &Arc<Store>, mdir: PathBuf) -> Vec<A
         // `Answers::Surface` when a caller passes `questions` (T22.1).
         Arc::new(AskUserTool::new(Answers::Fixed(answer))),
         Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
-        Arc::new(MemorySaveTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemorySearchTool::new(mem.clone(), mdir.clone())),
         Arc::new(MemoryGetTool::new(mem, mdir)),
         // Deferred, like memory: `tool_search` indexes them because this
@@ -446,5 +445,61 @@ mod tests {
             "{}",
             out.text
         );
+    }
+}
+
+#[cfg(test)]
+mod spec_budget {
+    use super::*;
+    use cox_protocol::traits::Store as _;
+
+    /// Bytes a spec costs in `system[0]`: description plus JSON schema.
+    fn cost(spec: &cox_protocol::ToolSpec) -> usize {
+        spec.description.len() + spec.input_schema.to_string().len()
+    }
+
+    /// The always-sent schemas (non-deferred), as a Claude-family session
+    /// gets them (`edit` only). Fixed budget: was 11 443 bytes with both
+    /// edit tools and the long `read`/`edit`/`bash` texts, 8 970 after.
+    #[test]
+    fn core_tool_specs_stay_inside_their_byte_budget() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open(tmp.path()).expect("open store"));
+        let specs: Vec<_> = tools(None, &store, tmp.path().join("m"))
+            .iter()
+            .map(|t| t.spec())
+            .collect();
+        let names: Vec<_> = specs.iter().map(|s| s.name.as_str()).collect();
+        let mut dedup = names.clone();
+        dedup.sort_unstable();
+        dedup.dedup();
+        assert_eq!(
+            dedup.len(),
+            names.len(),
+            "a tool is registered twice: {names:?}"
+        );
+        let core: usize = specs
+            .iter()
+            .filter(|s| !s.deferred && s.name != "apply_patch")
+            .map(cost)
+            .sum();
+        for s in &specs {
+            eprintln!("spec {} {} bytes", s.name, cost(s));
+        }
+        assert!(
+            core <= 9_200,
+            "core tool specs are {core} bytes, budget 9 200"
+        );
+        for s in specs
+            .iter()
+            .filter(|s| ["read", "edit", "bash"].contains(&s.name.as_str()))
+        {
+            assert!(
+                s.description.len() <= 600,
+                "{} description is {}",
+                s.name,
+                s.description.len()
+            );
+        }
     }
 }

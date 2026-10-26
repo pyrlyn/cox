@@ -113,6 +113,8 @@ fn tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(cox_tools::read::ReadTool),
         Arc::new(cox_tools::grep::GrepTool),
         Arc::new(cox_tools::glob::GlobTool),
+        Arc::new(cox_tools::edit::EditTool),
+        Arc::new(cox_tools::v4a::ApplyPatchTool),
         Arc::new(cox_tools::web_fetch::WebFetchTool::new()),
         Arc::new(cox_tools::ask_user::AskUserTool::new(
             cox_tools::ask_user::Answers::Fixed(None),
@@ -148,6 +150,9 @@ async fn replay(
         }
         "dedup-off" => config.context.dedup_window_turns = 0,
         "deferred-off" => config.context.deferred_tools = false,
+        // The pre-token-savings defaults, one mechanism at a time.
+        "microcompact6" => config.context.microcompact_after_turns = 6,
+        "edit-tools-both" => config.context.edit_tools = "both".into(),
         "compaction-off" => {
             config.context.compact_at = 1.0;
             config.context.microcompact_after_turns = u32::MAX;
@@ -270,6 +275,8 @@ async fn main() {
         "outline-off",
         "deferred-off",
         "compaction-off",
+        "microcompact6",
+        "edit-tools-both",
     ];
     let mut base_total = 0u64;
     let mut off_totals: HashMap<&str, u64> = HashMap::new();
@@ -297,8 +304,20 @@ async fn main() {
     println!("| mechanism | sessions | context-token-turns before | after | Δ |");
     println!("|---|---|---|---|---|");
     let mut any_nonzero = false;
-    for v in ["archive", "dedup", "outline", "deferred", "compaction"] {
-        let key = format!("{v}-off");
+    for v in [
+        "archive",
+        "dedup",
+        "outline",
+        "deferred",
+        "compaction",
+        "microcompact6",
+        "edit-tools-both",
+    ] {
+        let key = if v.contains('-') || v.ends_with('6') {
+            v.to_string()
+        } else {
+            format!("{v}-off")
+        };
         let before = off_totals.get(key.as_str()).copied().unwrap_or(0);
         let pct = if before == 0 {
             0.0

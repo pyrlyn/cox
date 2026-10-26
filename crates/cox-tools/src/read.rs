@@ -28,8 +28,14 @@ use crate::path::confine;
 /// `lib.rs`). `ToolOutput.text` is documented as untruncated, with the core
 /// archiving and re-truncating it losslessly (plan.md §1.2/D6a); this cap
 /// only stops one huge file from ballooning a single call's output before
-/// that safety net runs.
-pub(crate) const VISIBLE_CAP_BYTES: usize = 64 * 1024;
+/// that safety net runs. 32 KiB (~8k tokens) keeps one unranged read of a
+/// big file from eating a large slice of the context; the trailer names the
+/// next `lines=` range so the model can page on instead of guessing.
+pub(crate) const VISIBLE_CAP_BYTES: usize = 32 * 1024;
+
+/// Largest file `repomap` will parse. Kept at the old read cap on purpose:
+/// it bounds parse work, not model-visible text.
+pub(crate) const REPOMAP_MAX_FILE_BYTES: usize = 64 * 1024;
 
 /// How many leading bytes are checked for a NUL byte to decide "binary"
 /// (plan.md T3.2 step 2).
@@ -62,23 +68,15 @@ impl Tool for ReadTool {
         let input_schema = serde_json::to_value(schema_for!(ReadInput)).unwrap_or(Value::Null);
         ToolSpec {
             name: "read".to_string(),
-            description: "Reads a file as `line<TAB>content` text, or a structural outline. \
-                Default (mode \"text\", no `lines`) returns the whole file with line-number \
-                prefixes and always reports the file's total line count. Pass `lines: \"a-b\"` \
-                (1-based, inclusive) to read only that range once you know what you need — from \
-                a prior `grep` hit or an `outline` result — instead of paying for the whole \
-                file. Pass `mode: \"outline\"` for the file's top-level \
-                functions/types/classes/impls (tree-sitter for .rs/.ts/.tsx/.py/.go; markdown \
-                headings or definition-keyword lines for everything else). The outline is \
-                `start-end: signature`; pass `lines` as that `start-end`. Use outline first on \
-                any file you have not read yet, especially a large one, then follow up with \
-                `lines` on the range that actually matters. Pass `symbol: \"Foo::bar\"` (a \
-                function, method, type or class name; a bare `bar` also finds methods) to get \
-                just that definition's lines; several matches are listed with their line ranges \
-                instead. A PNG, JPEG, GIF or WebP file (up to 3.75 MB) comes back as the \
-                image itself, which you can see; `lines` and `mode` do not apply to it. Pass \
-                `anchors: true` to prefix each text line with `N:abc→` instead of `N<TAB>`; \
-                `edit` takes those anchors in `ops`. Refuses other binary files."
+            description: "Read a file as `line<TAB>content` with its total line count. \
+                `lines: \"a-b\"` (1-based, inclusive) reads only that range; prefer it once a \
+                `grep` hit or an outline tells you where to look. `mode: \"outline\"` lists \
+                top-level definitions as `start-end: signature` (use it first on unread or \
+                large files). `symbol: \"Foo::bar\"` returns just that definition. \
+                `anchors: true` prefixes lines with `N:abc→` anchors for `edit` `ops`. PNG, \
+                JPEG, GIF and WebP files (up to 3.75 MB) come back as images; other binary \
+                files are refused. Output over 32 KiB is cut; the trailer names the next \
+                range."
                 .to_string(),
             input_schema,
             deferred: false,
@@ -322,10 +320,24 @@ fn cap(text: String) -> String {
         boundary -= 1;
     }
     let cut = text[..boundary].rfind('\n').unwrap_or(boundary);
-    format!(
-        "{}\n\n[... truncated at {VISIBLE_CAP_BYTES} bytes; re-read with a narrower `lines=` range for the rest]",
-        &text[..cut]
-    )
+    let kept = &text[..cut];
+    // The last shown line's number (`N<TAB>` or `N:abc→`), so the hint can
+    // name the exact range to read next.
+    let next = kept
+        .rsplit('\n')
+        .next()
+        .map(|l| {
+            l.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+        })
+        .and_then(|n| n.parse::<usize>().ok())
+        .map(|n| n + 1);
+    let hint = match next {
+        Some(n) => format!("continue with `lines: \"{n}-{}\"`", n + 400),
+        None => "re-read with a narrower `lines=` range for the rest".to_string(),
+    };
+    format!("{kept}\n\n[... truncated at {VISIBLE_CAP_BYTES} bytes; {hint}]")
 }
 
 #[cfg(test)]
@@ -668,5 +680,31 @@ mod tests {
             let err = read_at(&roots, path, &input).expect_err("must refuse");
             assert!(matches!(err, ToolError::Confined { .. }), "{err:?}");
         }
+    }
+
+    /// A fixed 64 KiB file (1024 numbered lines of 64 bytes): an unranged
+    /// read now shows at most 32 KiB, half the old cap, and names the next
+    /// range to read instead of a vague hint.
+    #[test]
+    fn whole_read_is_capped_at_32_kib_with_a_next_range_hint() {
+        let content: String = (1..=1024).map(|n| format!("{n:063}\n")).collect();
+        assert_eq!(content.len(), 64 * 1024);
+        let text = render_text(&content, 1024, None, false);
+        let (shown, trailer) = text.rsplit_once("\n\n").expect("trailer");
+        assert!(shown.len() <= VISIBLE_CAP_BYTES, "{}", shown.len());
+        assert!(
+            shown.len() * 2 <= content.len() + 8 * 1024,
+            "half or less of the file"
+        );
+        let last: usize = shown
+            .rsplit('\n')
+            .next()
+            .and_then(|l| l.split('\t').next())
+            .and_then(|n| n.parse().ok())
+            .expect("last line number");
+        assert!(
+            trailer.contains(&format!("lines: \"{}-", last + 1)),
+            "names the next range: {trailer}"
+        );
     }
 }

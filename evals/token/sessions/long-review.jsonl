@@ -1,0 +1,17 @@
+{"summary": "## Goal\nReview the crate end to end\n## Decisions\nStart with main.rs\n## Files touched\nnone\n## Open todo\nauth, lib, big\n## Errors seen\nNone\n## Next step\nRead lib.rs"}
+{"user": "Start the review with main.rs.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "src/main.rs"}}], "final": "main.rs wires the CLI."}
+{"user": "Where is the entry point of the library?", "assistant": "On it.", "calls": [{"tool": "grep", "input": {"pattern": "pub fn"}}], "final": "lib.rs exports the API."}
+{"user": "Outline lib.rs.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "src/lib.rs", "mode": "outline"}}], "final": "A handful of functions."}
+{"user": "Continue.", "assistant": "On it.", "calls": [], "final": "Ready for the next file."}
+{"user": "Read auth.rs in full.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "src/auth.rs"}}], "final": "Sessions expire after an hour."}
+{"user": "Now the big generated file.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "data/big.rs"}}], "final": "It is generated tables."}
+{"user": "Lines 1-40 of lib.rs.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "src/lib.rs", "lines": "1-40"}}], "final": "Module docs and imports."}
+{"user": "Find TODOs.", "assistant": "On it.", "calls": [{"tool": "grep", "input": {"pattern": "TODO"}}], "final": "A few TODOs."}
+{"user": "Read the guide.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "docs/guide.md"}}], "final": "The guide covers setup."}
+{"user": "Any mention of refresh?", "assistant": "On it.", "calls": [{"tool": "grep", "input": {"pattern": "refresh"}}], "final": "refresh lives in auth.rs."}
+{"user": "List the Rust files.", "assistant": "On it.", "calls": [{"tool": "glob", "input": {"pattern": "**/*.rs"}}], "final": "Four Rust files."}
+{"user": "Summarise so far.", "assistant": "On it.", "calls": [], "final": "main, lib, auth, big reviewed."}
+{"user": "Check the manifest.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "Cargo.toml"}}], "final": "No extra deps."}
+{"user": "And the README.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "README.md"}}], "final": "README is short."}
+{"user": "Back to auth.rs: read it in full again.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "src/auth.rs"}}], "final": "Unchanged since the first read."}
+{"user": "Lines 1-40 of lib.rs again.", "assistant": "On it.", "calls": [{"tool": "read", "input": {"path": "src/lib.rs", "lines": "1-40"}}], "final": "Same as before."}

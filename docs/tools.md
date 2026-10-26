@@ -12,18 +12,18 @@ Core tools are always in context; deferred tools join through `tool_search`
 
 | Tool | Risk | Deferred | Subject | Notes |
 |---|---|---|---|---|
-| `read` | ReadOnly | no | path | whole / `lines="a-b"` / `mode="outline"` / `symbol="Foo::bar"` (one definition; .rs/.ts/.tsx/.py/.go); images returned as images, other binaries refused |
+| `read` | ReadOnly | no | path | whole / `lines="a-b"` / `mode="outline"` / `symbol="Foo::bar"` (one definition; .rs/.ts/.tsx/.py/.go); images returned as images, other binaries refused; output capped at 32 KiB with the next `lines` range named |
 | `grep` | ReadOnly | no | pattern | ripgrep libs, respects `.gitignore` |
 | `glob` | ReadOnly | no | pattern | mtime order, fuzzy with `query` |
 | `edit` | Write | no | path | exact `str_replace`, ambiguity errors |
-| `apply_patch` | Write (Destructive past 5 deleted files) | no | patch summary | Codex V4A grammar |
+| `apply_patch` | Write (Destructive past 5 deleted files) | no | patch summary | Codex V4A grammar; with `context.edit_tools = "auto"` only GPT/Codex/o-series models get it, others get `edit` |
 | `write` | Write | no | path | new files; rewrites over 200 lines refused |
 | `bash` | Exec (Destructive as classified) | no | command line | sandboxed, streamed, `background: true` archives |
 | `todo` | ReadOnly | no | — | drives the TUI todo panel |
 | `expand` | ReadOnly | no | archive id | reads back archived output, capped |
 | `ask_user` | ReadOnly | yes | question | blocks the turn; `--answer` headless; TUI: modal |
 | `tool_search` | ReadOnly | no | query | reveals up to 5 deferred schemas |
-| `web_fetch` | ReadOnly | yes | URL | readability fallback; domain rules apply |
+| `web_fetch` | ReadOnly | yes | URL | readability fallback; domain rules apply; text over 20 KiB archived for `expand` |
 | `agent` | max of its tools; Destructive with `isolation: "worktree"` | yes | preset | `explore` / `shell` presets, own budget; worktree isolation asks (denied in plan); `background: true` returns a task handle and `collect: [id or name, …]` (with `timeout_ms`) reads back each task's status and capped preview |
 | `memory_save` | Write | yes | name | one fact file + index + FTS row |
 | `memory_search` | ReadOnly | yes | query | FTS first, then files; top 5 capped |

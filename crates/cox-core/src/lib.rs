@@ -43,7 +43,7 @@ mod turn;
 /// `cox_core::permission::Engine` keeps working for existing callers.
 pub use cox_permission as permission;
 
-pub use context::{assemble, assemble_with, microcompact};
+pub use context::{assemble, assemble_with, dedup_reads, microcompact};
 pub use permission::{Engine, Outcome};
 pub use rollout::{History, HistoryTurn};
 pub use session::{MemoryStore, PathRules, Session};
