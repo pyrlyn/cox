@@ -63,7 +63,11 @@ jobs:
     permissions:
       contents: read
       actions: write
+    secrets:
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     with:
+      sccache: true # R2 compiler cache, see pyrlyn/ci docs/sccache.md
       mold: true # mold + clang on Linux runners (mise.toml [env])
       # Linux only. Windows: the workspace does not build there yet (P57); the
       # `windows` job below checks the crates that do. macOS: the `macos` job.
@@ -119,11 +123,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
+      - uses: pyrlyn/ci/.github/actions/sccache@228d35117ab56821b54c82fdd5751aac71892cd0 # ci#123, re-pin to main after merge
+        with:
+          access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          bucket: ${{ vars.SCCACHE_BUCKET }}
+          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          read-only: ${{ github.event_name == 'pull_request' }}
       - uses: taiki-e/install-action@23d41aa71228a2692ee31bb433f070fd4bdc6661 # nextest
 
       # Same features as the `rust` job.
       - name: platform tests
         run: cargo nextest run --workspace --all-features --no-tests=pass -E "$PLATFORM_TESTS"
+      - if: always() && env.RUSTC_WRAPPER == 'sccache'
+        run: sccache --show-stats
 
   # Linux job B (plan.md T4.2): no bwrap on PATH, so the sandbox must fall
   # back to Landlock + seccomp and still hold the same guarantees.
