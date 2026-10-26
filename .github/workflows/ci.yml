@@ -122,7 +122,11 @@ jobs:
       - uses: taiki-e/install-action@23d41aa71228a2692ee31bb433f070fd4bdc6661 # nextest
 
       # Same features as the `rust` job.
-      - name: platform tests
+      - name: tests skipped (SKIP_CI_TESTS)
+        if: vars.SKIP_CI_TESTS == 'true' || env.SKIP_CI_TESTS == 'true'
+        run: echo "::notice title=SKIP_CI_TESTS::tests skipped by SKIP_CI_TESTS"
+      - if: vars.SKIP_CI_TESTS != 'true' && env.SKIP_CI_TESTS != 'true'
+        name: platform tests
         run: cargo nextest run --workspace --all-features --no-tests=pass -E "$PLATFORM_TESTS"
 
   # Linux job B (plan.md T4.2): no bwrap on PATH, so the sandbox must fall
@@ -157,7 +161,11 @@ jobs:
 
       - uses: taiki-e/install-action@23d41aa71228a2692ee31bb433f070fd4bdc6661 # nextest
 
-      - name: sandbox tests without bwrap
+      - name: tests skipped (SKIP_CI_TESTS)
+        if: vars.SKIP_CI_TESTS == 'true' || env.SKIP_CI_TESTS == 'true'
+        run: echo "::notice title=SKIP_CI_TESTS::tests skipped by SKIP_CI_TESTS"
+      - if: vars.SKIP_CI_TESTS != 'true' && env.SKIP_CI_TESTS != 'true'
+        name: sandbox tests without bwrap
         run: |
           cargo nextest run -p cox-tools sandbox_ bash_ bash::
 
@@ -210,7 +218,11 @@ jobs:
       - name: build
         run: dotnet build Cox.sln -c Debug
 
-      - name: test
+      - name: tests skipped (SKIP_CI_TESTS)
+        if: vars.SKIP_CI_TESTS == 'true' || env.SKIP_CI_TESTS == 'true'
+        run: echo "::notice title=SKIP_CI_TESTS::tests skipped by SKIP_CI_TESTS"
+      - if: vars.SKIP_CI_TESTS != 'true' && env.SKIP_CI_TESTS != 'true'
+        name: test
         run: dotnet test --project Cox.Tests -c Debug
 
   # The guest workspace (plugins/, PL§9, T33.40.2): its own `cargo test`
@@ -238,7 +250,11 @@ jobs:
           endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           read-only: ${{ github.event_name == 'pull_request' }}
 
-      - name: plugin tests
+      - name: tests skipped (SKIP_CI_TESTS)
+        if: vars.SKIP_CI_TESTS == 'true' || env.SKIP_CI_TESTS == 'true'
+        run: echo "::notice title=SKIP_CI_TESTS::tests skipped by SKIP_CI_TESTS"
+      - if: vars.SKIP_CI_TESTS != 'true' && env.SKIP_CI_TESTS != 'true'
+        name: plugin tests
         run: cargo test --manifest-path plugins/Cargo.toml --workspace
 
       - name: plugin wasm32 build
@@ -308,7 +324,11 @@ jobs:
           mkdir -p build
           dart compile exe bin/server.dart -o build/example_dart
 
-      - name: dart plugin example e2e
+      - name: tests skipped (SKIP_CI_TESTS)
+        if: vars.SKIP_CI_TESTS == 'true' || env.SKIP_CI_TESTS == 'true'
+        run: echo "::notice title=SKIP_CI_TESTS::tests skipped by SKIP_CI_TESTS"
+      - if: vars.SKIP_CI_TESTS != 'true' && env.SKIP_CI_TESTS != 'true'
+        name: dart plugin example e2e
         run: cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_dart)'
 
       - name: build the Go example
@@ -323,7 +343,8 @@ jobs:
       # `tinygo` shim fails in the template test's scratch dir (no pin
       # there); hand the test the plugins' real tool PATH, as
       # `just plugin-examples go` does.
-      - name: go plugin example e2e
+      - if: vars.SKIP_CI_TESTS != 'true' && env.SKIP_CI_TESTS != 'true'
+        name: go plugin example e2e
         run: |
           PLUGIN_TOOLS_PATH="$(cd plugins && eval "$(mise env -s bash)" && printf '%s' "$PATH")"
           export PLUGIN_TOOLS_PATH
@@ -338,7 +359,8 @@ jobs:
 
       # Also scaffolds `cox plugin new --lang kotlin` and builds it with
       # Gradle, which needs the same real PATH as the Go template test.
-      - name: kotlin plugin example e2e
+      - if: vars.SKIP_CI_TESTS != 'true' && env.SKIP_CI_TESTS != 'true'
+        name: kotlin plugin example e2e
         run: |
           PLUGIN_TOOLS_PATH="$(cd plugins && eval "$(mise env -s bash)" && printf '%s' "$PATH")"
           export PLUGIN_TOOLS_PATH
