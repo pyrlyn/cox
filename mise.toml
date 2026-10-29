@@ -1,6 +1,6 @@
 [tools]
 python = "3.15.0" # runs ptools
-uv = "0.13.0" # installs the pipx: ptools tool
+uv = "0.13.5" # installs the pipx: ptools tool
 "cargo:cargo-sweep" = "0.8.0" # `mise run sweep`: drops build artifacts unused for 1 day (ptools sweep)
 mold = { version = "2.42.1", os = ["linux"] } # linker, Linux only; mise [env] below turns it on where it is installed
 sccache = { version = "0.18.0", os = ["linux", "macos"] } # compiler cache; the [env] block below makes it the rustc wrapper where it is installed
