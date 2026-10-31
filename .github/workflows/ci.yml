@@ -23,6 +23,9 @@ jobs:
   # variable (unset or `hosted` = the hosted label, `xcode-27-local` = the dedicated Mac;
   # fork PRs keep the hosted label).
   macos-runner:
+    permissions:
+      contents: read
+      actions: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -33,12 +36,18 @@ jobs:
         with:
           runner: ${{ vars.MACOS_RUNNER }}
           value: '["xcode-27"]'
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # infra's config action on .github/infra.yml: `docs-only` is "true" when every changed file
   # is documentation (fails open: "false" when unsure, e.g. a .github/ change). The jobs below
   # then do no work but still report under their names, so the required checks pass, and
   # `docs` runs the tests that read docs/. A failed `config` runs everything.
   config:
+    permissions:
+      contents: read
+      actions: write
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -47,6 +56,9 @@ jobs:
     steps:
       - id: config
         uses: pyrlyn/ci/.github/actions/config@main
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # The shared pyrlyn/ci workflow: fmt once, then per Linux target (x86_64 and
   # aarch64) clippy (--all-targets --all-features), check, and the full nextest
@@ -97,7 +109,10 @@ jobs:
   # name; keep it in sync when such a test is added or renamed. `--no-tests=pass` keeps an
   # empty selection green.
   macos:
-    needs: [config, macos-runner]
+    permissions:
+      contents: read
+      actions: write
+    needs: [config, macos-runner, rust]
     if: >-
       vars.MACOS_CI_DISABLED != 'true' &&
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -128,10 +143,16 @@ jobs:
       - if: vars.SKIP_CI_TESTS != 'true' && env.SKIP_CI_TESTS != 'true'
         name: platform tests
         run: cargo nextest run --workspace --all-features --no-tests=pass -E "$PLATFORM_TESTS"
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # Linux job B (plan.md T4.2): no bwrap on PATH, so the sandbox must fall
   # back to Landlock + seccomp and still hold the same guarantees.
   sandbox-landlock:
+    permissions:
+      contents: read
+      actions: write
     needs: config
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -168,6 +189,9 @@ jobs:
         name: sandbox tests without bwrap
         run: |
           cargo nextest run -p cox-tools sandbox_ bash_ bash::
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # P57 (T57.1): `cargo check` and clippy for x64 and ARM64 Windows over the
   # crates that build there, listed once in the justfile (`windows_crates`);
@@ -176,6 +200,9 @@ jobs:
   # Off until the Windows work is built and tested on a Windows host (creator,
   # 2026-09-29); CI comes after that.
   windows:
+    permissions:
+      contents: read
+      actions: write
     if: false
     runs-on: windows-latest
     defaults:
@@ -192,12 +219,18 @@ jobs:
 
       - name: windows check
         run: just windows-check
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # The Windows app (T58.3). `global.json` pins the .NET 10 SDK and the
   # Microsoft.Testing.Platform runner, so the steps run in `desktop/windows`.
   # Enabled after the layout built and its MSTest passed on a Windows host (A130).
   desktop-windows:
-    needs: [config, changes]
+    permissions:
+      contents: read
+      actions: write
+    needs: [config, changes, rust]
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
       && (needs.changes.result != 'success'
@@ -224,11 +257,17 @@ jobs:
       - if: vars.SKIP_CI_TESTS != 'true' && env.SKIP_CI_TESTS != 'true'
         name: test
         run: dotnet test --project Cox.Tests -c Debug
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # The guest workspace (plugins/, PL§9, T33.40.2): its own `cargo test`
   # target (a separate workspace, so the root `rust` job above never builds
   # it) plus the wasm32-unknown-unknown build every plugin ships as.
   plugins:
+    permissions:
+      contents: read
+      actions: write
     needs: config
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -259,6 +298,9 @@ jobs:
 
       - name: plugin wasm32 build
         run: cargo build --manifest-path plugins/Cargo.toml --workspace --target wasm32-unknown-unknown
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # Guest-language examples that need a toolchain of their own (PL§13):
   # each is `#[ignore]`d in the main `rust` job with a reason naming
@@ -266,6 +308,9 @@ jobs:
   # failure rather than a silently skipped test: Dart (T33.38), Go (T33.34)
   # and Kotlin (T33.36).
   plugin-examples:
+    permissions:
+      contents: read
+      actions: write
     needs: config
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -365,8 +410,14 @@ jobs:
           PLUGIN_TOOLS_PATH="$(cd plugins && eval "$(mise env -s bash)" && printf '%s' "$PATH")"
           export PLUGIN_TOOLS_PATH
           cargo nextest run -p cox --run-ignored only -E 'test(plugin_example_kotlin)'
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   deny:
+    permissions:
+      contents: read
+      actions: write
     needs: config
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -375,11 +426,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: EmbarkStudios/cargo-deny-action@v2
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # Fails when workspace-hack drifts from the dependency graph. cargo-hakari comes from
   # mise.toml (only it, rust and sccache are installed here: mise refuses a `cargo:` tool
   # while a configured sccache is missing). Own job, so the required checks keep their names.
   hakari:
+    permissions:
+      contents: read
+      actions: write
     needs: config
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -394,8 +451,14 @@ jobs:
       - run: cargo hakari generate --diff
       - run: cargo hakari manage-deps --dry-run
       - run: cargo hakari verify
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   audit:
+    permissions:
+      contents: read
+      actions: write
     needs: config
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -413,6 +476,9 @@ jobs:
           ignores=$(python3 -c 'import tomllib; print(" ".join("--ignore " + (i if isinstance(i, str) else i["id"]) for i in tomllib.load(open("deny.toml", "rb"))["advisories"]["ignore"]))')
           # shellcheck disable=SC2086 # word splitting into flags is intended
           cargo audit $ignores
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # plan.md T30.2: `bash scripts/footprint.sh --check` fails when any metric
   # regresses more than 20% against scripts/footprint.json (keyed by
@@ -423,8 +489,11 @@ jobs:
   # static name still reports under that name, so the required `footprint (<os>)` checks pass.
   # A skipped matrix job would report one check under its raw name and leave them waiting.
   footprint-macos:
+    permissions:
+      contents: read
+      actions: write
     name: footprint (xcode-27)
-    needs: [config, macos-runner]
+    needs: [config, macos-runner, rust]
     if: >-
       vars.MACOS_CI_DISABLED != 'true' &&
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -441,8 +510,14 @@ jobs:
 
       - name: footprint regression check
         run: bash scripts/footprint.sh --check
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   footprint-linux:
+    permissions:
+      contents: read
+      actions: write
     name: footprint (ubuntu-24.04)
     needs: config
     if: >-
@@ -458,6 +533,9 @@ jobs:
 
       - name: footprint regression check
         run: bash scripts/footprint.sh --check
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # Which suites this change needs, from the shared pyrlyn/ci classification
   # (changes.yml): per ecosystem, whether anything changed and whether a
@@ -490,7 +568,10 @@ jobs:
   # packages are linted by the SwiftLintPlugins build-tool plugin during
   # desktop-macos' `swift test`. SwiftLint is the mise.toml pin.
   desktop-macos-lint:
-    needs: [config, changes, macos-runner]
+    permissions:
+      contents: read
+      actions: write
+    needs: [config, changes, macos-runner, rust]
     if: >-
       vars.MACOS_CI_DISABLED != 'true' &&
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -555,6 +636,9 @@ jobs:
           dirs=(desktop/macos/LintFixtures desktop/macos/App)
           if [ -d desktop/macos/Packages ]; then dirs+=(desktop/macos/Packages); fi
           xcrun swift-format lint --strict --recursive "${dirs[@]}"
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # The macOS app (T37.15, DT§7): CoxFFI.xcframework for Apple Silicon only
   # (A67), then `swift test` for every package under desktop/macos/Packages,
@@ -570,7 +654,10 @@ jobs:
   # .github/actions/desktop-macos, shared with the desktop build workflow
   # (T37.32.3).
   desktop-macos:
-    needs: [config, changes, macos-runner]
+    permissions:
+      contents: read
+      actions: write
+    needs: [config, changes, macos-runner, rust]
     if: >-
       vars.MACOS_CI_DISABLED != 'true' &&
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -658,11 +745,17 @@ jobs:
             echo "the build rewrote the Swift dependency pins above: commit the resolved files" >&2
             exit 1
           fi
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # The script unit tests that do not need macOS (they use fakes, no Xcode): which Swift packages
   # desktop-macos may skip on a pull request (T63.2), the sccache wiring and xcframework.sh's
   # skip stamp. Moved off desktop-macos-lint: OS-independent work runs on Linux.
   scripts:
+    permissions:
+      contents: read
+      actions: write
     needs: config
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -681,11 +774,17 @@ jobs:
 
       - name: xcframework.sh skip stamp
         run: python3 -I -m unittest discover -s scripts/desktop -p 'test_xcframework.py'
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # The desktop design tokens (T37.17, DS§2): regenerate Tokens.swift,
   # Colors.xcassets and tokens.css from desktop/design/tokens/*.json and fail
   # on any change, like the config-schema drift test. Node only, so Linux.
   desktop-tokens:
+    permissions:
+      contents: read
+      actions: write
     needs: config
     if: >-
       !cancelled() && needs.config.outputs.docs-only != 'true'
@@ -713,12 +812,18 @@ jobs:
             echo "generated tokens drifted: run \`just desktop-tokens\` and commit" >&2
             exit 1
           fi
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
 
   # Docs-only pull requests: the tests that validate docs/ (`just docs-check`: docs/config.md
   # covers every key, the docs name every subcommand and their links resolve, docs/ide.md,
   # generated docs/config.md, the getting-started keymap table). Skipped otherwise: the `rust`
   # job runs the same tests.
   docs:
+    permissions:
+      contents: read
+      actions: write
     needs: config
     if: >-
       !cancelled() && needs.config.outputs.docs-only == 'true'
@@ -744,3 +849,6 @@ jobs:
 
       - name: docs check
         run: just docs-check
+      - name: Cancel the run on failure
+        if: failure()
+        uses: pyrlyn/ci/.github/actions/cancel-run@main
