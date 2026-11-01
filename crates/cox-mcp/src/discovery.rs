@@ -131,6 +131,7 @@ fn servers_in(map: Option<&Value>) -> HashMap<String, McpServerConfig> {
                 // cox's own `[mcp.servers.<name>]` is where `sandbox = false`
                 // is set, and it fully shadows a same-named entry from here.
                 sandbox: true,
+                ..Default::default()
             };
             (name.clone(), cfg)
         })

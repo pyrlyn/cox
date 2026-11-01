@@ -279,6 +279,25 @@ Append-only: the rollout keeps every original line; `dropped` ids are
 just skipped when building future requests. Early turns keep their
 verbatim text right up until they are summarised.
 
+## MCP results are memoized only when you ask
+
+A read-only MCP tool (approved contract, `readOnlyHint`) can reuse its last
+result for an identical call. Enable it per server:
+
+```toml
+[mcp.servers.docs]
+command = "docs-mcp"
+memo_ttl_secs = 300    # 0 (default) disables
+memo_max_entries = 128
+```
+
+The key is the tool name plus the arguments with object keys sorted; any other
+difference (value, type, array order, another tool or server) is a fresh call.
+The memo lives in memory for one session and one server; nothing is persisted.
+Limitations: a "read-only" tool can still return live data, so pick a TTL that
+matches how fresh the data must be; write tools are never memoized. Test it with
+`cargo nextest run -p cox-mcp memo`.
+
 ## Where it lands on disk
 
 Under `~/.cox/` (`COX_HOME` overrides; never touch the real home in

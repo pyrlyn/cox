@@ -1182,6 +1182,11 @@ pub struct McpServerConfig {
     /// `docs/design/plugins.md` §14 decision 4). `false` opts this named
     /// server out, for setups that need it; irrelevant to a `url` server.
     pub sandbox: bool,
+    /// Seconds a read-only tool result is reused for an identical call
+    /// (same tool, same canonical arguments) in one session; `0` is off.
+    pub memo_ttl_secs: u64,
+    /// Most memoized results kept per server; the oldest goes first.
+    pub memo_max_entries: usize,
 }
 
 impl Default for McpServerConfig {
@@ -1192,6 +1197,8 @@ impl Default for McpServerConfig {
             url: None,
             env: HashMap::new(),
             sandbox: true,
+            memo_ttl_secs: 0,
+            memo_max_entries: 128,
         }
     }
 }
