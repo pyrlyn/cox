@@ -2238,3 +2238,71 @@ unless Docker e2e is required.
 ### T62. Audit fixes (2026-10-07)
 
 Findings from a code audit on 2026-10-07. Verified-clean worth noting: zero non-test `unwrap/expect/panic!` across ~150k LOC, parameterized SQL, hardened plugin install path (https-only, sha256-gated, tar ToC refusal), correct flock session lock. T62.1 (self-update 404) is closed in `done.md`.
+
+### T69. Kotlin PDK and example audit (2026-11-02)
+
+Scope: everything in Kotlin in this repo: `plugins/sdk-kotlin` (`Cox.kt`, build files),
+`plugins/examples/kotlin` (`Main.kt`, `plugin.toml`, build files) and `plugins/templates/kotlin`.
+Read in full; `gradle pluginPackage` in `plugins/examples/kotlin` builds cleanly with the
+`plugins/mise.toml` toolchain (gradle 9.8.1, java 27.0.0). The e2e tests in
+`crates/cox/tests/it/plugin_example_kotlin.rs` were not run (they need the full host build).
+
+#### T69.1. The PDK wire codec has no unit tests
+
+- Severity: medium (testability)
+- Location: `plugins/sdk-kotlin/src/wasmWasiMain/kotlin/cox/pdk/Cox.kt`, `read`, `block`, `call`
+- What: the little-endian packing in `read`/`block` and the `Ok`/`Err` envelope handling in `call`
+  are private and bound to `@WasmImport` functions, so they are only exercised by the `#[ignore]`d
+  e2e tests that need java and gradle. A byte-order or tail-length bug shows up as a garbled JSON
+  error at runtime.
+- Why: the only coverage depends on a CI job most local runs skip.
+- Fix: make `read`/`block` take the load/store functions as parameters (as `read` already does)
+  and move them plus the envelope parser into a target-independent source set; add `commonTest`
+  cases for sizes 0, 1, 7, 8, 9, 17, non-ASCII UTF-8, `{"Err":…}`, `{}`, and a non-object reply.
+
+#### T69.2. `call` leaks the reply block when the reply cannot be decoded
+
+- Severity: low
+- Location: `Cox.kt`, `Cox.call`
+- What: `argBlock` and `reply` are freed only on the straight path; `read` (e.g. `n.toInt()` on a
+  huge length) or `length` throwing skips `free(reply)`. `export` also never frees its own
+  `out`/error blocks, which is fine only because extism owns output blocks.
+- Why: a long-lived plugin that keeps hitting a bad reply grows the extism kernel memory.
+- Fix: wrap the read in `try { … } finally { free(reply) }`; document which blocks the host owns.
+
+#### T69.3. Kotlin compiler version differs between mise and the Gradle builds
+
+- Severity: low
+- Location: `plugins/mise.toml` (`kotlin = "2.4.21"`), `kotlin("multiplatform") version "2.4.20"`
+  in `plugins/sdk-kotlin/build.gradle.kts`, `plugins/examples/kotlin/build.gradle.kts` and
+  `plugins/templates/kotlin/build.gradle.kts.tmpl`
+- What: the mise comment says the Gradle plugin pins its compiler "to the same `kotlin` version",
+  but the plugin is 2.4.20 and mise installs 2.4.21. The version is also repeated in three files.
+- Why: drift between the CLI compiler and the Gradle one; three places to bump.
+- Fix: bump the three to 2.4.21 (or pin mise to 2.4.20) and fix the comment; keep the version in
+  one `gradle.properties` key (`kotlinVersion`) read in `settings.gradle.kts`/`pluginManagement`
+  and let `cox plugin new` render the same value into the template.
+
+#### T69.4. `pluginPackage` depends on a Kotlin Gradle plugin internal path
+
+- Severity: low
+- Location: `plugins/examples/kotlin/build.gradle.kts` and `plugins/templates/kotlin/`
+  `build.gradle.kts.tmpl`, task `pluginPackage`
+- What: the `.wasm` is copied from `build/compileSync/wasmWasi/main/productionExecutable/kotlin`,
+  an internal layout; `ifNoFilesFound`-style checks are absent, so a KGP layout change produces a
+  package with `plugin.toml` and no module, and only `cox plugin install` fails later.
+- Why: silent breakage on a Kotlin bump, in every scaffolded plugin.
+- Fix: take the output from the link task's `outputs` (or
+  `compileProductionExecutableKotlinWasmWasi.get().destinationDirectory`) and fail the task when
+  the `.wasm` is missing (`doLast { check(file(...).isFile) }`).
+
+#### T69.5. Example counters accept corrupt kv values silently
+
+- Severity: low
+- Location: `plugins/examples/kotlin/src/wasmWasiMain/kotlin/Main.kt`, `stored`
+- What: a non-number value under `turns`/`failures` reads as 0 (`longOrNull ?: 0L`), and the next
+  write overwrites it; `cox_hook` would count one failure twice if a host sent both
+  `PostToolUse` (with `is_error`) and `PostToolUseFailure` for one call.
+- Why: the reference plugin is the template other languages copy; silent resets hide host bugs.
+- Fix: log a `warn` via `Cox.log` when the stored value is not a number; count failures only in
+  `PostToolUseFailure`, or dedupe on the tool call id from the payload.
