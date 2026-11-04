@@ -269,6 +269,9 @@ pub struct Session {
     /// undo), which is safe only because `system[3]` sits after the last
     /// cache breakpoint. Shared with children, like the memory index.
     harness_notes: Arc<std::sync::Mutex<String>>,
+    /// The project's saved brief, read once when a fresh top-level session
+    /// opens; empty for a resume, a child or `session_brief = false`.
+    session_brief: Arc<String>,
     /// Path-scoped rules the surface re-reads (T67.6). Empty until set.
     /// Shared with children so a subagent's read injects the same rule once.
     path_rules: Arc<OnceLock<Arc<dyn PathRules>>>,
@@ -578,6 +581,16 @@ impl Session {
         let home = std::env::home_dir();
         let engine = Engine::compile(&config.permissions, home.as_deref(), &cwd)?;
         let dedup = Dedup::new(config.context.dedup_window_turns);
+        // Read once at open: a brief saved later in this session must not
+        // change this session's system[3].
+        let session_brief = if is_resume || is_child || !config.context.session_brief {
+            None
+        } else {
+            store.brief_get(&compact::project_key(&cwd)).ok().flatten()
+        }
+        .filter(|b| !b.trim().is_empty())
+        .map(|b| compact::brief_block(&b, config.context.session_brief_chars))
+        .unwrap_or_default();
         let parent = parent_id
             .map(|parent| parent.to_string())
             .unwrap_or_default();
@@ -622,6 +635,7 @@ impl Session {
             skills_index: Arc::new(OnceLock::new()),
             memory_index: Arc::new(OnceLock::new()),
             harness_notes: Arc::new(std::sync::Mutex::new(String::new())),
+            session_brief: Arc::new(session_brief),
             path_rules: Arc::new(OnceLock::new()),
             path_rule_text: Arc::new(StdMutex::new(String::new())),
             output_styles: Arc::new(OnceLock::new()),
@@ -1750,7 +1764,7 @@ impl Session {
             self.inner.lock().await.last_context_tokens,
             self.provider.capabilities().max_context,
         );
-        let due = compact::needs_compaction(last, max_context, self.config.context.compact_at);
+        let due = compact::due(last, max_context, &self.config.context);
         if self.compact_now(due, last, max_context).await? {
             self.compact(compact::Trigger::Auto, None).await?;
         }
@@ -2044,6 +2058,12 @@ impl Session {
             if !memory_index.is_empty() {
                 req.system[3].text.push('\n');
                 req.system[3].text.push_str(memory_index);
+            }
+            // The previous sessions' brief sits right after the cached
+            // prefix, so it never moves system[0..=2] or a breakpoint.
+            if !self.session_brief.is_empty() {
+                req.system[3].text.push('\n');
+                req.system[3].text.push_str(&self.session_brief);
             }
             // T66.7: refined prompt notes ride in the same volatile block.
             let notes = self
@@ -2892,6 +2912,8 @@ pub struct MemoryStore {
     index: StdMutex<Vec<(String, u32, String)>>,
     /// `checkpoints` rows in insertion order (T26.1).
     checkpoints: StdMutex<Vec<cox_protocol::CheckpointRow>>,
+    /// project key -> saved session brief.
+    briefs: StdMutex<HashMap<String, String>>,
 }
 
 impl MemoryStore {
@@ -2904,6 +2926,7 @@ impl MemoryStore {
             memory: StdMutex::new(HashMap::new()),
             index: StdMutex::new(Vec::new()),
             checkpoints: StdMutex::new(Vec::new()),
+            briefs: StdMutex::new(HashMap::new()),
         }
     }
 
@@ -3006,6 +3029,21 @@ impl Store for MemoryStore {
                 snippet,
             })
             .collect())
+    }
+    fn brief_put(&self, project: &str, body: &str) -> Result<(), StoreError> {
+        self.briefs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(project.to_string(), body.to_string());
+        Ok(())
+    }
+    fn brief_get(&self, project: &str) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .briefs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(project)
+            .cloned())
     }
     fn memory_upsert(
         &self,

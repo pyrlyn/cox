@@ -791,6 +791,35 @@ impl StoreTrait for Store {
         })
     }
 
+    fn brief_put(&self, project: &str, body: &str) -> Result<(), StoreError> {
+        use schema::session_briefs::dsl;
+        let mut conn = self.conn.lock().map_err(|_| StoreError::Io)?;
+        let now = now_rfc3339();
+        diesel::insert_into(dsl::session_briefs)
+            .values((
+                dsl::project.eq(project),
+                dsl::body.eq(body),
+                dsl::updated_at.eq(&now),
+            ))
+            .on_conflict(dsl::project)
+            .do_update()
+            .set((dsl::body.eq(body), dsl::updated_at.eq(&now)))
+            .execute(&mut *conn)
+            .map_err(|_| StoreError::Sqlite)?;
+        Ok(())
+    }
+
+    fn brief_get(&self, project: &str) -> Result<Option<String>, StoreError> {
+        use schema::session_briefs::dsl;
+        let mut conn = self.conn.lock().map_err(|_| StoreError::Io)?;
+        dsl::session_briefs
+            .filter(dsl::project.eq(project))
+            .select(dsl::body)
+            .first::<String>(&mut *conn)
+            .optional()
+            .map_err(|_| StoreError::Sqlite)
+    }
+
     fn rollout_index(&self, session: &SessionId, turn: u32, text: &str) -> Result<(), StoreError> {
         self.rollout_index_text(session, turn, text)
     }
@@ -1340,7 +1369,7 @@ mod tests {
             err,
             StoreError::SchemaNewer {
                 db: "99991231000000".into(),
-                binary: "00000000000011".into(),
+                binary: "00000000000012".into(),
             }
         );
     }
@@ -1433,6 +1462,20 @@ mod tests {
             .map(|r| format!("-- {}\n{};\n\n", r.name, r.sql))
             .collect();
         insta::assert_snapshot!(rendered);
+    }
+
+    #[test]
+    fn brief_is_per_project_and_replaced_on_save() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        store.brief_put("/w/a/app", "first").expect("put");
+        store.brief_put("/w/a/app", "second").expect("put");
+        assert_eq!(
+            store.brief_get("/w/a/app").expect("get").as_deref(),
+            Some("second")
+        );
+        assert_eq!(store.brief_get("/w/b/app").expect("get"), None);
+        assert_eq!(store.brief_get("/w/a").expect("get"), None);
     }
 
     #[test]

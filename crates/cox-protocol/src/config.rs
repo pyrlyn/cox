@@ -822,6 +822,14 @@ impl_transport!(CompatibleProviderConfig);
 pub struct ContextConfig {
     /// Fraction of `max_context` that triggers compaction.
     pub compact_at: f64,
+    /// Absolute context size, in tokens, that also triggers compaction;
+    /// whichever of this and `compact_at` is reached first wins. `0` is off.
+    pub compact_at_tokens: u32,
+    /// Whether a compaction summary is saved per project and a new session
+    /// in the same project opens with it after the cached prefix.
+    pub session_brief: bool,
+    /// Most characters of the saved brief a new session receives.
+    pub session_brief_chars: u32,
     /// Turns compaction always keeps verbatim.
     pub keep_turns: u32,
     /// Turns after which a tool result is microcompacted to a pointer.
@@ -853,6 +861,9 @@ impl Default for ContextConfig {
     fn default() -> Self {
         Self {
             compact_at: 0.75,
+            compact_at_tokens: 0,
+            session_brief: true,
+            session_brief_chars: 4000,
             keep_turns: 2,
             microcompact_after_turns: 6,
             tool_output_visible_bytes: 8192,

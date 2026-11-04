@@ -355,6 +355,20 @@ pub trait Store: Send + Sync {
     fn checkpoint_insert(&self, row: &CheckpointRow) -> Result<(), StoreError>;
     /// Every checkpoint row of a session in insertion order.
     fn checkpoint_list(&self, session: &SessionId) -> Result<Vec<CheckpointRow>, StoreError>;
+    /// Saves the latest compaction summary of a project as the brief the
+    /// next session in that project opens with. `project` is the canonical
+    /// workspace root, never a bare directory name, so two checkouts with
+    /// the same folder name do not share a brief. Defaulted so a store
+    /// without the table keeps compiling and simply remembers nothing.
+    fn brief_put(&self, project: &str, body: &str) -> Result<(), StoreError> {
+        let _ = (project, body);
+        Ok(())
+    }
+    /// The brief [`Store::brief_put`] saved for exactly `project`, if any.
+    fn brief_get(&self, project: &str) -> Result<Option<String>, StoreError> {
+        let _ = project;
+        Ok(None)
+    }
 }
 
 /// Where a plugin grant applies (PL§3): the whole user install, or one

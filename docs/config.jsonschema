@@ -112,6 +112,9 @@
       "$ref": "#/$defs/ContextConfig",
       "default": {
         "compact_at": 0.75,
+        "compact_at_tokens": 0,
+        "session_brief": true,
+        "session_brief_chars": 4000,
         "keep_turns": 2,
         "microcompact_after_turns": 6,
         "tool_output_visible_bytes": 8192,
@@ -1126,6 +1129,25 @@
           "type": "number",
           "format": "double",
           "default": 0.75
+        },
+        "compact_at_tokens": {
+          "description": "Absolute context size, in tokens, that also triggers compaction;\nwhichever of this and `compact_at` is reached first wins. `0` is off.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 0
+        },
+        "session_brief": {
+          "description": "Whether a compaction summary is saved per project and a new session\nin the same project opens with it after the cached prefix.",
+          "type": "boolean",
+          "default": true
+        },
+        "session_brief_chars": {
+          "description": "Most characters of the saved brief a new session receives.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 4000
         },
         "keep_turns": {
           "description": "Turns compaction always keeps verbatim.",

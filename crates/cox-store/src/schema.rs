@@ -190,6 +190,15 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    /// `00000000000012_session_briefs`: one brief per project root.
+    session_briefs (project) {
+        project -> Text,
+        body -> Text,
+        updated_at -> Text,
+    }
+}
+
 // `usage` joins `sessions` on `session_id` (no foreign key in the DDL, so no
 // `joinable!`): the project spend in `queries.rs` groups by the session's cwd.
 diesel::allow_tables_to_appear_in_same_query!(sessions, usage);
