@@ -1135,6 +1135,57 @@ mod tests {
         assert_eq!(two(&minimal), format!("{INSTRUCTIONS}\n{block}"));
     }
 
+    /// Prompt-cache plan: the prefix breakpoint sits after `system[2]`,
+    /// then the previous and the newest message; never more than three.
+    #[test]
+    fn breakpoints_follow_the_prefix_plan() {
+        assert_eq!(breakpoints(4, 0), vec![2]);
+        assert_eq!(breakpoints(4, 1), vec![2, 4]);
+        assert_eq!(breakpoints(4, 2), vec![2, 4, 5]);
+        assert_eq!(breakpoints(4, 10), vec![2, 12, 13]);
+        for n in 0..32 {
+            let bps = breakpoints(4, n);
+            assert!(bps.len() <= 3, "{n}: {bps:?}");
+            assert!(bps.windows(2).all(|w| w[0] < w[1]), "{n}: {bps:?}");
+            assert!(bps.iter().all(|&i| i < 4 + n.max(1)), "{n}: {bps:?}");
+        }
+    }
+
+    /// The assembled request marks only the stable blocks as cacheable and
+    /// a growing history keeps the cached prefix byte-identical.
+    #[test]
+    fn assembled_prefix_is_cacheable_and_stable_across_turns() {
+        let config = cox_protocol::Config::default();
+        let one: Vec<Message> = serde_json::from_value(serde_json::json!([
+            {"role": "user", "content": [{"type": "text", "text": "one"}]},
+        ]))
+        .expect("history");
+        let mut three = one.clone();
+        three.extend(
+            serde_json::from_value::<Vec<Message>>(serde_json::json!([
+                {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+                {"role": "user", "content": [{"type": "text", "text": "two"}]},
+            ]))
+            .expect("history"),
+        );
+        let a = assemble(&one, &config, &[], Path::new("/w"), "d");
+        let b = assemble(&three, &config, &[], Path::new("/w"), "d");
+        let bp = a.cache_breakpoints[0];
+        assert!(
+            a.system[bp].cache,
+            "the prefix breakpoint targets a cached block"
+        );
+        assert_eq!(
+            serde_json::to_vec(&a.system[0..=bp]).expect("a"),
+            serde_json::to_vec(&b.system[0..=bp]).expect("b"),
+        );
+        assert_eq!(b.cache_breakpoints.len(), 3);
+        assert_eq!(
+            b.cache_breakpoints.last().copied(),
+            Some(b.system.len() + b.messages.len() - 1)
+        );
+    }
+
     fn with_map(config: &cox_protocol::Config, history: &[Message], map: &str) -> Request {
         assemble_with_skills(
             history,
